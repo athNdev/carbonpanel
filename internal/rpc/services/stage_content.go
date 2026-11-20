@@ -68,6 +68,12 @@ func serverAccessor(ctx context.Context, store *storage.Store, server *storage.S
 // .carbon-panel/staged. A delete records the live path and writes nothing.
 // The server's mods directory, datapacks directory, and world are not modified.
 func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
+	return stageContentBytesWithPrecondition(ctx, store, server, resolver, kind, action, targetRel, fileName, data, "")
+}
+
+// stageContentBytesWithPrecondition records the live digest observed at stage
+// time. The journaled publish rechecks it before copying replacement bytes.
+func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -91,13 +97,14 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 		}
 	}
 	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
-		ID:         id,
-		ServerID:   server.ID,
-		Kind:       kind,
-		Action:     action,
-		TargetPath: target,
-		StagePath:  stagePath,
-		FileName:   base,
+		ID:                 id,
+		ServerID:           server.ID,
+		Kind:               kind,
+		Action:             action,
+		TargetPath:         target,
+		StagePath:          stagePath,
+		FileName:           base,
+		ExpectedLiveSha512: expectedLiveSha512,
 	})
 	if err != nil {
 		if stagePath != "" {

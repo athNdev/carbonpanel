@@ -39,9 +39,22 @@ request.
    The scheduler holds a `ModUpdatePlanner` interface; the same service method
    implements manual and automatic staging. A nil planner, disabled policy,
    unknown apply window or malformed config fails closed.
-5. Simultaneous runs deduplicate by the staged file name already present in the
-   open batch. Retries and next/last execution remain the scheduler's
-   persisted responsibility; the planner never decides retry policy.
+5. Apply recomputes the server-owned preview for the reviewed files and refuses
+   a stale project, version, dependency or installed-digest decision. Staged
+   rows record the live SHA-512 observed at review time; the journaled publish
+   rechecks it before any backup or mutation and preserves staged bytes on
+   refusal, so a later local edit cannot be silently overwritten.
+6. The apply window is committed before the first staged byte is visible, and
+   the window, staged rows and target-uniqueness check run under the existing
+   per-server operation journal. A batch with unrelated reviewed changes under
+   a different window is refused, not silently retargeted.
+7. Downloads use the connection-guarded HTTP client shared with World Library
+   imports (static URL validation alone is not an SSRF guard). Transient
+   provider failures are returned to the scheduler as retryable errors.
+8. Cron timezone is resolved only for cron schedules; if an existing task's
+   schedule cannot be advanced, dispatch is refused and the task is disabled so
+   it cannot run on every tick. The planner is installed before the scheduler
+   starts so cold boot sees the real implementation.
 
 ## Consequences
 

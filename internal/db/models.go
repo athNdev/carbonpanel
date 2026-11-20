@@ -621,18 +621,22 @@ const (
 // StagedContentChange is one mod, datapack, or file edit waiting in a batch.
 // StagePath is empty for a delete, which records the live path to remove later.
 type StagedContentChange struct {
-	ID         string       `json:"id" gorm:"primaryKey"`
-	ServerID   string       `json:"server_id" gorm:"not null;index;column:server_id"`
-	BatchID    string       `json:"batch_id" gorm:"not null;index;column:batch_id"`
-	Kind       string       `json:"kind" gorm:"not null"`
-	Action     string       `json:"action" gorm:"not null"`
-	TargetPath string       `json:"target_path" gorm:"not null;column:target_path"`
-	StagePath  string       `json:"stage_path,omitempty" gorm:"column:stage_path"`
-	FileName   string       `json:"file_name" gorm:"column:file_name"`
-	Status     StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt  time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt  *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server     *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	ID         string `json:"id" gorm:"primaryKey"`
+	ServerID   string `json:"server_id" gorm:"not null;index;column:server_id"`
+	BatchID    string `json:"batch_id" gorm:"not null;index;column:batch_id"`
+	Kind       string `json:"kind" gorm:"not null"`
+	Action     string `json:"action" gorm:"not null"`
+	TargetPath string `json:"target_path" gorm:"not null;column:target_path"`
+	StagePath  string `json:"stage_path,omitempty" gorm:"column:stage_path"`
+	FileName   string `json:"file_name" gorm:"column:file_name"`
+	// ExpectedLiveSha512 is the installed digest observed when a reviewed
+	// update was staged. Publish must recheck it so a later local edit cannot
+	// be silently overwritten by a delayed apply. Empty means no precondition.
+	ExpectedLiveSha512 string       `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
+	Status             StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt          time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt          *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server             *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // TaskType defines the type of scheduled task
@@ -659,6 +663,7 @@ type ModUpdateTaskConfig struct {
 	MaxUpdatesPerRun int      `json:"max_updates_per_run,omitempty"`
 	SkipWhenRunning  bool     `json:"skip_when_running,omitempty"`
 	Window           string   `json:"window,omitempty"`
+	IdleMinutes      int      `json:"idle_minutes,omitempty"`
 }
 
 // TaskStatus defines the status of a scheduled task

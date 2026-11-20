@@ -32,6 +32,8 @@ export interface PolicyForm {
 	excludedProjects: string;
 	maxPerRun: number;
 	skipWhenRunning: boolean;
+	window?: 'next_restart' | 'idle';
+	idleMinutes?: number;
 }
 
 export function updateStateClass(state: string | undefined): string {
@@ -61,6 +63,58 @@ export function buildUpdateSelections(mods: ModLike[], selectedIds: string[]): U
 		}));
 }
 
+export interface PolicyFormState {
+	enabled: boolean;
+	cron: string;
+	timezone: string;
+	excludedProjects: string;
+	maxPerRun: number;
+	skipWhenRunning: boolean;
+	window: 'next_restart' | 'idle';
+	idleMinutes: number;
+}
+
+export const DEFAULT_POLICY_STATE: PolicyFormState = {
+	enabled: false,
+	cron: '0 3 * * *',
+	timezone: 'UTC',
+	excludedProjects: '',
+	maxPerRun: 5,
+	skipWhenRunning: true,
+	window: 'next_restart',
+	idleMinutes: 15
+};
+
+// The persisted config is the opt-in authority; task status is only a fallback
+// for a legacy task without the new config shape.
+export function policyFromPersistedTask(
+	task: { config?: string; status?: number; cronExpr?: string; timezone?: string } | null,
+	enabledStatus: number
+): PolicyFormState {
+	if (!task) return { ...DEFAULT_POLICY_STATE };
+	try {
+		const config = JSON.parse(task.config || '{}');
+		return {
+			enabled: config.enabled === true,
+			cron: task.cronExpr || DEFAULT_POLICY_STATE.cron,
+			timezone: task.timezone || DEFAULT_POLICY_STATE.timezone,
+			excludedProjects: Array.isArray(config.excluded_projects)
+				? config.excluded_projects.join(', ')
+				: '',
+			maxPerRun: Number(config.max_updates_per_run) || DEFAULT_POLICY_STATE.maxPerRun,
+			skipWhenRunning: config.skip_when_running !== false,
+			window: config.window === 'idle' ? 'idle' : 'next_restart',
+			idleMinutes: Number(config.idle_minutes) || DEFAULT_POLICY_STATE.idleMinutes
+		};
+	} catch {
+		return { ...DEFAULT_POLICY_STATE, enabled: task.status === enabledStatus };
+	}
+}
+
+export function isCurrentServer(capturedServerId: string, currentServerId: string): boolean {
+	return capturedServerId === currentServerId;
+}
+
 export function buildPolicyConfig(form: PolicyForm): string {
 	return JSON.stringify({
 		enabled: form.enabled,
@@ -70,6 +124,7 @@ export function buildPolicyConfig(form: PolicyForm): string {
 			.filter(Boolean),
 		max_updates_per_run: form.maxPerRun,
 		skip_when_running: form.skipWhenRunning,
-		window: 'next_restart'
+		window: form.window ?? 'next_restart',
+		idle_minutes: form.window === 'idle' ? (form.idleMinutes ?? 15) : 0
 	});
 }

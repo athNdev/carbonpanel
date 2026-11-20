@@ -136,7 +136,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	case "idle":
 		window = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE
 	}
-	results, _, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, 0)
+	results, _, transient, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, int32(cfg.IdleMinutes))
 	if err != nil {
 		return 0, refused, reasons, err
 	}
@@ -148,6 +148,9 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			refused++
 			reasons = append(reasons, result.FileName+": "+result.Outcome+" — "+result.Reason)
 		}
+	}
+	if transient != nil {
+		return staged, refused, reasons, transient
 	}
 	return staged, refused, reasons, nil
 }

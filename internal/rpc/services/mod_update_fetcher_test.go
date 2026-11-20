@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/stretchr/testify/require"
 )
@@ -65,13 +67,62 @@ func fetcherAgainstServer(t *testing.T, body string, version *modrinth.Version) 
 	}
 }
 
+type hostMapTransport struct {
+	hosts map[string]string
+	base  http.RoundTripper
+}
+
+func (t hostMapTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	if target, ok := t.hosts[clone.URL.Hostname()]; ok {
+		u, err := url.Parse(target)
+		if err != nil {
+			return nil, err
+		}
+		clone.URL.Scheme = u.Scheme
+		clone.URL.Host = u.Host
+	}
+	return t.base.RoundTrip(clone)
+}
+
+func TestGuardedDownloadClientStripsCredentialsOnCrossOriginRedirect(t *testing.T) {
+	var redirectedAuthorization string
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedAuthorization = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer destination.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://cdn2.modrinth.test/package.jar", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	// Production wraps the connection-guarded client with the same redirect
+	// policy. The transport only maps provider-like hosts onto local fixtures.
+	client := indexers.ProtectCredentialsOnRedirect(&http.Client{
+		Timeout: 2 * time.Minute,
+		Transport: hostMapTransport{base: http.DefaultTransport, hosts: map[string]string{
+			"cdn.modrinth.test":  origin.URL,
+			"cdn2.modrinth.test": destination.URL,
+		}},
+	})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://cdn.modrinth.test/package.jar", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer must-not-cross-origin")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, redirectedAuthorization, "credentials must be stripped on a cross-origin redirect")
+}
+
 func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	const allowedURL = "https://cdn.modrinth.test/files/mod-2.jar"
 	ctx := context.Background()
 
 	t.Run("verified download", func(t *testing.T) {
 		fetcher := fetcherAgainstServer(t, "next", candidateVersion(allowedURL, candidateHash("next")))
-		data, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
+		data, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
 		require.NoError(t, err)
 		require.Empty(t, outcome)
 		require.Equal(t, "next", string(data))
@@ -79,7 +130,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 
 	t.Run("real checksum mismatch is refused", func(t *testing.T) {
 		fetcher := fetcherAgainstServer(t, "tampered", candidateVersion(allowedURL, candidateHash("next")))
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
+		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
 		require.Error(t, err)
 		require.Equal(t, "refused_checksum", outcome)
 	})
@@ -87,7 +138,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	t.Run("literal-IP download URL is refused", func(t *testing.T) {
 		version := candidateVersion("http://127.0.0.1:65534/mod-2.jar", candidateHash("next"))
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
+		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
 		require.Error(t, err)
 		require.Equal(t, "refused_download", outcome)
 	})
@@ -96,7 +147,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		version := candidateVersion(allowedURL, candidateHash("next"))
 		version.Status = "draft"
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
+		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
 		require.Error(t, err)
 		require.Equal(t, "refused_provider", outcome)
 	})
@@ -105,14 +156,14 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		version := candidateVersion(allowedURL, candidateHash("next"))
 		version.Files = append(version.Files, version.Files[0])
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
+		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1")
 		require.Error(t, err)
 		require.Equal(t, "refused_provider", outcome)
 	})
 
 	t.Run("reviewed checksum must be a SHA-512 digest", func(t *testing.T) {
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: candidateVersion(allowedURL, "short")}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "mod-2.jar", "short", "fabric", "1.21.1")
+		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", "short", "fabric", "1.21.1")
 		require.Error(t, err)
 		require.True(t, strings.Contains(outcome, "refused_provider"), outcome)
 	})

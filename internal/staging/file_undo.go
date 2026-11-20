@@ -4,6 +4,7 @@ package staging
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -59,8 +60,23 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	return n, sum, nil
 }
 
+// fileSHA512 hashes a live file through the node accessor without loading it
+// into memory, so the publish precondition works for large mod jars too.
+func fileSHA512(ctx context.Context, acc nodestorage.Accessor, name string) (string, error) {
+	file, err := acc.OpenRead(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+	digest := sha512.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	type pending struct{ source, target, action string }
+	type pending struct{ source, target, action, expectedSHA512 string }
 	var files []pending
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -79,7 +95,10 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				files = append(files, pending{source: e.stage, target: e.live, action: storage.StagedActionReplace})
 			}
 		} else {
-			files = append(files, pending{source: row.StagePath, target: row.TargetPath, action: row.Action})
+			files = append(files, pending{
+				source: row.StagePath, target: row.TargetPath,
+				action: row.Action, expectedSHA512: row.ExpectedLiveSha512,
+			})
 		}
 	}
 	if len(files) == 0 {
@@ -111,6 +130,20 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 		info, err := acc.Stat(file.target)
 		if err != nil && !os.IsNotExist(err) {
 			return abortPreparation(err)
+		}
+		if file.expectedSHA512 != "" {
+			// The reviewer-observed bytes must still be live. Refuse before any
+			// backup or mutation; staged replacement bytes remain untouched.
+			if err != nil || !info.Mode().IsRegular() {
+				return abortPreparation(fmt.Errorf("live target %q changed since review; staged bytes preserved", file.target))
+			}
+			liveHash, hashErr := fileSHA512(ctx, acc, file.target)
+			if hashErr != nil {
+				return abortPreparation(hashErr)
+			}
+			if !strings.EqualFold(liveHash, file.expectedSHA512) {
+				return abortPreparation(fmt.Errorf("live target %q changed since review; staged bytes preserved", file.target))
+			}
 		}
 		item := fileSnap{target: file.target, recoveryRoot: recovery}
 		record := undoEntry{Target: file.target}

@@ -24,7 +24,7 @@ type modUpdateFetchFixture struct {
 	calls   int
 }
 
-func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string) ([]byte, string, error) {
+func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string) ([]byte, string, error) {
 	f.calls++
 	return f.data, f.outcome, f.err
 }
@@ -58,6 +58,7 @@ func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.
 
 	fetcher := &modUpdateFetchFixture{data: []byte("next")}
 	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
 	svc.SetModCandidateFetcher(fetcher)
 
 	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
@@ -99,6 +100,7 @@ func TestStageReviewedModUpdateRefusesInstalledDrift(t *testing.T) {
 
 	fetcher := &modUpdateFetchFixture{data: []byte("next")}
 	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
 	svc.SetModCandidateFetcher(fetcher)
 
 	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
@@ -121,6 +123,7 @@ func TestStageReviewedModUpdateRefusesChecksumMismatch(t *testing.T) {
 
 	fetcher := &modUpdateFetchFixture{err: errors.New("candidate bytes do not match the reviewed SHA-512"), outcome: "refused_checksum"}
 	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
 	svc.SetModCandidateFetcher(fetcher)
 
 	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
@@ -178,6 +181,94 @@ func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	require.Equal(t, "installed", string(live), "an automatic policy must not write the live tree")
 }
 
+func TestScheduledIdleWindowStagesThroughRealPlanner(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-idle", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+		Enabled: true, Window: "idle", IdleMinutes: 15,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, staged)
+	require.Zero(t, refused)
+	require.Empty(t, reasons)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, string(storage.UpdateWindowIdle), batch.Window)
+	require.Equal(t, 15, batch.IdleMinutes)
+	require.Nil(t, batch.ApplyAt)
+	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(live))
+}
+
+func TestTransientProviderFailureReturnsRetryableError(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-transient", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchFixture{outcome: "transient_download", err: errors.New("provider temporarily unavailable")}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(fetcher)
+
+	_, _, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.Error(t, err, "a transient download must reach the scheduler retry policy")
+	require.Contains(t, err.Error(), "provider temporarily unavailable")
+	require.NotEmpty(t, reasons)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch, "no batch should be committed when nothing staged")
+
+	fetcher.outcome, fetcher.err, fetcher.data = "", nil, []byte("next")
+	staged, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, staged, "the retry must stage through the real planner")
+}
+
+func TestStagingRefusesToRetargetAnAlreadyReviewedBatch(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-window-conflict", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+	_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "pending"}, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+	request := modUpdateRequest(server.ID, installedModDigest("installed"))
+	request.UpdateWindow = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE
+	request.UpdateIdleMinutes = 15
+
+	_, err = svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already-reviewed changes")
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, string(storage.UpdateWindowNextRestart), batch.Window)
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows, "no mod bytes should be staged into the conflicting batch")
+	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(live))
+}
+
 func TestStageReviewedModUpdateRequiresKnownServerAndValidWindow(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-update-window", storage.StatusStopped)
@@ -186,6 +277,7 @@ func TestStageReviewedModUpdateRequiresKnownServerAndValidWindow(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
 
 	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
 	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
 
 	_, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest("missing-server", installedModDigest("installed"))))

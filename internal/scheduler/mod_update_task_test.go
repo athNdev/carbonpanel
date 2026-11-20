@@ -92,9 +92,75 @@ func TestDueModUpdateTaskExecutesOnceAndRecordsOutcome(t *testing.T) {
 	require.Equal(t, 1, planner.calls, "a second tick must not re-run the same task")
 }
 
+type signalingModPlanner struct {
+	calls chan struct{}
+}
+
+func (f *signalingModPlanner) StageAvailableUpdates(context.Context, string, storage.ModUpdateTaskConfig) (int, int, []string, error) {
+	select {
+	case f.calls <- struct{}{}:
+	default:
+	}
+	return 0, 0, nil, nil
+}
+
+func TestColdBootDispatchesPersistedPolicyOnlyAfterPlannerInstalled(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateServer(ctx, &storage.Server{ID: "srv-cold", Name: "cold", Status: storage.StatusStopped}))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-cold", ServerID: "srv-cold", Name: "persisted policy",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "UTC",
+		NextRun: &past, Config: `{"enabled":true,"window":"idle","idle_minutes":15}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	planner := &signalingModPlanner{calls: make(chan struct{}, 1)}
+	s.SetModUpdatePlanner(planner)
+	require.NoError(t, s.Start())
+	defer s.Stop()
+	select {
+	case <-planner.calls:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cold boot did not dispatch the persisted mod update policy")
+	}
+}
+
+func TestInvalidTimezoneTaskCannotRepeatEveryTick(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateServer(ctx, &storage.Server{ID: "srv-bad-tz", Name: "bad-tz", Status: storage.StatusStopped}))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-bad-tz", ServerID: "srv-bad-tz", Name: "stale zone",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "Bad/Zone",
+		NextRun: &past, Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	planner := &fakeModPlanner{}
+	s.SetModUpdatePlanner(planner)
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Zero(t, planner.calls, "a task whose schedule cannot advance must not dispatch")
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+	reloaded, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusDisabled, reloaded.Status)
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Zero(t, planner.calls, "a disabled task must not repeat on the next tick")
+}
+
 func TestValidateModUpdateConfigJSON(t *testing.T) {
 	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true}`))
-	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"idle","max_updates_per_run":3}`))
+	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"idle","idle_minutes":15,"max_updates_per_run":3}`))
+	require.Error(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"idle"}`), "idle window needs a duration")
 	require.Error(t, ValidateModUpdateConfigJSON(`not-json`))
 	require.Error(t, ValidateModUpdateConfigJSON(`{"enabled":true,"max_updates_per_run":-1}`))
 	require.Error(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"at_time"}`), "a policy has no apply timestamp")

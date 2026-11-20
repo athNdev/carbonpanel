@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
 	buildPolicyConfig,
 	buildUpdateSelections,
+	DEFAULT_POLICY_STATE,
+	isCurrentServer,
+	policyFromPersistedTask,
 	updateStateClass,
 	type ModLike
 } from './mod-update-ui';
@@ -50,6 +53,34 @@ test('each preview state has the intended presentation treatment', () => {
 	assert.equal(new Set(classes).size, 4, 'review_required shares the neutral treatment');
 	assert.match(classes[0], /text-success-text/);
 	assert.match(classes[2], /text-destructive-text/);
+});
+
+test('a disabled first save reloads unchecked and idle duration is persisted', () => {
+	const disabled = policyFromPersistedTask(
+		{ config: JSON.stringify({ enabled: false, window: 'idle', idle_minutes: 30 }), status: 1 },
+		1
+	);
+	assert.equal(disabled.enabled, false, 'the persisted opt-in must beat task status');
+	assert.equal(disabled.window, 'idle');
+	assert.equal(disabled.idleMinutes, 30);
+	const fromConfig = buildPolicyConfig({ ...disabled, maxPerRun: disabled.maxPerRun });
+	assert.deepEqual(JSON.parse(fromConfig), {
+		enabled: false,
+		excluded_projects: [],
+		max_updates_per_run: 5,
+		skip_when_running: true,
+		window: 'idle',
+		idle_minutes: 30
+	});
+	assert.deepEqual(policyFromPersistedTask(null, 1), DEFAULT_POLICY_STATE);
+});
+
+test('two-server navigation cannot apply another server policy response', () => {
+	assert.equal(isCurrentServer('srv-a', 'srv-a'), true);
+	assert.equal(isCurrentServer('srv-a', 'srv-b'), false);
+	// A stale load for srv-a must be discarded after the tab switches to srv-b.
+	const stale = policyFromPersistedTask({ config: JSON.stringify({ enabled: true }) }, 1);
+	assert.equal(isCurrentServer('srv-a', 'srv-b') && stale.enabled, false);
 });
 
 test('policy config is opt-in, excludes blank IDs and bounds the batch', () => {

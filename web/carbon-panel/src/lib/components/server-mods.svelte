@@ -36,7 +36,14 @@ one at https://mozilla.org/MPL/2.0/.
 		type TaskExecution
 	} from '$lib/proto/carbonpanel/v1/task_pb';
 	import { formatBytes } from '$lib/utils';
-	import { buildPolicyConfig, buildUpdateSelections, updateStateClass } from '$lib/mod-update-ui';
+	import {
+		buildPolicyConfig,
+		buildUpdateSelections,
+		DEFAULT_POLICY_STATE,
+		isCurrentServer,
+		policyFromPersistedTask,
+		updateStateClass
+	} from '$lib/mod-update-ui';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import ModBrowserDialog from '$lib/components/mod-browser-dialog.svelte';
 	import {
@@ -88,6 +95,8 @@ one at https://mozilla.org/MPL/2.0/.
 	let policyExcluded = $state('');
 	let policyMax = $state(5);
 	let policySkipRunning = $state(true);
+	let policyWindow = $state<'next_restart' | 'idle'>('next_restart');
+	let policyIdleMinutes = $state(15);
 	let policyLastOutcome = $state('No runs yet');
 	let policySaving = $state(false);
 
@@ -115,27 +124,24 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function loadPolicy() {
 		if (!canHaveMods()) return;
+		const serverId = server.id;
 		try {
-			const response = await rpcClient.task.listTasks({ serverId: server.id });
+			const response = await rpcClient.task.listTasks({ serverId });
+			if (!isCurrentServer(serverId, server.id)) return;
 			const task = response.tasks.find((candidate) => candidate.taskType === TaskType.MOD_UPDATE);
 			policyTask = task ?? null;
+			const state = policyFromPersistedTask(task ?? null, TaskStatus.ENABLED);
+			policyEnabled = state.enabled;
+			policyCron = state.cron;
+			policyTimezone = state.timezone;
+			policyExcluded = state.excludedProjects;
+			policyMax = state.maxPerRun;
+			policySkipRunning = state.skipWhenRunning;
+			policyWindow = state.window;
+			policyIdleMinutes = state.idleMinutes;
 			if (task) {
-				policyEnabled = task.status === TaskStatus.ENABLED;
-				policyCron = task.cronExpr || '0 3 * * *';
-				policyTimezone = task.timezone || 'UTC';
-				try {
-					const config = JSON.parse(task.config || '{}');
-					policyExcluded = Array.isArray(config.excluded_projects)
-						? config.excluded_projects.join(', ')
-						: '';
-					policyMax = Number(config.max_updates_per_run) || 5;
-					policySkipRunning = config.skip_when_running !== false;
-				} catch {
-					policyExcluded = '';
-					policyMax = 5;
-					policySkipRunning = true;
-				}
 				const history = await rpcClient.task.listTaskExecutions({ taskId: task.id });
+				if (!isCurrentServer(serverId, server.id)) return;
 				const latest: TaskExecution | undefined = history.executions[0];
 				if (latest) {
 					const outcome =
@@ -151,6 +157,14 @@ one at https://mozilla.org/MPL/2.0/.
 					policyLastOutcome = 'No runs yet';
 				}
 			} else {
+				policyEnabled = DEFAULT_POLICY_STATE.enabled;
+				policyCron = DEFAULT_POLICY_STATE.cron;
+				policyTimezone = DEFAULT_POLICY_STATE.timezone;
+				policyExcluded = DEFAULT_POLICY_STATE.excludedProjects;
+				policyMax = DEFAULT_POLICY_STATE.maxPerRun;
+				policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning;
+				policyWindow = DEFAULT_POLICY_STATE.window;
+				policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
 				policyLastOutcome = 'No runs yet';
 			}
 		} catch (error) {
@@ -159,11 +173,14 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function savePolicy() {
+		const serverId = server.id;
 		const config = buildPolicyConfig({
 			enabled: policyEnabled,
 			excludedProjects: policyExcluded,
 			maxPerRun: policyMax,
-			skipWhenRunning: policySkipRunning
+			skipWhenRunning: policySkipRunning,
+			window: policyWindow,
+			idleMinutes: policyIdleMinutes
 		});
 		try {
 			policySaving = true;
@@ -174,14 +191,16 @@ one at https://mozilla.org/MPL/2.0/.
 					timezone: policyTimezone,
 					config
 				});
+				if (!isCurrentServer(serverId, server.id)) return;
 				const toggled = await rpcClient.task.toggleTask({
 					id: policyTask.id,
 					status: policyEnabled ? TaskStatus.ENABLED : TaskStatus.DISABLED
 				});
+				if (!isCurrentServer(serverId, server.id)) return;
 				policyTask = toggled.task ?? updated.task ?? policyTask;
 			} else {
 				const created = await rpcClient.task.createTask({
-					serverId: server.id,
+					serverId,
 					name: 'Automatic mod updates',
 					description: 'Stages compatible Modrinth updates into the pending batch.',
 					taskType: TaskType.MOD_UPDATE,
@@ -192,6 +211,7 @@ one at https://mozilla.org/MPL/2.0/.
 					retryCount: 1,
 					retryDelay: 60
 				});
+				if (!isCurrentServer(serverId, server.id)) return;
 				policyTask = created.task ?? null;
 			}
 			toast.success('Mod update policy saved');
@@ -212,6 +232,18 @@ one at https://mozilla.org/MPL/2.0/.
 			loading = true;
 			uploading = false;
 			hasLoaded = false;
+			// Policy state belongs to one server; never carry it across tabs.
+			policyTask = null;
+			policyEnabled = DEFAULT_POLICY_STATE.enabled;
+			policyCron = DEFAULT_POLICY_STATE.cron;
+			policyTimezone = DEFAULT_POLICY_STATE.timezone;
+			policyExcluded = DEFAULT_POLICY_STATE.excludedProjects;
+			policyMax = DEFAULT_POLICY_STATE.maxPerRun;
+			policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning;
+			policyWindow = DEFAULT_POLICY_STATE.window;
+			policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
+			policyLastOutcome = 'No runs yet';
+			policySaving = false;
 		}
 		if (active && !hasLoaded) {
 			hasLoaded = true;
@@ -636,6 +668,40 @@ one at https://mozilla.org/MPL/2.0/.
 						class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
 					/>
 				</div>
+				<div class="min-w-0">
+					<label
+						for="mod-policy-window"
+						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+					>
+						Apply window
+					</label>
+					<select
+						id="mod-policy-window"
+						bind:value={policyWindow}
+						class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+					>
+						<option value="next_restart">Next restart</option>
+						<option value="idle">When empty</option>
+					</select>
+				</div>
+				{#if policyWindow === 'idle'}
+					<div class="min-w-0">
+						<label
+							for="mod-policy-idle"
+							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						>
+							Idle minutes
+						</label>
+						<input
+							id="mod-policy-idle"
+							type="number"
+							min="1"
+							max="10080"
+							bind:value={policyIdleMinutes}
+							class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						/>
+					</div>
+				{/if}
 				<label class="flex items-center gap-2 text-xs text-foreground">
 					<input
 						type="checkbox"

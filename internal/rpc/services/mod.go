@@ -483,7 +483,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 	// handles a reviewed provider update. Staging re-verifies installed bytes
 	// and the provider release; the live mods directory is not written here.
 	if len(msg.GetUpdateSelections()) > 0 {
-		results, batch, err := s.stageReviewedModUpdates(ctx, msg.ServerId,
+		results, batch, _, err := s.stageReviewedModUpdates(ctx, msg.ServerId,
 			msg.GetUpdateSelections(), msg.GetUpdateWindow(),
 			msg.GetUpdateApplyAtUnix(), msg.GetUpdateIdleMinutes())
 		if err != nil {

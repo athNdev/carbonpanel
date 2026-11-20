@@ -40,3 +40,10 @@ The scheduler invokes the same planner through an injected interface.
   `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
+- Apply revalidates the server-owned preview and the live digest; publish
+  refuses a delayed-drift row and keeps staged bytes for recovery.
+- Window, staged rows and target uniqueness are journaled together; unrelated
+  reviewed batches are not retargeted. The guarded World Library download
+  client is reused and transient provider failures stay retryable.
+- The scheduler installs the planner before starting, applies timezone only to
+  cron, and refuses to dispatch a task whose next run cannot be advanced.

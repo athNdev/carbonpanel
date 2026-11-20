@@ -408,8 +408,18 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			continue
 		}
 
-		// Update next run time immediately to prevent re-querying from DB if check runs again before task finishes
-		s.updateNextRun(task)
+		// Advance the schedule before dispatch. If it cannot be advanced the
+		// task must not run: a still-due row would otherwise be claimed again
+		// on every tick. Disable it with the reason in the log.
+		if err := s.updateNextRun(task); err != nil {
+			s.log.Error("Task %s: cannot advance schedule, refusing dispatch: %v", task.Name, err)
+			if dbErr := s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+				Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error; dbErr != nil {
+				s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+			}
+			s.releaseTask(task.ID)
+			continue
+		}
 
 		// Execute task asynchronously
 		s.wg.Add(1)
@@ -578,7 +588,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Update next run time if not already updated at dispatch
 		if trigger != "scheduled" {
-			s.updateNextRun(task)
+			if err := s.updateNextRun(task); err != nil {
+				s.log.Error("Task %s: failed to advance schedule after skip: %v", task.Name, err)
+			}
 		}
 		return execution, nil
 	}
@@ -693,7 +705,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 	// Update next run time if not already updated at dispatch
 	if trigger != "scheduled" {
-		s.updateNextRun(task)
+		if err := s.updateNextRun(task); err != nil {
+			s.log.Error("Task %s: failed to advance schedule after execution: %v", task.Name, err)
+		}
 	}
 
 	return execution, execErr
@@ -814,28 +828,26 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 // updateNextRun calculates and updates the next run time for a task. It uses
 // CalculateNextRun so dispatch and explicit recalculation honor the same
 // per-task timezone and cannot drift apart.
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
+func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
-	if task.Schedule == storage.ScheduleTypeOnce {
-		task.Status = storage.TaskStatusDisabled
+	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
 		if err := s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now); err != nil {
-			s.log.Error("Task %s: failed to clear next run: %v", task.Name, err)
+			return fmt.Errorf("clear next run: %w", err)
 		}
-		return
-	}
-	if task.Schedule == storage.ScheduleTypeEvent {
-		if err := s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now); err != nil {
-			s.log.Error("Task %s: failed to clear next run: %v", task.Name, err)
+		if task.Schedule == storage.ScheduleTypeOnce {
+			task.Status = storage.TaskStatusDisabled
 		}
-		return
+		return nil
 	}
 	nextRun, err := s.CalculateNextRun(task)
 	if err != nil {
-		s.log.Error("Task %s: failed to calculate next run: %v", task.Name, err)
-		return
+		return err
 	}
-	s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+	if err := s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now); err != nil {
+		return fmt.Errorf("store next run: %w", err)
+	}
+	return nil
 }
 
 // Task type executors
@@ -1313,23 +1325,24 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 // CalculateNextRun calculates the next run time for a task based on its schedule
 func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, error) {
 	now := time.Now()
-	var location *time.Location
-	if zone := strings.TrimSpace(task.Timezone); zone != "" {
-		// An explicit UTC must not silently inherit the host's local zone.
-		location = time.UTC
-		if !strings.EqualFold(zone, "UTC") {
-			loaded, err := time.LoadLocation(zone)
-			if err != nil {
-				return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
-			}
-			location = loaded
-		}
-	}
 
 	switch task.Schedule {
 	case storage.ScheduleTypeCron:
 		if task.CronExpr == "" {
 			return nil, fmt.Errorf("cron expression required")
+		}
+		// Timezone applies only to cron slots. An interval or one-shot task
+		// must keep its absolute deadline even if a stale zone is configured.
+		var location *time.Location
+		if zone := strings.TrimSpace(task.Timezone); zone != "" {
+			location = time.UTC
+			if !strings.EqualFold(zone, "UTC") {
+				loaded, err := time.LoadLocation(zone)
+				if err != nil {
+					return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+				}
+				location = loaded
+			}
 		}
 		schedule, err := s.cronParser.Parse(task.CronExpr)
 		if err != nil {
@@ -1453,7 +1466,11 @@ func ValidateModUpdateConfigJSON(raw string) error {
 		return fmt.Errorf("max_updates_per_run must be between 0 and %d", maxAutomaticModUpdatesPerRun)
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Window)) {
-	case "", "next_restart", "idle":
+	case "", "next_restart":
+	case "idle":
+		if cfg.IdleMinutes <= 0 || cfg.IdleMinutes > 10080 {
+			return errors.New("idle_minutes must be between 1 and 10080 for the idle window")
+		}
 	default:
 		return fmt.Errorf("unknown apply window %q", cfg.Window)
 	}
