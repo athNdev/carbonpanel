@@ -335,7 +335,7 @@ def verify_channel_docs(index, channel, commit, digest, page_texts=(),
 GUIDE_PATH_PREFIX = "docs/carbon-panel/src/content/docs/"
 
 
-def guide_fingerprint(declaration, revision, blobs):
+def guide_fingerprint(declaration, revision, blobs, presentation=None):
     """Fingerprint the declaration plus the exact maintained source blobs.
 
     This is release-independent liveness: a later unrelated merge, a cancelled
@@ -371,22 +371,34 @@ def guide_fingerprint(declaration, revision, blobs):
                 "guides": records}
     payload = {"declaration_sha256": declaration_hash,
                "revision": revision, "guides": records}
-    return {"fingerprint": hashlib.sha256(
+    presentation_hash = ""
+    if presentation is not None:
+        presentation_hash = str(presentation.get("fingerprint", "")) \
+            if isinstance(presentation, dict) else str(presentation)
+        if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
+            raise ValueError("presentation fingerprint must be a SHA-256")
+        payload["presentation_fingerprint"] = presentation_hash
+    result = {"fingerprint": hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
         "revision": revision, "declaration_sha256": declaration_hash,
         "manifest_identity": identity,
         "manifest_identity_hash": manifest_identity_hash(identity),
         "guides": records}
+    # Legacy candidates predate presentation; omit the field entirely so their
+    # candidate JSON bytes are unchanged.
+    if presentation_hash:
+        result["presentation_fingerprint"] = presentation_hash
+    return result
 
 
-def candidate_guide_fingerprint(declaration_path, revision, root):
+def candidate_guide_fingerprint(declaration_path, revision, root, presentation=None):
     declaration = load_json(declaration_path)
     blobs = {}
     for guide in declaration.get("guides") or []:
         path = guide.get("source_path")
         blobs[path] = subprocess.check_output(
             ["git", "show", f"{revision}:{path}"], cwd=root)
-    return guide_fingerprint(declaration, revision, blobs)
+    return guide_fingerprint(declaration, revision, blobs, presentation=presentation)
 
 
 PUBLISHED_INDEX_ROUTES = ("/version-index.json", "/docs/version-index.json")
@@ -425,6 +437,14 @@ def fetch_live_guide_evidence(get_bytes):
             if isinstance(error, urllib.error.HTTPError) and error.code != 404:
                 raise
             evidence[channel] = None
+        if isinstance(evidence[channel], dict):
+            presentation_path = "/" + CHANNEL_ROUTES[channel].strip("/") + "/presentation.json"
+            try:
+                evidence[channel]["presentation"] = json.loads(get_bytes(presentation_path).decode("utf-8"))
+            except (urllib.error.HTTPError, FileNotFoundError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code != 404:
+                    raise
+                evidence[channel]["presentation"] = None
     route_state = published_route_liveness(get_bytes)
     evidence["published_routes"] = route_state["routes"]
     evidence["published_route_problems"] = route_state["problems"]
@@ -478,6 +498,14 @@ def guide_change_decision(candidate, live_evidence):
         # invisible; source HEAD movement with identical inputs stays a no-op.
         if manifest.get("declaration_sha256") != declaration_hash:
             problems.append(f"{channel} live maintained declaration hash is stale")
+        # Changelog/banner presentation is a SEPARATE channel input, never a
+        # release-independent maintained guide. A version-banner-only fix must
+        # still reconcile Pages: its fingerprint is stamped into the built
+        # presentation.json and compared here, not folded into the guide receipt.
+        wanted_presentation = candidate.get("presentation_fingerprint", "")
+        live_presentation = (manifest.get("presentation") or {}).get("fingerprint")
+        if wanted_presentation and live_presentation != wanted_presentation:
+            problems.append(f"{channel} live channel presentation is stale")
     problems.extend((live_evidence or {}).get("published_route_problems") or [])
     return {"publish": bool(problems),
             "reason": ("live maintained guide receipt is missing or stale"
@@ -712,6 +740,37 @@ def verify_manifest_identity(candidate, manifest):
     return (not problems), problems
 
 
+def channel_presentation_paths(live_index):
+    """Presentation and changelog receipt paths for every published version.
+
+    Both the canonical channel route and the immutable archive route carry the
+    same generated presentation, so a banner/changelog-only change must be
+    attested at each path, not merely at one canonical copy. A legacy index
+    without `versions` falls back to the two canonical channel routes.
+    """
+    routes = []
+    for version in live_index.get("versions") or []:
+        if not isinstance(version, dict):
+            continue
+        for key in ("route", "immutable_route"):
+            route = str(version.get(key) or "").strip("/")
+            if route:
+                routes.append(route)
+    if not routes:
+        routes = [value.strip("/") for value in CHANNEL_ROUTES.values()]
+    routes = sorted(set(routes))
+    return ([f"/{route}/presentation.json" for route in routes],
+            [f"/{route}/changelog/index.html" for route in routes])
+
+
+def _presentation_fingerprint(payload):
+    """The fingerprint actually carried by a built presentation.json."""
+    if not isinstance(payload, dict):
+        return ""
+    value = str(payload.get("fingerprint", ""))
+    return value if re.fullmatch(r"[0-9a-f]{64}", value) else ""
+
+
 def stamp_publication_receipt(site, candidate, live_index, source_revision):
     """Stamp a publication receipt into the built artifact (never main)."""
     if not valid_commit(source_revision):
@@ -739,6 +798,37 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
         local = root / path.lstrip("/")
         if local.is_file():
             page_hashes[path] = sha256_bytes(local.read_bytes())
+    # Channel presentation is a real built input, not an echoed candidate
+    # string. When the candidate declares a presentation fingerprint, read the
+    # ACTUAL presentation.json at canonical AND stable archive paths, require a
+    # valid SHA-256 that matches the candidate, and attest its bytes together
+    # with the generated changelog HTML. A wrong or missing file fails here
+    # instead of passing on a hash copied from the candidate. Legacy candidates
+    # without a presentation fingerprint keep the original path.
+    presentation_hash = str(candidate.get("presentation_fingerprint") or "")
+    if presentation_hash:
+        if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
+            raise ValueError("candidate channel presentation fingerprint must be a SHA-256")
+        presentation_paths, changelog_paths = channel_presentation_paths(live_index)
+        for path in presentation_paths:
+            local = root / path.lstrip("/")
+            if not local.is_file():
+                raise ValueError(f"channel presentation receipt is missing: {path}")
+            try:
+                payload = json.loads(local.read_text(encoding="utf-8"))
+            except (ValueError, UnicodeDecodeError) as error:
+                raise ValueError(f"channel presentation receipt is malformed: {path}: {error}")
+            actual = _presentation_fingerprint(payload)
+            if not actual:
+                raise ValueError(f"channel presentation receipt has no valid fingerprint: {path}")
+            if actual != presentation_hash:
+                raise ValueError(f"channel presentation fingerprint disagrees with candidate: {path}")
+            page_hashes[path] = sha256_bytes(local.read_bytes())
+        for path in changelog_paths:
+            local = root / path.lstrip("/")
+            if not local.is_file():
+                raise ValueError(f"generated changelog page is missing: {path}")
+            page_hashes[path] = sha256_bytes(local.read_bytes())
     nightly = (live_index.get("channels") or {}).get("nightly") or {}
     receipt = {"schema_version": 1, "source_revision": source_revision,
                "nightly_promotion_receipt": (nightly.get("promotion") or {}).get("receipt", ""),
@@ -747,6 +837,11 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
                "manifest_identity_hash": candidate.get("manifest_identity_hash", ""),
                "channels": channels, "page_hashes": page_hashes,
                "baseline_mode": "exact-artifact"}
+    # Legacy candidates have NO presentation input. Omit the field entirely so
+    # their historical receipt bytes stay identical (bots flagged the extra
+    # empty field as a byte regression). New candidates keep the explicit key.
+    if presentation_hash:
+        receipt["presentation_fingerprint"] = presentation_hash
     path = Path(site) / "publication-receipt.json"
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return receipt
@@ -761,6 +856,19 @@ def verify_publication_receipt(receipt, candidate, live_index, source_revision,
         field = {"guide_fingerprint": "fingerprint"}.get(key, key)
         if receipt.get(key) != candidate.get(field):
             problems.append(f"publication receipt {key} does not match the candidate")
+    # Legacy receipts predate channel presentation and stay compatible. Once a
+    # candidate declares presentation, the key is REQUIRED, valid, and equal:
+    # a VersionBanner/changelog-only change must therefore reconcile Pages.
+    presented = str(candidate.get("presentation_fingerprint") or "")
+    if presented:
+        if not re.fullmatch(r"[0-9a-f]{64}", presented):
+            problems.append("candidate channel presentation fingerprint is not a SHA-256")
+        if "presentation_fingerprint" not in receipt:
+            problems.append("publication receipt is missing the presentation fingerprint")
+        elif receipt["presentation_fingerprint"] != presented:
+            problems.append("publication receipt presentation fingerprint does not match the candidate")
+    elif receipt.get("presentation_fingerprint") not in (None, ""):
+        problems.append("legacy publication receipt has an unexpected presentation fingerprint")
     if receipt.get("source_revision") != source_revision:
         problems.append("publication receipt source revision is not the tested commit")
     for name in CHANNELS:
@@ -773,6 +881,24 @@ def verify_publication_receipt(receipt, candidate, live_index, source_revision,
         attested = receipt.get("page_hashes") or {}
         if not attested:
             problems.append("publication receipt has no page byte hashes")
+        if presented and re.fullmatch(r"[0-9a-f]{64}", presented):
+            presentation_paths, changelog_paths = channel_presentation_paths(live_index)
+            for path in presentation_paths + changelog_paths:
+                if path not in attested:
+                    problems.append(f"publication receipt does not attest channel bytes: {path}")
+            # Read the real served presentation.json: a hash echoed from the
+            # candidate on an absent or wrong file must never pass.
+            for path in presentation_paths:
+                try:
+                    payload = json.loads(get_bytes(path).decode("utf-8"))
+                except Exception as error:
+                    problems.append(f"public channel presentation {path} is unavailable or malformed: {error}")
+                    continue
+                actual = _presentation_fingerprint(payload)
+                if not actual:
+                    problems.append(f"public channel presentation {path} has no valid fingerprint")
+                elif actual != presented:
+                    problems.append(f"public channel presentation fingerprint at {path} does not match the candidate")
         for path, digest in attested.items():
             try:
                 observed = get_bytes(path)
@@ -938,7 +1064,33 @@ def verify_prior_bytes(site, base_url):
     receipt_bytes = observed["/publication-receipt.json"]
     if receipt_bytes is not None:
         receipt = json.loads(receipt_bytes.decode("utf-8"))
-        for path, digest in (receipt.get("page_hashes") or {}).items():
+        attested = receipt.get("page_hashes") or {}
+        presented = str(receipt.get("presentation_fingerprint") or "")
+        if presented:
+            # After deploy the SAME required keys/paths must be present: a
+            # legacy receipt (no presentation) keeps the old compatible path.
+            if not re.fullmatch(r"[0-9a-f]{64}", presented):
+                problems.append("live receipt presentation fingerprint is not a SHA-256")
+            presentation_paths, changelog_paths = channel_presentation_paths(index)
+            for path in presentation_paths + changelog_paths:
+                if path not in attested:
+                    problems.append(f"live receipt does not attest channel bytes: {path}")
+            for path in presentation_paths:
+                live_value = live_bytes(get_bytes, [path])[path]
+                if live_value is None:
+                    problems.append(f"live channel presentation is missing: {path}")
+                    continue
+                try:
+                    payload = json.loads(live_value.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    problems.append(f"live channel presentation is malformed: {path}")
+                    continue
+                actual = _presentation_fingerprint(payload)
+                if not actual:
+                    problems.append(f"live channel presentation has no valid fingerprint: {path}")
+                elif actual != presented:
+                    problems.append(f"live channel presentation fingerprint disagrees with the receipt: {path}")
+        for path, digest in attested.items():
             live_value = page_observed.get(path)
             if live_value is None:
                 live_value = live_bytes(get_bytes, [path])[path]
@@ -1018,9 +1170,14 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
         mode = "legacy-reconstructed"
     else:
         # The workflow stamps receipts separately, so reconstruct it from the
-        # exact declaration and blobs at the deployment SHA.
+        # exact declaration and blobs at the deployment SHA, PLUS the channel
+        # presentation fingerprint persisted by the trusted build. A legacy
+        # artifact without presentation.json stays compatible (no field).
+        presentation_path = site / CHANNEL_ROUTES["stable"].strip("/") / "presentation.json"
+        presentation = load_json(presentation_path) if presentation_path.is_file() else None
         candidate = candidate_guide_fingerprint(
-            Path(root) / "docs/maintained-guides.json", deployment_sha, root)
+            Path(root) / "docs/maintained-guides.json", deployment_sha, root,
+            presentation=presentation)
         stamp_publication_receipt(site, candidate, live, deployment_sha)
         ok, problems = verify_rendered_guide_links(_local_get(site), live, root)
         if not ok:
@@ -1070,6 +1227,8 @@ def build_parser():
     fingerprint.add_argument("--declaration", required=True)
     fingerprint.add_argument("--revision", required=True)
     fingerprint.add_argument("--root", default=str(ROOT))
+    fingerprint.add_argument("--presentation", default="",
+                             help="path to the generated presentation fingerprint JSON")
     evidence = commands.add_parser("guide-evidence")
     evidence.add_argument("--base-url", default="https://carbonpanel.dev")
     decision = commands.add_parser("guide-change-decision")
@@ -1171,8 +1330,10 @@ def main():
         if not ok:
             raise ValueError("Maintained guide provenance failed: " + "; ".join(problems))
     elif args.command == "guide-fingerprint":
+        presentation = load_json(args.presentation) if args.presentation else None
         emit({"verified": True,
-              **candidate_guide_fingerprint(args.declaration, args.revision, args.root)})
+              **candidate_guide_fingerprint(args.declaration, args.revision, args.root,
+                                            presentation=presentation)})
     elif args.command == "guide-evidence":
         evidence = _public_evidence(args.base_url)
         emit({"verified": True, **evidence})

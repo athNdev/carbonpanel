@@ -853,5 +853,210 @@ class PublishedRouteLivenessTests(unittest.TestCase):
             gate.published_route_liveness(broken)
 
 
+class ChannelPresentationReceiptTests(unittest.TestCase):
+    """Presentation is a separate channel input, with legacy compatibility."""
+
+    HASH = "a" * 64
+
+    def base_candidate(self, presentation="", **overrides):
+        value = {"fingerprint": "b" * 64, "declaration_sha256": "c" * 64,
+                 "manifest_identity_hash": "d" * 64,
+                 "presentation_fingerprint": presentation}
+        value.update(overrides)
+        return value
+
+    def receipt(self, presentation=True):
+        value = {"declaration_sha256": "c" * 64, "guide_fingerprint": "b" * 64,
+                 "manifest_identity_hash": "d" * 64, "source_revision": "e" * 40,
+                 "channels": {}, "page_hashes": {}}
+        if presentation:
+            value["presentation_fingerprint"] = self.HASH
+        return value
+
+    def test_legacy_receipt_without_presentation_is_accepted(self):
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(presentation=False), self.base_candidate(),
+            {"channels": {}}, "e" * 40)
+        self.assertTrue(ok, problems)
+
+    def test_exact_presentation_hash_required_when_persisted(self):
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(), self.base_candidate(presentation=self.HASH),
+            {"channels": {}}, "e" * 40)
+        self.assertTrue(ok, problems)
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(), self.base_candidate(presentation="f" * 64),
+            {"channels": {}}, "e" * 40)
+        self.assertFalse(ok)
+        self.assertTrue(any("presentation fingerprint" in p for p in problems))
+
+    def index_with_versions(self):
+        """Canonical plus stable-archive routes carrying the presentation."""
+        return {"versions": [
+            {"channel": "stable", "route": "/docs/",
+             "immutable_route": "/docs/versions/2.0.1/"},
+            {"channel": "nightly", "route": "/docs/nightly/",
+             "immutable_route": "/docs/nightly/"},
+        ], "channels": {}}
+
+    def site_with_presentation(self, root):
+        for path in ("/docs/presentation.json",
+                     "/docs/versions/2.0.1/presentation.json",
+                     "/docs/nightly/presentation.json"):
+            target = root / path.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps({"fingerprint": self.HASH,
+                                          "generator_sha256": "a" * 64}),
+                              encoding="utf-8")
+        for path in ("/docs/changelog/index.html",
+                     "/docs/versions/2.0.1/changelog/index.html",
+                     "/docs/nightly/changelog/index.html"):
+            target = root / path.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("<h1>Changelog</h1>", encoding="utf-8")
+
+    def test_stamp_reads_and_attests_real_presentation_at_canonical_and_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            self.site_with_presentation(site)
+            index = self.index_with_versions()
+            receipt = gate.stamp_publication_receipt(
+                site, self.base_candidate(presentation=self.HASH), index, "e" * 40)
+            for path in ("/docs/presentation.json",
+                         "/docs/versions/2.0.1/presentation.json",
+                         "/docs/nightly/presentation.json",
+                         "/docs/changelog/index.html",
+                         "/docs/versions/2.0.1/changelog/index.html",
+                         "/docs/nightly/changelog/index.html"):
+                self.assertIn(path, receipt["page_hashes"], path)
+            ok, problems = gate.verify_publication_receipt(
+                receipt, self.base_candidate(presentation=self.HASH), index,
+                "e" * 40, gate._local_get(site))
+            self.assertTrue(ok, problems)
+
+    def test_stamp_rejects_wrong_or_missing_presentation_and_changelog(self):
+        index = self.index_with_versions()
+        candidate = self.base_candidate(presentation=self.HASH)
+        cases = (
+            ("canonical fingerprint wrong", lambda s: (
+                s / "docs/presentation.json").write_text(
+                    json.dumps({"fingerprint": "f" * 64}), encoding="utf-8")),
+            ("stable archive fingerprint wrong", lambda s: (
+                s / "docs/versions/2.0.1/presentation.json").write_text(
+                    json.dumps({"fingerprint": "f" * 64}), encoding="utf-8")),
+            ("canonical presentation missing", lambda s: (
+                s / "docs/presentation.json").unlink()),
+            ("stable archive presentation missing", lambda s: (
+                s / "docs/versions/2.0.1/presentation.json").unlink()),
+            ("nightly presentation missing", lambda s: (
+                s / "docs/nightly/presentation.json").unlink()),
+            ("archive changelog missing", lambda s: (
+                s / "docs/versions/2.0.1/changelog/index.html").unlink()),
+        )
+        for label, mutate in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                site = Path(directory)
+                self.site_with_presentation(site)
+                mutate(site)
+                with self.assertRaises(ValueError):
+                    gate.stamp_publication_receipt(site, candidate, index, "e" * 40)
+
+    def test_verify_rejects_echoed_hash_on_wrong_or_missing_live_presentation(self):
+        index = self.index_with_versions()
+        candidate = self.base_candidate(presentation=self.HASH)
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            self.site_with_presentation(site)
+            receipt = gate.stamp_publication_receipt(site, candidate, index, "e" * 40)
+            get_bytes = gate._local_get(site)
+            ok, problems = gate.verify_publication_receipt(
+                receipt, candidate, index, "e" * 40, get_bytes)
+            self.assertTrue(ok, problems)
+
+            canonical = site / "docs/presentation.json"
+            canonical.write_text(json.dumps({"fingerprint": "f" * 64}), encoding="utf-8")
+            ok, problems = gate.verify_publication_receipt(
+                receipt, candidate, index, "e" * 40, get_bytes)
+            self.assertFalse(ok)
+            self.assertTrue(any("fingerprint" in p for p in problems), problems)
+
+            canonical.unlink()
+            def missing(path):
+                raise urllib.error.HTTPError(path, 404, "not found", {}, None)
+            ok, problems = gate.verify_publication_receipt(
+                receipt, candidate, index, "e" * 40, missing)
+            self.assertFalse(ok)
+            self.assertTrue(any("presentation" in p for p in problems), problems)
+
+            # A receipt that attests no presentation/changelog bytes fails even
+            # when the echoed presentation_fingerprint field is correct.
+            stripped = json.loads(json.dumps(receipt))
+            for path in ("docs/presentation.json", "docs/versions/2.0.1/presentation.json",
+                         "docs/nightly/presentation.json", "docs/changelog/index.html",
+                         "docs/versions/2.0.1/changelog/index.html",
+                         "docs/nightly/changelog/index.html"):
+                stripped["page_hashes"].pop("/" + path, None)
+            self.site_with_presentation(site)
+            ok, problems = gate.verify_publication_receipt(
+                stripped, candidate, index, "e" * 40, gate._local_get(site))
+            self.assertFalse(ok)
+            self.assertTrue(any("does not attest channel bytes" in p for p in problems), problems)
+
+    def test_verify_requires_presentation_key_when_candidate_declares_it(self):
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(presentation=False), self.base_candidate(presentation=self.HASH),
+            {"channels": {}}, "e" * 40)
+        self.assertFalse(ok)
+        self.assertTrue(any("missing the presentation fingerprint" in p for p in problems))
+
+    def test_legacy_stamp_omits_presentation_key_and_keeps_bytes(self):
+        """Pre-presentation receipts must keep their historical bytes exactly."""
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            legacy_index = LiveStateTests().index()
+            (site / "version-index.json").write_text(
+                json.dumps(legacy_index), encoding="utf-8")
+            candidate = GuideLivenessTests().candidate()
+            self.assertNotIn("presentation_fingerprint", candidate)
+            receipt = gate.stamp_publication_receipt(
+                site, candidate, legacy_index, GuideLivenessTests.REVISION)
+            self.assertNotIn("presentation_fingerprint", receipt)
+            raw = (site / "publication-receipt.json").read_bytes()
+            self.assertNotIn(b"presentation_fingerprint", raw)
+            ok, problems = gate.verify_publication_receipt(
+                receipt, candidate, legacy_index, GuideLivenessTests.REVISION,
+                gate._local_get(site))
+            self.assertTrue(ok, problems)
+
+    def test_pre_presentation_reconstruct_has_no_presentation_input(self):
+        candidate = GuideLivenessTests().candidate()
+        self.assertNotIn("presentation_fingerprint", candidate)
+        manifests = GuideLivenessTests().evidence(
+            sha256=candidate["guides"][0]["source_sha256"])
+        evidence = {channel: {"channels": manifests[channel]["channels"],
+                              "declaration_sha256": manifests[channel]["declaration_sha256"],
+                              "published_routes": {}, "published_route_problems": []}
+                    for channel in gate.CHANNELS}
+        decision = gate.guide_change_decision(candidate, evidence)
+        self.assertFalse(decision["publish"], decision)
+
+    def test_guide_change_decision_notices_presentation_only_change(self):
+        candidate = self.base_candidate(presentation=self.HASH)
+        candidate["guides"] = []
+        live = {}
+        for channel in gate.CHANNELS:
+            live[channel] = {"channels": [], "declaration_sha256": "c" * 64,
+                             "presentation": {"fingerprint": "f" * 64}}
+        live["published_routes"] = {}
+        live["published_route_problems"] = []
+        decision = gate.guide_change_decision(candidate, live)
+        self.assertTrue(decision["publish"])
+        self.assertTrue(any("presentation" in p for p in decision["problems"]))
+        for channel in gate.CHANNELS:
+            live[channel]["presentation"] = {"fingerprint": self.HASH}
+        decision = gate.guide_change_decision(candidate, live)
+        self.assertFalse(decision["publish"], decision)
+
+
 if __name__ == "__main__":
     unittest.main()

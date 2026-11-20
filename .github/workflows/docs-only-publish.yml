@@ -102,14 +102,20 @@ jobs:
       # unrelated merge or a cancelled queue cannot hide a needed guide update:
       # the candidate fingerprint is the declaration plus the real Git blobs at
       # the trusted revision, compared with the receipt actually served live.
-      - name: Fingerprint the maintained guides at the tested revision
+      - name: Fingerprint channel presentation and maintained guides at the tested revision
         id: fingerprint
         env:
           GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
         run: |
+          # Changelog and VersionBanner are channel presentation, NOT release-
+          # independent maintained guides. Their own fingerprint is a separate
+          # input so a switcher-only fix still reconciles Pages.
+          python3 scripts/changelog_page.py presentation-fingerprint \
+            --root "$GITHUB_WORKSPACE" > .presentation-fingerprint.json
           python3 scripts/docs_publication_gate.py guide-fingerprint \
             --declaration docs/maintained-guides.json \
             --revision "$GUIDE_REVISION" --root "$GITHUB_WORKSPACE" \
+            --presentation .presentation-fingerprint.json \
             > .guide-fingerprint.json
           echo "fingerprint=$(jq -r '.fingerprint' .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
           echo "json=$(jq -c . .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
