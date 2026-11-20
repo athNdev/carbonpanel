@@ -828,7 +828,9 @@ jobs:
           path: .website-build/site
       - name: Provision Chromium and pin expectations for stable live browser QA
         id: stable_chromium
-        working-directory: scripts/manual-review/e2e
+        # Privileged Stable uses the SAME immutable trusted checkout as the
+        # gate modules. The candidate site is passed to the checker as data.
+        working-directory: .trusted-release/scripts/manual-review/e2e
         run: |
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium

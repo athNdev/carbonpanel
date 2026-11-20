@@ -3928,5 +3928,38 @@ class PublicationDagPathTests(unittest.TestCase):
                             for s in steps))
 
 
+class BrowserDomGateTests(unittest.TestCase):
+    """The browser gate uses one pinned Playwright session, not dump-dom loops."""
+
+    def test_pinned_helper_and_python_wrapper(self):
+        root = release.ROOT
+        helper = root / "scripts/manual-review/e2e/version-check-dom.mjs"
+        self.assertTrue(helper.is_file())
+        source = helper.read_text(encoding="utf-8")
+        self.assertIn('from "playwright"', source)
+        self.assertIn("chromium.launch(", source)
+        self.assertIn('waitUntil: "domcontentloaded"', source)
+        self.assertIn("hasOwnProperty.call(results, request.key)", source)
+        self.assertIn("empty document DOM", source)
+        self.assertIn("unknown browser error", source)
+        wrapper = (root / "scripts/browser_version_check.py").read_text(encoding="utf-8")
+        self.assertIn("collect_dom(", wrapper)
+        self.assertIn("version-check-dom.mjs", wrapper)
+        self.assertNotIn("--dump-dom", wrapper)
+        self.assertNotIn("disable-javascript", wrapper)
+        self.assertIn("An empty DOM is a browser failure", wrapper)
+
+    def test_privileged_workflow_provisions_trusted_e2e_package(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        jobs = yaml.safe_load(source)["jobs"]
+        provision = next(s for s in jobs["stable-channel-transaction"]["steps"]
+                         if s.get("id") == "stable_chromium")
+        self.assertEqual(provision["working-directory"],
+                         ".trusted-release/scripts/manual-review/e2e")
+        cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/browser_version_check.py", cd)
+
+
 if __name__ == "__main__":
     unittest.main()

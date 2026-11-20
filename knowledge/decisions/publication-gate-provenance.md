@@ -37,6 +37,12 @@ sources:
   observations: only well-formed two-string OS/architecture pairs qualify.
   Malformed entries are refused deterministically at every CLI boundary, never
   coerced from arbitrary iterables or mapping keys.
+- Browser qualification uses the repository-pinned Playwright helper beside the
+  e2e package, with one bounded browser session, DOMContentLoaded and cached
+  route/viewport visits. Privileged Stable provisions that package from the
+  trusted checkout and passes the candidate site as data; all route, pin,
+  marker and retired-page assertions remain in the Python caller. An empty DOM
+  is a browser error with the real message, never a missing-marker diagnostic.
 
 # Read next
 

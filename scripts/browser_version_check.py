@@ -15,9 +15,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -30,19 +30,30 @@ from scripts import version_contract as vc  # noqa: E402
 SITE = ROOT / ".website-build/site"
 BASE = "https://carbonpanel.dev"
 RETIRED = ("1.0.39", "3.0.0-alpha.1")
+# The helper lives beside the repository-pinned Playwright package so it uses
+# the exact browser dependency provisioned by the workflow. The local site is
+# passed as DATA; the helper never reads the packaged artifact itself.
+E2E = ROOT / "scripts" / "manual-review" / "e2e"
+DOM_HELPER = E2E / "version-check-dom.mjs"
+BROWSER_WIDTHS = (375, 1440)
 
 
-def chrome_path():
-    candidates = [os.environ.get("CHROME_PATH"), Path("/usr/bin/chromium"),
-                  Path("/usr/bin/google-chrome")]
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return str(candidate)
-    for name in ("chromium", "google-chrome", "chrome"):
-        found = shutil.which(name)
-        if found:
-            return found
-    raise RuntimeError("Set CHROME_PATH to a Chromium-family executable.")
+def collect_dom(origin, paths):
+    """One bounded Playwright session for every route/viewport pair."""
+    if not DOM_HELPER.is_file():
+        raise RuntimeError(f"missing pinned browser helper: {DOM_HELPER}")
+    requests = [{"key": f"{path}|{width}", "path": path, "width": width}
+                for path in paths for width in BROWSER_WIDTHS]
+    with tempfile.TemporaryDirectory(prefix="carbon-version-dom-") as temporary:
+        output = Path(temporary) / "dom.json"
+        command = ["node", str(DOM_HELPER), "--origin", origin,
+                   "--out", str(output), "--requests", json.dumps(requests)]
+        result = subprocess.run(command, cwd=str(E2E), capture_output=True,
+                                text=True, encoding="utf-8", errors="replace", timeout=300)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError("browser DOM collector failed: " + (detail or f"exit {result.returncode}"))
+        return json.loads(output.read_text(encoding="utf-8"))
 
 
 def main():
@@ -97,8 +108,9 @@ def main():
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         origin = f"http://127.0.0.1:{server.server_port}"
-    binary = chrome_path()
     failures = []
+    dom_cache = {}
+    browser_errors = []
 
     def published(path):
         """Does the exact URL exist (local artifact file or live public route)?"""
@@ -112,27 +124,24 @@ def main():
 
 
     def dom(path, width=1440):
-        for attempt in range(3):
-            profile = Path(os.environ.get("TEMP", "/tmp")) / \
-                f"cp-version-dom-{abs(hash((path, width)))}-{attempt}"
-            try:
-                result = subprocess.run(
-                    [binary, "--headless", "--disable-gpu", "--no-sandbox",
-                     "--disable-dev-shm-usage", "--disable-javascript",
-                     "--no-first-run", "--no-default-browser-check",
-                     f"--window-size={width},900", "--virtual-time-budget=500",
-                     "--user-data-dir=" + str(profile),
-                     "--dump-dom", origin + path], capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=30)
-            except subprocess.TimeoutExpired:
-                continue
-            if result.stdout:
-                return result.stdout
-        failures.append(f"{path} ({width}px): browser did not return DOM")
-        return ""
+        key = f"{path}|{width}"
+        entry = dom_cache.get(key)
+        if entry is None:
+            browser_errors.append(f"{path} ({width}px): no browser result collected")
+            return ""
+        if entry.get("error"):
+            message = f"{path} ({width}px): browser error: {entry['error']}"
+            if message not in browser_errors:
+                browser_errors.append(message)
+            return ""
+        return entry.get("html", "")
 
     def expect(path, needles, width=1440):
         page = dom(path, width)
+        if not page:
+            # An empty DOM is a browser failure, not evidence that markers
+            # are missing. The actual browser error is reported separately.
+            return page
         for needle in needles:
             if needle not in page:
                 failures.append(f"{path} ({width}px): missing {needle!r}")
@@ -140,6 +149,8 @@ def main():
 
     def reject(path, needles, width=1440):
         page = dom(path, width)
+        if not page:
+            return
         for needle in needles:
             if needle in page:
                 failures.append(f"{path} ({width}px): unexpected {needle!r}")
@@ -179,6 +190,14 @@ def main():
     staging = nightly_marker["route"] if is_candidate else None
     if is_candidate and not staging.startswith("/docs/candidate/"):
         failures.append(f"candidate marker route {staging} is not a non-active staging path")
+
+    # Collect every DOM snapshot in ONE bounded Playwright session before the
+    # assertions run. Repeated route/viewport pairs are cached by the helper.
+    dom_paths = [staging] if is_candidate else list(active_routes) + [
+        "/docs/getting-started/docker-compose/", stable_route]
+    dom_cache.update(collect_dom(origin, dom_paths))
+    if browser_errors:
+        raise ValueError("browser qualification aborted:\n- " + "\n- ".join(browser_errors))
 
     try:
         if is_candidate:
