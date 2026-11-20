@@ -838,6 +838,15 @@ jobs:
           test -s .website-build/site/docs/getting-started/proxmox/index.html
           test -s .website-build/site/docs/nightly/index.html
           echo "final_built=true" >> "$GITHUB_OUTPUT"
+      - name: Provision Chromium for browser QA
+        id: chromium
+        if: steps.final_artifact.outcome == 'success'
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          # Use the exact browser installed by the pinned Playwright package;
+          # do not override it with an arbitrary cached binary.
       - name: Browser-qualify Stable/Nightly channels on the final artifact
         id: browser_ui
         if: steps.final_artifact.outcome == 'success'
@@ -856,16 +865,6 @@ jobs:
         if: steps.browser_ui.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
-      - name: Provision Chromium for live browser QA
-        id: chromium
-        if: steps.final_deploy.outcome == 'success'
-        working-directory: scripts/manual-review/e2e
-        run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Live browser QA on deployed HTTPS (switcher, pins, both channels)
         id: live_browser
         if: steps.final_deploy.outcome == 'success'

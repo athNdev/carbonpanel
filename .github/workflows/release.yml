@@ -424,6 +424,11 @@ jobs:
         with:
           version: '1.50.0'
           github_token: ${{ github.token }}
+      - name: Provision pinned Playwright for the rehearsal browser gate
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
       - name: Qualify both rendered channels at the commit and staged OCI digest
         env:
           PLANNED_VERSION: ${{ needs.plan.outputs.version }}
@@ -828,13 +833,14 @@ jobs:
           path: .website-build/site
       - name: Provision Chromium and pin expectations for stable live browser QA
         id: stable_chromium
-        working-directory: scripts/manual-review/e2e
+        # Privileged Stable uses the SAME immutable trusted checkout as the
+        # gate modules. The candidate site is passed to the checker as data.
+        working-directory: .trusted-release/scripts/manual-review/e2e
         run: |
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          # Use the exact browser installed by the pinned Playwright package;
+          # do not override it with an arbitrary cached binary.
           INDEX="$GITHUB_WORKSPACE/.website-build/site/version-index.json"
           echo "CARBONPANEL_EXPECT_NIGHTLY_REVISION=$(jq -r '.channels.nightly.commit' "$INDEX")" >> "$GITHUB_ENV"
           echo "CARBONPANEL_EXPECT_NIGHTLY_DIGEST=$(jq -r '.channels.nightly.image.digest' "$INDEX")" >> "$GITHUB_ENV"
