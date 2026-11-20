@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Existing Linux guest installer qualification](panel-guest-installer.md) — Exercise the packaged controller install and update on disposable hosted Linux with a guest-local Docker daemon.
 - [Modpack compatibility sweep](modpack-sweep.md) — How to qualify pre-existing modpacks sequentially on the newest supported Minecraft version.
 - [Packaged Linux systemd qualification](panel-systemd-qualification.md) — Qualify a controller archive with a fresh install and in-place upgrade on hosted Linux.
 - [Testing seams](harness.md) — How failure and recovery behavior is tested without a live Minecraft server or a reachable Docker daemon.

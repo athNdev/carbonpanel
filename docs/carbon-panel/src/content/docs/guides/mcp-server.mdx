@@ -19,11 +19,20 @@ Carbon Panel includes a read-first Model Context Protocol (MCP) stdio gateway.
 The gateway's OCI package has its own version and release workflow.
 [Distribution decision](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md)
 
-The gateway mounts the generated **211-tool combined catalogue**. The
+The gateway mounts the generated **212-tool combined catalogue**. The
 controller has 251 declared RPCs across 28 proto services and
 241 mounted/reachable RPCs across 27 services. The strict gate verifies the
-200 supported operations. The audit matrix documents 79 excluded operations
+201 supported operations. The audit matrix documents 78 excluded operations
 and their equivalents where available.
+
+Use `get_server` for per-server status and cached CPU, memory, disk, TPS and
+player telemetry when the controller has a sample. It requires `servers/read`
+on that server.
+
+`list_staged_config_changes` requires `server_config/read` on the selected
+server. It returns rollout status and scheduling metadata, with an optional
+status filter and a result limit of 1 to 100. It omits saved config payloads.
+This tool requires a controller with `StagedConfigService`.
 
 ## Choose the panel build first
 

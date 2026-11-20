@@ -8,6 +8,7 @@ import {
 	THEME_KEY,
 	MOTION_KEY,
 	DENSITY_KEY,
+	SERVER_METRICS_KEY,
 	type PreferenceStorage
 } from './display-preferences.svelte';
 
@@ -356,4 +357,17 @@ test('migrated surfaces introduce no new hardcoded six-digit hex colors', () => 
 		const hex = source.match(/#[0-9a-fA-F]{6}\b/g) || [];
 		assert.deepEqual(hex, [], `${file} introduced hardcoded hex colors: ${hex.join(', ')}`);
 	}
+});
+
+test('server metrics expand by default and persist independent of the server', () => {
+	const { storage, documentStub, values } = fixture();
+	const prefs = createDisplayPreferences(storage, documentStub);
+	assert.equal(get(prefs.metricsExpanded), true);
+	prefs.setMetricsExpanded(false);
+	assert.equal(values.get(SERVER_METRICS_KEY), 'false');
+	const next = createDisplayPreferences(storage, documentStub);
+	next.hydrate();
+	assert.equal(get(next.metricsExpanded), false);
+	next.reset();
+	assert.equal(get(next.metricsExpanded), true);
 });

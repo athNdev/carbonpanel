@@ -24,6 +24,7 @@ on:
       - .github/workflows/compose-release-qualification.yml
       - scripts/qualify-compose-*.*
       - scripts/qualify-compose-client/**
+      - scripts/proxmox/qualify-existing-guest.py
 
 permissions:
   actions: read
@@ -110,6 +111,28 @@ jobs:
         run: |
           export QUALIFY_NPM_PREFIX="$PWD/scripts/qualify-compose-client"
           bash scripts/qualify-compose-release.sh "$RUNNER_TEMP/compose-qualification" "$PWD/qualification-product" "$MODE"
+
+      - name: Exercise the existing-guest installer
+        if: ${{ !cancelled() && matrix.mode == 'host' && steps.artifacts.outcome == 'success' }}
+        env:
+          STAGED_SHA: ${{ steps.coordinates.outputs.staged_sha }}
+          BASELINE_IMAGE: ${{ steps.artifacts.outputs.baseline_image }}
+          BASELINE_COMMIT: ${{ steps.artifacts.outputs.baseline_commit }}
+          CANDIDATE_IMAGE: ${{ steps.artifacts.outputs.candidate_image }}
+        run: |
+          python3 scripts/proxmox/qualify-existing-guest.py \
+            --product "$PWD/qualification-product" \
+            --baseline-image "$BASELINE_IMAGE" --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-image "$CANDIDATE_IMAGE" --candidate-commit "$STAGED_SHA"
+
+      - name: Upload existing-guest installer evidence
+        if: ${{ !cancelled() && matrix.mode == 'host' && steps.artifacts.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: panel-guest-installer-evidence
+          path: ${{ runner.temp }}/panel-guest-installer-evidence.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Remove the job's loopback registry
         if: always()

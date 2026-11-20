@@ -29,6 +29,7 @@ GAME_PORT="${REVIEW_GAME_PORT:-25585}"
 IMAGE="${REVIEW_IMAGE:-carbon-panel:review}"
 USER_NAME="${PANEL_REVIEW_USER:-reviewer}"
 USER_PASS="${PANEL_REVIEW_PASSWORD:-Review-Panel-2026}"
+OBSERVED_PLAYER="${REVIEW_OBSERVED_PLAYER:-0}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT >= 1 && 10#$PORT <= 65515)) || {
 	echo "review port must be in 1..65515" >&2; exit 2;
@@ -174,9 +175,17 @@ seed() {
 			extra_port=$((extra_port + 1))
 		done
 		GAME_PORT="$(free_port "$GAME_PORT")"
-		rpc /carbonpanel.v1.ServerService/CreateServer \
-			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":'"$GAME_PORT"',"requestId":"review-bootstrap-server"}' \
-			"${token}" >/dev/null
+		local starter
+		starter="$(REVIEW_GAME_PORT="$GAME_PORT" REVIEW_OBSERVED_PLAYER="$OBSERVED_PLAYER" node -e '
+			const config = {name:"review-vanilla", mcVersion:"1.21.1", modLoader:"MOD_LOADER_VANILLA",
+				memory:2048, maxPlayers:10, port:Number(process.env.REVIEW_GAME_PORT), requestId:"review-bootstrap-server"};
+			if (process.env.REVIEW_OBSERVED_PLAYER === "1") {
+				config.proxyHostname = "review-vanilla.invalid";
+				config.dockerOverrides = {environment: {ONLINE_MODE: "false"}};
+			}
+			console.log(JSON.stringify(config));
+		')"
+		rpc /carbonpanel.v1.ServerService/CreateServer "${starter}" "${token}" >/dev/null
 	fi
 	# A missing or failed starter is a setup failure, not a successful capture.
 	local servers server_id server_status container_id record deadline timeout="${REVIEW_SEED_TIMEOUT_SECONDS:-180}"
@@ -186,7 +195,7 @@ seed() {
 	# StartServer while that asynchronous lifecycle operation still owns the row.
 	while :; do
 		servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
-		record="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log([v[0].id,v[0].status??"",v[0].containerId??""].join("|"))}catch(e){process.exitCode=1}})')"
+		record="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;const server=v?.find(item=>item.name==="review-vanilla");if(!server?.id)throw Error();console.log([server.id,server.status??"",server.containerId??""].join("|"))}catch(e){process.exitCode=1}})')"
 		IFS='|' read -r server_id server_status container_id <<< "$record"
 		case "$server_status" in
 			SERVER_STATUS_ERROR|SERVER_STATUS_UNHEALTHY|7|8) echo "review starter creation failed: $server_status" >&2; return 1 ;;
@@ -197,6 +206,13 @@ seed() {
 		((SECONDS < deadline)) || { echo "review starter did not finish creation within $timeout seconds" >&2; return 1; }
 		sleep 1
 	done
+	local observed_port=""
+	if [ "$OBSERVED_PLAYER" = "1" ]; then
+		# Check the effective Docker config before starting a review game with
+		# offline authentication. The fixture can only connect over loopback.
+		observed_port="$(review_loopback_game_port "$container_id")" || return 1
+	fi
+	printf '%s\n' "$server_id" >"${DATA}/server-id"
 	case "$server_status" in
 		SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|3|2) ;;
 		*) rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null ;;
@@ -204,11 +220,19 @@ seed() {
 
 	seed_showcase_pack "${token}"
 	seed_showcase_world_library "${token}" "${server_id}"
-	if wait_for_server_running "${token}"; then
+	if wait_for_server_running "${token}" "${server_id}"; then
 		seed_showcase_terrain "${token}" "${server_id}"
-		seed_showcase_player "${token}" "${server_id}"
+		if [ "$OBSERVED_PLAYER" = "1" ]; then
+			REVIEW_PANEL_PORT="$PORT" REVIEW_FIXTURE_GAME_PORT="$observed_port" \
+				REVIEW_FIXTURE_SERVER_ID="$server_id" REVIEW_FIXTURE_TOKEN="$token" \
+				node "${REPO}/scripts/review/fixtures/minecraft-player/observe.mjs" || return 1
+		fi
+		if [ "$OBSERVED_PLAYER" != "1" ] || [ "${REVIEW_SHOWCASE_PLAYER_DETAIL:-0}" = "1" ]; then
+			seed_showcase_player "${token}" "${server_id}"
+		fi
 	else
-		echo "review server did not reach RUNNING; skipping player allowlist fixture" >&2
+		echo "review server did not reach RUNNING; skipping player fixture" >&2
+		[ "$OBSERVED_PLAYER" != "1" ]
 	fi
 }
 
@@ -246,11 +270,28 @@ seed_showcase_world_library() {
 		echo "could not seed a review compatibility report" >&2
 }
 
+review_loopback_game_port() {
+	local container_id="$1"
+	assert_owner || return 1
+	[[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+	docker inspect --format '{{json .HostConfig.PortBindings}}' "$container_id" |
+		node -e '
+			const bindings = JSON.parse(require("fs").readFileSync(0, "utf8"))["25565/tcp"];
+			const port = Number(bindings?.[0]?.HostPort);
+			if (bindings?.length !== 1 || bindings[0].HostIp !== "127.0.0.1" ||
+			    !Number.isInteger(port) || port < 1 || port > 65535) {
+				console.error("refusing offline review game without a loopback-only Docker port");
+				process.exit(1);
+			}
+			console.log(port);
+		'
+}
+
 wait_for_server_running() {
-	local token="$1" deadline=$((SECONDS + 180)) status response
+	local token="$1" server_id="$2" deadline=$((SECONDS + 180)) status response
 	while ((SECONDS < deadline)); do
-		response="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null || true)"
-		status="$(printf '%s' "${response}" | json_path 'servers.0.status')"
+		response="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null || true)"
+		status="$(printf '%s' "${response}" | json_path 'server.status')"
 		case "${status}" in
 			SERVER_STATUS_RUNNING|3) return 0 ;;
 		esac
@@ -421,7 +462,7 @@ seed_showcase_terrain() {
 # a failure leaves the core captures untouched.
 seed_showcase_bluemap() {
 	local token="$1" node_id data_path host_path server_id level="world" mapdir deadline
-	server_id="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null | json_path 'servers.0.id')"
+	server_id="$(cat "${DATA}/server-id")"
 	node_id="$(rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" 2>/dev/null | json_path 'nodes.0.id')"
 	data_path="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null | json_path 'server.dataPath')"
 	if [ -z "${server_id}" ] || [ -z "${node_id}" ] || [ -z "${data_path}" ]; then
@@ -492,6 +533,9 @@ world_view:
       health_path: "/"
       player_feed: false
 EOF
+	if [ "$OBSERVED_PLAYER" = "1" ]; then
+		printf '\nproxy:\n  enabled: true\n  bind_host: "127.0.0.1"\n' >>"${DATA}/config/config.yaml"
+	fi
 	map_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).maps;console.log(Array.isArray(m)?m.length:0)}catch(e){console.log(0)}})' <"${mapdir}/web/settings.json" 2>/dev/null || printf '0')"
 	echo "review BlueMap map count: ${map_count}" >&2
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
@@ -671,7 +715,13 @@ up|up-controller)
 		if [ "${mode}" = "up-controller" ]; then
 			printf '{}\n' >"${DATA}/config/config.yaml"
 		else
-			REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" node -e 'console.log(JSON.stringify({minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}}))' >"${DATA}/config/config.yaml"
+			REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" REVIEW_OBSERVED_PLAYER="$OBSERVED_PLAYER" node -e '
+				const config = {minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}};
+				if (process.env.REVIEW_OBSERVED_PLAYER === "1") {
+					config.proxy = {enabled:true, bind_host:"127.0.0.1"};
+				}
+				console.log(JSON.stringify(config));
+			' >"${DATA}/config/config.yaml"
 		fi
 	fi
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
@@ -685,8 +735,6 @@ up|up-controller)
 	fi
 	seed
 	token="$(login_token)"
-	rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null |
-		json_path 'servers.0.id' >"${DATA}/server-id" || true
 	if [ -n "${token}" ]; then
 		seed_showcase_bluemap "${token}" || true
 		if [ -f "${DATA}/config/config.yaml" ] && grep -q 'world_view:' "${DATA}/config/config.yaml"; then
@@ -739,7 +787,7 @@ up|up-controller)
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
 						map_probe="$(curl -fsS --max-time 3 'http://127.0.0.1:8100/settings.json' 2>&1 || true)"
 						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
-						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | head -n 5 | tr '\n' ' ' | cut -c1-260)"
+						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | sed -n '1,5p' | tr '\n' ' ' | cut -c1-260)"
 						echo "review textures files: ${tex_probe}" >&2
 						http_probe="$(curl -sS --max-time 3 -D - -o /dev/null 'http://127.0.0.1:8100/maps/world/textures.json.gz' 2>&1 || true)"
 						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-300)" >&2
@@ -766,7 +814,8 @@ up|up-controller)
 							sleep 3
 						done
 						echo "review BlueMap tile files before journey: ${tile_prev}" >&2
-						tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | head -12 | tr '\n' ' ' | cut -c1-500)"
+						# Consume the full stream so an early exit does not trip pipefail.
+					tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | sed -n '1,12p' | tr '\n' ' ' | cut -c1-500)"
 						echo "review BlueMap tile sample: ${tile_sample}" >&2
 						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
 						echo "review BlueMap tile lods: ${tile_lods}" >&2

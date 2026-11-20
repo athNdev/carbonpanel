@@ -25,6 +25,8 @@ on:
       - main
     paths:
       - 'web/carbon-panel/src/routes/+page.svelte'
+      - 'web/carbon-panel/src/routes/+layout.*'
+      - 'web/carbon-panel/src/app.css'
       - 'web/carbon-panel/src/routes/players/**'
       - 'web/carbon-panel/src/routes/worlds/**'
       - 'web/carbon-panel/src/routes/library/**'
@@ -46,6 +48,9 @@ on:
       - 'scripts/showcase_assets.py'
       - 'scripts/showcase_assets.test.py'
       - '.github/workflows/showcase.yml'
+  schedule:
+    # Backstop for backend-only changes and missed path-filtered pushes.
+    - cron: '17 3 * * 1'
   workflow_dispatch:
     inputs:
       players:
@@ -66,7 +71,7 @@ on:
       worlds:
         description: 'Capture rendered BlueMap tiles (independent gate; OSS-392)'
         required: false
-        default: false
+        default: true
         type: boolean
       library:
         description: 'Capture World Library revisions/compatibility (feature gate)'
@@ -74,7 +79,7 @@ on:
         default: true
         type: boolean
       force_publish:
-        description: 'Publish even when captured images are unchanged'
+        description: 'Publish a newer source even when captured images are unchanged'
         required: false
         default: false
         type: boolean
@@ -82,15 +87,43 @@ on:
 permissions:
   contents: read
 
+env:
+  FEATURES_PLAYERS: ${{ github.event_name != 'workflow_dispatch' || inputs.players }}
+  FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
+  FEATURES_WORLDS: ${{ github.event_name != 'workflow_dispatch' || inputs.worlds }}
+  FEATURES_WORLDTAB: ${{ github.event_name != 'workflow_dispatch' || inputs.worldtab }}
+  FEATURES_LIBRARY: ${{ github.event_name != 'workflow_dispatch' || inputs.library }}
+
 concurrency:
-  group: showcase-${{ github.sha }}
+  group: showcase-${{ github.sha }}-${{ github.event_name != 'workflow_dispatch' || (inputs.players && inputs.worlds && inputs.worldtab && inputs.library) }}
   cancel-in-progress: true
 
 jobs:
   capture:
     name: Capture (read-only)
     runs-on: ubuntu-latest
+    outputs:
+      features: ${{ steps.features.outputs.names }}
+      canonical: ${{ steps.features.outputs.canonical }}
     steps:
+      - name: Resolve capture features
+        id: features
+        run: |
+          features=()
+          if [ "$FEATURES_PLAYERS" = "true" ]; then features+=(players); fi
+          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then features+=(playerdetail); fi
+          if [ "$FEATURES_WORLDS" = "true" ]; then features+=(worlds); fi
+          if [ "$FEATURES_WORLDTAB" = "true" ]; then features+=(worldtab); fi
+          if [ "$FEATURES_LIBRARY" = "true" ]; then features+=(library); fi
+          (IFS=,; echo "names=${features[*]}") >> "$GITHUB_OUTPUT"
+          if [ "$FEATURES_PLAYERS" = "true" ] && [ "$FEATURES_WORLDS" = "true" ] &&
+             [ "$FEATURES_WORLDTAB" = "true" ] && [ "$FEATURES_LIBRARY" = "true" ]; then
+            echo "canonical=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "canonical=false" >> "$GITHUB_OUTPUT"
+            echo "Partial capture requested. The validated artifact will be available without updating the asset branch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout source at the exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,9 +162,15 @@ jobs:
       - name: Install review driver
         run: node scripts/review/setup-browser.mjs --with-deps
 
+      - name: Install the review game client
+        if: env.FEATURES_PLAYERS == 'true'
+        run: bun install --cwd scripts/review/fixtures/minecraft-player --frozen-lockfile --ignore-scripts
+
       - name: Boot disposable seeded stack
         run: bash scripts/review/devstack.sh up
         env:
+          REVIEW_OBSERVED_PLAYER: ${{ env.FEATURES_PLAYERS == 'true' && '1' || '0' }}
+          REVIEW_SHOWCASE_PLAYER_DETAIL: ${{ env.FEATURES_PLAYERDETAIL == 'true' && '1' || '0' }}
           # Isolated fixture credentials; never used outside this stack.
           PANEL_REVIEW_USER: reviewer
           PANEL_REVIEW_PASSWORD: Review-Panel-2026
@@ -140,24 +179,13 @@ jobs:
         env:
           PANEL_REVIEW_USER: reviewer
           PANEL_REVIEW_PASSWORD: Review-Panel-2026
-          FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
-          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
-          FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
+          FEATURES: ${{ steps.features.outputs.names }}
         run: |
           PORT="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/port")"
           export SHOWCASE_SERVER_ID="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/server-id")"
           if [ -f "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id" ]; then
             export SHOWCASE_PLAYER_IDENTITY="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id")"
           fi
-          FEATURES=""
-          if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
-          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
-          if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
-          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
-          if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
-          FEATURES="${FEATURES#,}"
           EXTRA=()
           if [ -n "$FEATURES" ]; then EXTRA=(--features "$FEATURES"); fi
           node scripts/review/journey.mjs \
@@ -195,20 +223,9 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
-          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
-          FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
+          FEATURES: ${{ steps.features.outputs.names }}
         run: |
           mkdir -p /tmp/showcase-bundle /tmp/showcase-artifact/bundle
-          FEATURES=""
-          if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
-          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
-          if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
-          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
-          if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
-          FEATURES="${FEATURES#,}"
           APP_VERSION="$(git describe --tags --always 2>/dev/null || printf 'packaged-review')"
           CAPTURED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           DRIVER="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/showcase/browser.json","utf8")).driverVersion)')"
@@ -250,8 +267,8 @@ jobs:
   publish:
     name: Publish to asset branch (contents:write)
     needs: capture
-    # Never publish from PRs, forks or a non-main ref.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # Branch and partial runs produce artifacts without publication.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.capture.outputs.canonical == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -294,20 +311,9 @@ jobs:
 
       - name: Reject unexpected artifact contents (data only, no code or plan)
         env:
-          FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
-          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
-          FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
+          FEATURES: ${{ needs.capture.outputs.features }}
         run: |
-          FEATURES=""
-          if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
-          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
-          if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
-          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
-          if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
-          FEATURES="${FEATURES#,}"
-          FEATURES="$FEATURES" python3 - <<'PY'
+          python3 - <<'PY'
           import os, sys, json
           root = '/tmp/showcase-artifact'
           plan = json.load(open('trusted-source/scripts/review/plan-showcase.json', encoding='utf-8'))
@@ -342,19 +348,8 @@ jobs:
       - name: Validate bundle against the pinned source plan
         env:
           SOURCE_SHA: ${{ github.sha }}
-          FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
-          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
-          FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
+          FEATURES: ${{ needs.capture.outputs.features }}
         run: |
-          FEATURES=""
-          if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
-          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
-          if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
-          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
-          if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
-          FEATURES="${FEATURES#,}"
           python3 trusted-source/scripts/showcase_assets.py validate \
             --publish-dir /tmp/showcase-artifact/bundle \
             --plan trusted-source/scripts/review/plan-showcase.json \
@@ -382,8 +377,8 @@ jobs:
           set -euo pipefail
           git -C trusted-source fetch --quiet origin main
           main_sha="$(git -C trusted-source rev-parse refs/remotes/origin/main)"
-          if [ "$main_sha" != "$SOURCE_SHA" ]; then
-            echo "capture source $SOURCE_SHA is not live main $main_sha (delayed or superseded)" >&2
+          if ! git -C trusted-source merge-base --is-ancestor "$SOURCE_SHA" "$main_sha"; then
+            echo "capture source $SOURCE_SHA is outside live main history $main_sha" >&2
             exit 1
           fi
           last="assets/showcase/manifest.json"
@@ -392,18 +387,14 @@ jobs:
             exit 1
           fi
           last_sha="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["sha"])' "$last")"
-          if ! git -C trusted-source cat-file -e "${last_sha}^{commit}" 2>/dev/null; then
-            echo "last published commit $last_sha is unknown/divergent" >&2
+          if [[ ! "$last_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             ! git -C trusted-source merge-base --is-ancestor "$last_sha" "$main_sha"; then
+            echo "last published commit $last_sha is outside live main history $main_sha" >&2
             exit 1
           fi
-          old_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["contentDigest"])' "$last")"
-          new_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["contentDigest"])' /tmp/showcase-artifact/bundle/manifest.json)"
-          if [ "$last_sha" = "$SOURCE_SHA" ]; then
-            if [ "$old_digest" != "$new_digest" ]; then
-              echo "re-run for $SOURCE_SHA would replace published assets with different bytes" >&2
-              exit 1
-            fi
+          if git -C trusted-source merge-base --is-ancestor "$SOURCE_SHA" "$last_sha"; then
             echo "already-current=true" >> "$GITHUB_OUTPUT"
+            echo "Asset branch already contains source $last_sha. The validated capture for $SOURCE_SHA remains available in this run." >> "$GITHUB_STEP_SUMMARY"
           elif ! git -C trusted-source merge-base --is-ancestor "$last_sha" "$SOURCE_SHA"; then
             echo "capture $SOURCE_SHA is not a descendant of last published $last_sha" >&2
             exit 1

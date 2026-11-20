@@ -361,6 +361,7 @@ type Mod struct {
 }
 
 type IndexedModpack struct {
+	ServerSide    string    `json:"server_side"`                               // Project-level server support declared by the indexer.
 	ID            string    `json:"id" gorm:"primaryKey"`                      // Format: "indexer-originalId"
 	IndexerID     string    `json:"indexer_id" gorm:"index;column:indexer_id"` // Original ID from indexer
 	Indexer       string    `json:"indexer" gorm:"index"`                      // "fuego", "modrinth", etc.

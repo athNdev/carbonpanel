@@ -220,7 +220,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v1/staged-config/{serverID}/staged", Mount: "internal/rpc/server.go:323",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonOperatorMaintenance,
-		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. Use the panel staged changes workflow.",
+		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. MCP exposes bounded rollout metadata through list_staged_config_changes.",
 		ACL:    "server_config/read on serverID",
 		Sources: []string{
 			"internal/rpc/server.go:317:mux.Handle(\"/api/v1/staged-config/\"",
@@ -262,7 +262,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v2/metrics/servers/{id}", Mount: "internal/rpc/server.go:331",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonTelemetry,
-		Reason: "Per-server Prometheus exposition for monitoring. GetServer provides server status and metadata.",
+		Reason: "Per-server Prometheus exposition for monitoring. GetServer includes the latest cached operational metrics for a scoped server.",
 		ACL:    "servers/read on id",
 		Sources: []string{
 			"internal/rpc/server.go:325:mux.Handle(\"/api/v2/metrics/\"",

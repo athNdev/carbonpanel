@@ -133,6 +133,7 @@ var exposedTools = []ToolSpec{
 	{Name: "list_server_executions", Procedure: "/carbonpanel.v1.TaskService/ListServerExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions for one server with a bounded limit.", Source: "server"},
 	{Name: "list_server_players", Procedure: "/carbonpanel.v1.ServerService/ListServerPlayers", Class: Class("safe"), Confirm: false, Description: "Read the live online player list for one server. Read-only metrics; no health endpoint.", Source: "server"},
 	{Name: "list_servers", Procedure: "/carbonpanel.v1.ServerService/ListServers", Class: Class("safe"), Confirm: false, Description: "List Minecraft servers visible to this token. Read-only.", Source: "first_slice"},
+	{Name: "list_staged_config_changes", Procedure: "/carbonpanel.v1.StagedConfigService/ListStagedChanges", Class: Class("safe"), Confirm: false, Description: "List recent staged configuration changes for one server. Returns rollout metadata and status. Read-only.", Source: "integration"},
 	{Name: "list_subusers", Procedure: "/carbonpanel.v1.SubuserService/ListSubusers", Class: Class("safe"), Confirm: false, Description: "List per-server subuser grants. Read-only; the server_id is the RBAC object.", Source: "admin"},
 	{Name: "list_task_executions", Procedure: "/carbonpanel.v1.TaskService/ListTaskExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions of one task with a bounded limit.", Source: "server"},
 	{Name: "list_tasks", Procedure: "/carbonpanel.v1.TaskService/ListTasks", Class: Class("safe"), Confirm: false, Description: "List scheduled tasks for one server. Task config is redacted.", Source: "server"},
@@ -221,7 +222,7 @@ var exposedTools = []ToolSpec{
 const (
 	IntegrationDeclaredRPCs = 251
 	IntegrationMountedRPCs = 241
-	IntegrationExcludedOps = 79
-	IntegrationSupportedOps = 200
-	IntegrationCombinedTools = 211
+	IntegrationExcludedOps = 78
+	IntegrationSupportedOps = 201
+	IntegrationCombinedTools = 212
 )

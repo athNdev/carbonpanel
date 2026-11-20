@@ -20,6 +20,7 @@ export type DensityChoice = 'comfortable' | 'compact';
 // Storage keys are a compatibility contract: keep the existing names.
 export const THEME_KEY = 'carbon-theme';
 export const MOTION_KEY = 'carbon-motion';
+export const SERVER_METRICS_KEY = 'carbon-server-metrics-expanded';
 export const DENSITY_KEY = 'carbon-density';
 
 const THEMES: ThemeChoice[] = ['dark', 'light'];
@@ -58,6 +59,7 @@ export function createDisplayPreferences(
 ) {
 	const themeValue = writable<ThemeChoice>('dark');
 	const motionValue = writable<MotionChoice>('full');
+	const metricsExpanded = writable(true);
 	const densityValue = writable<DensityChoice>('comfortable');
 
 	const useBrowserStorage = storage === undefined;
@@ -143,6 +145,9 @@ export function createDisplayPreferences(
 		const storedTheme = read(THEME_KEY);
 		const storedMotion = read(MOTION_KEY);
 		const storedDensity = read(DENSITY_KEY);
+		const storedMetrics = read(SERVER_METRICS_KEY);
+		if (storedMetrics === 'true' || storedMetrics === 'false')
+			metricsExpanded.set(storedMetrics === 'true');
 		if (THEMES.includes(storedTheme as ThemeChoice)) themeValue.set(storedTheme as ThemeChoice);
 		if (MOTIONS.includes(storedMotion as MotionChoice))
 			motionValue.set(storedMotion as MotionChoice);
@@ -172,7 +177,13 @@ export function createDisplayPreferences(
 		apply();
 	}
 
+	function setMetricsExpanded(expanded: boolean) {
+		metricsExpanded.set(expanded);
+		write(SERVER_METRICS_KEY, String(expanded));
+	}
+
 	function reset() {
+		setMetricsExpanded(true);
 		themeValue.set('dark');
 		motionValue.set('full');
 		densityValue.set('comfortable');
@@ -183,6 +194,8 @@ export function createDisplayPreferences(
 	}
 
 	return {
+		metricsExpanded: metricsExpanded as Readable<boolean>,
+		setMetricsExpanded,
 		theme: themeValue as Readable<ThemeChoice>,
 		motion: motionValue as Readable<MotionChoice>,
 		density: densityValue as Readable<DensityChoice>,
