@@ -35,7 +35,7 @@ must verify before any HTTP request. Module config and tile assets are read only
 through the confined node data accessor. This includes an enabled Docker node
 registered as local to the controller. It can use managed BlueMap installation
 and private discovery with its registered ID and the configured controller
-Docker client. A missing or disabled node cannot use the private path.
+Docker client. Unknown or disabled registered nodes cannot use the private path.
 A remote node needs an explicit, allowlisted node-local endpoint.
 No renderer is discovered by port probing or host-port bindings.
 

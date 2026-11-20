@@ -18,6 +18,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/worldview"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -54,9 +55,13 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	}
 
 	s.blueMapInstallMu.Lock()
-	noop := func(bool, string) error { return nil }
-	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], func(bool, string) error, error) {
+	var transition *docker.Transition
+	release := func() {
+		transition.Release()
 		s.blueMapInstallMu.Unlock()
+	}
+	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], func(bool, string) error, error) {
+		release()
 		return true, nil, nil, err
 	}
 
@@ -80,6 +85,20 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		}
 		return fail(connect.NewError(connect.CodePermissionDenied, errors.New(reason)))
 	}
+	// Module creation and config staging must see the same owning world as a
+	// server migration. Re-read under the existing lifecycle transition.
+	transition, err = docker.TryBeginServerTransition(server.ID)
+	if err != nil {
+		return fail(connect.NewError(connect.CodeAborted, err))
+	}
+	if err := s.store.AssertNoServerOperation(ctx, server.ID); err != nil {
+		return fail(connect.NewError(connect.CodeAborted, err))
+	}
+	current, err := s.store.GetServer(ctx, server.ID)
+	if err != nil {
+		return fail(connect.NewError(connect.CodeNotFound, errors.New("the server no longer exists")))
+	}
+	*server = *current
 	node, nodeErr := bluemapdiscovery.PrivateRendererNode(ctx, s.store, server.NodeID)
 	if nodeErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, nodeErr))
@@ -94,16 +113,28 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	if listErr != nil {
 		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("check existing renderer: %w", listErr)))
 	}
+	var currentModule *storage.Module
+	var previousAssignment bool
 	for _, module := range existing {
-		if module != nil && module.ServerID == msg.ServerId {
-			if !bluemapdiscovery.SameRendererNode(module.NodeID, server.NodeID) {
-				return fail(connect.NewError(connect.CodeFailedPrecondition,
-					errors.New("the existing BlueMap module belongs to a previous node assignment; resolve it from the Modules page before retrying")))
-			}
-			resp, convErr := s.blueMapResponse(ctx, module)
-			s.blueMapInstallMu.Unlock()
-			return true, resp, noop, convErr
+		if module == nil || module.ServerID != server.ID {
+			continue
 		}
+		if !bluemapdiscovery.SameRendererNode(module.NodeID, server.NodeID) {
+			previousAssignment = true
+			continue
+		}
+		if currentModule == nil || module.ID < currentModule.ID {
+			currentModule = module
+		}
+	}
+	if currentModule != nil {
+		resp, convErr := s.blueMapResponse(ctx, currentModule)
+		release()
+		return true, resp, nil, convErr
+	}
+	if previousAssignment {
+		return fail(connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("a BlueMap module belongs to a previous node assignment; reconnect the old node and remove or migrate the module before retrying")))
 	}
 
 	// startImmediately is a SECOND privileged action. Check it here, before
@@ -226,7 +257,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 				}
 			}
 			_ = stager.Close()
-			s.blueMapInstallMu.Unlock()
+			release()
 		})
 		return commitErr
 	}

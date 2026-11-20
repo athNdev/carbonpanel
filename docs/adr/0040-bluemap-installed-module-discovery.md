@@ -103,7 +103,7 @@ map config per target world plus explicit `accept-download` acknowledgement.
   persisted node record qualify. Private discovery inspects the configured
   controller daemon and verifies the server's current assignment against the
   module and Docker labels before reading its data.
-  Missing and disabled nodes have no private discovery. Remote nodes need an
+  Unknown and disabled registered nodes have no private discovery. Remote nodes need an
   explicit, allowlisted node-local endpoint.
 - A configured-but-unrendered world reports a setup/rendering state, not a map.
 - The singleton guarantee is per controller process; operators must not run two

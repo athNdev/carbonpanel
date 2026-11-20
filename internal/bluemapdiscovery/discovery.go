@@ -140,6 +140,9 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	// the strength of its stored locality marker alone.
 	runtime := d.pool.GetDefaultClient()
 	if runtime == nil {
+		if d.log != nil {
+			d.log.Warn("bluemap discovery: no controller Docker client for node %s", nodeID)
+		}
 		facts.Lifecycle = worldview.ModuleFailed
 		return facts, nil
 	}

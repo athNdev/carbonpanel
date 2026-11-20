@@ -92,6 +92,7 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 	}{
 		{"legacy", "default", "", true, true, 0, ""},
 		{"registered-local", localID, "", true, true, 0, ""},
+		{"transition-in-progress", localID, "", true, true, connect.CodeAborted, "transition"},
 		{"registered-without-controller", localID, "", true, true, connect.CodeFailedPrecondition, "no configured controller Docker client"},
 		{"registered-local-without-consent", localID, "", true, false, connect.CodeInvalidArgument, "explicit acceptance"},
 		{"registered-local-without-world", localID, "", false, true, connect.CodeFailedPrecondition, "readable Minecraft Java Edition world"},
@@ -141,6 +142,13 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 				Metadata: metadata, StartImmediately: true,
 			})
 			req.Header().Set("Authorization", "Bearer "+token)
+			if tc.name == "transition-in-progress" {
+				transition, err := docker.TryBeginServerTransition(server.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer transition.Release()
+			}
 			client := api
 			if tc.name == "registered-without-controller" {
 				client = apiWithoutController
@@ -213,6 +221,16 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 			b, err = os.ReadFile(filepath.Join(world, "level.dat"))
 			if err != nil || string(b) != "existing world fixture" {
 				t.Fatalf("original world changed: %s, %v", b, err)
+			}
+			stale := &storage.Module{
+				ID: tc.name + "-old", ServerID: server.ID, NodeID: remoteID, TemplateID: worldview.BuiltinBlueMapTemplateID,
+			}
+			if err := srv.store.CreateModule(ctx, stale); err != nil {
+				t.Fatal(err)
+			}
+			repeated, err = retry(token)
+			if err != nil || repeated.Msg.GetModule().GetId() != persisted.ID {
+				t.Fatalf("prior assignment shadowed the current renderer: %v, %v", repeated, err)
 			}
 		})
 	}

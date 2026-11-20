@@ -47,8 +47,8 @@ sources:
   [ADR 0048](../../docs/adr/0048-bluemap-asset-routing-and-csp.md).
 - In-context BlueMap install uses existing ModuleService authorization. It is a
   server-side singleton per server guarded by a controller-PROCESS mutex held
-  through persistence: it covers concurrent RPCs/tabs/operators/retries on ONE
-  controller process and makes no cross-controller or distributed guarantee.
+  through persistence and shares the per-server lifecycle transition with
+  migrations. Those guarantees apply within one controller process.
   Consent is explicit but its actor/time come from the authenticated principal
   and server clock. An existing module is adopted read-only. `startImmediately`
   needs `modules/start` as well as `modules/create`; both are checked before any
