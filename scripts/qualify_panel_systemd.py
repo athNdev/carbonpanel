@@ -58,21 +58,21 @@ def verify_bundle(directory, destination, commit, arch):
     build = json.loads((destination / "BUILD-INFO.json").read_text(encoding="utf-8"))
     require((build["version"], build["commit"], build["os"], build["arch"])
             == (manifest["version"], commit, "linux", arch), "BUILD-INFO.json disagrees with release manifest")
-    version = build.get("semver", build["version"].removeprefix("v"))
+    display_version = build.get("semver", build["version"])
     receipt = {
         "archive": archive_name,
         "archive_sha256": archive_digest,
         "checksums_sha256": rehearsal.sha256_file(checksums_path),
         "manifest_sha256": rehearsal.sha256_file(manifest_path),
         "commit": commit,
-        "version": version,
+        "version": display_version.removeprefix("v"),
         "binaries": {},
     }
     for program in ("carbon-panel", "carbon-storage"):
         binary = destination / program
         reported = run(str(binary), "--version")
-        require(reported.startswith(f"{program} {version} ") and f"commit {commit}" in reported,
-                f"{program} --version disagrees with the verified package")
+        require(reported.startswith(f"{program} {display_version} (commit {commit}; "),
+                f"{program} --version disagrees with the verified package: {reported}")
         receipt["binaries"][program] = {"sha256": rehearsal.sha256_file(binary), "version": reported}
     return receipt
 
