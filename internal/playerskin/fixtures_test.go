@@ -160,6 +160,7 @@ func makeProfilePayload(t *testing.T, textures map[string]any) []byte {
 		t.Fatalf("marshal inner textures: %v", err)
 	}
 	outer, err := json.Marshal(map[string]any{
+		"id":         strings.ReplaceAll(testUUID, "-", ""),
 		"properties": []map[string]string{{"name": "textures", "value": base64.StdEncoding.EncodeToString(inner)}},
 	})
 	if err != nil {

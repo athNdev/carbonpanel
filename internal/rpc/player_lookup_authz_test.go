@@ -66,7 +66,7 @@ func TestLookupPlayerRequiresGlobalPlayersRead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture, client, closeFn := playerRPCFixture(t, tc.grant)
 			defer closeFn()
-			_, err := client.LookupPlayer(context.Background(), connect.NewRequest(&v1.LookupPlayerRequest{Query: "SomeName"}))
+			_, err := client.LookupPlayer(context.Background(), connect.NewRequest(&v1.LookupPlayerRequest{Query: "SomeName", IncludeSkin: true}))
 			if tc.code != 0 {
 				if connect.CodeOf(err) != tc.code || fixture.calls != 0 {
 					t.Fatalf("denial=%v calls=%d, want code=%v calls=0", err, fixture.calls, tc.code)

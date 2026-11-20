@@ -40,9 +40,10 @@
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Operation journal — Shape + Rules + Read next](operation-journal-shape.md) — Every create, start, stop, restart, delete and migrate is written to
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
+- [Player lookup profile](player-management-lookup-profile.md) — Read-only exact account resolution, bounded skin portraits and authorized session observations.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
+- [Player management - Identity, provenance and capabilities](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Player management — Authorization and audit](player-management-authorization-and-audit.md) — All PlayerService procedures are mapped to players:* permissions and
-- [Player management — Identity and provenance + Sources and capabilities + Skins, identity lookup and deep data + Roster f](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 - [Portable node installer — How to check + Read next](node-installer-how-to-check.md) — go test ./internal/nodeinstall/... and
 - [Portable node installer — Rule + Why](node-installer-rule.md) — The portable installer in internal/nodeinstall and cmd/carbon-node-installer

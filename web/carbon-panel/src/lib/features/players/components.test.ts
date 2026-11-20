@@ -145,14 +145,12 @@ test('PlayerLookup discloses every unresolved state and never invents an identit
 	assert.match(s, /PlayerLookupStatus\.NOT_FOUND/, 'handles not found');
 	assert.match(s, /PlayerLookupStatus\.AMBIGUOUS/, 'handles ambiguous');
 	assert.match(s, /PlayerLookupStatus\.UNAVAILABLE/, 'handles unavailable');
-	assert.match(s, /No identity was created/, 'unresolved states state that nothing was invented');
-	assert.match(
-		s,
-		/creates no identity, roster entry or presence claim/,
-		'discloses the read-only contract'
-	);
-	assert.match(s, /no name history is queried or shown/, 'discloses no name history');
-	assert.match(s, /outage or timeout/, 'outage is distinct from authoritative not found');
+	assert.match(s, /includeSkin: true/, 'opts into the profile portrait');
+	assert.match(s, /does not add it to your roster/, 'discloses the read-only contract');
+	assert.match(s, /Lookup temporarily unavailable/, 'outage is distinct from not found');
+	assert.match(s, /data:image\/png;base64,/, 'uses the bounded same-origin response bytes');
+	assert.match(s, /Skin unavailable/, 'profile remains readable without a portrait');
+	assert.match(s, /response.observedIdentityKey/, 'links only an observed identity');
 	assert.match(s, /mine !== generation/, 'stale provider replies are discarded');
 	assert.match(s, /hasPermission\('players', 'read', '\*'\)/, 'gated by the global read grant');
 	assert.match(s, /aria-live="polite"/, 'status changes are announced');
