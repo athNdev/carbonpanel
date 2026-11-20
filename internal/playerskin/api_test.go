@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,5 +423,80 @@ func TestConstructorBounds(t *testing.T) {
 	}
 	if _, err := c3.Get(context.Background(), testUUID, KindSkin); err == nil {
 		t.Fatal("Get on an invalid cache should fail")
+	}
+}
+
+func assertUnavailableSkinAsset(t *testing.T, a Asset, wantCached bool) {
+	t.Helper()
+	if a.Confidence != ConfidenceUnknown {
+		t.Fatalf("confidence = %q, want %q (asset=%+v)", a.Confidence, ConfidenceUnknown, a)
+	}
+	if a.FromCache != wantCached {
+		t.Fatalf("FromCache = %v, want %v (asset=%+v)", a.FromCache, wantCached, a)
+	}
+	if !strings.Contains(strings.ToLower(a.Note), "skin unavailable") {
+		t.Fatalf("note not an unavailable skin status: %q", a.Note)
+	}
+	if a.ContentType != contentTypePNG || len(a.Data) == 0 {
+		t.Fatalf("asset not a decorated image payload: content=%q len=%d", a.ContentType, len(a.Data))
+	}
+	if _, err := decodePNG(a.Data); err != nil {
+		t.Fatalf("unavailable asset is not a valid PNG: %v", err)
+	}
+}
+
+// TestSkinFetch_ProfileSuccessTextureRateLimitedRetainsIdentity proves the
+// "identity success with skin 429" case: the profile endpoint resolves identity
+// and texture metadata successfully, but the texture fetch is rate-limited.
+// The exact requested UUID remains the subject of the call and the result is a
+// transient, appropriately decorated unavailable skin asset (not a definitive
+// negative, not an error that discards identity context).
+func TestSkinFetch_ProfileSuccessTextureRateLimitedRetainsIdentity(t *testing.T) {
+	f := newSkinFixture(t)
+	f.mu.Lock()
+	f.textureStatus = http.StatusTooManyRequests
+	f.mu.Unlock()
+	c := newTestCache(t, time.Hour, nil)
+
+	first, err := c.Get(context.Background(), testUUID, KindFace)
+	if err != nil {
+		t.Fatalf("Get (profile ok, texture 429): %v", err)
+	}
+	assertUnavailableSkinAsset(t, first, false)
+	if first.Source != SourceIdentityService {
+		t.Fatalf("source = %q, want fresh identity service attempt", first.Source)
+	}
+	if p, tx, _ := f.counts(); p != 1 || tx != 1 {
+		t.Fatalf("calls = profile %d texture %d, want 1,1", p, tx)
+	}
+
+	// Transient 429 must not be cached as a definitive negative "no skin".
+	second, err := c.Get(context.Background(), testUUID, KindFace)
+	if err != nil {
+		t.Fatalf("Get after texture 429: %v", err)
+	}
+	assertUnavailableSkinAsset(t, second, false)
+	if p, tx, _ := f.counts(); p != 2 || tx != 2 {
+		t.Fatalf("transient 429 was cached as negative: profile %d texture %d, want 2,2", p, tx)
+	}
+}
+
+// TestSkinFetch_ProfileRateLimitedRetainsIdentity proves a transient profile
+// 429 during skin fetch returns a decorated unavailable asset for the exact
+// requested identity rather than a definitive negative or an error.
+func TestSkinFetch_ProfileRateLimitedRetainsIdentity(t *testing.T) {
+	f := newSkinFixture(t)
+	f.mu.Lock()
+	f.profileStatus = http.StatusTooManyRequests
+	f.mu.Unlock()
+	c := newTestCache(t, time.Hour, nil)
+
+	a, err := c.Get(context.Background(), testUUID, KindFace)
+	if err != nil {
+		t.Fatalf("Get (profile 429): %v", err)
+	}
+	assertUnavailableSkinAsset(t, a, false)
+	if _, tx, _ := f.counts(); tx != 0 {
+		t.Fatal("texture fetch should not run when profile fetch is unavailable")
 	}
 }
