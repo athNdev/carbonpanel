@@ -1,6 +1,6 @@
 ---
 type: Runbook
-title: "Backup and restore â€” Use this when + Rules + Known gap + Read next"
+title: "Backup and restore — Use this when + Rules + Known gap + Read next"
 description: "A backup, snapshot, restore or retention change is being made."
 status: stable
 owners: [oss-runtime]
