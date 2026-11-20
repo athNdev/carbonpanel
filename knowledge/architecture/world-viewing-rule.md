@@ -31,26 +31,20 @@ maps and retries temporary failures while the scope remains authorized. Read
 denials and scope changes clear the current map session. Renderer changes
 acquire a matching session before mounting the replacement map.
 
-The native viewport reads saved Overworld terrain through its map session.
-Format checks and rendered tiles share a bounded worker pool. Inventory can
-defer a format check without hiding the world's link. Active lifecycle
-operations temporarily refuse new map reads.
-The viewport bounds visible tile requests and aborts work outside the current session
-or viewport. Empty and partial saves are explicit; controls move the map view
-and do not modify the world. Shared map links carry coordinates only and
-still require the recipient’s scoped read permission.
-The native Overworld map projects existing non-sensitive markers, waypoints,
-and points of interest from the scoped ListMapOverlays result. The marker
-list can center offscreen points. Native markers include neither live player
-locations nor region overlays.
+The native viewport reads saved Overworld terrain through a scoped session.
+Format checks and tiles share bounded workers. Deferred inventory checks keep
+world links visible. Active lifecycle operations temporarily refuse reads.
+The viewport bounds tile requests and aborts work outside the current view or
+session. It identifies empty and partial saves. Shared links carry coordinates
+and require the recipient’s scoped read permission. The readonly map shows
+non-sensitive markers, waypoints and points of interest from scoped
+ListMapOverlays results. The marker list centers offscreen points.
 
-Renderer traffic is same-origin only. The browser receives an opaque,
-short-lived session key, never a renderer URL or port; every proxied asset
-request re-authenticates with the cookie or bearer token and enforces
-`world_view/read` on the concrete server. Missing renderer endpoints, remote
-nodes without a node-local renderer, unsupported capabilities and stale tiles
-are reported honestly; there is no public map endpoint, no controller-local
-fallback and no cross-origin iframe.
+Renderer traffic stays same-origin using opaque, short-lived keys. Every
+request authenticates and enforces the concrete server’s map-read permission.
+Missing endpoints, remote limitations, unsupported capabilities and stale
+tiles have distinct states. Renderer endpoints stay private and scoped to
+their own node.
 
 Managed BlueMap install and private discovery share one node eligibility
 check. It accepts legacy controller aliases and enabled registered nodes
