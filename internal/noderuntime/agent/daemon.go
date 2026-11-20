@@ -44,12 +44,12 @@ func observeDaemon(ctx context.Context, facts native.HostFacts, spec native.Daem
 	rel, err := filepath.Rel(runtimeDir, socket)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
 		socket == "/run/docker.sock" || socket == "/var/run/docker.sock" {
-		return daemonObservation{}, errors.New("Docker socket is outside the private runtime directory")
+		return daemonObservation{}, errors.New("docker socket is outside the private runtime directory")
 	}
 	if facts.HostSocketPath != "" {
 		hostSocket, err := filepath.EvalSymlinks(facts.HostSocketPath)
 		if err == nil && hostSocket == socket {
-			return daemonObservation{}, errors.New("Docker socket resolves to the host engine")
+			return daemonObservation{}, errors.New("docker socket resolves to the host engine")
 		}
 	}
 	file, err := os.Stat(socket)
@@ -64,7 +64,7 @@ func observeDaemon(ctx context.Context, facts native.HostFacts, spec native.Daem
 		return daemonObservation{}, err
 	}
 	if dataRoot == "/var/lib/docker" || strings.HasPrefix(dataRoot, "/var/lib/docker/") {
-		return daemonObservation{}, errors.New("Docker data root resolves under the shared engine")
+		return daemonObservation{}, errors.New("docker data root resolves under the shared engine")
 	}
 
 	probe, cancel := context.WithTimeout(ctx, daemonProbeTimeout)
@@ -73,7 +73,7 @@ func observeDaemon(ctx context.Context, facts native.HostFacts, spec native.Daem
 	if err != nil {
 		return daemonObservation{}, err
 	}
-	defer api.Close()
+	defer func() { _ = api.Close() }()
 	response, err := api.Info(probe, client.InfoOptions{})
 	if err != nil {
 		return daemonObservation{}, err
@@ -81,10 +81,10 @@ func observeDaemon(ctx context.Context, facts native.HostFacts, spec native.Daem
 	info := response.Info
 	daemonRoot, err := filepath.EvalSymlinks(info.DockerRootDir)
 	if err != nil || !filepath.IsAbs(info.DockerRootDir) || daemonRoot != dataRoot || strings.TrimSpace(info.ID) == "" {
-		return daemonObservation{}, errors.New("Docker daemon identity or private data root is unverifiable")
+		return daemonObservation{}, errors.New("docker daemon identity or private data root is unverifiable")
 	}
 	if slices.Contains(info.SecurityOptions, "name=rootless") != (spec.Mode == native.ModeRootless) {
-		return daemonObservation{}, errors.New("Docker daemon running mode disagrees with the approved plan")
+		return daemonObservation{}, errors.New("docker daemon running mode disagrees with the approved plan")
 	}
 	return daemonObservation{
 		id: info.ID, version: info.ServerVersion,

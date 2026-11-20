@@ -83,7 +83,7 @@ func readAgentInput(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	b, err := io.ReadAll(io.LimitReader(file, maxInputBytes+1))
 	if err != nil {
 		return nil, err
