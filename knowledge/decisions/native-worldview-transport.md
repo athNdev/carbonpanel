@@ -24,6 +24,9 @@ The End assets use a closed Java 1.21.9 Vanilla save profile. Pin ordinary
 local directories to the active level and its DIM1/region tree, then recheck
 the source identity, active world and renderer precedence before publication.
 The optional manifest dimensions describe only qualified saved sources.
+The viewport offers only those dimensions and opens the Overworld by default.
+The active native dimension also scopes panel-owned marker reads and copied
+coordinate links.
 
 # Alternatives
 
