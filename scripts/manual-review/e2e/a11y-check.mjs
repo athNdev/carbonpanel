@@ -322,7 +322,12 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'GetServer') {
 			if (state.detail === 'error') return fail('Fixture server unavailable');
-			return reply({ server: FLEET.find((server) => server.id === 'srv-1') });
+			const server = FLEET.find((server) => server.id === 'srv-1');
+			return reply({
+				server: state.narrowSettings
+					? { ...server, nodeId: 'local', containerId: 'fixture-container', mcVersion: '1.21.1' }
+					: server
+			});
 		}
 		if (state.narrowSettings) {
 			if (method === 'ListNodes')
@@ -347,6 +352,8 @@ async function seedPackagedRoutes(page, state, authMode) {
 			}
 			if (method === 'GetAuthConfig')
 				return reply({ localAuthEnabled: true, sessionTimeout: 86400, oidcEnabled: false });
+			if (method === 'GetMinecraftVersions')
+				return reply({ versions: [{ id: '1.21.1', type: 'release' }], latest: '1.21.1' });
 			if (method === 'GetModLoaders') return reply({ modloaders: [] });
 		}
 		if (method === 'ListNodes') return reply({ nodes: [] });
@@ -1326,6 +1333,7 @@ async function runNarrowSettingsJourney(browser, base) {
 						await names.last().waitFor();
 						if ((await names.count()) !== 7) throw new Error('Expected all seven OIDC variable names');
 						for (const name of await names.all()) await assertHorizontallyVisible(name);
+						await names.last().scrollIntoViewIfNeeded();
 						await capture('oidc');
 					});
 					await check(`server settings ${label}: migration keyboard selection and memory advisory fit`, async () => {

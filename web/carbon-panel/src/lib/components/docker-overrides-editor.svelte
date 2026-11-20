@@ -295,7 +295,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
+	<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 		{#if collapsible}
 			<button
 				type="button"
@@ -342,7 +342,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{#if expanded}
 		<Card class="overflow-hidden">
 			{#if jsonMode}
-				<CardContent class="pt-6">
+				<CardContent class="px-3 pt-4 sm:px-6 sm:pt-6">
 					<div class="space-y-3">
 						<Textarea
 							bind:value={jsonText}
@@ -371,7 +371,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</CardContent>
 			{:else}
-				<CardContent class="space-y-6 pt-6">
+				<CardContent class="space-y-6 px-3 pt-4 sm:px-6 sm:pt-6">
 					<!-- Environment Variables -->
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
