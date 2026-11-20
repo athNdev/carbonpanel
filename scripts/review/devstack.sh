@@ -382,32 +382,16 @@ seed_showcase_terrain() {
 	# region files r.{-1,0}.{-1,0}.mca with 256 chunks each. Wait for real
 	# headers in those files, not just a stable size: a small spawn region can
 	# otherwise look settled while most of the landscape is still missing.
-	local host_path region_dir coverage_line coverage bytes stable=0 prev_coverage=-1 poll
+	local host_path region_dir coverage_line coverage bytes stable=0 prev_coverage=-1 deadline
 	host_path="$(review_server_host_path "${token}" "${server_id}")"
 	region_dir="${host_path}/world/region"
 	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
 	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
-	for ((poll = 0; poll < 40; poll++)); do
+	deadline=$((SECONDS + 180))
+	while ((SECONDS < deadline)); do
 		# Flush before each sample so the header we read is persisted.
 		rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
-		coverage_line="$(REGION_DIR="${region_dir}" python3 - <<'PY'
-import os
-root = os.environ['REGION_DIR']
-covered = size = 0
-for rx in (-1, 0):
-    for rz in (-1, 0):
-        path = os.path.join(root, 'r.%d.%d.mca' % (rx, rz))
-        if not os.path.isfile(path):
-            continue
-        size += os.path.getsize(path)
-        with open(path, 'rb') as handle:
-            header = handle.read(4096)
-        if len(header) < 4096:
-            continue
-        covered += sum(1 for i in range(0, 4096, 4) if header[i + 3] != 0)
-print('%d:%d' % (covered, size))
-PY
-)"
+		coverage_line="$(python3 "${REPO}/scripts/review/region_coverage.py" --region-dir "${region_dir}" 2>/dev/null || printf '0:0')"
 		coverage_line="${coverage_line:-0:0}"
 		coverage="${coverage_line%%:*}"
 		bytes="${coverage_line##*:}"

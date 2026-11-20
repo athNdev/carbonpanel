@@ -19,7 +19,9 @@ from pathlib import Path
 import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "review"))
 import showcase_assets as sa  # noqa: E402
+import region_coverage as rc  # noqa: E402
 
 # Derive the browser driver version from the authoritative pin so this fixture
 # cannot silently drift behind scripts/manual-review/e2e/package.json again.
@@ -372,7 +374,31 @@ class ShowcasePipelineTest(unittest.TestCase):
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
 
-    def test_fixture_terrain_batches_are_bounded_and_seed_uses_rpc(self) -> None:
+    def test_outside_region_entries_cannot_qualify_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            def write_headers(requested: bool) -> None:
+                for rx in (-1, 0):
+                    for rz in (-1, 0):
+                        header = bytearray(4096)
+                        xs = (range(16, 32) if rx == -1 else range(0, 16))
+                        zs = (range(16, 32) if rz == -1 else range(0, 16))
+                        if not requested:
+                            xs = range(0, 16) if rx == -1 else range(16, 32)
+                            zs = range(0, 16) if rz == -1 else range(16, 32)
+                        for x in xs:
+                            for z in zs:
+                                header[4 * (x + 32 * z) + 3] = 1
+                        Path(tmp, f"r.{rx}.{rz}.mca").write_bytes(bytes(header) + b"x" * 512)
+
+            write_headers(requested=False)
+            covered, size = rc.requested_chunks(tmp)
+            self.assertEqual(covered, 0, "outside entries must not qualify")
+            self.assertGreater(size, 0, "region bytes must still be reported")
+            write_headers(requested=True)
+            covered, _ = rc.requested_chunks(tmp)
+            self.assertEqual(covered, 1024, "all requested chunks must count")
+
+    def test_fixture_terrain_batches_are_bounded_and_seed_is_fresh_only(self) -> None:
         devstack = (
             Path(__file__).resolve().parent / "review" / "devstack.sh"
         ).read_text(encoding="utf-8")
