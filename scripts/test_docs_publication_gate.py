@@ -11,7 +11,7 @@ from unittest.mock import patch
 import urllib.error
 import zipfile
 
-from scripts import docs_publication_gate as gate
+from scripts import docs_publication_gate as gate, version_contract
 
 
 class LiveStateTests(unittest.TestCase):
@@ -38,6 +38,7 @@ class LiveStateTests(unittest.TestCase):
             "channels": {
                 "stable": {
                     "display": "Stable", "tag": "v1.0.40", "commit": self.STABLE,
+                    "version": "1.0.40",
                     "route": "/docs/",
                     "image": {"tag": "latest", "stable_alias": "stable",
                               "digest": gate.STABLE_BASELINE["digest"],
@@ -104,6 +105,71 @@ class LiveStateTests(unittest.TestCase):
         built["promotion"] = {"state": "final", "promoted": True}
         ok, _ = gate.verify_docs_receipt(built, live)
         self.assertFalse(ok)
+
+
+class PublishedStableTests(unittest.TestCase):
+    def setUp(self):
+        self.index = LiveStateTests().index()
+        entry = self.index["channels"]["stable"]
+        entry.update(tag="carbonpanel-v2.0.1", version="2.0.1", commit="a" * 40)
+        entry["image"].update(revision=entry["commit"], digest="sha256:" + "b" * 64)
+        self.stable = gate.stable_identity(self.index)
+
+    def qualify(self, *, alias_override=None, latest_override=None, peeled_revision=None,
+                manifest_verified=True):
+        stable = gate.stable_identity(self.index)
+        latest = {"tag_name": stable["tag"], "draft": False, "prerelease": False,
+                  "published_at": "2026-11-20T00:00:00Z", **(latest_override or {})}
+        present = {name: ("present", {"digest": stable["digest"], "revision": stable["commit"],
+                                      "platforms": gate.release.REQUIRED_PLATFORMS})
+                   for name in gate.release.CHANNEL_REGISTRIES}
+        observations = {name: present for name in ("latest", "stable", stable["version"])}
+        observations.update(alias_override or {})
+        with patch.object(gate, "github_api", return_value=(
+            lambda url: json.dumps(latest if url.endswith("/releases/latest")
+                                  else {"sha": peeled_revision or stable["commit"]}), "https://api.example"
+        )), patch.object(gate.release, "release_provenance",
+                        return_value=(manifest_verified, "release digest mismatch", None)) as provenance, \
+                patch.object(gate.release, "channel_observe",
+                             side_effect=observations.__getitem__) as observe:
+            result = gate.qualify_public_stable(self.index, "athNdev/carbonpanel")
+            provenance.assert_called_once_with(f"v{stable['version']}", stable["commit"],
+                                               stable["digest"], [[latest]], git_tag=stable["tag"])
+            self.assertEqual([call.args[0] for call in observe.call_args_list], list(observations))
+            return result
+
+    def test_newer_release_renders_and_checks_against_the_observed_identity(self):
+        stable = self.qualify()
+        inputs = gate.stable_render_inputs(stable)
+        source = gate.load_json(gate.ROOT / "docs/website-source.json")
+        built = version_contract.release_build_contract(
+            source, {f"CARBONPANEL_{key.upper()}": value for key, value in inputs.items()})
+        self.assertEqual(gate.stable_identity(built), self.stable)
+        self.assertEqual(gate.validate_channel_contract(built, self.index), (True, []))
+        self.assertFalse(gate.validate_channel_contract(source, self.index)[0])
+        self.assertIsNotNone(gate.resolve_live_docs_state(self.index, self.index)[0])
+
+    def test_legacy_absent_stable_aliases_allow_only_the_exact_historical_renderer(self):
+        self.index = LiveStateTests().index()
+        missing = {name: ("absent", {}) for name in gate.release.CHANNEL_REGISTRIES}
+        stable = self.qualify(alias_override={"stable": missing})
+        self.assertEqual(set(gate.stable_render_inputs(stable).values()), {""})
+        with self.assertRaisesRegex(ValueError, "legacy Stable identity differs"):
+            gate.stable_render_inputs({**stable, "digest": "sha256:" + "f" * 64})
+
+    def test_conflicting_or_unknown_live_evidence_refuses(self):
+        partial = {"docker_hub": ("absent", {}), "ghcr": ("unknown", {})}
+        cases = (
+            ({"latest_override": {"tag_name": "v1.0.40"}}, "GitHub Latest"),
+            ({"latest_override": {"prerelease": True}}, "GitHub Latest"),
+            ({"peeled_revision": "d" * 40}, "peel"),
+            ({"manifest_verified": False}, "release provenance"),
+            ({"alias_override": {"stable": partial}}, "registry evidence"),
+            ({"alias_override": {"2.0.1": partial}}, "registry evidence"),
+        )
+        for kwargs, reason in cases:
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, reason):
+                self.qualify(**kwargs)
 
 
 class RenderedContentTests(unittest.TestCase):
@@ -442,6 +508,18 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("--promotion-state final", self.text)
         self.assertIn("python3 scripts/build_website.py\n            python3 scripts/check_website.py",
                       self.text)
+
+    def test_both_publishers_render_and_validate_the_qualified_stable_pin(self):
+        landing = (gate.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        for workflow in (self.text, landing):
+            self.assertIn("--verify-stable", workflow)
+            self.assertLess(workflow.index("--verify-stable"), workflow.index("scripts/build_website.py\n"))
+            for field in ("TAG", "REVISION", "DIGEST"):
+                self.assertIn("CARBONPANEL_STABLE_" + field, workflow)
+            self.assertIn("--stable-source", workflow)
+            self.assertIn("vars.NIGHTLY_RECOVERY_ACTIVE != 'true'", workflow)
+        self.assertLess(self.text.index("guide-evidence"), self.text.index('if [ "$RECOVERY_ACTIVE" = true ]'))
+        self.assertNotIn("site-only-$ACTIVE_COMMIT", landing)
 
     def test_no_channel_writes_and_exact_prior_baseline(self):
         for forbidden in ("channel-promote", "channel-transaction", "--apply",
