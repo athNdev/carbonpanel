@@ -247,7 +247,7 @@ async function main() {
   const source = await rpc("ServerService", "CreateServer", {
     name: "compose-world-source", description: "world library qualification source",
     mcVersion: version, modLoader: "MOD_LOADER_VANILLA", memory: 1024, maxPlayers: 5,
-    port: sourcePort, startImmediately: true, autoStart: false,
+    port: sourcePort, node_id: state.nodeId, startImmediately: true, autoStart: false,
     dockerOverrides: { environment: { ONLINE_MODE: "FALSE" } },
     requestId: "world-swap-source-create",
   });

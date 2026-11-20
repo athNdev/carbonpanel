@@ -23,6 +23,11 @@ stop may need 60 seconds. Use its own bounded deadline and reconcile an
 interrupted call by replaying the same `request_id`; the journal returns the
 original operation rather than starting a second swap.
 
+World bind needs the owning node's storage adapter. Create fixture servers on
+the controller's registered local node (`NodeService/ListNodes`, `is_local`),
+not on a node created by the harness: a harness-created node is treated as
+remote and BindWorld is refused with `remote node storage unavailable`.
+
 Node-owned server fixture directories are deliberately not world-writable.
 Archive them with narrowly scoped fixture `sudo` reads and restore the archive
 file's ownership to the runner; never chmod managed world data.

@@ -114,12 +114,16 @@ async function main() {
   assert.ok(token, "fixture admin could not sign in");
 
   if (fresh) {
-    const { nodes = [] } = await rpc("NodeService", "ListNodes");
-    if (nodes.length === 0) {
-      await rpc("NodeService", "CreateNode", {
-        name: "qualification-local", host: "unix:///var/run/docker.sock", enabled: true, maxMemoryMb: 4096, maxServers: 4,
-      });
-    }
+    // The shipped controller registers its own local node. World Library bind
+    // needs the owning node's storage adapter; a node created by this harness
+    // would be treated as remote and refused. Wait for the real local node.
+    const localNode = await waitFor("controller local node", 90, async () => {
+      const { nodes = [] } = await rpc("NodeService", "ListNodes");
+      const node = nodes.find(candidate => candidate.isLocal === true);
+      assert.ok(node, "controller has no local node registered");
+      return node;
+    });
+    state.nodeId = localNode.id;
     state.port = (await rpc("ServerService", "GetNextAvailablePort")).port;
     assert.ok(state.port, "no game port allocated");
     const result = await rpc("ServerService", "CreateServer", {
@@ -130,6 +134,7 @@ async function main() {
       memory: 1024,
       maxPlayers: 5,
       port: state.port,
+      node_id: state.nodeId,
       startImmediately: true,
       autoStart: true,
       dockerOverrides: { environment: { ONLINE_MODE: "FALSE" } },
