@@ -32,6 +32,32 @@ const (
 	LookupUnavailable LookupStatus = "unavailable"
 )
 
+func identityUnavailable(reason string) LookupResult {
+	note := "Identity service unavailable"
+	if reason = strings.TrimSpace(reason); reason != "" {
+		note += " (" + reason + ")"
+	}
+	note += "; try again later."
+	return LookupResult{Status: LookupUnavailable, Note: note, Source: SourceIdentityService}
+}
+
+func identityUnavailableForStatus(status int) LookupResult {
+	if status == http.StatusTooManyRequests {
+		return identityUnavailable("rate limited")
+	}
+	return identityUnavailable("")
+}
+
+func identityUnavailableForError(ctx context.Context, err error) LookupResult {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return identityUnavailable("request timed out")
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		return identityUnavailable("request canceled")
+	}
+	return identityUnavailable("")
+}
+
 // LookupResult resolves an exact query to one online identity. Name is the
 // provider's current name, never a name-history entry. Note explains every
 // non-found status (and may accompany a found result as a disclosure).
@@ -44,12 +70,11 @@ type LookupResult struct {
 }
 
 var (
-	namePattern       = regexp.MustCompile(`^[A-Za-z0-9_]{1,16}$`)
-	undashedUUID      = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
-	errMalformedName  = errors.New("identity service returned a malformed name profile")
-	errMalformedUUID  = errors.New("identity service returned an invalid UUID")
-	errNameDisagree   = errors.New("identity service resolved a different name than requested")
-	errUnexpectedResp = errors.New("identity service returned an unexpected response")
+	namePattern      = regexp.MustCompile(`^[A-Za-z0-9_]{1,16}$`)
+	undashedUUID     = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+	errMalformedName = errors.New("identity service returned a malformed name profile")
+	errMalformedUUID = errors.New("identity service returned an invalid UUID")
+	errNameDisagree  = errors.New("identity service resolved a different name than requested")
 )
 
 // NormalizeQuery classifies a trimmed operator query without any network I/O.
@@ -102,14 +127,14 @@ func (c *Cache) Lookup(ctx context.Context, query string) (LookupResult, error) 
 func (c *Cache) lookupUUID(ctx context.Context, uuid string) (LookupResult, error) {
 	profile, status, err := c.getProfile(ctx, uuid)
 	if err != nil {
-		return unavailableLookup(errUpstream.Error() + ": " + err.Error()), nil
+		return identityUnavailableForError(ctx, err), nil
 	}
 	switch status {
 	case http.StatusOK:
 	case http.StatusNoContent, http.StatusNotFound:
 		return LookupResult{Status: LookupNotFound, Note: "No Mojang profile exists for that UUID.", Source: SourceIdentityService}, nil
 	default:
-		return unavailableLookup(errUnexpectedResp.Error()), nil
+		return identityUnavailableForStatus(status), nil
 	}
 	name := strings.TrimSpace(profile.Name)
 	if name == "" {
@@ -135,11 +160,11 @@ func (c *Cache) lookupUUID(ctx context.Context, uuid string) (LookupResult, erro
 func (c *Cache) lookupName(ctx context.Context, name string) (LookupResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nameBaseURL+url.PathEscape(name), nil)
 	if err != nil {
-		return unavailableLookup(errUpstream.Error() + ": " + err.Error()), nil
+		return identityUnavailableForError(ctx, err), nil
 	}
 	resp, err := c.clientFor(expectedHost(nameBaseURL)).Do(req)
 	if err != nil {
-		return unavailableLookup(errUpstream.Error() + ": " + err.Error()), nil
+		return identityUnavailableForError(ctx, err), nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
@@ -149,11 +174,11 @@ func (c *Cache) lookupName(ctx context.Context, name string) (LookupResult, erro
 	default:
 		// 429 (rate limit), 5xx and unexpected codes are explicitly unknown,
 		// never a definitive absence.
-		return unavailableLookup(errUnexpectedResp.Error()), nil
+		return identityUnavailableForStatus(resp.StatusCode), nil
 	}
 	body, err := readBounded(resp.Body, maxProfileBytes)
 	if err != nil {
-		return unavailableLookup(errUpstream.Error() + ": " + err.Error()), nil
+		return identityUnavailableForError(ctx, err), nil
 	}
 	if len(strings.TrimSpace(string(body))) == 0 {
 		// Authoritative 200 with an empty body is a definitive negative.
@@ -178,8 +203,4 @@ func (c *Cache) lookupName(ctx context.Context, name string) (LookupResult, erro
 		return LookupResult{Status: LookupAmbiguous, Note: errNameDisagree.Error() + "; use the exact UUID instead.", Source: SourceIdentityService}, nil
 	}
 	return LookupResult{Status: LookupFound, UUID: canonical, Name: providerName, Source: SourceIdentityService}, nil
-}
-
-func unavailableLookup(note string) LookupResult {
-	return LookupResult{Status: LookupUnavailable, Note: "Identity service unavailable; try again later. " + note, Source: SourceIdentityService}
 }

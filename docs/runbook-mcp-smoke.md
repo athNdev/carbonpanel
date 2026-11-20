@@ -153,6 +153,12 @@ substitute for verification of a public immutable digest. Use `--dry-run` to
 inspect the planned commands without Docker; when Docker is unavailable it
 reports `blocked` with evidence instead of claiming success.
 
+The build-only report records the local image ID used for the container and
+includes the stdio driver's handshake, tool names and scoped call result under
+`stdio_smoke`. The runner removes its fixture, network and automatically tagged
+images. Cleanup failure fails the smoke and retains the report. Images selected
+with `--image-tag`, `--mock-tag` or `--skip-build` remain available to the caller.
+
 ## 4. Read-only smoke on a disposable fixture
 
 Use an owned mock panel or a freshly created, disposable panel install. Never a

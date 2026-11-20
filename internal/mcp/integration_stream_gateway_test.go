@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect"
@@ -150,8 +151,7 @@ func TestGatewayTerminalFailureClosesControllerHandleAndRecovers(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if _, err := transfer.OpenWithSize(ctx, "u-open", "srv-1", "worlds/x", int64(len(frame)));
-			!errors.Is(err, ErrStreamAdmission) {
+		if _, err := transfer.OpenWithSize(ctx, "u-open", "srv-1", "worlds/x", int64(len(frame))); !errors.Is(err, ErrStreamAdmission) {
 			t.Fatalf("post-Open admission was not refused: %v", err)
 		}
 		if len(client.closes) != 1 {
@@ -371,75 +371,91 @@ func TestIntegrationControllerStreamParallelToolsCall(t *testing.T) {
 // TestGatewayStreamMemoryIsBounded proves expired and canceled sessions release
 // staged bytes and registry entries, and that admission is capped.
 func TestGatewayStreamMemoryIsBounded(t *testing.T) {
-	frame := bytes.Repeat([]byte("m"), storageworker.ChunkBytes)
-	sum := sha256.Sum256(frame)
-	client := &digestFakeClient{frame: frame, sha: hex.EncodeToString(sum[:])}
-	transfer, err := NewStreamTransfer(client, 60*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-
-	// Admission is bounded independently of TTL.
-	longTransfer, err := NewStreamTransfer(client, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handles := make([]string, 0, maxGatewaySessions)
-	for i := 0; i < maxGatewaySessions; i++ {
-		h, err := longTransfer.OpenWithSize(ctx, "u-cap", "srv-1", "worlds/cap.bin", int64(len(frame)))
+	// The 60ms TTL is a deliberately short fixture value. Run the whole
+	// scenario in a synctest bubble so host scheduling cannot expire sessions
+	// before the explicit cancel phase; fake time advances only at the point
+	// below where expiry is under test.
+	synctest.Test(t, func(t *testing.T) {
+		const ttl = 60 * time.Millisecond
+		frame := bytes.Repeat([]byte("m"), storageworker.ChunkBytes)
+		sum := sha256.Sum256(frame)
+		client := &digestFakeClient{frame: frame, sha: hex.EncodeToString(sum[:])}
+		transfer, err := NewStreamTransfer(client, ttl)
 		if err != nil {
-			t.Fatalf("open %d: %v", i, err)
+			t.Fatal(err)
 		}
-		handles = append(handles, h)
-	}
-	if _, err := longTransfer.OpenWithSize(ctx, "u-cap", "srv-1", "worlds/cap.bin", int64(len(frame)));
-		!errors.Is(err, ErrStreamAdmission) {
-		t.Fatalf("admission cap not enforced: %v", err)
-	}
-	for _, h := range handles {
-		longTransfer.Release("u-cap", h)
-	}
+		ctx := context.Background()
 
-	// Stage large frames in many sessions, then cancel half and let the rest
-	// expire. Both paths must return aggregate memory to zero.
-	const sessions = 32
-	short := make([]string, 0, sessions)
-	for i := 0; i < sessions; i++ {
-		h, err := transfer.OpenWithSize(ctx, "u-memory", "srv-1", "worlds/mem.bin", int64(len(frame)))
+		// Admission is bounded independently of TTL.
+		longTransfer, err := NewStreamTransfer(client, time.Hour)
 		if err != nil {
-			t.Fatalf("open %d: %v", i, err)
+			t.Fatal(err)
 		}
-		short = append(short, h)
-		if _, _, _, err := transfer.ReadChunk(ctx, "u-memory", h); err != nil && !errors.Is(err, io.EOF) {
-			t.Fatalf("frame %d: %v", i, err)
+		handles := make([]string, 0, maxGatewaySessions)
+		for i := 0; i < maxGatewaySessions; i++ {
+			h, err := longTransfer.OpenWithSize(ctx, "u-cap", "srv-1", "worlds/cap.bin", int64(len(frame)))
+			if err != nil {
+				t.Fatalf("open %d: %v", i, err)
+			}
+			handles = append(handles, h)
 		}
-	}
-	transfer.mu.Lock()
-	staged := transfer.aggregate
-	count := len(transfer.sessions)
-	transfer.mu.Unlock()
-	if staged != sessions*len(frame) || count != sessions {
-		t.Fatalf("staging state: bytes=%d sessions=%d", staged, count)
-	}
-	for _, h := range short[:sessions/2] {
-		if err := transfer.Cancel(ctx, "u-memory", h); err != nil {
-			t.Fatalf("cancel: %v", err)
+		if _, err := longTransfer.OpenWithSize(ctx, "u-cap", "srv-1", "worlds/cap.bin", int64(len(frame))); !errors.Is(err, ErrStreamAdmission) {
+			t.Fatalf("admission cap not enforced: %v", err)
 		}
-	}
-	transfer.mu.Lock()
-	afterCancel := transfer.aggregate
-	transfer.mu.Unlock()
-	if afterCancel != (sessions/2)*len(frame) {
-		t.Fatalf("cancel did not free staged bytes: %d", afterCancel)
-	}
-	time.Sleep(250 * time.Millisecond) // TTL timers for the uncanceled half
-	transfer.mu.Lock()
-	finalBytes, finalCount := transfer.aggregate, len(transfer.sessions)
-	transfer.mu.Unlock()
-	if finalBytes != 0 || finalCount != 0 {
-		t.Fatalf("TTL did not reclaim gateway state: bytes=%d sessions=%d", finalBytes, finalCount)
-	}
+		for _, h := range handles {
+			longTransfer.Release("u-cap", h)
+		}
+
+		// Stage large frames in many sessions, then cancel half and let the
+		// rest expire. Both paths must return aggregate memory to zero.
+		const sessions = 32
+		short := make([]string, 0, sessions)
+		for i := 0; i < sessions; i++ {
+			h, err := transfer.OpenWithSize(ctx, "u-memory", "srv-1", "worlds/mem.bin", int64(len(frame)))
+			if err != nil {
+				t.Fatalf("open %d: %v", i, err)
+			}
+			short = append(short, h)
+			if _, _, _, err := transfer.ReadChunk(ctx, "u-memory", h); err != nil && !errors.Is(err, io.EOF) {
+				t.Fatalf("frame %d: %v", i, err)
+			}
+		}
+		transfer.mu.Lock()
+		staged := transfer.aggregate
+		count := len(transfer.sessions)
+		transfer.mu.Unlock()
+		if staged != sessions*len(frame) || count != sessions {
+			t.Fatalf("staging state: bytes=%d sessions=%d", staged, count)
+		}
+
+		// Explicit cancel of half the sessions, before any fake time advance.
+		for _, h := range short[:sessions/2] {
+			if err := transfer.Cancel(ctx, "u-memory", h); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+		}
+		transfer.mu.Lock()
+		afterCancel := transfer.aggregate
+		afterCount := len(transfer.sessions)
+		transfer.mu.Unlock()
+		if afterCancel != (sessions/2)*len(frame) || afterCount != sessions/2 {
+			t.Fatalf("cancel did not free staged bytes/sessions: bytes=%d sessions=%d", afterCancel, afterCount)
+		}
+
+		// Advance the bubble clock past the fixture TTL. The root Sleep is
+		// durably blocking, so fake time reaches the 60ms expiry timers, their
+		// callbacks release the uncanceled half, and only then does Sleep
+		// return. Wait makes callback completion explicit before asserting.
+		time.Sleep(ttl + time.Millisecond)
+		synctest.Wait()
+
+		transfer.mu.Lock()
+		finalBytes, finalCount := transfer.aggregate, len(transfer.sessions)
+		transfer.mu.Unlock()
+		if finalBytes != 0 || finalCount != 0 {
+			t.Fatalf("TTL did not reclaim gateway state: bytes=%d sessions=%d", finalBytes, finalCount)
+		}
+	})
 }
 
 // --- One-at-a-time commit lease ---------------------------------------------
@@ -638,9 +654,9 @@ func TestIntegrationControllerStreamParallelCommitOfOneHandle(t *testing.T) {
 	}
 	wantChunks := (len(payload) + storageworker.ChunkBytes - 1) / storageworker.ChunkBytes
 	expected := map[string]int{
-		"/carbonpanel.v1.UploadService/InitUpload":      1,
-		"/carbonpanel.v1.UploadService/UploadChunk":     wantChunks,
-		"/carbonpanel.v1.FileService/SaveUploadedFile":  1,
+		"/carbonpanel.v1.UploadService/InitUpload":     1,
+		"/carbonpanel.v1.UploadService/UploadChunk":    wantChunks,
+		"/carbonpanel.v1.FileService/SaveUploadedFile": 1,
 	}
 	for proc, want := range expected {
 		if counts[proc] != want {
@@ -694,7 +710,6 @@ func TestGatewayCommitFailureIsRetryable(t *testing.T) {
 		t.Fatalf("successful retry leaked budget: bytes=%d sessions=%d", left, sessions)
 	}
 }
-
 
 // --- Ambiguous final-save outcomes ------------------------------------------
 

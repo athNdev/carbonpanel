@@ -190,4 +190,68 @@ func TestLookupCrossHostRedirectIsUnavailable(t *testing.T) {
 	if err != nil || res.Status != LookupUnavailable {
 		t.Fatalf("result = %+v err=%v", res, err)
 	}
+	assertSanitizedIdentityUnavailable(t, res.Note)
+}
+
+func assertSanitizedIdentityUnavailable(t *testing.T, note string) {
+	t.Helper()
+	lower := strings.ToLower(note)
+	if !strings.Contains(lower, "unavailable") || !strings.Contains(lower, "try again") {
+		t.Fatalf("note not actionable unavailable: %q", note)
+	}
+	for _, leak := range []string{"http://", "https://", "context deadline exceeded", "skin unavailable", "texture download", "net/url", "users/profiles/minecraft", "session/minecraft/profile"} {
+		if strings.Contains(lower, leak) {
+			t.Fatalf("note leaked internal detail %q: %q", leak, note)
+		}
+	}
+}
+
+func TestLookupRateLimitUnavailableNoteIsSanitized(t *testing.T) {
+	f := newLookupFixture(t)
+	f.nameStatus = http.StatusTooManyRequests
+	cache := newTestCache(t, 0, nil)
+	res, err := cache.Lookup(context.Background(), "Steve")
+	if err != nil || res.Status != LookupUnavailable {
+		t.Fatalf("result = %+v err=%v", res, err)
+	}
+	assertSanitizedIdentityUnavailable(t, res.Note)
+	if !strings.Contains(strings.ToLower(res.Note), "rate") {
+		t.Fatalf("429 note should indicate rate limiting: %q", res.Note)
+	}
+}
+
+func TestLookupTimeoutUnavailableNoteIsSanitized(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(80 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slow.Close()
+	oldName := nameBaseURL
+	nameBaseURL = slow.URL + "/users/profiles/minecraft/"
+	t.Cleanup(func() { nameBaseURL = oldName })
+	cache := newTestCache(t, 0, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	res, err := cache.Lookup(ctx, "Steve")
+	if err != nil || res.Status != LookupUnavailable {
+		t.Fatalf("timeout result = %+v err=%v", res, err)
+	}
+	assertSanitizedIdentityUnavailable(t, res.Note)
+	if !strings.Contains(strings.ToLower(res.Note), "timed out") {
+		t.Fatalf("timeout note should indicate timeout: %q", res.Note)
+	}
+}
+
+func TestLookupUUIDRateLimitUnavailableNoteIsSanitized(t *testing.T) {
+	f := newLookupFixture(t)
+	f.profileStatus = http.StatusTooManyRequests
+	cache := newTestCache(t, 0, nil)
+	res, err := cache.Lookup(context.Background(), testUUID)
+	if err != nil || res.Status != LookupUnavailable {
+		t.Fatalf("result = %+v err=%v", res, err)
+	}
+	assertSanitizedIdentityUnavailable(t, res.Note)
+	if !strings.Contains(strings.ToLower(res.Note), "rate") {
+		t.Fatalf("429 note should indicate rate limiting: %q", res.Note)
+	}
 }
