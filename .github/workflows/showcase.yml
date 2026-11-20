@@ -42,6 +42,7 @@ on:
       - 'scripts/review/entry-state.test.mjs'
       - 'scripts/review/devstack.sh'
       - 'scripts/review/fixtures/**'
+      - 'scripts/review/region_coverage.py'
       - 'scripts/showcase_assets.py'
       - 'scripts/showcase_assets.test.py'
       - '.github/workflows/showcase.yml'

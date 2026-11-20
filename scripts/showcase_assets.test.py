@@ -19,7 +19,9 @@ from pathlib import Path
 import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "review"))
 import showcase_assets as sa  # noqa: E402
+import region_coverage as rc  # noqa: E402
 
 # Derive the browser driver version from the authoritative pin so this fixture
 # cannot silently drift behind scripts/manual-review/e2e/package.json again.
@@ -371,6 +373,57 @@ class ShowcasePipelineTest(unittest.TestCase):
 
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
+
+    def test_outside_region_entries_cannot_qualify_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            def write_headers(requested: bool) -> None:
+                for rx in (-1, 0):
+                    for rz in (-1, 0):
+                        header = bytearray(4096)
+                        xs = (range(16, 32) if rx == -1 else range(0, 16))
+                        zs = (range(16, 32) if rz == -1 else range(0, 16))
+                        if not requested:
+                            xs = range(0, 16) if rx == -1 else range(16, 32)
+                            zs = range(0, 16) if rz == -1 else range(16, 32)
+                        for x in xs:
+                            for z in zs:
+                                header[4 * (x + 32 * z) + 3] = 1
+                        Path(tmp, f"r.{rx}.{rz}.mca").write_bytes(bytes(header) + b"x" * 512)
+
+            write_headers(requested=False)
+            covered, size = rc.requested_chunks(tmp)
+            self.assertEqual(covered, 0, "outside entries must not qualify")
+            self.assertGreater(size, 0, "region bytes must still be reported")
+            write_headers(requested=True)
+            covered, _ = rc.requested_chunks(tmp)
+            self.assertEqual(covered, 1024, "all requested chunks must count")
+
+    def test_fixture_terrain_batches_are_bounded_and_seed_is_fresh_only(self) -> None:
+        devstack = (
+            Path(__file__).resolve().parent / "review" / "devstack.sh"
+        ).read_text(encoding="utf-8")
+        block = devstack.split("local -a ranges=(", 1)[1].split(")", 1)[0]
+        ranges = re.findall(r'"(-?\d+) (-?\d+) (-?\d+) (-?\d+)"', block)
+        self.assertTrue(ranges, "no forceload ranges found")
+        for x0, z0, x1, z1 in ranges:
+            chunks = (int(x1) // 16 - int(x0) // 16 + 1) * (
+                int(z1) // 16 - int(z0) // 16 + 1
+            )
+            self.assertLessEqual(chunks, 256, f"forceload range exceeds 256 chunks: {chunks}")
+        # The seed must be pinned only for a fresh fixture config; an existing
+        # review config (and any running container) is never modified.
+        self.assertIn('if [ ! -f "${DATA}/config/config.yaml" ]; then', devstack)
+        self.assertIn("JSON.stringify({minecraft:{global_config:{seed:", devstack)
+        self.assertNotIn("ConfigService/UpdateServerConfig", devstack)
+        # Region readiness must use the shared GetServer.dataPath resolver and
+        # real .mca header coverage, never a guessed slug+ID path.
+        self.assertIn("review_server_host_path", devstack)
+        self.assertIn(".mca", devstack)
+        self.assertNotIn('servers/${server_id}/world/region', devstack)
+        # The World View camera must be zoomed out for a landscape capture.
+        distance = re.search(r"world:0:0:0:(\d+):0:0:0:0:perspective", devstack)
+        self.assertTrue(distance, "no BlueMap startLocation found")
+        self.assertGreater(int(distance.group(1)), 100, "camera is not a wide landscape view")
 
     def test_narrow_player_viewport_is_restored_before_world_view(self) -> None:
         plan = json.loads((

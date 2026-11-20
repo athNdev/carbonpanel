@@ -338,6 +338,19 @@ seed_showcase_pack() {
 	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
 }
 
+# Resolve a disposable server's host data root from the panel's authoritative
+# GetServer.dataPath. Shared by the terrain-readiness and BlueMap lanes so a
+# slug+ID directory (review-vanilla_<id>) is never guessed as a bare id.
+review_server_host_path() {
+	local token="$1" server_id="$2" data_path host_path
+	data_path="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null | json_path 'server.dataPath')"
+	case "${data_path}" in
+		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
+		*) host_path="${DATA}/data/servers/${server_id}" ;;
+	esac
+	printf '%s' "${host_path}"
+}
+
 # Guarantee real terrain under the fixed initial camera. A fresh Minecraft
 # world has a random seed, so relying on whatever chunks happen to exist at
 # origin makes the map capture intermittently black. Force-load a small grid
@@ -345,18 +358,53 @@ seed_showcase_pack() {
 # saves before the renderer reads the world. This only generates disposable
 # fixture terrain; no external world or live server is touched.
 seed_showcase_terrain() {
-	local token="$1" server_id="$2" response success
-	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add -4 -4 4 4",silent:true}))')"
-	response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
-		echo "review terrain pre-generation was refused; map capture may be empty" >&2
-		return 0
-	}
-	success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
-	echo "review deterministic spawn chunk grid: success=${success}" >&2
-	[ "${success}" = "true" ] || return 0
-	sleep 45
+	local token="$1" server_id="$2" response success range
+	local -a ranges=(
+		"-256 -256 -1 -1"
+		"0 -256 255 -1"
+		"-256 0 -1 255"
+		"0 0 255 255"
+	)
+	# Minecraft /forceload takes BLOCK coordinates and refuses more than 256
+	# chunks per command. Each range covers 16x16 = 256 chunks (256 blocks per
+	# side); four ranges cover a 512x512 block landscape around spawn.
+	for range in "${ranges[@]}"; do
+		response="$(REVIEW_SERVER_ID="${server_id}" REVIEW_RANGE="${range}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add " + process.env.REVIEW_RANGE,silent:true}))')"
+		response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
+			echo "review terrain batch ${range} was refused; map capture may be clipped" >&2
+			return 0
+		}
+		success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
+		echo "review terrain batch ${range}: success=${success}" >&2
+		[ "${success}" = "true" ] || return 0
+	done
+	# Four 256-chunk batches cover chunks x=-16..15, z=-16..15, i.e. four
+	# region files r.{-1,0}.{-1,0}.mca with 256 chunks each. Wait for real
+	# headers in those files, not just a stable size: a small spawn region can
+	# otherwise look settled while most of the landscape is still missing.
+	local host_path region_dir coverage_line coverage bytes stable=0 prev_coverage=-1 deadline
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
+	region_dir="${host_path}/world/region"
 	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
 	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+	deadline=$((SECONDS + 180))
+	while ((SECONDS < deadline)); do
+		# Flush before each sample so the header we read is persisted.
+		rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+		coverage_line="$(python3 "${REPO}/scripts/review/region_coverage.py" --region-dir "${region_dir}" 2>/dev/null || printf '0:0')"
+		coverage_line="${coverage_line:-0:0}"
+		coverage="${coverage_line%%:*}"
+		bytes="${coverage_line##*:}"
+		if [ "${coverage}" -ge 900 ] && [ "${coverage}" = "${prev_coverage}" ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		prev_coverage="${coverage}"
+		[ "${stable}" -ge 2 ] && break
+		sleep 3
+	done
+	echo "review persisted region coverage: ${prev_coverage}/1024 chunks, ${bytes} bytes (stable checks: ${stable})" >&2
 }
 
 # A real BlueMap renderer for the gated World View capture. Managed install is
@@ -374,10 +422,7 @@ seed_showcase_bluemap() {
 		echo "could not resolve seeded server/node facts for BlueMap; skipping renderer" >&2
 		return 0
 	fi
-	case "${data_path}" in
-		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
-		*) host_path="${DATA}/data/servers/${server_id}" ;;
-	esac
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
 	DATA_PATH_FOR_BLUEMAP="${host_path}"
 	echo "review BlueMap world path: ${data_path} -> ${host_path}" >&2
 	if [ ! -d "${host_path}/${level}" ]; then
@@ -410,13 +455,13 @@ EOF
 		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
 			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
 		fi
-		if [ "${count}" -ge 20 ] && [ "${count}" = "${prev_count}" ]; then
+		if [ "${count}" -ge 250 ] && [ "${count}" = "${prev_count}" ]; then
 			stable=$((stable + 1))
 		else
 			stable=0
 		fi
 		prev_count="${count}"
-		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 20 ]; then
+		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 250 ]; then
 			break
 		fi
 		sleep 3
@@ -528,7 +573,7 @@ overlay_csp_safe_webapp() {
 # the tile-coverage wait and immediately before the journey.
 set_bluemap_start_location() {
 	local mapdir="$1" web="${1}/web"
-	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
+	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:120:0:0:0:0:perspective}"
 	local settings_tmp="${DATA}/config/bluemap-settings.json"
 	[ -f "${web}/settings.json" ] || return 1
 	START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
@@ -604,7 +649,11 @@ up)
 	PORT="$(free_port "${PORT}")"
 	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp" "${DATA}/config"
 	echo "${PORT}" >"${DATA}/port"
-	[ -f "${DATA}/config/config.yaml" ] || printf '{}\n' >"${DATA}/config/config.yaml"
+	# Fresh fixtures only: pin a deterministic world seed in the initial
+	# config (JSON is valid YAML). Existing review configs are never touched.
+	if [ ! -f "${DATA}/config/config.yaml" ]; then
+		REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" node -e 'console.log(JSON.stringify({minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}}))' >"${DATA}/config/config.yaml"
+	fi
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
 	start_panel
@@ -674,13 +723,13 @@ up)
 						# READY means textures/settings are valid, but the viewport may
 						# still request lowres tiles the renderer has not produced yet.
 						# Let the real renderer continue filling the shared web root.
-						tile_deadline=$((SECONDS + 120))
+						tile_deadline=$((SECONDS + 300))
 						tile_stable=0
 						tile_prev=-1
 						while ((SECONDS < tile_deadline)); do
 							tile_count="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | wc -l | tr -d ' ')"
 							tile_count="${tile_count:-0}"
-							if [ "${tile_count}" -ge 60 ] && [ "${tile_count}" = "${tile_prev}" ]; then
+							if [ "${tile_count}" -ge 250 ] && [ "${tile_count}" = "${tile_prev}" ]; then
 								tile_stable=$((tile_stable + 1))
 							else
 								tile_stable=0
