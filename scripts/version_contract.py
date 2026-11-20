@@ -140,6 +140,28 @@ def apply_promotion(contract, promotion):
     return updated
 
 
+def release_build_contract(contract, environ=None):
+    """Apply an exact release identity to the rendering input after validating its source contract."""
+    environ = os.environ if environ is None else environ
+    tag, revision, digest = (environ.get(key, "") for key in
+                             ("CARBONPANEL_STABLE_TAG", "CARBONPANEL_STABLE_REVISION",
+                              "CARBONPANEL_STABLE_DIGEST"))
+    if not any((tag, revision, digest)):
+        return contract
+    from scripts import release
+    allowed, reason = release.publication_candidate_decision(tag)
+    if not allowed or tag == release.OCCUPIED_PRODUCT_TAG:
+        raise ValueError("Unpublishable stable identity: " + reason)
+    product = release.product_release(tag)
+    if product["prerelease"] or not SHA.fullmatch(revision) or not DIGEST.fullmatch(digest):
+        raise ValueError("Rendering a release requires a stable tag, full commit and verified digest")
+    result = copy.deepcopy(contract)
+    stable = result["channels"]["stable"]
+    stable.update(tag=tag, version=product["semver"], commit=revision)
+    stable["image"].update(revision=revision, digest=digest)
+    return result
+
+
 def _problems(problems):
     if problems:
         raise ValueError("version contract drift:\n- " + "\n- ".join(sorted(set(problems))))
@@ -411,6 +433,7 @@ def version_index(contract, catalog=None, root=ROOT):
     stable = contract["channels"]["stable"]
     return {
         "schema_version": SCHEMA_VERSION,
+        "catalog": contract["catalog"],
         "repository": contract["repository"],
         "channels": {name: dict(contract["channels"][name]) for name in CHANNEL_NAMES},
         "stable": {
