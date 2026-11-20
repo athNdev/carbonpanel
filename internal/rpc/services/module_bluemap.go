@@ -31,6 +31,9 @@ const (
 	// operators creating a module from the Modules page do not need the new
 	// consent metadata and keep the legacy generic path; they are not broken.
 	blueMapManagedSignalKey = "bluemap_managed"
+
+	// The lease covers the entire worker, including a cold image pull.
+	defaultBlueMapStartupTimeout = 2 * time.Minute
 )
 
 // prepareBuiltinBlueMap apply the OSS-388 server-side rules to a CreateModule
@@ -197,7 +200,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	}
 
 	// Construct the managed variant entirely from server-side facts. Client
-	// overrides of ports, volumes, command, init or env are discarded.
+	// overrides of ports, volumes, command, init, dependencies or env are discarded.
 	volumes, volErr := bluemapdiscovery.ManagedVolumes(server, level)
 	if volErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("derive read-only world mount: %w", volErr)))
@@ -210,6 +213,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	msg.InitCommand = ""
 	msg.InitCommandDelay = 0
 	msg.RestartAfterInit = false
+	msg.Dependencies = nil
 	msg.AccessUrls = nil
 
 	// Deterministic, consent-gated map config derived from the real readable
@@ -283,12 +287,36 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 					transition.Release()
 					s.blueMapInstallMu.Unlock()
 				}()
-				s.createModuleContainer(moduleID, startImmediately)
+				s.startManagedBlueMap(moduleID, startImmediately)
 			}()
 		})
 		return commitErr
 	}
 	return false, nil, fin, nil
+}
+
+func (s *ModuleService) startManagedBlueMap(moduleID string, startImmediately bool) {
+	timeout := s.blueMapStartupTimeout
+	if timeout == 0 {
+		timeout = defaultBlueMapStartupTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := s.moduleManager.CreateAndStartModule(ctx, moduleID, startImmediately)
+	if err == nil {
+		return
+	}
+	s.log.Error("Managed BlueMap startup failed for module %s: %v", moduleID, err)
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return
+	}
+
+	// Keep the recorded container after a timeout so an operator can retry Start.
+	statusCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer stop()
+	if err := s.store.UpdateModuleStatus(statusCtx, moduleID, storage.ModuleStatusError); err != nil {
+		s.log.Error("Failed to mark managed BlueMap module %s as errored: %v", moduleID, err)
+	}
 }
 
 func (s *ModuleService) blueMapResponse(ctx context.Context, module *storage.Module) (*connect.Response[v1.CreateModuleResponse], error) {

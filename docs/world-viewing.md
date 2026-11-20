@@ -50,6 +50,10 @@ ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
 principal and clock), adopts an existing module without mutation, and requires
 `modules/start` in addition to `modules/create` when starting immediately.
+Docker image preparation, container creation and start share a two-minute
+startup limit. If the limit expires, the panel releases the server lifecycle
+transition and marks the module as errored. Open Modules and retry Start;
+the panel keeps the container ID when Docker already returned it.
 
 ## 2. Endpoint topology and the same-origin proxy
 

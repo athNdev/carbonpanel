@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -543,10 +545,12 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		startStatus      int
+		stallStart       bool
 		wantModuleStatus storage.ModuleStatus
 	}{
-		{"successful start", http.StatusNoContent, storage.ModuleStatusRunning},
-		{"failed daemon start", http.StatusInternalServerError, storage.ModuleStatusError},
+		{name: "successful start", startStatus: http.StatusNoContent, wantModuleStatus: storage.ModuleStatusRunning},
+		{name: "failed daemon start", startStatus: http.StatusInternalServerError, wantModuleStatus: storage.ModuleStatusError},
+		{name: "stalled daemon start", stallStart: true, wantModuleStatus: storage.ModuleStatusError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -555,8 +559,13 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			const containerID = "abcdef0123456789"
 			store, _ := blueMapFixtureStore(t, ctx, serverID, "default", "actual_world")
 			t.Cleanup(func() { _ = store.Close() })
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"proxy_hostname": "world.test"}); err != nil {
+				t.Fatal(err)
+			}
 			creating, starting := make(chan struct{}, 1), make(chan struct{}, 1)
 			createDone, startDone := make(chan struct{}), make(chan struct{})
+			startCanceled := make(chan struct{})
+			var creates, inspects, starts atomic.Int32
 			var allowCreate, allowStart sync.Once
 			unblockCreate := func() { allowCreate.Do(func() { close(createDone) }) }
 			unblockStart := func() { allowStart.Do(func() { close(startDone) }) }
@@ -568,14 +577,29 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 				case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
 					_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/create"):
-					creating <- struct{}{}
-					<-createDone
+					if creates.Add(1) == 1 {
+						creating <- struct{}{}
+						<-createDone
+					}
 					_, _ = w.Write([]byte(`{"Id":"` + containerID + `"}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/json"):
+					inspects.Add(1)
 					_, _ = w.Write([]byte(`{"State":{"Status":"created"}}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/start"):
+					if starts.Add(1) > 1 {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
 					starting <- struct{}{}
-					<-startDone
+					select {
+					case <-r.Context().Done():
+						close(startCanceled)
+						return
+					case <-startDone:
+					}
+					if tc.stallStart {
+						return // test cleanup
+					}
 					w.WriteHeader(tc.startStatus)
 					if tc.startStatus != http.StatusNoContent {
 						_, _ = w.Write([]byte(`{"message":"fixture daemon refused startup"}`))
@@ -598,9 +622,14 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 				defer cancel()
 				_ = docker.WaitForServerTransition(waitCtx, serverID)
 			})
+			cfg := &config.Config{Proxy: config.ProxyConfig{Enabled: true}}
+			proxyManager := proxy.NewManager(store, cfg, log, dockerClient.GetDockerClient())
 			svc := &ModuleService{
 				store: store, enforcer: mustEnforcer(t, store), storageResolver: nodestorage.NewResolver(nil),
-				docker: dockerClient, moduleManager: module.NewManager(store, dockerClient, nil, &config.Config{}, nil, log), log: log,
+				docker: dockerClient, moduleManager: module.NewManager(store, dockerClient, nil, cfg, proxyManager, log), log: log,
+			}
+			if tc.stallStart {
+				svc.blueMapStartupTimeout = 2 * time.Second
 			}
 			_, handler := carbonpanelv1connect.NewModuleServiceHandler(svc, connect.WithInterceptors(
 				connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
@@ -615,7 +644,8 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			install := func() (*connect.Response[v1.CreateModuleResponse], error) {
 				return client.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
 					Name: "BlueMap", ServerId: serverID, TemplateId: blueMapTemplateID, StartImmediately: true,
-					Metadata: map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"},
+					Dependencies: []*v1.ModuleDependency{{ModuleId: "unrelated-module"}},
+					Metadata:     map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"},
 				}))
 			}
 			waitFor := func(signal <-chan struct{}, phase string) {
@@ -651,7 +681,11 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			if err != nil || retry.Msg.GetModule().GetId() != moduleID {
 				t.Fatalf("same-assignment install did not adopt the committed renderer: %v %v", retry, err)
 			}
-			unblockStart()
+			if tc.stallStart {
+				waitFor(startCanceled, "startup request cancellation")
+			} else {
+				unblockStart()
+			}
 			if err := docker.WaitForServerTransition(ctx, serverID); err != nil {
 				t.Fatalf("startup did not release the transition: %v", err)
 			}
@@ -661,11 +695,30 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			}
 			defer lease.Release()
 			row, err := store.GetModule(ctx, moduleID)
-			if err != nil || row.Status != tc.wantModuleStatus {
+			if err != nil || row.Status != tc.wantModuleStatus || row.ContainerID != containerID {
 				t.Fatalf("module after transition release: %v %v", row, err)
 			}
 			if _, err := install(); connect.CodeOf(err) != connect.CodeAborted {
 				t.Fatalf("install bypassed another owner's transition: %v", err)
+			}
+			lease.Release()
+			if tc.stallStart {
+				if _, err := client.StartModule(ctx, connect.NewRequest(&v1.StartModuleRequest{Id: moduleID})); err != nil {
+					t.Fatalf("retry start after timeout: %v", err)
+				}
+				row, err := store.GetModule(ctx, moduleID)
+				if err != nil || row.Status != storage.ModuleStatusRunning || row.ContainerID != containerID {
+					t.Fatalf("retry did not start the same module container: %v %v", row, err)
+				}
+				if creates.Load() != 1 || starts.Load() != 2 {
+					t.Fatalf("expected one create and two starts, got %d creates and %d starts", creates.Load(), starts.Load())
+				}
+			}
+			if err := proxyManager.UpdateModuleRoute(row, &storage.Server{ProxyHostname: "world.test"}); err != nil {
+				t.Fatalf("private renderer route refresh: %v", err)
+			}
+			if inspects.Load() != starts.Load() || len(proxyManager.GetModuleRoutes()) != 0 {
+				t.Fatalf("private renderer reached host route setup: %d inspects for %d starts", inspects.Load(), starts.Load())
 			}
 		})
 	}

@@ -53,8 +53,9 @@ type ModuleService struct {
 	// create path per controller process. It makes retries/concurrent tabs
 	// converge on one module per server; it is explicitly NOT a cross-process
 	// atomic reservation (ADR 0011/0015).
-	blueMapInstallMu sync.Mutex
-	blueMapStarting  map[string]string // server ID to committed module ID, under blueMapInstallMu
+	blueMapInstallMu      sync.Mutex
+	blueMapStarting       map[string]string // server ID to committed module ID, under blueMapInstallMu
+	blueMapStartupTimeout time.Duration     // when zero, use the managed startup default
 }
 
 // ModuleAuthorizer is the mapped RBAC seam used for managed-install create and
