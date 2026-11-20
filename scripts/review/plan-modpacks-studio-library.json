@@ -13,14 +13,14 @@
     "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
     "confirmSelector": "input[placeholder=\"Confirm your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
   "login": {
     "path": "/login",
     "usernameSelector": "input[placeholder=\"Enter your username\"]",
     "passwordSelector": "input[placeholder=\"Enter your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
   "steps": [
     {

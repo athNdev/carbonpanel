@@ -75,7 +75,7 @@ jobs:
           printf 'PANEL_REVIEW_PASSWORD=%s\n' "${password}" >> "${GITHUB_ENV}"
       - name: Boot owned review stack
         id: boot
-        run: bash scripts/review/devstack.sh up
+        run: bash scripts/review/devstack.sh up-controller
       - name: Run both checked-in Chromium plans
         id: review
         run: |
