@@ -119,7 +119,7 @@ func TestColdBootDispatchesPersistedPolicyOnlyAfterPlannerInstalled(t *testing.T
 	planner := &signalingModPlanner{calls: make(chan struct{}, 1)}
 	s.SetModUpdatePlanner(planner)
 	require.NoError(t, s.Start())
-	defer s.Stop()
+	defer func() { require.NoError(t, s.Stop()) }()
 	select {
 	case <-planner.calls:
 	case <-time.After(5 * time.Second):

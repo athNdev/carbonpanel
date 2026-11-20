@@ -566,7 +566,11 @@ func main() {
 	if err := taskScheduler.Start(); err != nil {
 		log.Error("Failed to start task scheduler: %v", err)
 	}
-	defer taskScheduler.Stop()
+	defer func() {
+		if err := taskScheduler.Stop(); err != nil {
+			log.Error("Failed to stop task scheduler: %v", err)
+		}
+	}()
 
 	// The auth manager persists the recovery key. Announce the secret only
 	// when this process generated it; later starts log the path alone so a
