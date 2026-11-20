@@ -9,6 +9,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/scheduler"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/google/uuid"
 )
@@ -21,6 +22,9 @@ const defaultAutomaticModUpdatesPerRun = 10
 func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (int, int, []string, error) {
 	if !cfg.Enabled {
 		return 0, 0, nil, nil
+	}
+	if err := scheduler.ValidateModUpdateConfig(cfg); err != nil {
+		return 0, 0, nil, err
 	}
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
@@ -80,10 +84,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	limit := cfg.MaxUpdatesPerRun
 	if limit <= 0 {
 		limit = defaultAutomaticModUpdatesPerRun
-	} else if limit > 50 {
-		// A persisted config is untrusted even when creation validated it;
-		// never let a large value become a large allocation.
-		limit = 50
+
 	}
 
 	selections := make([]*v1.ModUpdateSelection, 0, limit)

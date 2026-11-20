@@ -349,6 +349,25 @@ func TestRacedDiscardCannotOrphanStagedModPayload(t *testing.T) {
 	require.Equal(t, storage.StagedStatusStaged, phase.Status)
 }
 
+func TestReviewedUpdateRejectsInvalidWindowsBeforeProviderWork(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "invalid-update-window", storage.StatusStopped)
+	svc := NewModService(store, nil, um, logger.New())
+	for _, window := range []v1.ConfigApplyWindow{
+		v1.ConfigApplyWindow(999),
+		v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME,
+		v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE,
+	} {
+		req := modUpdateRequest(server.ID, installedModDigest("installed"))
+		req.UpdateWindow = window
+		_, err := svc.UpdateMod(ctx, connect.NewRequest(req))
+		require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err), "%s: %v", window, err)
+	}
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch)
+}
+
 func TestStagingRefusesBatchWithIndependentCronConfig(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-cron-cohab", storage.StatusStopped)

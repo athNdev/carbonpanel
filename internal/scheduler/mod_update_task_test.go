@@ -157,6 +157,30 @@ func TestInvalidTimezoneTaskCannotRepeatEveryTick(t *testing.T) {
 	require.Zero(t, planner.calls, "a disabled task must not repeat on the next tick")
 }
 
+func TestPersistedInvalidModUpdatePolicyFailsBeforePlanner(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-bad-policy", Name: "bad policy", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	overdue := time.Now().Add(-time.Hour)
+	task := &storage.ScheduledTask{
+		ID: "task-bad-policy", ServerID: server.ID, Name: "invalid stored policy",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", NextRun: &overdue,
+		Config: `{"enabled":true,"window":"unknown"}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Zero(t, planner.calls)
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, storage.ExecutionStatusFailed, executions[0].Status)
+}
+
 func TestValidateModUpdateConfigJSON(t *testing.T) {
 	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true}`))
 	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"idle","idle_minutes":15,"max_updates_per_run":3}`))

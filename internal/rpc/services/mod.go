@@ -495,7 +495,9 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			msg.GetUpdateApplyAtUnix(), msg.GetUpdateIdleMinutes())
 		if err != nil {
 			code := connect.CodeInternal
-			if errors.Is(err, storage.ErrUpdateBatchConflict) {
+			if errors.Is(err, errInvalidModUpdateWindow) {
+				code = connect.CodeInvalidArgument
+			} else if errors.Is(err, storage.ErrUpdateBatchConflict) {
 				code = connect.CodeFailedPrecondition
 			} else if strings.Contains(err.Error(), "server not found") || strings.Contains(err.Error(), "no mod updates") {
 				code = connect.CodeInvalidArgument

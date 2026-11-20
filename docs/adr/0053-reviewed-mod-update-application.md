@@ -66,7 +66,8 @@ request.
    mismatching request. Legacy config-only batches with no timed window
    still admit next-restart config alongside an independent cron row.
    On a config-only batch with no cron, an explicit
-   retarget changes the window and inserts the config in one transaction.
+   retarget resets the idle clock when the window changes. Config staging
+   snapshots the live baseline after admission, in the same write transaction.
    Config and content admission also check the publish and discard journal
    in their write transaction. A timed publisher rechecks its batch after
    obtaining the journal, so a retarget between selection and ownership
@@ -84,8 +85,9 @@ request.
 
 ## Consequences
 
-- An operator must explicitly select a preview and choose an apply window
-  before bytes enter a batch. Staging alone never restarts a server.
+- Manual staging requires an operator to select a preview and apply window.
+  An enabled scheduled policy selects compatible updates using its saved window.
+  Staging alone never restarts a server.
 - Backup, rollback, per-server serialization and apply-window semantics are
   exactly the staged-batch semantics already used for config and content.
 - An MCP catalog change must not expose the review-and-apply flow as a tool;

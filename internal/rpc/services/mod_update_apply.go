@@ -169,6 +169,13 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if len(selections) == 0 {
 		return nil, nil, nil, errors.New("no mod updates selected")
 	}
+	windowName, applyAt, idle, err := windowFromProto(window, applyAtUnix, idleMinutes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := storage.ValidateUpdateWindow(windowName, applyAt, idle); err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: %v", errInvalidModUpdateWindow, err)
+	}
 	// One live target appears once. A duplicated filename is skipped before
 	// any provider work so a repeated submission cannot repeat a download or
 	// create two staged rows for the same file.
@@ -226,10 +233,6 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	fetcher := s.candidateFetcher
 	if fetcher == nil {
 		fetcher = providerModCandidateFetcher{}
-	}
-	windowName, applyAt, idle := windowFromProto(window, applyAtUnix, idleMinutes)
-	if err := storage.ValidateUpdateWindow(windowName, applyAt, idle); err != nil {
-		return nil, nil, nil, err
 	}
 
 	// Compare the complete window before any persistent write or provider
@@ -409,7 +412,9 @@ func installedModLocation(root *os.Root, base, fileName string) (string, bool, e
 	return disabled, false, nil
 }
 
-func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) (storage.UpdateWindow, *time.Time, int) {
+var errInvalidModUpdateWindow = errors.New("invalid mod update window")
+
+func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) (storage.UpdateWindow, *time.Time, int, error) {
 	var applyAt *time.Time
 	if applyAtUnix > 0 {
 		value := time.Unix(applyAtUnix, 0).UTC()
@@ -417,10 +422,12 @@ func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes
 	}
 	switch window {
 	case v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME:
-		return storage.UpdateWindowAtTime, applyAt, 0
+		return storage.UpdateWindowAtTime, applyAt, 0, nil
 	case v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE:
-		return storage.UpdateWindowIdle, nil, int(idleMinutes)
+		return storage.UpdateWindowIdle, nil, int(idleMinutes), nil
+	case v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_UNSPECIFIED, v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART:
+		return storage.UpdateWindowNextRestart, nil, 0, nil
 	default:
-		return storage.UpdateWindowNextRestart, nil, 0
+		return "", nil, 0, fmt.Errorf("%w: unknown apply window %d", errInvalidModUpdateWindow, window)
 	}
 }

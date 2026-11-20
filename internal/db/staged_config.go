@@ -210,42 +210,6 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		return nil, fmt.Errorf("server not found")
 	}
 
-	live, err := s.GetServerConfig(ctx, serverID)
-	if err != nil {
-		if !errors.Is(err, ErrServerConfigNotFound) {
-			return nil, fmt.Errorf("failed to read current server config: %w", err)
-		}
-		live = s.CreateDefaultServerConfig(serverID)
-	}
-	current, err := ServerConfigToMap(live)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read current server config: %w", err)
-	}
-	if err := validateStagedConfigFields(live, changes); err != nil {
-		return nil, err
-	}
-
-	diff := DiffMaps(current, changes)
-	if len(diff) == 0 {
-		return nil, fmt.Errorf("no differences vs current config")
-	}
-	payload, err := json.Marshal(diff)
-	if err != nil {
-		return nil, err
-	}
-	baseSnap := make(map[string]any, len(diff))
-	for key := range diff {
-		if value, ok := current[key]; ok {
-			baseSnap[key] = value
-		} else {
-			baseSnap[key] = nil
-		}
-	}
-	basePayload, err := json.Marshal(baseSnap)
-	if err != nil {
-		return nil, err
-	}
-
 	window := opts.Window
 	if window == "" {
 		window = UpdateWindowNextRestart
@@ -256,15 +220,13 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 	staged := &StagedConfigChange{
 		ID:          uuid.New().String(),
 		ServerID:    serverID,
-		Payload:     string(payload),
-		BasePayload: string(basePayload),
 		ApplyMode:   mode,
 		CronExpr:    cronExpr,
 		ApplyAt:     opts.ApplyAt,
 		IdleMinutes: opts.IdleMinutes,
 		Status:      StagedStatusStaged,
 	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		batch, err := ensureOpenBatch(tx, serverID, window)
 		if err != nil {
 			return err
@@ -272,6 +234,43 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		if err := requireBatchAdmission(tx, serverID); err != nil {
 			return err
 		}
+		live := &ServerConfig{}
+		err = tx.Where("server_id = ?", serverID).First(live).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to read current server config: %w", err)
+			}
+			live = s.CreateDefaultServerConfig(serverID)
+		}
+		current, err := ServerConfigToMap(live)
+		if err != nil {
+			return fmt.Errorf("failed to read current server config: %w", err)
+		}
+		if err := validateStagedConfigFields(live, changes); err != nil {
+			return err
+		}
+
+		diff := DiffMaps(current, changes)
+		if len(diff) == 0 {
+			return fmt.Errorf("no differences vs current config")
+		}
+		payload, err := json.Marshal(diff)
+		if err != nil {
+			return err
+		}
+		baseSnap := make(map[string]any, len(diff))
+		for key := range diff {
+			if value, ok := current[key]; ok {
+				baseSnap[key] = value
+			} else {
+				baseSnap[key] = nil
+			}
+		}
+		basePayload, err := json.Marshal(baseSnap)
+		if err != nil {
+			return err
+		}
+
 		content, err := hasBatchContent(tx, batch.ID)
 		if err != nil {
 			return err
@@ -285,15 +284,27 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 			if err != nil {
 				return err
 			}
-			if content || cron || !opts.SetBatchWindow {
-				if !batchWindowMatches(batch, window, opts.ApplyAt, opts.IdleMinutes) {
+			if !batchWindowMatches(batch, window, opts.ApplyAt, opts.IdleMinutes) {
+				if content || cron {
 					return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
 				}
-			} else if err := setBatchWindow(tx, batch, window, mode, opts.ApplyAt, opts.IdleMinutes); err != nil {
-				return err
+				if !opts.SetBatchWindow {
+					pending, err := hasBatchConfig(tx, batch.ID)
+					if err != nil {
+						return err
+					}
+					if pending {
+						return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
+					}
+				}
+				if err := setBatchWindow(tx, batch, window, mode, opts.ApplyAt, opts.IdleMinutes); err != nil {
+					return err
+				}
 			}
 		}
 		staged.BatchID = batch.ID
+		staged.Payload = string(payload)
+		staged.BasePayload = string(basePayload)
 		return tx.Create(staged).Error
 	})
 	if err != nil {

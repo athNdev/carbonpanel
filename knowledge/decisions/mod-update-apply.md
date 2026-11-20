@@ -46,15 +46,15 @@ The scheduler invokes the same planner through an injected interface.
 - Reviewed content checks the complete window before work, at batch
   preparation, and at row insertion. Config targeting an open batch with
   content or an independent cron row must match its complete window. A
-  config-only retarget and its new row commit together. The SQLite write
-  transactions reject pending cron config and content symmetrically.
+  config-only retarget resets the idle clock. Admission snapshots live config
+  in the write transaction and excludes pending cron and content symmetrically.
 - Config and content cannot join while publication or discard owns the
   journal. The publisher rechecks batch changes after acquiring the journal.
 - Due publication of legacy mixed data excludes cron config from base checks,
   rollback reconciliation and publication. The remaining cron row and its
   trigger stay intact. Discard shares the operation lock, keeps its typed
   Connect refusals and records its own operation name.
-- The guarded World Library client bounds transfers, including rejected bytes.
-  Duplicate targets are refused and transient provider failures stay retryable.
+- The guarded HTTP client protects egress and redirects. Fetch and staging
+  bound candidate and total bytes, including rejected downloads.
 - The scheduler installs the planner first, uses timezones for cron, and
   skips dispatch if it cannot advance the task's next run.

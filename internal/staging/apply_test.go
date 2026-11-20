@@ -127,6 +127,38 @@ func TestSweepPublishesDueBatchAndLeavesFutureBatch(t *testing.T) {
 	require.NotNil(t, still)
 }
 
+func TestConfigStagingReadsBaselineAfterPriorBatchPublishes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "config-base-after-publish", Name: "config-base-after-publish", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	now := time.Now().UTC()
+	when := now.Add(-time.Minute)
+	first, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "published"}, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+
+	// Pause just before the config producer claims the writer. A due
+	// publisher commits and closes the original batch before staging resumes.
+	var published bool
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register("fixture:publish_before_staging_claim", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*storage.ServerUpdateBatch); !ok {
+			return
+		}
+		require.NoError(t, Sweep(ctx, store, nil, now, nil, func(context.Context, *storage.Server, Plan) error {
+			published = true
+			return nil
+		}))
+	}))
+	staged, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "after"}, storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.True(t, published)
+	require.NotEqual(t, first.BatchID, staged.BatchID)
+	require.JSONEq(t, `{"motd":"published"}`, staged.BasePayload)
+	_, err = store.ApplyStagedConfigChange(ctx, staged.ID)
+	require.NoError(t, err)
+}
+
 func TestSweepRejectsNewConfigAndContentDuringPublication(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)

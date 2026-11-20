@@ -1462,6 +1462,11 @@ func ValidateModUpdateConfigJSON(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return fmt.Errorf("invalid mod update policy: %w", err)
 	}
+	return ValidateModUpdateConfig(cfg)
+}
+
+// ValidateModUpdateConfig checks a decoded policy at the execution boundary.
+func ValidateModUpdateConfig(cfg storage.ModUpdateTaskConfig) error {
 	if cfg.MaxUpdatesPerRun < 0 || cfg.MaxUpdatesPerRun > maxAutomaticModUpdatesPerRun {
 		return fmt.Errorf("max_updates_per_run must be between 0 and %d", maxAutomaticModUpdatesPerRun)
 	}
@@ -1489,6 +1494,9 @@ func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Se
 	}
 	if !cfg.Enabled {
 		return "mod update policy is disabled; nothing staged", nil
+	}
+	if err := ValidateModUpdateConfig(cfg); err != nil {
+		return "", fmt.Errorf("invalid mod update policy: %w", err)
 	}
 	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
 		return "server is running; mod update policy skipped by running-server policy", nil

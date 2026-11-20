@@ -48,6 +48,14 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		if err := requireNoBatchCronConfig(tx, batch.ID); err != nil {
 			return err
 		}
+		// Legacy config-only rows used apply-mode spellings as their batch
+		// window. Once any cron row is gone, content can use the normal
+		// next-restart batch path alongside compatible config.
+		if batch.Window != string(UpdateWindowNextRestart) && batchWindowMatches(batch, UpdateWindowNextRestart, nil, 0) {
+			if err := setBatchWindow(tx, batch, UpdateWindowNextRestart, StagedApplyOnRestart, nil, 0); err != nil {
+				return err
+			}
+		}
 		if row.ID == "" {
 			row.ID = uuid.New().String()
 		}
@@ -167,6 +175,13 @@ func hasBatchContent(tx *gorm.DB, batchID string) (bool, error) {
 	return count > 0, err
 }
 
+func hasBatchConfig(tx *gorm.DB, batchID string) (bool, error) {
+	var count int64
+	err := tx.Model(&StagedConfigChange{}).
+		Where("batch_id = ? AND status = ?", batchID, StagedStatusStaged).Count(&count).Error
+	return count > 0, err
+}
+
 func hasBatchCronConfig(tx *gorm.DB, batchID string) (bool, error) {
 	var count int64
 	err := tx.Model(&StagedConfigChange{}).
@@ -230,12 +245,11 @@ func checkReviewedContentWindow(tx *gorm.DB, batch *ServerUpdateBatch, window Up
 	if err != nil {
 		return err
 	}
-	var configs int64
-	if err := tx.Model(&StagedConfigChange{}).
-		Where("batch_id = ? AND status = ?", batch.ID, StagedStatusStaged).Count(&configs).Error; err != nil {
+	configs, err := hasBatchConfig(tx, batch.ID)
+	if err != nil {
 		return err
 	}
-	if content || configs != 0 {
+	if content || configs {
 		return batchWindowConflict(batch, window, applyAt, idleMinutes)
 	}
 	return nil
@@ -315,10 +329,13 @@ func (s *Store) setOpenBatchWindow(ctx context.Context, serverID string, window 
 }
 
 func setBatchWindow(tx *gorm.DB, batch *ServerUpdateBatch, window UpdateWindow, mode StagedApplyMode, applyAt *time.Time, idleMinutes int) error {
-	if batch.Window != string(window) || !batchWindowMatches(batch, window, applyAt, idleMinutes) {
-		if err := tx.Model(batch).Updates(map[string]any{
-			"window": string(window), "apply_at": applyAt, "idle_minutes": idleMinutes,
-		}).Error; err != nil {
+	changed := !batchWindowMatches(batch, window, applyAt, idleMinutes)
+	if batch.Window != string(window) || changed {
+		updates := map[string]any{"window": string(window), "apply_at": applyAt, "idle_minutes": idleMinutes}
+		if changed {
+			updates["idle_since"] = nil
+		}
+		if err := tx.Model(batch).Updates(updates).Error; err != nil {
 			return err
 		}
 		batch.Window, batch.ApplyAt, batch.IdleMinutes = string(window), applyAt, idleMinutes
