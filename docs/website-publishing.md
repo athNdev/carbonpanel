@@ -199,7 +199,7 @@ python3 scripts/version_bump.py prepare --check
 python3 scripts/build_website.py
 python3 scripts/check_website.py
 python3 scripts/version_bump.py prepare --check --site .website-build/site
-cd scripts/manual-review/e2e && bun install --frozen-lockfile && bunx playwright install chromium && cd ../..
+cd scripts/manual-review/e2e && bun install --frozen-lockfile && bunx playwright install chromium && cd ../../..
 python3 scripts/changelog_browser_check.py
 ```
 

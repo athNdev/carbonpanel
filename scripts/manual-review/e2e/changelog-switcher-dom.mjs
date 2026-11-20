@@ -43,6 +43,12 @@ try {
       });
       const entry = {
         html: await page.evaluate(() => document.documentElement.outerHTML),
+        // textContent (not innerText): the channel line has CSS capitalize,
+        // which would otherwise disguise the exact rendered version string.
+        banner: await page.evaluate(
+          () => document.querySelector(".version-banner")?.textContent || ""),
+        links: await page.evaluate(() => Array.from(document.querySelectorAll("a[href]"))
+          .map((a) => ({ href: a.getAttribute("href"), text: a.textContent || "" }))),
         status: response ? response.status() : null,
         url: page.url(),
       };

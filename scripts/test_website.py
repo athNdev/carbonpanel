@@ -474,6 +474,20 @@ class ChannelChangelogTests(unittest.TestCase):
             self.assertIn(f"https://carbonpanel.dev/panel{expected}", sub)
             self.assertNotIn(f"https://carbonpanel.dev{expected})", sub)
 
+    def test_candidate_staging_counterparts_stay_at_the_global_site_root(self):
+        """A non-active probe path is not a deployment subpath."""
+        index = copy.deepcopy(self.index)
+        revision = "f" * 40
+        staging = f"/docs/candidate/{revision}/"
+        for version in index["versions"]:
+            if version["channel"] == "nightly":
+                version["route"] = version["immutable_route"] = staging
+        current = next(v for v in index["versions"] if v["channel"] == "nightly")
+        page = changelog_page.render(index, current, self.declaration, self.notes,
+                                     base=staging, staging=True)
+        self.assertIn("https://carbonpanel.dev/docs/changelog/", page)
+        self.assertNotIn(staging + "docs/changelog/", page)
+
     def test_presentation_hash_is_lf_stable_and_notes_are_utf8_clean(self):
         root = Path(__file__).resolve().parent.parent
         notes_rel = self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"]

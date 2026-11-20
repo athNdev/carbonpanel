@@ -128,16 +128,19 @@ def presentation_fingerprint(root=ROOT):
             "schema_version": 1, "inputs": payload}
 
 
-def render(index, current, declaration, notes, site="https://carbonpanel.dev", base="/"):
+def render(index, current, declaration, notes, site="https://carbonpanel.dev", base="/",
+           staging=False):
     """Render one channel-correct changelog page; caller writes it as MDX.
 
-    Counterpart links honour the deployment subpath (`--base`): a root-relative
-    URL would point outside a subpath installation.
+    Counterpart links honour a real deployment subpath (`--base`): a root-
+    relative URL would point outside a subpath installation. A candidate probe
+    uses a NON-ACTIVE staging path, not a deployment subpath, so its counterparts
+    stay canonical until the verified promotion commits them.
     """
     if not base.startswith("/") or not base.endswith("/") or ".." in base:
         raise ValueError("changelog deployment base must be an absolute path ending in /")
     origin = site.rstrip("/")
-    prefix = origin + base.rstrip("/")
+    prefix = origin if staging else origin + base.rstrip("/")
 
     def counterpart_url(route):
         return prefix + "/" + route.strip("/") + "/changelog/"

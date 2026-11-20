@@ -259,7 +259,8 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     declaration = changelog_page.load_source(root)
     notes = changelog_page.load_notes(root, declaration)
     (project / changelog_page.GENERATED_PAGE).write_text(
-        changelog_page.render(index, current, declaration, notes, site, root_base),
+        changelog_page.render(index, current, declaration, notes, site, root_base,
+                              staging=base.startswith("/docs/candidate/")),
         encoding="utf-8")
     (project / "public/presentation.json").write_text(
         json.dumps(changelog_page.presentation_fingerprint(root), indent=2) + "\n",

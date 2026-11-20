@@ -87,6 +87,8 @@ def main():
                        nightly_route: stable_route}
         stable_labels = (str(stable["version"]), str(stable["tag"]))
         nightly_labels = ("Nightly", "rolling " + nightly["commit"][:12])
+        canonical = (index["repository"].rstrip("/")
+                     + "/releases/tag/" + str(stable["tag"]))
         routes = (stable_route, nightly_route, archive)
 
         requests = []
@@ -115,11 +117,20 @@ def main():
                     failures.append(f"{key}: expected exactly one H1, found {h1}")
                 body = text_of(html)
                 labels = nightly_labels if path == nightly_route else stable_labels
+                banner = text_of(str(entry.get("banner") or ""))
+                if not banner:
+                    failures.append(f"{key}: .version-banner text is empty")
                 for label in labels:
-                    if label not in body:
-                        failures.append(f"{key}: banner is missing {label!r}")
+                    if label not in banner:
+                        failures.append(f"{key}: .version-banner is missing {label!r}")
                 if "Canonical GitHub release notes" not in body:
                     failures.append(f"{key}: missing canonical release-note link")
+                links = entry.get("links") or []
+                if not any(isinstance(link, dict) and link.get("href") == canonical
+                           and str(stable["tag"]) in str(link.get("text") or "")
+                           for link in links):
+                    failures.append(f"{key}: canonical release-note anchor href is missing "
+                                    f"or wrong: {canonical}")
                 for stale in STALE:
                     if stale in body:
                         failures.append(f"{key}: stale heading {stale!r}")
