@@ -437,12 +437,6 @@ jobs:
           python3 scripts/release.py nightly-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
             --ci-verified "$CI_VERIFIED" --auto-bind-previous --apply
-      - name: Sync Docker Hub repository description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: atharvnaphade/carbonpanel
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. Image publication must not
+      # overwrite it with a raw, older README or a moving-source description.

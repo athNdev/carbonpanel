@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: MPL-2.0
+# Sole owner of the public Docker Hub full_description for atharvnaphade/carbonpanel.
+# It derives a compact Docker-focused body from README.md and the published
+# version contract, publishes only on drift/manual recovery, and proves the
+# result by reading the public repository body back from Docker Hub.
+# No image, tag, release, Pages or deployment write happens in this workflow.
+name: Docker Hub description
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - docs/dockerhub-description.json
+      - docs/version-index.json
+      - scripts/dockerhub_description.py
+      - scripts/test_dockerhub_description.py
+      - .github/workflows/dockerhub-description.yml
+  # A trusted successful Stable release is an immediate refresh signal. The
+  # job gate below still requires a successful run on main, and the generator
+  # resolves the live published version index rather than a lagging baseline.
+  workflow_run:
+    workflows: ['Carbon Panel Release']
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Manual recovery: rewrite the body even if the public read-back already matches'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-description
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Reconcile Docker Hub description
+    runs-on: ubuntu-24.04
+    # Never run from a fork PR or an unsuccessful/unrelated release run.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: Checkout workflow scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve target main commit
+        id: target
+        # Scheduled, dispatch and workflow_run events start in an empty
+        # workspace with no `origin` remote. The GitHub refs API resolves the
+        # current main head without depending on a checkout or cached state.
+        run: |
+          python3 scripts/dockerhub_description.py resolve-main \
+            --repository "${{ github.repository }}" \
+            --event "${{ github.event_name }}" \
+            --event-sha "${{ github.sha }}"
+
+      - name: Checkout the target commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Assert checked-out HEAD equals the target commit
+        env:
+          EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "::error::HEAD $actual differs from target $EXPECTED_SHA"
+            exit 1
+          fi
+
+      - name: Generate the expected Docker-focused body
+        id: generated
+        run: |
+          python3 scripts/dockerhub_description.py generate \
+            --config docs/dockerhub-description.json \
+            --readme README.md \
+            --output dockerhub-description.generated.md
+
+      - name: Compare the public body with the generated body
+        id: drift
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            python3 scripts/dockerhub_description.py check \
+              --expected dockerhub-description.generated.md --force
+          else
+            python3 scripts/dockerhub_description.py check \
+              --expected dockerhub-description.generated.md
+          fi
+
+      - name: Re-resolve main head for the promotion race guard
+        id: recheck
+        run: |
+          python3 scripts/dockerhub_description.py resolve-main \
+            --repository "${{ github.repository }}" --event schedule
+
+      - name: Guard against promotion race
+        run: |
+          python3 scripts/dockerhub_description.py assert-head \
+            --expected "${{ steps.target.outputs.sha }}" \
+            --observed "${{ steps.recheck.outputs.sha }}"
+
+      - name: Preflight Docker Hub write credentials
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/dockerhub_description.py require-credentials
+
+      - name: Publish derived body (drift or manual recovery only)
+        if: steps.drift.outputs.changed == 'true'
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: atharvnaphade/carbonpanel
+          readme-filepath: dockerhub-description.generated.md
+          short-description: ${{ steps.generated.outputs.short_description }}
+          enable-url-completion: false
+
+      - name: Guard against promotion race after write
+        run: |
+          sha=$(python3 scripts/dockerhub_description.py resolve-main \
+            --repository "${{ github.repository }}" --event schedule | tail -n 1)
+          python3 scripts/dockerhub_description.py assert-head \
+            --expected "${{ steps.target.outputs.sha }}" --observed "$sha"
+
+      - name: Verify public read-back
+        run: |
+          python3 scripts/dockerhub_description.py verify \
+            --expected dockerhub-description.generated.md \
+            --check-short-description
+
+      - name: Summarize reconciliation
+        env:
+          CHANGED: ${{ steps.drift.outputs.changed }}
+          EXPECTED_BYTES: ${{ steps.drift.outputs.expected_bytes }}
+          EXPECTED_SHA: ${{ steps.drift.outputs.expected_sha256 }}
+          STABLE: ${{ steps.generated.outputs.stable_version }}
+        run: |
+          {
+            echo "### Docker Hub description"
+            echo "- Stable from published contract: \`$STABLE\`"
+            echo "- Expected body: $EXPECTED_BYTES UTF-8 bytes, sha256 \`$EXPECTED_SHA\`"
+            echo "- Public write performed: $CHANGED"
+            echo "- Public page: https://hub.docker.com/r/atharvnaphade/carbonpanel"
+          } >> "$GITHUB_STEP_SUMMARY"
