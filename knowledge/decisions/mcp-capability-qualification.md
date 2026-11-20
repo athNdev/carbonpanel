@@ -12,7 +12,7 @@ sources:
   - title: MCP stable build compatibility
     resource: https://carbonpanel.atlassian.net/browse/OSS-353
   - title: MCP operator guide
-    resource: docs/carbon-panel/src/content/docs/guides/mcp-server.mdx
+    resource: ../../docs/carbon-panel/src/content/docs/guides/mcp-server.mdx
 ---
 
 # Choice
