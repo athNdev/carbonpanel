@@ -45,3 +45,6 @@ sources:
 - Import records a library-relative archive key. Preview and bind resolve it
   under the configured World Library root and accept legacy paths within that
   root. Bind validates the archive path before stopping the running server.
+- Match Java world data versions to the release JAR's `version.json`
+  `world_version`. Java 1.21.1 writes 3955 and Java 1.21 writes 3953, even
+  though they share a network protocol version.
