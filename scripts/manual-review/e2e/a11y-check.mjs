@@ -133,6 +133,7 @@ const FLEET = [
 // The shell focus prefix is stable; the sidebar nav collapses below 768, so
 // only its first three stops are asserted at the narrowest viewport.
 const SHELL_FOCUS = [
+	'Skip to content',
 	'Toggle Navigation',
 	'Carbon Panel',
 	'A1 A11y Reviewer',
@@ -646,6 +647,116 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				});
 			}
 
+      await check(
+        `shell @${width} ${theme}: skip link and off-canvas focus containment`,
+        async () => {
+          const state = await page.evaluate(() => ({
+            main: Boolean(document.getElementById("carbon-main")),
+            skip:
+              document
+                .querySelector('a[href="#carbon-main"]')
+                ?.textContent?.trim() ?? null,
+            navInert: document.getElementById("carbon-sidenav")?.inert ?? false,
+          }));
+          if (
+            !state.main ||
+            state.skip !== "Skip to content" ||
+            state.navInert !== (width === 360)
+          ) {
+            throw new Error(
+              `shell keyboard seam incomplete: ${JSON.stringify(state)}`,
+            );
+          }
+          return state;
+        },
+      );
+
+      await page.goto(root + "/", { waitUntil: "domcontentloaded" });
+      await page
+        .getByRole("heading", { name: "Cluster Overview", level: 1 })
+        .waitFor();
+      await check(
+        `shell @${width} ${theme}: skip link and profile menu keyboard restoration`,
+        async () => {
+          await page.locator("body").click({ position: { x: 2, y: 2 } });
+          await page.keyboard.press("Tab");
+          const skipFocused = await page.evaluate(
+            () =>
+              document.activeElement?.textContent?.trim() === "Skip to content",
+          );
+          await page.keyboard.press("Enter");
+          const landed = await page.evaluate(
+            () => document.activeElement?.id ?? null,
+          );
+          await page.keyboard.press("Tab");
+          const nextInMain = await page.evaluate(() =>
+            Boolean(document.activeElement?.closest("main")),
+          );
+          const trigger = page.locator('[aria-haspopup="menu"]');
+          await trigger.focus();
+
+          await page.keyboard.press("Enter");
+          const menu = page.locator('[role="menu"]');
+          await menu.waitFor();
+          await page.locator('[role="menuitem"]').first().focus();
+          await page.keyboard.press("Escape");
+          await menu.waitFor({ state: "detached" });
+          await page.waitForFunction(
+            () =>
+              document.activeElement ===
+              document.querySelector('[aria-haspopup="menu"]'),
+            null,
+            { timeout: 3000 },
+          );
+          const menuEscapeRestored = true;
+
+          const dialogResults = {};
+          for (const [label, title] of [
+            ["Profile", "Profile"],
+            ["Preferences", "Preferences"],
+          ]) {
+            await trigger.focus();
+            await page.keyboard.press("Enter");
+            await menu.waitFor();
+            await page
+              .getByRole("menuitem", { name: label, exact: true })
+              .click();
+            const dialog = page.getByRole("dialog");
+            await dialog.waitFor();
+            const heading = await dialog.getAttribute("aria-labelledby");
+            dialogResults[label] = Boolean(heading);
+            await page.keyboard.press("Escape");
+            await dialog.waitFor({ state: "detached" });
+            await page.waitForFunction(
+              () =>
+                document.activeElement ===
+                document.querySelector('[aria-haspopup="menu"]'),
+              null,
+              { timeout: 3000 },
+            );
+            dialogResults[`${label}FocusRestored`] = true;
+          }
+
+          if (
+            !skipFocused ||
+            landed !== "carbon-main" ||
+            !nextInMain ||
+            !menuEscapeRestored ||
+            Object.values(dialogResults).some((value) => !value)
+          ) {
+            throw new Error(
+              `shell keyboard restoration incomplete: ${JSON.stringify({ skipFocused, landed, nextInMain, menuEscapeRestored, dialogResults })}`,
+            );
+          }
+          return {
+            skipFocused,
+            landed,
+            nextInMain,
+            menuEscapeRestored,
+            dialogResults,
+          };
+        },
+      );
 			for (const path of ['/servers', '/servers/srv-1']) {
 				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
 				await page.locator('h1').first().waitFor();
@@ -810,7 +921,11 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.keyboard.press('ArrowLeft');
 				return { initial, focusedAfterArrowRight: focused, after };
 			});
-		}
+      await page.goto(root + "/servers/srv-1", {
+        waitUntil: "domcontentloaded",
+      });
+      await page.locator("#server-detail-tabs-tab-world").click();
+      await page.locator("[data-server-tab-panel]").waitFor();		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await check(`route /servers ${theme}: empty state is exposed`, async () => {
@@ -877,8 +992,16 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByLabel('Username', { exact: true }).fill('review');
 				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
 				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-				await page.getByText('Invalid username or password', { exact: false }).first().waitFor();
-				return { path: await page.evaluate(() => location.pathname), error: true, metrics };
+				const announced = page
+					.getByRole('alert')
+					.filter({ hasText: 'Invalid username or password' });
+				await announced.first().waitFor();
+				return {
+					path: await page.evaluate(() => location.pathname),
+					error: true,
+					announced: await announced.count(),
+					metrics
+				};
 			});
 		}
 	} finally {

@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import type { Component, Snippet } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import {
 		Blocks,
@@ -48,6 +48,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let sideNavExpanded = $state(true);
 	let profileOpen = $state(false);
+	// Bound to the exact header menu trigger: a page-level menu or a remount
+	// must never receive focus restored from these shell dialogs.
+	let profileTriggerButton: HTMLButtonElement | null = $state(null);
 	let profileDialogOpen = $state(false);
 	let prefsOpen = $state(false);
 	let passwordOld = $state('');
@@ -63,6 +66,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function closeProfile() {
 		profileOpen = false;
+	}
+
+	async function restoreProfileFocus() {
+		await tick();
+		if (profileTriggerButton?.isConnected) profileTriggerButton.focus();
 	}
 
 	function openProfileDialog() {
@@ -114,6 +122,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function handleProfileKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
 			profileOpen = false;
+			// The focused menuitem is removed with the menu; return focus to
+			// the trigger instead of dropping the user at the document root.
+			void tick().then(() => profileTriggerButton?.focus());
 		}
 	}
 	let servers = $derived($activitySortedServers);
@@ -242,6 +253,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<header
 		class="fixed top-0 right-0 left-0 z-50 flex h-12 items-center justify-between border-b border-border bg-background px-3"
 	>
+		<a
+			href="#carbon-main"
+			class="focus-ring sr-only focus:not-sr-only focus:absolute focus:top-1 focus:left-2 focus:z-60 focus:bg-background focus:px-2 focus:py-1 focus:text-xs"
+		>
+			Skip to content
+		</a>
 		<div class="flex items-center gap-2">
 			<!-- Hamburger Button -->
 			<button
@@ -284,6 +301,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<div class="relative flex items-center gap-2 border-l border-border pl-2">
 					<button
 						type="button"
+						bind:this={profileTriggerButton}
 						class="focus-ring motion-press flex items-center gap-2 px-1 py-1 transition-colors hover:bg-accent"
 						aria-haspopup="menu"
 						aria-expanded={profileOpen}
@@ -313,6 +331,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div
 							role="menu"
 							aria-label="Profile"
+							onkeydown={handleProfileKeydown}
 							class="absolute top-full right-0 z-50 mt-1 w-44 border border-border bg-popover py-1 shadow-[var(--carbon-shadow-overlay)]"
 						>
 							<button
@@ -352,6 +371,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- IBM Carbon SideNav: off-canvas overlay on narrow screens, rail/panel on md+ -->
 		<aside
 			id="carbon-sidenav"
+			inert={isMobile && !sideNavExpanded}
 			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
 				? 'translate-x-0'
 				: '-translate-x-full'} {sideNavExpanded ? 'md:w-64' : 'md:w-12'} md:translate-x-0"
@@ -426,6 +446,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Main Content Area -->
 		<main
+			id="carbon-main"
+			tabindex="-1"
 			class="scrollbar-stable ml-0 flex min-h-0 flex-1 flex-col overflow-y-auto p-4 transition-[margin] duration-(--motion-fast) ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
 				? 'md:ml-64'
 				: 'md:ml-12'}"
@@ -442,7 +464,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		description="Signed-in account summary"
 		size="md"
 		hasFooter={false}
-		onclose={() => (profileDialogOpen = false)}
+		onclose={() => {
+			profileDialogOpen = false;
+			void restoreProfileFocus();
+		}}
 	>
 		{#if user}
 			<div class="space-y-3">
@@ -538,5 +563,5 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</CarbonModal>
 
-	<PreferencesDialog bind:open={prefsOpen} />
+	<PreferencesDialog bind:open={prefsOpen} onclose={() => void restoreProfileFocus()} />
 </div>

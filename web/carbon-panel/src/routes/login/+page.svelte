@@ -289,6 +289,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if error}
 			{#key error}
 				<div
+					role="alert"
 					class="motion-rise-in mb-6 flex items-start gap-2.5 rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
 				>
 					<AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
@@ -349,13 +350,13 @@ one at https://mozilla.org/MPL/2.0/.
 					{/if}
 				</div>
 
-				<CarbonButton type="submit" class="w-full justify-center rounded-none" disabled={loading}>
-					{#if loading}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Creating admin account...
-					{:else}
-						Create Admin Account
-					{/if}
+				<CarbonButton
+					type="submit"
+					class="w-full justify-center rounded-none"
+					disabled={loading}
+					{loading}
+				>
+					{loading ? 'Creating admin account...' : 'Create Admin Account'}
 				</CarbonButton>
 			</form>
 		{:else}
@@ -389,13 +390,9 @@ one at https://mozilla.org/MPL/2.0/.
 								type="submit"
 								class="w-full justify-center rounded-none"
 								disabled={loading}
+								{loading}
 							>
-								{#if loading}
-									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-									Signing in...
-								{:else}
-									Sign In
-								{/if}
+								{loading ? 'Signing in...' : 'Sign In'}
 							</CarbonButton>
 						</form>
 					{/if}
