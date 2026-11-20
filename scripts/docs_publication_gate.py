@@ -45,7 +45,19 @@ NIGHTLY_BASELINE = {
 PAGES_ARTIFACT_NAME = "github-pages"
 # A rollback becomes the latest successful Pages deployment and serves this
 # narrowly named artifact; it is a valid baseline once its bytes are validated.
-PAGES_ARTIFACT_NAMES = ("github-pages", "github-pages-prior")
+PAGES_DEPLOY_STEPS = {
+    "Deploy the full canonical stage artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the final canonical artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the selected Pages artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the full preserved site once": PAGES_ARTIFACT_NAME,
+    "Deploy to GitHub Pages": PAGES_ARTIFACT_NAME,
+    "Deploy the synchronized stable docs marker once": PAGES_ARTIFACT_NAME,
+    "Deploy the off-path Stable candidate probe": "github-pages-stable-probe",
+    "Deploy the exact prior docs bytes": "github-pages-prior",
+    "Restore prior stable docs after a failed synchronized transaction": "github-pages-prior-stable",
+    "Deploy the exact prior stable docs bytes": "github-pages-prior-stable",
+}
+PAGES_ARTIFACT_NAMES = tuple(dict.fromkeys(PAGES_DEPLOY_STEPS.values()))
 PAGES_ENVIRONMENT = "github-pages"
 LIVE_INDEX_URL = "https://carbonpanel.dev/version-index.json"
 DEPLOYMENT_STATES = frozenset({
@@ -522,8 +534,9 @@ def recheck_main_tip(repository, expected):
             "tip": first, "expected": expected}
 
 
-def pages_deployment_identity(deployments, statuses_by_id, environment=PAGES_ENVIRONMENT):
-    """Resolve the last SUCCESSFUL Pages deployment, independent of artifacts."""
+def pages_deployment_identity(deployments, statuses_by_id, get_job,
+                              environment=PAGES_ENVIRONMENT):
+    """Resolve the last job with an actual successful Pages deploy step."""
     candidates = [item for item in (deployments or [])
                   if isinstance(item, dict) and item.get("environment") == environment]
     if not candidates:
@@ -537,37 +550,53 @@ def pages_deployment_identity(deployments, statuses_by_id, environment=PAGES_ENV
         state = str(statuses[0].get("state") or "").lower()
         if state not in DEPLOYMENT_STATES:
             return None, f"deployment {deployment.get('id')} has unknown state {state!r}"
-        if state != "success":
+        # A rollback job can deliberately fail its final workflow assertion
+        # after restoring Pages successfully. The deploy step is authoritative.
+        if state not in {"success", "failure", "error", "inactive"}:
             continue
-        match = re.search(r"/actions/runs/(\d+)", str(statuses[0].get("target_url") or ""))
+        match = re.search(r"/actions/runs/(\d+)/job/(\d+)$", str(statuses[0].get("target_url") or ""))
         if not match:
-            return None, f"successful deployment {deployment.get('id')} has no resolvable run id"
-        return {"deployment_id": str(deployment.get("id")), "run_id": match.group(1),
+            return None, f"completed deployment {deployment.get('id')} has no resolvable job id"
+        run_id, job_id = match.groups()
+        job = get_job(job_id)
+        if (str(job.get("id")) != job_id or str(job.get("run_id")) != run_id
+                or job.get("head_sha") != deployment.get("sha")):
+            return None, f"deployment {deployment.get('id')} does not match its Actions job"
+        steps = []
+        for step in job.get("steps") or []:
+            name = step.get("name", "")
+            artifact_name = PAGES_DEPLOY_STEPS.get(name)
+            if name.startswith("Run actions/deploy-pages@"):
+                artifact_name = PAGES_ARTIFACT_NAME
+            if artifact_name:
+                steps.append((step, artifact_name))
+        if not steps:
+            return None, f"deployment {deployment.get('id')} has no recognized Pages deploy steps"
+        attempted = [entry for entry in steps if entry[0].get("conclusion") != "skipped"]
+        if not attempted:
+            continue
+        step, artifact_name = max(attempted, key=lambda entry: entry[0]["number"])
+        if step.get("conclusion") != "success":
+            return None, f"deployment {deployment.get('id')} has an unverified final Pages step"
+        return {"deployment_id": str(deployment.get("id")), "run_id": run_id,
                 "sha": str(deployment.get("sha") or ""),
+                "job_id": job_id, "deploy_step": step["name"], "artifact_name": artifact_name,
                 "environment": environment, "state": "success"}, ""
-    return None, "no successful github-pages deployment was observed"
+    return None, "no actual successful github-pages deploy step was observed"
 
 
-def pages_baseline_from_deployments(deployments, statuses_by_id, artifacts_by_run=None,
-                                    environment=PAGES_ENVIRONMENT):
-    """Resolve deployment identity, then name its candidate Pages artifacts.
-
-    Artifact availability never hides the deployment SHA. A normal run may hold
-    both `github-pages` and `github-pages-prior`; the fetch step disambiguates
-    them by verifying exact current live bytes (source manifests included).
-    """
-    identity, reason = pages_deployment_identity(deployments, statuses_by_id, environment)
-    if not identity:
-        return None, reason
-    artifacts = (artifacts_by_run or {}).get(identity["run_id"]) or []
+def pages_baseline_artifact(identity, artifacts):
+    """Select only the artifact used by the proven deployment step."""
     candidates = [artifact for artifact in artifacts
                   if isinstance(artifact, dict)
-                  and artifact.get("name") in PAGES_ARTIFACT_NAMES
+                  and artifact.get("name") == identity["artifact_name"]
                   and not artifact.get("expired") and artifact.get("id")]
     if not candidates:
-        return {**identity, "artifact_id": "", "artifact_name": "",
+        return {**identity, "artifact_id": "",
                 "artifact_candidates": [], "artifact_verified": False}, (
                     "deployment resolved; its Pages artifact is unavailable or expired")
+    if len(candidates) != 1:
+        return None, "the deploying run has multiple artifacts with the deployed name"
     return {**identity,
             "artifact_id": str(candidates[0]["id"]),
             "artifact_name": candidates[0].get("name", ""),
@@ -602,16 +631,13 @@ def pages_baseline(repository):
         identifier = str(deployment.get("id"))
         statuses_by_id[identifier] = json.loads(
             api(f"{root}/deployments/{identifier}/statuses?per_page=10"))
-    artifacts_by_run = {}
-    for statuses in statuses_by_id.values():
-        if not statuses or str(statuses[0].get("state") or "").lower() != "success":
-            continue
-        match = re.search(r"/actions/runs/(\d+)", str(statuses[0].get("target_url") or ""))
-        if not match or match.group(1) in artifacts_by_run:
-            continue
-        listing = json.loads(api(f"{root}/actions/runs/{match.group(1)}/artifacts?per_page=100"))
-        artifacts_by_run[match.group(1)] = listing.get("artifacts") or []
-    return pages_baseline_from_deployments(deployments, statuses_by_id, artifacts_by_run)
+    identity, reason = pages_deployment_identity(
+        deployments, statuses_by_id,
+        lambda job_id: json.loads(api(f"{root}/actions/jobs/{job_id}")))
+    if not identity:
+        return None, reason
+    listing = json.loads(api(f"{root}/actions/runs/{identity['run_id']}/artifacts?per_page=100"))
+    return pages_baseline_artifact(identity, listing.get("artifacts") or [])
 
 
 def _extract_pages_artifact(archive, destination):
@@ -1119,6 +1145,7 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
     deployment predating maintained guides gets no stamped receipt: its real
     pages are compared byte-for-byte against live instead.
     """
+    root = Path(root).resolve()
     if not valid_commit(deployment_sha):
         raise ValueError("recovery needs the exact deployment commit SHA")
     if subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
@@ -1430,7 +1457,7 @@ def main():
     elif args.command == "fetch-prior-pages":
         api, _ = github_api(args.repository)
         live = urllib.request.urlopen(args.live_url, timeout=60).read()
-        if args.run_id and not args.artifact_id:
+        if args.run_id:
             listing = json.loads(api(
                 f"https://api.github.com/repos/{args.repository}/actions/runs"
                 f"/{args.run_id}/artifacts?per_page=100"))

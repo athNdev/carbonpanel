@@ -110,12 +110,13 @@ Before any deploy the shared `docs_publication_gate` resolves the live
 Stable/Nightly receipt, rebuilds the **full** two-channel site from that exact
 state plus the tested guide bytes, and proves it preserves the same commit,
 digest, selector and rendered canonical pages. Rollback bytes come from the
-**last successful github-pages deployment**: its success status resolves the
-exact workflow run and the named archived artifact, and that artifact is
+**last successful GitHub Pages deploy step**. Follow the deployment status
+to its exact Actions job, skip jobs whose Pages steps were all skipped, and
+select the archived artifact named by the final deploy step. That artifact is
 accepted only when its index, receipts, manifests and every declared page are
 byte-equal to the live site. An equal `version-index.json` alone is never
 enough — a docs-only rebuild can share it while serving different guide bytes.
-Only when that artifact has expired may the gate reconstruct a baseline from
+Only when that artifact is no longer retained may the gate reconstruct a baseline from
 the exact deployment SHA confirmed on `origin/main`, in a separate worktree;
 live state is re-qualified and all live bytes compared, and the result is
 reported as `reconstructed`, never as the original artifact. A missing or

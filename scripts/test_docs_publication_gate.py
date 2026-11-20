@@ -4,6 +4,7 @@ import argparse
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -379,73 +380,103 @@ class GuideLivenessTests(unittest.TestCase):
 
 
 class PagesBaselineTests(unittest.TestCase):
-    DEPLOYMENT = "7924139974"
-    RUN = "44602759613"
-    ARTIFACT = "14568077771"
-    SHA = "f93c3a9a5b1ee900bb55bbb1c59307b93cced431"
+    DEPLOYMENT = "7948601117"
+    RUN = "44786485570"
+    JOB = "136463335046"
+    ARTIFACT = "14654581812"
+    SHA = "2245f1669381afaff49381cb3f3ac153786c8085"
 
     def fixture(self):
         deployments = [
             {"id": self.DEPLOYMENT, "environment": "github-pages", "sha": self.SHA,
-             "created_at": "2026-11-19T19:53:09Z"},
-            {"id": "7912890948", "environment": "github-pages", "sha": "6" * 40,
-             "created_at": "2026-11-19T12:19:59Z"},
+             "created_at": "2026-11-20T17:47:49Z"},
+            {"id": "7948700163", "environment": "github-pages", "sha": self.SHA,
+             "created_at": "2026-11-20T17:52:45Z"},
+            {"id": "7951625248", "environment": "github-pages", "sha": "86f80535011072c45f2cf951cb4078d675398f08",
+             "created_at": "2026-11-20T20:19:30Z"},
         ]
         statuses = {
             self.DEPLOYMENT: [{"state": "success", "target_url":
                                "https://github.com/athNdev/carbonpanel/actions/runs/"
-                               + self.RUN + "/job/1"}],
-            "7912890948": [{"state": "success", "target_url":
+                               + self.RUN + "/job/" + self.JOB}],
+            "7948700163": [{"state": "success", "target_url":
                             "https://github.com/athNdev/carbonpanel/actions/runs/"
-                            "44500000000/job/1"}],
+                            + self.RUN + "/job/136466009627"}],
+            "7951625248": [{"state": "success", "target_url":
+                            "https://github.com/athNdev/carbonpanel/actions/runs/"
+                            "44809544673/job/136544870678"}],
         }
-        artifacts = {
-            self.RUN: [{"id": self.ARTIFACT, "name": "github-pages", "expired": False,
-                        "workflow_run": {"id": int(self.RUN), "head_sha": self.SHA}}],
-            "44500000000": [{"id": "111", "name": "github-pages", "expired": False}],
+        jobs = {
+            self.JOB: {"id": int(self.JOB), "run_id": int(self.RUN), "head_sha": self.SHA, "steps": [
+                {"number": 1, "name": "Deploy the off-path Stable candidate probe", "conclusion": "success"},
+                {"number": 2, "name": "Deploy the synchronized stable docs marker once", "conclusion": "success"},
+            ]},
+            "136466009627": {"id": 136466009627, "run_id": int(self.RUN), "head_sha": self.SHA, "steps": [
+                {"number": 1, "name": "Deploy the exact prior stable docs bytes", "conclusion": "skipped"},
+            ]},
+            "136544870678": {"id": 136544870678, "run_id": 44809544673,
+                             "head_sha": deployments[-1]["sha"], "steps": [
+                {"number": 1, "name": "Deploy the final canonical artifact", "conclusion": "skipped"},
+                {"number": 2, "name": "Deploy the exact prior docs bytes", "conclusion": "skipped"},
+            ]},
         }
-        return deployments, statuses, artifacts
+        artifacts = [
+            {"id": self.ARTIFACT, "name": "github-pages", "expired": False},
+            {"id": "14653469517", "name": "github-pages-prior-stable", "expired": False},
+            {"id": "14654218656", "name": "github-pages-stable-probe", "expired": False},
+        ]
+        return deployments, statuses, jobs, artifacts
 
     def test_observed_latest_success_resolves_to_exact_artifact(self):
-        deployments, statuses, artifacts = self.fixture()
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, artifacts)
+        deployments, statuses, jobs, artifacts = self.fixture()
+        identity, reason = gate.pages_deployment_identity(deployments, statuses, jobs.get)
+        self.assertEqual(reason, "")
+        baseline, reason = gate.pages_baseline_artifact(identity, artifacts)
         self.assertEqual(reason, "")
         self.assertEqual((baseline["deployment_id"], baseline["run_id"],
                           baseline["artifact_id"], baseline["sha"]),
                          (self.DEPLOYMENT, self.RUN, self.ARTIFACT, self.SHA))
 
     def test_unknown_state_fails_closed(self):
-        deployments, statuses, artifacts = self.fixture()
-        statuses[self.DEPLOYMENT][0]["state"] = "in_progress"
-        baseline, _ = gate.pages_baseline_from_deployments(
-            deployments, statuses, artifacts)
-        self.assertEqual(baseline["run_id"], "44500000000")
-        statuses[self.DEPLOYMENT][0]["state"] = "unrecognised"
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, artifacts)
+        deployments, statuses, jobs, _ = self.fixture()
+        statuses["7951625248"][0]["state"] = "in_progress"
+        baseline, _ = gate.pages_deployment_identity(deployments, statuses, jobs.get)
+        self.assertEqual(baseline["run_id"], self.RUN)
+        statuses["7951625248"][0]["state"] = "unrecognised"
+        baseline, reason = gate.pages_deployment_identity(deployments, statuses, jobs.get)
         self.assertIsNone(baseline)
         self.assertIn("unknown state", reason)
 
-    def test_two_artifacts_and_all_expired_keep_deployment_identity(self):
-        deployments, statuses, artifacts = self.fixture()
-        artifacts[self.RUN].append(
-            {"id": "222", "name": "github-pages-prior", "expired": False})
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, artifacts)
+    def test_rollback_selects_its_own_artifact_and_expiry_keeps_identity(self):
+        deployments, statuses, jobs, artifacts = self.fixture()
+        jobs["136466009627"]["steps"][0]["conclusion"] = "success"
+        statuses["7948700163"][0]["state"] = "failure"
+        identity, _ = gate.pages_deployment_identity(deployments, statuses, jobs.get)
+        baseline, reason = gate.pages_baseline_artifact(identity, artifacts)
         self.assertEqual(reason, "")
         self.assertEqual(baseline["sha"], self.SHA)
         self.assertEqual(baseline["run_id"], self.RUN)
-        self.assertEqual(len(baseline["artifact_candidates"]), 2)
-        for artifact in artifacts[self.RUN]:
-            artifact["expired"] = True
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, artifacts)
+        self.assertEqual(baseline["deployment_id"], "7948700163")
+        self.assertEqual(baseline["artifact_id"], "14653469517")
+        artifacts[1]["expired"] = True
+        baseline, reason = gate.pages_baseline_artifact(identity, artifacts)
         self.assertIsNotNone(baseline)
         self.assertEqual(baseline["sha"], self.SHA)
         self.assertEqual(baseline["artifact_id"], "")
         self.assertFalse(baseline["artifact_verified"])
         self.assertIn("unavailable or expired", reason)
+
+    def test_unknown_jobs_and_unsuccessful_deploy_outcomes_fail_closed(self):
+        deployments, statuses, jobs, _ = self.fixture()
+        latest = jobs["136544870678"]
+        latest["steps"][-1]["conclusion"] = "failure"
+        baseline, reason = gate.pages_deployment_identity(deployments, statuses, jobs.get)
+        self.assertIsNone(baseline)
+        self.assertIn("unverified final Pages step", reason)
+        latest["steps"] = []
+        baseline, reason = gate.pages_deployment_identity(deployments, statuses, jobs.get)
+        self.assertIsNone(baseline)
+        self.assertIn("no recognized Pages deploy steps", reason)
 
     def test_exact_artifact_must_byte_match_live(self):
         live = b'{"schema_version":3}'
@@ -528,7 +559,8 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("pages-baseline", self.text)
         self.assertIn("fetch-prior-pages", self.text)
         self.assertIn("--repository \"$GITHUB_REPOSITORY\" --run-id \"$RUN_ID\"", self.text)
-        self.assertNotIn("--artifact-id \"$ARTIFACT_ID\"", self.text)
+        self.assertIn("--run-id \"$RUN_ID\" --artifact-id \"$ARTIFACT_ID\"", self.text)
+        self.assertIn("steps.baseline.outputs.artifact_id == ''", self.text)
         self.assertIn("test \"sha256:$LIVE_HASH\" = \"$PRIOR_HASH\"", self.text)
         self.assertIn("artifact_name: github-pages-prior", self.text)
 
@@ -769,10 +801,17 @@ class LiveByteVerificationTests(unittest.TestCase):
 
             with patch.object(gate, "_http_get", return_value=get_bytes), \
                  patch.object(gate.subprocess, "run", side_effect=fake_run), \
-                 patch.object(gate.subprocess, "check_call", return_value=0):
+                 patch.object(gate.subprocess, "check_call",
+                              wraps=gate.subprocess.check_call) as build:
+                script = root / "scripts" / "build_website.py"
+                script.parent.mkdir()
+                script.write_text("from pathlib import Path\n"
+                                  "assert Path(__file__).parent.parent == Path.cwd()\n",
+                                  encoding="utf-8")
                 result = gate.recover_prior_pages(
-                    root / "prior", "https://carbonpanel.dev", sha, str(root),
+                    root / "prior", "https://carbonpanel.dev", sha, os.path.relpath(root),
                     str(declaration))
+                build.assert_called_once()
                 self.assertEqual(result["mode"], "legacy-reconstructed")
                 self.assertFalse((root / "prior" / "publication-receipt.json").exists())
 
