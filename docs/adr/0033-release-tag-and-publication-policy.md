@@ -94,15 +94,27 @@ refuses.
 GitHub `latest` selection uses the same product-only verified stable ordering
 as registry alias promotion: prereleases never promote, an older maintenance
 release does not displace a newer verified stable, and an undeterminable state
-leaves `latest` unchanged. The whole explicit publication run holds one
-workflow-level, non-cancelling `carbonpanel-product-publish` concurrency group
-across immutable publish, GitHub release and alias promotion, so different
-versions cannot race or interleave phases or strand a run after immutable
-publication; build-only rehearsals and ordinary CI use a distinct per-run key
-and are not serialized. `cancel-in-progress: false` protects the running run
-only: with the default `queue: single` a later dispatch can replace the one
-pending run, so this lane requires single-operator dispatch and the operator
-must verify the resulting run before retrying.
+leaves `latest` unchanged. The whole explicit publication run holds the shared
+workflow-level `pages-deploy` lock across immutable publish, GitHub release and
+alias promotion. Rehearsals use a distinct per-run key. The shared lock uses
+`cancel-in-progress: false` and `queue: max` to preserve running and waiting
+publication work. Live preflight still verifies the candidate's eligibility
+when it acquires the lock.
+
+## Release cadence and maintenance
+
+Keep two public channels and one actively maintained Stable minor line.
+Retaining prior artifacts gives users a reproducible upgrade and recovery
+path. Each additional maintained line would require its own backports and
+qualification matrix. Open an older-line maintenance exception only with a
+named owner, scope and end date. Preserve the newer Stable aliases if such
+an exception ships.
+
+A monthly readiness review gives maintainers a checkpoint for grouping
+compatible features and deciding whether an upgrade needs an opt-in RC.
+Ship urgent patches through the same qualification and promotion gates as
+other Stable releases. See [release operations](../releases.md#release-model)
+and [release model research](../research/release-models.md).
 
 Docker Hub is `atharvnaphade/carbonpanel`; GHCR is the lowercased GitHub
 repository name, `ghcr.io/athndev/carbonpanel`.

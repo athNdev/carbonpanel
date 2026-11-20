@@ -25,13 +25,12 @@ permissions:
   actions: read
   deployments: read
 
-# Only an eligible successful push CI run on trusted main joins the shared
-# pages-deploy lock, so a failed/PR event with skipped jobs cannot occupy the
-# single pending slot and displace a real queued site deployment. Every other
-# event gets its own non-cancelling group; the job `if` still gates all writes.
+# Eligible successful main push CI joins the shared publication queue.
+# Other events use their own group while the job condition gates all writes.
 concurrency:
   group: ${{ vars.NIGHTLY_RECOVERY_ACTIVE != 'true' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && 'pages-deploy' || format('docs-only-verify-{0}', github.event.workflow_run.id) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:

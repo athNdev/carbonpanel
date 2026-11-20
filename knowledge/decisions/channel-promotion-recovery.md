@@ -48,8 +48,8 @@ sources:
   ID, prior deployment and retained Pages archives. Recovery requires the same
   private draft. The minor alias advances only after public download verification.
 - Stable requires observed dual-registry digests and trusted gate commands.
-- All channel and docs moves share ONE non-cancelling `pages-deploy` lock; no
-  nested group and no dispatched workflow takes the same lock. A manual/site-only
+- Channel and docs moves share the non-cancelling `pages-deploy` lock with
+  `queue: max` and live revalidation. No nested publisher takes the same lock. A manual/site-only
   dispatch publishes only an already-active source from the receipt. A partial
   move converges, a stale/out-of-order candidate is refused, and an idempotent
   alias at the target is a no-op. No immutable tag is overwritten or deleted.

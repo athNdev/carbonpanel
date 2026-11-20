@@ -2,14 +2,11 @@
 
 # Website and pinned documentation
 
-The Pages deployment contains the marketing homepage at `/` and
-Starlight documentation at `/docs/`, and the shared
-design system at `/design-system/`. Two workflows publish Pages, never in
-parallel: `.github/workflows/landing.yml` for an explicit site-only dispatch and
-`.github/workflows/docs-only-publish.yml` for the automatic docs-only lane. Both
-join the same non-cancelling `pages-deploy` lock; the channel transaction in
-`cd.yml` shares it too. Every other workflow only builds and validates; it
-cannot replace the homepage or the canonical docs.
+The Pages deployment contains the homepage at `/`, documentation at `/docs/`
+and the shared design system at `/design-system/`. Explicit site-only deploys,
+automatic docs-only deploys, channel promotions and recovery all use the
+non-cancelling `pages-deploy` queue. Each publisher qualifies the live source
+under the shared lock before replacing the canonical site.
 
 ## Source contract
 
@@ -104,7 +101,8 @@ check, an unresolved or mismatched live Stable/Nightly product/image receipt, a
 main tip that moved after pinning, or an unverified rollback baseline is a
 blocked qualification: the job stops with zero Page, alias, tag, release or
 tracked-file writes and reports the failing reason. No failed or PR event may
-occupy the shared `pages-deploy` slot.
+occupy the shared `pages-deploy` queue. Eligible jobs use `queue: max` with
+cancellation disabled and verify the current source after acquiring the lock.
 
 Before any deploy the shared `docs_publication_gate` resolves the live
 Stable/Nightly receipt, rebuilds the **full** two-channel site from that exact
