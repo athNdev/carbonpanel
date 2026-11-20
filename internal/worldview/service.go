@@ -48,6 +48,7 @@ type ServiceDeps struct {
 	Authorizer Authorizer
 	Resolver   *Resolver
 	Sessions   *SessionRegistry
+	Native     *NativeMap
 	Overlays   *OverlayStore
 	Auditor    AuditLogger
 	Log        Logger
@@ -143,7 +144,16 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 		return connect.NewResponse(&v1.GetWorldViewSessionResponse{State: state, Reason: reason}), nil
 	}
 
-	key, expires := s.deps.Sessions.Issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL)
+	var native nativeScope
+	if target.GetRendererType() == v1.RendererType_RENDERER_TYPE_NATIVE {
+		native, err = resolveNativeScope(ctx, s.deps.Native.store, server, ref)
+		if err != nil {
+			return connect.NewResponse(&v1.GetWorldViewSessionResponse{
+				State: v1.RendererState_RENDERER_STATE_ABSENT, Reason: err.Error(),
+			}), nil
+		}
+	}
+	key, expires := s.deps.Sessions.issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL, native)
 	if key == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
 	}
@@ -170,6 +180,12 @@ func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.
 	}
 	renderer, resolveErr := s.resolver().Resolve(ctx, canonicalNodeID(server.NodeID), serverID)
 	if resolveErr != nil || renderer == nil {
+		if s.hasNativeTerrain(ctx, server, nil, resolveErr) {
+			return connect.NewResponse(&v1.ListCapabilitiesResponse{
+				RendererType: v1.RendererType_RENDERER_TYPE_NATIVE,
+				Capabilities: nativeCapabilities(),
+			}), nil
+		}
 		detail := "renderer is not configured; map capabilities are unavailable"
 		if errors.Is(resolveErr, ErrUnsupportedRenderer) {
 			detail = "the configured renderer has no verified adapter"
@@ -364,6 +380,19 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 
 	renderer, err := s.resolver().Resolve(ctx, nodeID, server.ID)
 	if err != nil || renderer == nil {
+		if s.hasNativeTerrain(ctx, server, ref, err) {
+			target.Dimension = "overworld"
+			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
+			target.RendererState = v1.RendererState_RENDERER_STATE_READY
+			target.Renderer = &v1.RendererDescriptor{
+				Type: target.RendererType, Capabilities: []string{CapabilityMap2D}, WebBasePath: ProxyPrefix,
+			}
+			target.Freshness = &v1.Observation{
+				Source: nativeSource, Applicability: "saved Java terrain", Confidence: "detected",
+				Note: "Terrain updates after Minecraft saves its chunks.",
+			}
+			return target
+		}
 		if errors.Is(err, ErrUnsupportedRenderer) {
 			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
 		} else if err != nil && !errors.Is(err, ErrRendererUnavailable) {
@@ -414,6 +443,29 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		target.Error = "renderer health probe failed; see panel logs"
 	}
 	return target
+}
+
+func (s *Service) hasNativeTerrain(ctx context.Context, server *storage.Server, ref *v1.WorldRef, resolveErr error) bool {
+	if s.deps.Native == nil || !errors.Is(resolveErr, ErrRendererUnavailable) {
+		return false
+	}
+	if _, exists := s.resolver().cfg.endpointFor(canonicalNodeID(server.NodeID), server.ID); exists {
+		return false
+	}
+	_, err := s.deps.Native.inspect(ctx, server, ref)
+	return err == nil
+}
+
+func nativeCapabilities() []*v1.Capability {
+	caps := make([]*v1.Capability, 0, len(AllCapabilityNames))
+	for _, name := range AllCapabilityNames {
+		detail := "Native terrain does not provide this feature."
+		if name == CapabilityMap2D {
+			detail = "Saved Java Overworld terrain"
+		}
+		caps = append(caps, capability(name, name == CapabilityMap2D, detail))
+	}
+	return caps
 }
 
 func cloneOverlay(overlay *v1.MapOverlay) *v1.MapOverlay {

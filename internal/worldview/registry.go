@@ -21,6 +21,7 @@ type session struct {
 	WorldKey string
 	UserID   string
 	Expires  time.Time
+	native   nativeScope
 }
 
 // SessionRegistry is a mutex-protected, in-memory registry with lazy expiry
@@ -39,6 +40,10 @@ func NewSessionRegistry() *SessionRegistry {
 // Issue creates a new key. serverID/userID must be non-empty; callers derive
 // them from the authenticated RPC context rather than from request input.
 func (r *SessionRegistry) Issue(serverID, worldKey, userID string, ttl time.Duration) (string, time.Time) {
+	return r.issue(serverID, worldKey, userID, ttl, nativeScope{})
+}
+
+func (r *SessionRegistry) issue(serverID, worldKey, userID string, ttl time.Duration, native nativeScope) (string, time.Time) {
 	if ttl <= 0 {
 		ttl = DefaultSessionTTL
 	}
@@ -52,7 +57,7 @@ func (r *SessionRegistry) Issue(serverID, worldKey, userID string, ttl time.Dura
 	now := r.currentTime()
 	s := &session{
 		Key: key, ServerID: serverID, WorldKey: worldKey,
-		UserID: userID, Expires: now.Add(ttl),
+		UserID: userID, Expires: now.Add(ttl), native: native,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

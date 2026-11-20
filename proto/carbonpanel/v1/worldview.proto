@@ -43,6 +43,7 @@ enum RendererType {
   RENDERER_TYPE_SQUAREMAP = 2;
   RENDERER_TYPE_DYNMAP = 3;
   RENDERER_TYPE_STATIC = 4;
+  RENDERER_TYPE_NATIVE = 5; // Carbon Panel renders saved Java terrain directly
 }
 
 // RendererState is the honest lifecycle state of a renderer for one world.

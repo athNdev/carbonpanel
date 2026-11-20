@@ -36,6 +36,7 @@ const (
 	RendererType_RENDERER_TYPE_SQUAREMAP   RendererType = 2
 	RendererType_RENDERER_TYPE_DYNMAP      RendererType = 3
 	RendererType_RENDERER_TYPE_STATIC      RendererType = 4
+	RendererType_RENDERER_TYPE_NATIVE      RendererType = 5 // Carbon Panel renders saved Java terrain directly
 )
 
 // Enum value maps for RendererType.
@@ -46,6 +47,7 @@ var (
 		2: "RENDERER_TYPE_SQUAREMAP",
 		3: "RENDERER_TYPE_DYNMAP",
 		4: "RENDERER_TYPE_STATIC",
+		5: "RENDERER_TYPE_NATIVE",
 	}
 	RendererType_value = map[string]int32{
 		"RENDERER_TYPE_UNSPECIFIED": 0,
@@ -53,6 +55,7 @@ var (
 		"RENDERER_TYPE_SQUAREMAP":   2,
 		"RENDERER_TYPE_DYNMAP":      3,
 		"RENDERER_TYPE_STATIC":      4,
+		"RENDERER_TYPE_NATIVE":      5,
 	}
 )
 
@@ -1494,13 +1497,14 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\avisible\x18\x03 \x01(\bR\avisible\"v\n" +
 	"\x1bSetPlayerVisibilityResponse\x12\x18\n" +
 	"\avisible\x18\x01 \x01(\bR\avisible\x12=\n" +
-	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*\x99\x01\n" +
+	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*\xb3\x01\n" +
 	"\fRendererType\x12\x1d\n" +
 	"\x19RENDERER_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RENDERER_TYPE_BLUEMAP\x10\x01\x12\x1b\n" +
 	"\x17RENDERER_TYPE_SQUAREMAP\x10\x02\x12\x18\n" +
 	"\x14RENDERER_TYPE_DYNMAP\x10\x03\x12\x18\n" +
-	"\x14RENDERER_TYPE_STATIC\x10\x04*\x91\x02\n" +
+	"\x14RENDERER_TYPE_STATIC\x10\x04\x12\x18\n" +
+	"\x14RENDERER_TYPE_NATIVE\x10\x05*\x91\x02\n" +
 	"\rRendererState\x12\x1e\n" +
 	"\x1aRENDERER_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RENDERER_STATE_ABSENT\x10\x01\x12\x1d\n" +
