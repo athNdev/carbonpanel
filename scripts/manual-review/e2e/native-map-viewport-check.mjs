@@ -100,16 +100,31 @@ async function runPackagedWorldView(browser) {
     };
     const session = "/api/v1/worldview/map/native-route-fixture/";
     let tileRequests = 0;
+    const markerReads = [];
+    const overworldMarker = { serverId: native.serverId, worldRef, dimension: "overworld", x: 18.5, z: -29.25 };
+    const overlays = [
+      { ...overworldMarker, id: "waypoint", kind: "waypoint", label: "Village gate" },
+      { ...overworldMarker, id: "private", kind: "marker", label: "Private position", sensitive: true },
+      { ...overworldMarker, id: "player", kind: "player", label: "Player position" },
+      { ...overworldMarker, id: "region", kind: "region", label: "Region boundary" },
+      { ...overworldMarker, id: "nether", kind: "poi", dimension: "nether", label: "Nether location" },
+    ];
     context = await browser.newContext({
       viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce",
     });
     const page = await context.newPage();
     await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
       const method = new URL(route.request().url()).pathname.split("/").at(-1);
+      if (method === "ListMapOverlays") {
+        const request = route.request().postDataJSON();
+        markerReads.push(request);
+        await route.fulfill({ json: { overlays: request.dimension === "overworld" ? overlays : [overlays.at(-1)] } });
+        return;
+      }
       const responses = {
         GetAuthStatus: {localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false},
         GetCurrentUser: { user: {id: "fixture", username: "Fixture"}, permissions: [
-          {resource: "*", action: "*", objectId: "*"},
+          { resource: "world_view", action: "read", objectId: native.serverId },
         ]},
         GetWorldViewStatus: { target: native },
         GetWorldViewSession: { state: native.rendererState, proxyPath: session },
@@ -134,7 +149,7 @@ async function runPackagedWorldView(browser) {
       });
     });
     const key = "w1." + Buffer.from(JSON.stringify([2, native.serverId, worldRef.levelName, "", ""])).toString("base64url");
-    await page.goto(origin + "worlds/" + native.serverId + "/" + key);
+    await page.goto(origin + "worlds/" + native.serverId + "/" + key + "?dimension=nether");
     await page.getByRole("heading", { name: "World terrain" }).waitFor();
     const surface = page.getByRole("region", { name: "Map surface" });
     const tile = surface.locator("img").first();
@@ -143,8 +158,18 @@ async function runPackagedWorldView(browser) {
     assert.equal(await tile.evaluate((img) => img.naturalWidth), 128);
     assert.equal(await surface.locator("iframe").count(), 0);
     assert.ok(tileRequests > 0);
+    const gate = surface.getByRole("button", { name: "Waypoint: Village gate", exact: true });
+    await gate.click();
+    await surface.getByRole("heading", { name: "Village gate", exact: true }).waitFor();
+    await surface.getByRole("status").getByText("X: 18.5 · Z: -29.25", { exact: true }).waitFor();
+    assert.ok(markerReads.some((request) =>
+      request.serverId === native.serverId && request.worldRef?.levelName === worldRef.levelName && request.dimension === "overworld"
+    ));
+    assert.equal(await page.getByRole("button", { name: "Map markers (1)", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Show player markers", exact: true }).count(), 0);
+    assert.doesNotMatch(await page.locator("body").innerText(), /Private position|Player position|Region boundary|Nether location/);
     await page.screenshot({path: path.join(evidence, "packaged-world-view-native.png")});
-    results.push("the packaged World View renders scoped native tiles without an iframe or module");
+    results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
   } finally {
     await context?.close();
     child.kill();
@@ -398,6 +423,98 @@ try {
         await context.close();
       }
     }
+  }
+
+  const markerContext = await browser.newContext({
+    viewport: { width: 360, height: 900 },
+    hasTouch: true,
+  });
+  try {
+    const page = await markerContext.newPage();
+    await configure(page, "dark");
+    scenario = "partial";
+    await page.goto(base);
+    await text(page, partial).waitFor();
+
+    const map = fromMap(page);
+    const camp = map.getByRole("button", {
+      name: "Marker: River camp",
+      exact: true,
+    });
+    await camp.waitFor();
+    await map
+      .getByRole("button", {
+        name: "Point of interest: Old aqueduct",
+        exact: true,
+      })
+      .waitFor();
+    const bounds = await map.boundingBox();
+    const pin = await camp.boundingBox();
+    assert.ok(bounds && pin);
+    const scale = 2 * Math.max(1, bounds.width / 640, bounds.height / 640);
+    assert.ok(
+      Math.abs(
+        pin.x + pin.width / 2 - (bounds.x + bounds.width / 2 + 24.5 * scale),
+      ) < 1,
+    );
+    assert.ok(
+      Math.abs(
+        pin.y + pin.height / 2 - (bounds.y + bounds.height / 2 + 19.75 * scale),
+      ) < 1,
+    );
+
+    await camp.tap();
+    await page
+      .getByRole("heading", { name: "River camp", exact: true })
+      .waitFor();
+    await page
+      .getByRole("status")
+      .getByText("X: 36.5 · Z: -14.25", { exact: true })
+      .waitFor();
+    await page.screenshot({
+      path: path.join(evidence, "markers-360-dark.png"),
+      animations: "disabled",
+    });
+    await page.getByRole("button", { name: "Close marker details" }).click();
+    assert.equal(
+      await camp.evaluate((element) => element === document.activeElement),
+      true,
+    );
+
+    await camp.press("Enter");
+    await page
+      .getByRole("heading", { name: "River camp", exact: true })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Map markers (3)", exact: true })
+      .click();
+    assert.doesNotMatch(
+      await page.locator("main").innerText(),
+      /Private location|Player location|Unsupported region|Nether ruin/,
+    );
+    const visibility = page.getByRole("checkbox", {
+      name: "Show markers on map",
+    });
+    await visibility.uncheck();
+    assert.equal(await map.getByRole("button").count(), 0);
+
+    await page
+      .getByRole("button", { name: "Center map on Waypoint: North trail" })
+      .click();
+    await map
+      .getByRole("button", { name: "Waypoint: North trail", exact: true })
+      .waitFor();
+    assert.equal(await coordinates(page).innerText(), "X: -300 · Z: 270");
+    assert.equal(
+      await map.evaluate((element) => element === document.activeElement),
+      true,
+    );
+    assert.equal(await visibility.isChecked(), true);
+    results.push(
+      "native markers project accurately, retain kind and precision, support keyboard and touch, and surface offscreen points",
+    );
+  } finally {
+    await markerContext.close();
   }
 
   const context = await browser.newContext({

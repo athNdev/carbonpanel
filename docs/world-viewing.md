@@ -12,6 +12,11 @@ the active map using that server’s World View read permission. The map page
 offers **Install BlueMap** when the account and node support it and explains
 when a remote node needs an explicit endpoint.
 
+The native saved-terrain map shows saved markers, waypoints and points of
+interest from the world’s Overworld. Select a pin for its coordinates. Open
+**Map markers** to center the map on a point or toggle pin visibility. Live
+player positions and regions are outside the native map’s coverage.
+
 ## 1. Renderer lifecycle
 
 BlueMap is the built-in default adapter (`builtin-bluemap` module template);
