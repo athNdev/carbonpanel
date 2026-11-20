@@ -40,6 +40,22 @@ Compensation for a failed multi-family publish is data-preserving and staged:
    retention trees without an active operation, recovery restores a family only
    when the live path is confirmed missing. It never deletes retained data.
 
+## Running servers
+
+A bind holds the server lifecycle transition from the first Docker observation
+until the decision. Its active journal guards stop, promotion and restart. The
+adapter requires both server power
+grants for a running target and checks the active bind journal's server, node
+endpoint and container identity before internal power calls. Public power
+requests keep their ordinary admission checks.
+
+Publish proceeds after the node confirms the container stopped. Success and
+proven rollback restart the same container. The controller confirms the Docker
+process is running before releasing recovery data. If stopping or restarting
+cannot be verified, the operation stays active and the controller preserves
+the recovery trees. Staged configuration and container recreation stay on the
+regular start path.
+
 Knowledge is updated in `knowledge/architecture/world-library-shape.md`.
 
 ## Consequences

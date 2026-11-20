@@ -22,3 +22,11 @@ sources:
 - Active operations prevent retry and startup tree changes. Legacy recovery
   without an active operation restores only when the live path is confirmed
   missing and preserves staged and quarantined trees.
+
+# Running servers
+
+- The binder holds the server transition across Docker observation, stop, swap
+  and restart. The internal adapter requires server power grants and the
+  active journal's matching server, container and node endpoint.
+- A safe rollback restores running intent on the original container.
+  Uncertain stop or restart retains the journal lock and recovery data.

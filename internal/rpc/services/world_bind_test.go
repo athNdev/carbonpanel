@@ -28,6 +28,10 @@ type worldTestLifecycle struct {
 	failStart bool
 }
 
+func (f *worldTestLifecycle) BeginTransition(string) (func(), error) {
+	return func() {}, nil
+}
+
 func (f *worldTestLifecycle) IsRunning(context.Context, string) (bool, error) { return f.running, nil }
 func (f *worldTestLifecycle) StopServer(context.Context, string) error {
 	f.stops++

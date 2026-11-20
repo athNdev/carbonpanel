@@ -38,6 +38,7 @@ type CommandSender interface {
 // and restarting require the servers:stop/start grant in the RPC layer; this
 // package never broadens that authorization.
 type Lifecycle interface {
+	BeginTransition(string) (release func(), err error)
 	StopServer(ctx context.Context, serverID string) error
 	StartServer(ctx context.Context, serverID string) error
 	IsRunning(ctx context.Context, serverID string) (bool, error)
@@ -253,6 +254,23 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		return nil, err
 	}
 
+	if b.lifecycle != nil {
+		releaseTransition, err := b.lifecycle.BeginTransition(server.ID)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseTransition()
+	}
+	current, err := b.store.GetServer(ctx, server.ID)
+	if err != nil {
+		return nil, err
+	}
+	if server.NodeID != current.NodeID || server.DataPath != current.DataPath ||
+		server.ContainerID != current.ContainerID {
+		return nil, errors.New("server identity changed before world bind acquired admission")
+	}
+	server = current
+
 	node := nodestorage.NodeInfo{
 		ID: req.NodeID, Name: req.NodeID,
 		IsLocal: nodestorage.IsLegacyLocalNodeID(req.NodeID),
@@ -288,8 +306,8 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	var result *BindResult
 	var cleanup []string
 	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID,
-		func() (bool, error) {
-			out, roots, err := b.publish(ctx, acc, server, req, revision)
+		func(ownedCtx context.Context) (bool, error) {
+			out, roots, err := b.publish(ownedCtx, acc, server, req, revision)
 			cleanup = roots
 			if out != nil {
 				result = out
@@ -426,7 +444,7 @@ func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision
 	return nil
 }
 
-func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (*BindResult, []string, error) {
+func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (out *BindResult, cleanup []string, retErr error) {
 	wasRunning := false
 	var err error
 	if b.lifecycle != nil {
@@ -449,8 +467,23 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	}
 	if wasRunning && b.lifecycle != nil {
 		if err := b.lifecycle.StopServer(ctx, req.ServerID); err != nil {
-			return nil, nil, fmt.Errorf("stop before world swap: %w", err)
+			return nil, nil, fmt.Errorf("%w: cannot confirm stop before world swap: %v", ErrUncertainOutcome, err)
 		}
+		// Restore the original running intent after success or a proven failure.
+		// A disconnected caller cannot cancel this recovery action.
+		defer func() {
+			if errors.Is(retErr, ErrUncertainOutcome) {
+				return
+			}
+			restartCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+			defer cancel()
+			if err := b.lifecycle.StartServer(restartCtx, req.ServerID); err != nil {
+				cleanup = nil
+				retErr = fmt.Errorf("%w: restart after world swap could not be verified: %w",
+					ErrUncertainOutcome, errors.Join(retErr, err))
+			}
+		}()
+
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -652,15 +685,6 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		return compensate(err)
 	}
 
-	// An ambiguous outcome after an external mutation must not be auto-retried.
-	// Keep the old tree until the restart and verification have been observed.
-	if wasRunning && b.lifecycle != nil {
-		if err := b.lifecycle.StartServer(ctx, req.ServerID); err != nil {
-			return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)}, nil,
-				fmt.Errorf("%w: restart after swap failed; retained recovery tree at %s: %v", ErrUncertainOutcome, oldRoot, err)
-		}
-	}
-
 	return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: "success", Consistency: string(consistency)},
 		[]string{stageRoot, oldRoot}, nil
 }
@@ -704,7 +728,7 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 
 	removed := false
 	_, err = operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-unbind", requestID,
-		func() (bool, error) {
+		func(context.Context) (bool, error) {
 			current, err := b.store.GetWorldBinding(ctx, serverID, level)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -806,6 +830,11 @@ func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string,
 // ResolveOperation records an operator decision on an uncertain operation. It
 // never retries the mutation itself.
 func (b *Binder) ResolveOperation(ctx context.Context, serverID, operationID, note string) error {
+	release, err := b.admission.Acquire(ctx, "server:"+serverID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	op, err := b.store.GetServerOperation(ctx, operationID)
 	if err != nil {
 		return err
