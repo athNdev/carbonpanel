@@ -509,6 +509,41 @@ re-deploys the retained prior site as needed, then verifies the public bytes.
 A conflicting release, deployment or alias requires investigation. If the
 release is already public, retry its failed verification from the original run.
 
+The publisher verifies exact-commit CI, tag identity, the complete download set,
+local checksums and GitHub's uploaded asset digests before exposing the release.
+It resolves drafts by their stable release ID; GitHub's by-tag REST endpoint
+does not return unpublished drafts. Existing public releases remain immutable
+under the tool's policy and require a new version for further changes.
+
+A **resume** is stricter than an identical tag digest. The operator must supply
+the verified `sha256:` image digest, and the exact Git tag must resolve to the
+intended source commit. The tool then reads the existing release's
+`release-manifest.json` asset and requires its version, source commit, revision
+and image digest to match the requested release. Equal registry digests and
+platform counts alone are never sufficient; unknown or mismatched provenance
+refuses before any alias moves.
+
+## Docker Hub repository description
+
+The public Docker Hub `full_description` is owned by
+`.github/workflows/dockerhub-description.yml`, not by image publication. It is a
+byte-bounded Docker-focused view generated from `README.md` sections and the
+published Stable identity in `docs/version-index.json`; the generator
+(`scripts/dockerhub_description.py`) fails rather than emit a body over Docker
+Hub's 25,000 UTF-8 byte limit. The workflow reconciles on affected main merges,
+once daily and on manual `workflow_dispatch` recovery, then verifies the public
+body by reading it back from the unauthenticated Docker Hub API.
+
+A Stable promotion only has to update the version contract
+(`docs/website-source.json`, regenerated `docs/version-index.json`). Do not add
+a second Stable version to `docs/dockerhub-description.json`. Production
+generation reads the **live published** version index and fails closed if it is
+unavailable or older than the checked-in baseline: a temporary docs outage or a
+pre-promotion identity can never put an obsolete Stable on the public page.
+Offline fixtures may opt into the baseline explicitly. A main-head guard
+prevents an in-flight scheduled run from reverting a newly promoted Stable, and
+CD/release no longer write the description. There is no `:stable` image tag;
+use the exact published version tag or the moving `:latest` alias.
 The immutable product tag, image and exact draft downloads remain available
 after recovery. Use the verified digest and original artifacts for subsequent
 qualification and promotion.
