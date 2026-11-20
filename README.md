@@ -33,7 +33,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 [![Carbon Panel cluster dashboard with host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
-[Open the original 2880 × 2000 dashboard PNG ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[Open the original full-resolution dashboard PNG ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
 ## Modpack Studio. Modpacks, made simple.
 

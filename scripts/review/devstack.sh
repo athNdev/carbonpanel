@@ -714,7 +714,7 @@ up)
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
 						map_probe="$(curl -fsS --max-time 3 'http://127.0.0.1:8100/settings.json' 2>&1 || true)"
 						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
-						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | head -n 5 | tr '\n' ' ' | cut -c1-260)"
+						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | sed -n '1,5p' | tr '\n' ' ' | cut -c1-260)"
 						echo "review textures files: ${tex_probe}" >&2
 						http_probe="$(curl -sS --max-time 3 -D - -o /dev/null 'http://127.0.0.1:8100/maps/world/textures.json.gz' 2>&1 || true)"
 						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-300)" >&2
@@ -741,7 +741,8 @@ up)
 							sleep 3
 						done
 						echo "review BlueMap tile files before journey: ${tile_prev}" >&2
-						tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | head -12 | tr '\n' ' ' | cut -c1-500)"
+						# Consume the full stream so an early exit does not trip pipefail.
+					tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | sed -n '1,12p' | tr '\n' ' ' | cut -c1-500)"
 						echo "review BlueMap tile sample: ${tile_sample}" >&2
 						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
 						echo "review BlueMap tile lods: ${tile_lods}" >&2

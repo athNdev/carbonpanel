@@ -79,7 +79,7 @@ on:
         default: true
         type: boolean
       force_publish:
-        description: 'Publish even when captured images are unchanged'
+        description: 'Publish a newer source even when captured images are unchanged'
         required: false
         default: false
         type: boolean

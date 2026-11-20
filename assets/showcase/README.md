@@ -31,7 +31,8 @@ The canonical bundle contains `showcase-dashboard`, `showcase-dashboard-full`,
 `showcase-server-detail`, `showcase-studio`, `showcase-modpacks`,
 `showcase-library`, `showcase-library-revisions`, `showcase-player-allowlist`,
 `showcase-worlds-list`, `showcase-world-tab`, and `showcase-world-view`.
-The full dashboard is a native 2880 × 2000 capture with navigation and shell.
+The full dashboard is a native 2× capture of the 1440 CSS-pixel desktop
+layout with navigation and shell.
 The leading dashboard image captures the content at a narrower desktop width
 for the README. Its link opens the original full-window PNG. The World View frame
 uses a broad camera over the seeded Vanilla server's generated Overworld,
@@ -65,12 +66,14 @@ Any failure leaves the previous good screenshots untouched.
 ```sh
 REVIEW_STACK_NAME=carbon-readme-review \
 REVIEW_PORT=18267 \
-REVIEW_DATA_DIR=/tmp/carbon-readme-review \
   bash scripts/review/devstack.sh up
+
+session="$HOME/.cache/carbon-panel-review/sessions/carbon-readme-review"
+export SHOWCASE_SERVER_ID="$(cat "$session/server-id")"
 
 node scripts/review/journey.mjs \
   --plan scripts/review/plan-showcase.json \
-  --base http://127.0.0.1:<port-from-devstack> \
+  --base "http://127.0.0.1:$(cat "$session/port")" \
   --out /tmp/showcase \
   --features players,library,worldtab,worlds
 
