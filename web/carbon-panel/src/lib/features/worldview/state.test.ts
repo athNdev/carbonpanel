@@ -24,7 +24,7 @@ test('every renderer state maps to exactly one honest UI state', () => {
 	assert.equal(deriveViewState(target(RendererState.STOPPED)), 'stopped');
 	assert.equal(deriveViewState(target(RendererState.ERROR)), 'error');
 	assert.equal(deriveViewState(target(RendererState.UNSUPPORTED)), 'unsupported');
-	assert.equal(deriveViewState(target(RendererState.UNSPECIFIED)), 'loading');
+	assert.equal(deriveViewState(target(RendererState.UNSPECIFIED)), 'unknown');
 });
 
 test('only fresh or last-known maps with a path may mount a frame', () => {
@@ -35,6 +35,7 @@ test('only fresh or last-known maps with a path may mount a frame', () => {
 		'stopped',
 		'error',
 		'unsupported',
+		'unknown',
 		'loading'
 	] as const) {
 		assert.equal(canMountEmbed(state, '/api/v1/worldview/map/key/'), false);
@@ -55,8 +56,9 @@ test('age uses the real observation and never invents a zero', () => {
 		nanos: 0
 	});
 	assert.equal(formatAge(observed, now), '3 minutes ago');
-	assert.equal(formatAge(undefined, now), 'age unknown');
+	assert.equal(formatAge(undefined, now), 'Not reported');
 	assert.equal(timestampToMs(undefined), null);
+	assert.equal(formatAge({ seconds: BigInt(now / 1000 - 50), nanos: 0 }, now), 'just now');
 	assert.equal(
 		formatAge(
 			create(TimestampSchema, { seconds: BigInt(Math.floor(now / 1000) + 500), nanos: 0 }),

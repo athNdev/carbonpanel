@@ -18,6 +18,11 @@ visibility flag are the only mutations, and both are audited. Teleport and
 world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
+The server World tab links to the active map, or to World View scoped to that
+server when the active level is unknown. World View uses server names only
+from the authorized server inventory. Setup and unavailable states do not
+mount a map.
+
 Renderer traffic is same-origin only. The browser receives an opaque,
 short-lived session key, never a renderer URL or port; every proxied asset
 request re-authenticates with the cookie or bearer token and enforces

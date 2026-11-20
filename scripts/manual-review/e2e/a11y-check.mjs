@@ -542,11 +542,12 @@ const PACKAGED_ROUTES = [
 	},
 	{
 		path: '/worlds',
-		h1: 'Worlds',
+		h1: 'World View',
 		controls: [
-			['heading', 'Worlds'],
+			['heading', 'World View'],
 			['textbox', 'Search viewable worlds'],
-			['link', 'Renderer modules'],
+			['combobox', 'Server'],
+			['combobox', 'State'],
 			['button', 'Refresh'],
 			['link', 'Alpha Overworld']
 		]

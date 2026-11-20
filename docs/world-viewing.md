@@ -6,6 +6,12 @@ modifies or teleports anything. The governing decisions are in
 [ADR 0015](adr/0015-world-viewing-renderer-proxy.md) and the durable rule is in
 `knowledge/architecture/world-viewing.md`.
 
+Open **World View** to browse maps, or use **Open map** in a server’s
+**World** tab. If the active level is still unknown, the link lists worlds for
+that server. A map that needs setup offers **Install BlueMap** when the
+account and node support it. The map page also explains when a remote node
+needs an explicit endpoint.
+
 ## 1. Renderer lifecycle
 
 BlueMap is the built-in default adapter (`builtin-bluemap` module template);

@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import type { ResolvedPathname } from '$app/types';
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
@@ -25,6 +26,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { authStore, checkPermission } from '$lib/stores/auth';
+	import { serversStore } from '$lib/stores/servers';
+	import { shortId } from '$lib/features/world-library/presentation';
 	import { createWorldViewStore } from '$lib/stores/worldview.svelte';
 	import {
 		ListWorldViewTargetsRequestSchema,
@@ -57,14 +60,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			).target
 	});
 
+	let scopedServerId = $derived(page.url.searchParams.get('server') ?? '');
 	let auth = $derived($authStore);
-	let canRead = $derived(checkPermission(auth.permissions, 'world_view', 'read'));
+	let canRead = $derived(checkPermission(auth.permissions, 'world_view', 'read', scopedServerId));
 	let snapshot = $derived($store);
 	let denied = $state(false);
 	let started = false;
 
 	let search = $state('');
 	let serverFilter = $state('all');
+	let selectedServerId = $derived(scopedServerId || serverFilter);
 	let stateFilter = $state('all');
 
 	function handleListError(error: unknown) {
@@ -93,23 +98,41 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return store.watchTargets(15_000);
 	});
 
+	let serverNames = $derived(
+		new Map(
+			$serversStore
+				.filter((server) => checkPermission(auth.permissions, 'servers', 'read', server.id))
+				.map((server) => [server.id, server.name])
+		)
+	);
+
+	function serverLabel(id: string): string {
+		return serverNames.get(id) || 'Server ' + shortId(id);
+	}
+
+	let scopedTargets = $derived(
+		snapshot.targets.filter((target) => !scopedServerId || target.serverId === scopedServerId)
+	);
 	let servers = $derived(
-		Array.from(new Set(snapshot.targets.map((target) => target.serverId))).sort()
+		Array.from(new Set(snapshot.targets.map((target) => target.serverId))).sort((first, second) =>
+			serverLabel(first).localeCompare(serverLabel(second))
+		)
 	);
-	let stateOptions = $derived(
-		Array.from(
-			new Set(snapshot.targets.map((target) => deriveViewState(target).toUpperCase()))
-		).sort()
-	);
+	let stateOptions = $derived(Array.from(new Set(scopedTargets.map(deriveViewState))).sort());
 
 	let filtered = $derived.by(() => {
 		const query = search.trim().toLowerCase();
-		return snapshot.targets.filter((target) => {
-			if (serverFilter !== 'all' && target.serverId !== serverFilter) return false;
-			if (stateFilter !== 'all' && deriveViewState(target).toUpperCase() !== stateFilter)
-				return false;
+		return scopedTargets.filter((target) => {
+			if (selectedServerId !== 'all' && target.serverId !== selectedServerId) return false;
+			if (stateFilter !== 'all' && deriveViewState(target) !== stateFilter) return false;
 			if (!query) return true;
-			return [target.name, target.worldRef?.levelName, target.worldRef?.bindingId, target.serverId]
+			return [
+				target.name,
+				target.worldRef?.levelName,
+				target.worldRef?.bindingId,
+				target.serverId,
+				serverLabel(target.serverId)
+			]
 				.join(' ')
 				.toLowerCase()
 				.includes(query);
@@ -124,6 +147,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		) as ResolvedPathname;
 	}
 
+	function rendererLabel(target: WorldViewTarget): string {
+		return deriveViewState(target) === 'onboarding'
+			? 'Not configured'
+			: rendererName(target.renderer?.type ?? target.rendererType, 'Unknown renderer');
+	}
+
 	function clearFilters() {
 		search = '';
 		serverFilter = 'all';
@@ -136,20 +165,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	data-testid="showcase-worlds-content"
 >
 	<CarbonPageHeader
-		title="Worlds"
-		description="View Minecraft worlds through their configured renderer. Maps are observation only."
+		title="World View"
+		description={scopedServerId && canRead && !denied
+			? 'Maps for ' + serverLabel(scopedServerId)
+			: 'Browse Minecraft world maps and see which servers are ready to view.'}
 	>
-		{#snippet tag()}
-			<CarbonTag type="blue" size="sm">OBSERVATION</CarbonTag>
-		{/snippet}
 		{#snippet actions()}
-			<CarbonButton kind="tertiary" size="sm" href={resolve('/modules')}>
-				Renderer modules
-			</CarbonButton>
-			<CarbonButton kind="secondary" size="sm" onclick={retryTargets} loading={snapshot.loading}>
-				<RefreshCw class="h-3.5 w-3.5" />
-				<span>Refresh</span>
-			</CarbonButton>
+			{#if scopedServerId}
+				<CarbonButton kind="tertiary" size="sm" href={resolve('/worlds')}>All servers</CarbonButton>
+			{/if}
+			{#if canRead && !denied}
+				<CarbonButton kind="secondary" size="sm" onclick={retryTargets} loading={snapshot.loading}>
+					<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
+					<span>Refresh</span>
+				</CarbonButton>
+			{/if}
 		{/snippet}
 	</CarbonPageHeader>
 
@@ -166,7 +196,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<Lock class="h-6 w-6" />
 			{/snippet}
 		</CarbonEmptyState>
-	{:else if !snapshot.hydrated && snapshot.loading}
+	{:else if !snapshot.hydrated && !snapshot.error}
 		<div class="border border-border bg-card p-6" role="status">
 			<CarbonInlineLoading description="Loading viewable worlds…" />
 		</div>
@@ -176,10 +206,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			message={formatRpcError(snapshot.error, 'The world inventory could not be read.')}
 			onretry={retryTargets}
 		/>
-	{:else if snapshot.targets.length === 0}
+	{:else if scopedTargets.length === 0}
 		<CarbonEmptyState
-			title="No viewable worlds"
-			description="No renderer-backed worlds are available for your account yet. Install a renderer module for a server, then refresh."
+			title={scopedServerId ? 'No worlds found for this server' : 'No worlds available'}
+			description={scopedServerId
+				? 'Check the active world from the server’s World tab, then refresh this list.'
+				: 'Open a server’s World tab to check its active world and available map options.'}
 		>
 			{#snippet icon()}
 				<MapIcon class="h-6 w-6" />
@@ -216,19 +248,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					size="sm"
 				/>
 			</div>
-			<div class="w-full sm:w-52">
-				<CarbonSelect bind:value={serverFilter} label="Server">
-					<option value="all">All servers ({servers.length})</option>
-					{#each servers as server (server)}
-						<option value={server}>{server}</option>
-					{/each}
-				</CarbonSelect>
-			</div>
+			{#if !scopedServerId}
+				<div class="w-full sm:w-52">
+					<CarbonSelect bind:value={serverFilter} label="Server">
+						<option value="all">All servers ({servers.length})</option>
+						{#each servers as server (server)}
+							<option value={server}>{serverLabel(server)}</option>
+						{/each}
+					</CarbonSelect>
+				</div>
+			{/if}
 			<div class="w-full sm:w-52">
 				<CarbonSelect bind:value={stateFilter} label="State">
 					<option value="all">All states</option>
 					{#each stateOptions as option (option)}
-						<option value={option}>{option}</option>
+						<option value={option}>{VIEW_STATE_LABEL[option]}</option>
 					{/each}
 				</CarbonSelect>
 			</div>
@@ -242,9 +276,52 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				onaction={clearFilters}
 			/>
 		{:else}
+			{#snippet worldLink(target: WorldViewTarget)}
+				<a
+					href={targetHref(target)}
+					class="focus-ring font-medium break-words text-foreground underline-offset-2 hover:text-accent-text hover:underline"
+				>
+					{target.name || target.worldRef?.levelName || 'Untitled world'}
+				</a>
+			{/snippet}
+			{#snippet stateTag(target: WorldViewTarget)}
+				{@const view = deriveViewState(target)}
+				<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
+			{/snippet}
+			{#snippet observation(target: WorldViewTarget)}
+				{formatAge(target.freshness?.observedAt ?? target.lastRender)}
+			{/snippet}
+
+			<section class="border border-border bg-card xl:hidden" aria-label="Viewable worlds">
+				<h2 class="border-b border-border p-3 text-sm font-semibold">
+					{filtered.length} of {scopedTargets.length} worlds shown
+				</h2>
+				<ul class="divide-y divide-border">
+					{#each filtered as target (targetHref(target))}
+						<li class="flex min-w-0 flex-col gap-2 p-3 text-sm">
+							<div class="grid items-start gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+								{@render worldLink(target)}
+								<div>{@render stateTag(target)}</div>
+							</div>
+							<dl
+								class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs text-muted-foreground"
+							>
+								<dt>Server</dt>
+								<dd class="break-words">{serverLabel(target.serverId)}</dd>
+								<dt>Renderer</dt>
+								<dd>{rendererLabel(target)}</dd>
+								<dt>Last observation</dt>
+								<dd>{@render observation(target)}</dd>
+							</dl>
+						</li>
+					{/each}
+				</ul>
+			</section>
+
 			<CarbonDataTable
+				class="hidden xl:block"
 				title="Viewable worlds"
-				description="{filtered.length} of {snapshot.targets.length} worlds shown"
+				description="{filtered.length} of {scopedTargets.length} worlds shown"
 			>
 				{#snippet header()}
 					<tr>
@@ -256,15 +333,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</tr>
 				{/snippet}
 				{#each filtered as target (targetHref(target))}
-					{@const view = deriveViewState(target)}
 					<tr class="transition-colors hover:bg-accent">
 						<td class="min-w-[180px] px-3 py-3">
-							<a
-								href={targetHref(target)}
-								class="block truncate font-medium text-foreground hover:text-accent-text hover:underline"
-							>
-								{target.name || target.worldRef?.levelName || 'Untitled world'}
-							</a>
+							{@render worldLink(target)}
 							<p class="font-mono text-xs break-all text-muted-foreground">
 								{target.worldRef?.levelName ||
 									target.worldRef?.bindingId ||
@@ -272,17 +343,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									'—'}
 							</p>
 						</td>
-						<td class="px-3 py-3 font-mono text-xs break-all text-muted-foreground">
-							{target.serverId}
+						<td class="px-3 py-3 text-xs break-words text-muted-foreground">
+							{serverLabel(target.serverId)}
 						</td>
 						<td class="px-3 py-3 text-xs text-muted-foreground">
-							{rendererName(target.renderer?.type ?? target.rendererType)}
+							{rendererLabel(target)}
 						</td>
 						<td class="px-3 py-3">
-							<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
+							{@render stateTag(target)}
 						</td>
 						<td class="px-3 py-3 font-mono text-xs text-muted-foreground">
-							{formatAge(target.freshness?.observedAt ?? target.lastRender)}
+							{@render observation(target)}
 						</td>
 					</tr>
 				{/each}

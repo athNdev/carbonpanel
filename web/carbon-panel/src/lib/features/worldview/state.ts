@@ -9,6 +9,7 @@ import { RendererState, type WorldViewTarget } from '$lib/proto/carbonpanel/v1/w
 
 export type ViewState =
 	| 'loading'
+	| 'unknown'
 	| 'onboarding'
 	| 'installing'
 	| 'rendering'
@@ -39,12 +40,13 @@ export function deriveViewState(target: WorldViewTarget | undefined): ViewState 
 		case RendererState.UNSUPPORTED:
 			return 'unsupported';
 		default:
-			return 'loading';
+			return 'unknown';
 	}
 }
 
 export const VIEW_STATE_LABEL: Record<ViewState, string> = {
 	loading: 'CHECKING MAP',
+	unknown: 'UNKNOWN STATUS',
 	onboarding: 'SETUP NEEDED',
 	installing: 'INSTALLING',
 	rendering: 'RENDERING',
@@ -61,6 +63,7 @@ export type StateTone =
 /** Color is supplemental; every tag also carries the text label above. */
 export const VIEW_STATE_TONE: Record<ViewState, StateTone> = {
 	loading: 'gray',
+	unknown: 'gray',
 	onboarding: 'blue',
 	installing: 'cyan',
 	rendering: 'purple',
@@ -110,9 +113,9 @@ export function formatAge(
 	nowMs: number = Date.now()
 ): string {
 	const ms = timestampToMs(value);
-	if (ms === null) return 'age unknown';
+	if (ms === null) return 'Not reported';
 	const seconds = Math.max(0, Math.floor((nowMs - ms) / 1000));
-	if (seconds < 45) return 'just now';
+	if (seconds < 60) return 'just now';
 	const minutes = Math.floor(seconds / 60);
 	if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
 	const hours = Math.floor(minutes / 60);

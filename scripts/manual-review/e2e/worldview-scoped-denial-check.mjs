@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Scoped real-browser check for the World View detail route. Mounts the actual
- * SvelteKit route with local Connect fixtures (the normal entry point) and
- * proves that action-scoped write denials do NOT revoke an otherwise readable
+ * Real-browser checks for the World View inventory and map routes. The actual
+ * SvelteKit app uses local Connect fixtures so the journey can check navigation,
+ * recovery, and setup alongside the scoped permissions. It proves that action-scoped write denials do NOT revoke an otherwise readable
  * world view. The read scope stays valid; only a specific write RPC is refused
  * at the network boundary, which is the real regression case. No live server,
  * world, renderer or daemon is used and the sandbox frame is a harmless
@@ -31,6 +31,9 @@ const results = [];
 const writeCalls = [];
 let denyWrite = ""; // "" | SetPlayerVisibility | SetMapOverlay | SendCommand
 let readDenied = false;
+let statusMode = "ready";
+let nodeIsLocal = true;
+let createModuleCalls = 0;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
 const target = {
@@ -49,18 +52,35 @@ const target = {
   nodeId: "local",
 };
 
+const otherTarget = {
+  ...target,
+  serverId: "srv-2",
+  worldRef: { ...worldRef, serverId: "srv-2", levelName: "creative" },
+  name: "Fixture Creative",
+  rendererType: "RENDERER_TYPE_UNSPECIFIED",
+  rendererState: "RENDERER_STATE_ABSENT",
+  renderer: undefined,
+};
+
 let viteServer;
 let browser;
 try {
-  viteServer = await createServer({
-    root: project,
-    server: { host: "127.0.0.1", port: 0, strictPort: false },
-  });
-  await viteServer.listen();
-  const base = `http://127.0.0.1:${viteServer.httpServer.address().port}`;
+  let base = process.env.WORLDVIEW_DENIAL_APP_URL;
+  if (!base) {
+    viteServer = await createServer({
+      root: project,
+      server: { host: "127.0.0.1", port: 0, strictPort: false },
+    });
+    await viteServer.listen();
+    base = "http://127.0.0.1:" + viteServer.httpServer.address().port;
+  }
+  base = base.replace(/\/$/, "");
   ({ browser } = await launchReviewBrowser());
 
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    reducedMotion: "reduce",
+  });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -88,10 +108,37 @@ try {
         // All action scopes visible; the backend writes are individually denied below.
         permissions: [{ resource: "*", action: "*", objectId: "*" }],
       });
+    if (method === "ListServers")
+      return reply({
+        servers: [
+          { id: "srv-1", name: "Fixture Survival Server" },
+          { id: "srv-2", name: "Fixture Creative Server" },
+        ],
+      });
     if (method === "ListWorldViewTargets")
-      return readDenied ? denied() : reply({ targets: [target] });
-    if (method === "GetWorldViewStatus")
-      return readDenied ? denied() : reply({ target });
+      return readDenied ? denied() : reply({ targets: [target, otherTarget] });
+    if (method === "GetWorldViewStatus") {
+      if (readDenied) return denied();
+      if (statusMode === "missing") return reply({});
+      if (statusMode === "error")
+        return reply({ code: "unavailable", message: "Fixture status temporarily unavailable" }, 503);
+      if (statusMode === "setup")
+        return reply({
+          target: {
+            ...target,
+            rendererType: "RENDERER_TYPE_UNSPECIFIED",
+            rendererState: "RENDERER_STATE_ABSENT",
+            renderer: undefined,
+          },
+        });
+      return reply({ target });
+    }
+    if (method === "ListNodes") return reply({ nodes: [{ id: "local", isLocal: nodeIsLocal }] });
+    if (method === "ListModules") return reply({ modules: [] });
+    if (method === "CreateModule") {
+      createModuleCalls += 1;
+      return reply({ code: "failed_precondition", message: "Fixture install failure" }, 400);
+    }
     if (method === "ListCapabilities")
       return reply({
         rendererType: "RENDERER_TYPE_BLUEMAP",
@@ -251,6 +298,79 @@ try {
     await page.locator("body").innerText(),
   );
   results.push("world_view/read denial still produces the explicit no-access state");
+
+  readDenied = false;
+  await dumpOnFailure("world-inventory", async () => {
+    for (const [width, theme] of [[360, "dark"], [768, "light"], [1440, "dark"]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((mode) => {
+        localStorage.setItem("carbon-theme", mode);
+        localStorage.setItem("mode-watcher-mode", mode);
+      }, theme);
+      await page.goto(base + "/worlds");
+      const content = page.getByTestId("showcase-worlds-content");
+      const mapLink = content.getByRole("link", { name: "Fixture Overworld" });
+      await mapLink.waitFor();
+      await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
+      await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
+      await content.getByText("Not reported", { exact: true }).filter({ visible: true }).first().waitFor();
+      assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
+      const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
+      assert.equal(overflow, false, "World View fits at width " + width);
+      await mapLink.focus();
+      assert.equal(await mapLink.evaluate((element) => element === document.activeElement), true);
+      await page.screenshot({
+        path: path.join(evidence, "inventory-" + width + "-" + theme + ".png"),
+        animations: "disabled",
+      });
+      await page.keyboard.press("Enter");
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+    }
+    await page.goto(base + "/worlds?server=srv-1");
+    await page.getByRole("link", { name: "Fixture Overworld" }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Fixture Creative" }).count(), 0);
+    await page.getByRole("link", { name: "All servers" }).click();
+    await page.getByRole("link", { name: "Fixture Creative" }).waitFor();
+  });
+  results.push("inventory presents names, setup and unknown freshness at 360, 768 and 1440, supports keyboard navigation and preserves server scoping");
+
+  await dumpOnFailure("unavailable-status", async () => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    for (const mode of ["missing", "error"]) {
+      statusMode = mode;
+      await page.goto(url);
+      await page.getByRole("heading", { name: "Map status unavailable" }).waitFor();
+      assert.equal(await page.getByRole("region", { name: /World map/i }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "View controls" }).count(), 0);
+      statusMode = "ready";
+      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+    }
+  });
+  results.push("missing and failed status both expose a working retry and keep the map closed until it is ready");
+
+  await dumpOnFailure("renderer-setup", async () => {
+    statusMode = "setup";
+    nodeIsLocal = false;
+    await page.goto(url);
+    await page.getByRole("heading", { name: "Set up a map" }).waitFor();
+    await page.getByText(/Private renderer discovery is only available on the local node/).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Install BlueMap" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "View controls" }).count(), 0);
+    nodeIsLocal = true;
+    await page.reload();
+    await page.getByRole("button", { name: "Install BlueMap", exact: true }).click();
+    const accept = page.getByRole("button", { name: "Accept and install" });
+    assert.equal(await accept.isEnabled(), false);
+    await page.getByRole("checkbox", { name: /I explicitly accept/ }).check();
+    await accept.click();
+    await page.getByRole("alert").filter({ hasText: "Fixture install failure" }).waitFor();
+    assert.equal(createModuleCalls, 1);
+    assert.equal(await page.getByText("Fixture install failure", { exact: false }).count(), 1);
+    assert.equal(await page.locator("[data-sonner-toast]").count(), 0);
+    await page.screenshot({ path: path.join(evidence, "setup-error-360.png"), animations: "disabled" });
+  });
+  results.push("remote setup stays guarded and local consented install failure is shown once inline");
 
   assert.deepEqual(errors, [], `page errors: ${errors.join("; ")}`);
   await fs.writeFile(
