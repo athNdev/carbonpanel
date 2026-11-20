@@ -19,6 +19,29 @@ const upgradedDescription = "Compose qualification after upgrade";
 const [phase, stateFile] = process.argv.slice(2);
 let token;
 
+// Undici reports the socket error on error.cause.code, not in error.message.
+function transportCause(error) {
+  const codes = [];
+  let cause = error && error.cause;
+  for (let depth = 0; cause && depth < 5; depth++) {
+    if (cause.code) codes.push(String(cause.code));
+    cause = cause.cause;
+  }
+  return { codes, text: codes.join(" ") + " " + String((error && error.message) || "") };
+}
+
+function safeToRetry(service, method, body) {
+  // Reads are always safe. Mutations are retried only with an idempotency key,
+  // or when the only effect is re-issuing a deterministic fixture console
+  // command (gamerule/save-all/list) whose repeated execution is harmless.
+  const reads = new Set(["GetServer", "ListNodes", "GetNextAvailablePort", "GetImportJob",
+    "GetUploadStatus", "GetBinding", "ListBackups", "ListActivityLogs", "CheckCompatibility", "Login"]);
+  if (reads.has(method)) return true;
+  if (body && typeof body.request_id === "string" && body.request_id) return true;
+  if (service === "ServerService" && method === "SendCommand") return true;
+  return false;
+}
+
 async function rpc(service, method, body = {}) {
   const headers = { "Content-Type": "application/json", "Connect-Protocol-Version": "1" };
   if (token) headers.Authorization = "Bearer " + token;
@@ -30,9 +53,17 @@ async function rpc(service, method, body = {}) {
       });
       break;
     } catch (error) {
-      const transient = /UND_ERR_SOCKET|ECONNRESET|socket closed/i.test(String(error));
-      if (!transient || attempt === 2) throw error;
-      console.log("Transient controller socket close on " + service + "/" + method + "; retrying");
+      const cause = transportCause(error);
+      const transient = /UND_ERR_SOCKET|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/.test(cause.text);
+      if (!transient || attempt === 2) {
+        console.log("Controller RPC " + service + "/" + method + " failed: " + cause.text);
+        throw error;
+      }
+      if (!safeToRetry(service, method, body)) {
+        console.log("Non-idempotent mutation failed with " + cause.text + "; not replaying");
+        throw error;
+      }
+      console.log("Transient controller socket close (" + cause.text + ") on " + service + "/" + method + "; retrying safely");
       await sleep(1000);
     }
   }

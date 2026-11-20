@@ -130,7 +130,7 @@ printf 'candidate_image=%s\n' "$candidate" | tee -a "$evidence"
 # it is not an assertion that Compose ran the staged OCI image digest. That
 # digest needs its own exact-image evidence and is recorded separately by the
 # release qualification ledger.
-if artifact_present release-image-context; then
+if (( primary_count == 1 )); then
   printf 'candidate_image_provenance=local-build-from-release-image-context\n' | tee -a "$evidence"
 else
   printf 'candidate_image_provenance=local-build-from-verified-linux-bundle\n' | tee -a "$evidence"

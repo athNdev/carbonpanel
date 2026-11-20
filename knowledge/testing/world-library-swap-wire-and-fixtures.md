@@ -39,13 +39,21 @@ Archive them with narrowly scoped fixture `sudo` reads and restore the archive
 file's ownership to the runner; never chmod managed world data.
 
 A backup record's size and digest are metadata, not proof that archived bytes
-exist. Locate the real archive by its published digest, inspect its entries and
-compare the archived `level.dat` bytes with the original. A missing or damaged
-archive fails the check.
+exist. Locate the real archive by its published digest inside this fixture's
+backup directory only, with the same narrow fixture privilege. The stable
+original-world marker comes
+from the `level.dat` inside that archive captured before the swap, not from a
+mutable live file that `save-all flush` may rewrite. Compare the archive digest
+and that archived marker before and after the swap; a missing, damaged or
+changed archive fails the check.
 
-Two unexpired copies of a primary staging artifact are ambiguous, not absent.
-Reject ambiguity before selecting any input path; only a genuinely missing
-primary artifact may use the bounded reconstruction fallback.
+Classify transport failures from Undici's `error.cause.code` (`UND_ERR_SOCKET`,
+`ECONNRESET`, `EPIPE`, timeouts), not from the top-level message. Retry only
+reads and mutations carrying an idempotency key (or deterministic fixture
+console commands), so an interrupted write cannot duplicate a mutation.
+
+Duplicate unexpired primary staging artifacts are a hard error, not a trigger
+for the bounded reconstruction fallback.
 
 # Read next
 
