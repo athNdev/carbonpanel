@@ -25,6 +25,9 @@ sources:
 
 # Running servers
 
+- Bind and recovery read locality and endpoint generation from the owning
+  node row. A registered controller daemon uses its local data path even
+  with an assigned node ID. Legacy local aliases remain supported.
 - The binder holds the server transition across Docker observation, stop, swap
   and restart. The internal adapter requires server power grants and the
   active journal's matching server, container and node endpoint.
