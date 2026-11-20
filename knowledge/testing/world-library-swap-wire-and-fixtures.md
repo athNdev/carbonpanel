@@ -18,30 +18,30 @@ decimal strings. Normalize them with `BigInt` before comparing with Node buffer
 lengths. `scripts/test-qualify-world-swap.mjs` feeds a serialized
 `GetUploadStatus` response so a strict-equality regression is caught offline.
 
-BindWorld can take longer than an ordinary read because a supported graceful
-stop may need 60 seconds. Use its own bounded deadline and reconcile an
-interrupted call by replaying the same `request_id`; the journal returns the
-original operation rather than starting a second swap.
+BindWorld needs its own bounded deadline because a graceful stop may take 60s;
+reconcile an interrupted call by replaying the same `request_id`, which returns
+the original operation rather than a second swap.
 
 Shipped Compose has no auto-registered local node row. The fixture registers a
 node for `unix:///var/run/docker.sock` if absent and places both servers on its
 real UUID via `node_id`, so the supported node-id and endpoint-generation path
-is exercised. The fixture asserts the node is classified `is_local` and that
-each created server reports that exact `nodeId`. Do not bypass node IDs or
-endpoint-generation checks or edit binding source here. If BindWorld reports
+is exercised; the fixture asserts `is_local` and matching server `nodeId`. Do
+not bypass node IDs or endpoint-generation checks or edit binding source. If BindWorld reports
 `remote node storage unavailable` for that real node UUID, the defect is in the
 product's storage resolution (binder must resolve the node row, not only legacy
 string IDs) and belongs to a separate product branch, not this qualification PR.
 
-Node-owned server fixture directories are deliberately not world-writable.
-Archive them with narrowly scoped fixture `sudo` reads and restore the archive
-file's ownership to the runner; never chmod managed world data.
+Archive ONLY `world` from the disposable server data parent and assert
+`world/level.dat` in both archives before import; `stageFamilies` requires a
+world folder at the archive root. A flat ZIP is a separate product gap.
+
+Node-owned fixture dirs are not world-writable: use narrow fixture `sudo`
+reads and restore archive ownership to the runner; never chmod managed data.
 
 A backup record's size and digest are metadata, not proof that archived bytes
-exist. Locate the real archive by its published digest inside this fixture's
-backup directory only, with the same narrow fixture privilege. The stable
-original-world marker is the `level.dat` inside that archive captured before the swap, not from a
-mutable live file that `save-all flush` may rewrite. Compare the archive digest
+exist. Find the archive by published digest in this fixture's backup directory
+only. The stable marker is its `level.dat`, captured before the swap rather
+than a live file that `save-all flush` may rewrite. Compare the archive digest
 and that archived marker before and after the swap; a missing, damaged or
 changed archive fails the check.
 

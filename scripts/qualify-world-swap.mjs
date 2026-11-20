@@ -82,11 +82,18 @@ function sudoSha256(path) {
   return execFileSync("sudo", ["sha256sum", path], { encoding: "utf8" }).trim().split(/\s+/)[0];
 }
 
-function sudoZip(directory, archive) {
-  execFileSync("sudo", ["zip", "-qr", archive, "."], { cwd: directory });
+// Binder.stageFamilies expects a world directory containing level.dat, and
+// documented Carbon Panel backups keep world folders at the archive root.
+// Package ONLY the real `world` folder from the disposable server data parent;
+// do not flatten it and do not weaken product validation.
+function sudoZipWorld(serverDir, archive) {
+  execFileSync("sudo", ["zip", "-qr", archive, "world"], { cwd: serverDir });
   const uid = execFileSync("id", ["-u"], { encoding: "utf8" }).trim();
   const gid = execFileSync("id", ["-g"], { encoding: "utf8" }).trim();
   execFileSync("sudo", ["chown", uid + ":" + gid, archive]);
+  const entries = sudoArchiveEntries(archive);
+  assert.ok(entries.includes("world/level.dat"),
+    "fixture archive must contain world/level.dat: " + entries.slice(0, 8).join(","));
 }
 
 function sudoArchiveEntries(archive) {
@@ -302,9 +309,9 @@ async function main() {
   await waitFor("source world stopped before first archive", 120, async () => {
     assert.equal((await serverRecord(sourceId)).status, "SERVER_STATUS_STOPPED");
   });
-  const sourceWorld = resolve(serverDataDir(sourceId), "world");
+  const sourceDataDir = serverDataDir(sourceId);
   const archiveA = resolve(work, "world-source-a.zip");
-  sudoZip(sourceWorld, archiveA);
+  sudoZipWorld(sourceDataDir, archiveA);
   report.sourceArchiveSha256 = sha256(archiveA);
 
   // A genuinely different second archive: revisions are content-addressed,
@@ -319,7 +326,7 @@ async function main() {
     assert.equal((await serverRecord(sourceId)).status, "SERVER_STATUS_STOPPED");
   });
   const archiveB = resolve(work, "world-source-b.zip");
-  sudoZip(sourceWorld, archiveB);
+  sudoZipWorld(sourceDataDir, archiveB);
   assert.notEqual(sha256(archiveA), sha256(archiveB), "the two source archives are identical");
   check("distinct known-good worlds packaged through the operator fixture",
     "a=" + sha256(archiveA) + " b=" + sha256(archiveB));
