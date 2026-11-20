@@ -512,7 +512,7 @@ type FamilyServerExcludedSurface struct {
 
 // FamilyServerExcludedSurfaces documents protocol/HTTP surfaces that are not
 // tools. There is intentionally no health-endpoint tool: healthz/readyz are
-// public probes. The servers/read tools give server status and logs,
+// public probes. The servers/read tools give server status, logs and cached operational metrics,
 // while Prometheus monitoring uses the panel metrics endpoints.
 var FamilyServerExcludedSurfaces = []FamilyServerExcludedSurface{
 	{

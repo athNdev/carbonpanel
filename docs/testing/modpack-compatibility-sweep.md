@@ -27,19 +27,25 @@ panel rejects it instead of silently creating an unplayable server.
 | # | Pack | Source | Loader (manifest) | Why it is in the matrix |
 | --- | --- | --- | --- | --- |
 | 1 | Kreatopolis-server | local upload | NeoForge 1.20.1 | Local pack path; already-created server used for the environment baseline |
-| 2 | Haste | Modrinth | Fabric | Small, fast smoke test of the Modrinth install path |
+| 2 | Haste | Modrinth | Fabric | Project declares dedicated servers unsupported; expect rejection after sync |
 | 3 | Cobblemon Official Modpack [NeoForge] | Modrinth | NeoForge | Large NeoForge pack with many client/server splits |
-| 4 | Performium | Modrinth | Fabric | Performance pack; checks client-only mod rejection |
+| 4 | Performium | Modrinth | Fabric | Project declares dedicated servers unsupported; version `ZWYCTyNf` declared all 38 files server-required |
 | 5 | Homestead | Modrinth | Fabric/Forge | World-generation and datapack-heavy pack |
-| 6 | The Dwellers | Modrinth | Forge/NeoForge | 1.20.1 Forge-family regression coverage |
-| 7 | ArdaCraft | Modrinth | Forge | Large 1.20.1 content pack and long startup path |
-| 8 | Fabulously Optimized | Modrinth | Fabric | Client-only pack; expected outcome is a clear rejection or warning |
-| 9 | Distant Horizons & Iris Shaders | Modrinth | Fabric | Client-only rendering pack; second negative case |
+| 6 | The Dwellers | Modrinth | Forge/NeoForge | Check dedicated-server class-loading failures even when the project declares server support |
+| 7 | ArdaCraft | Modrinth | Fabric | Large 1.20.1 content pack and long startup path |
+| 8 | Fabulously Optimized | Modrinth | Fabric | Project declares dedicated servers unsupported although version `FLkaba1E` declared all 49 files server-required |
+| 9 | Distant Horizons & Iris Shaders | Modrinth | Fabric | Project declares dedicated servers unsupported |
 
 If a pack is not in the indexed library, import it from Modrinth by slug and
 record the import result before creating the server. Never substitute a
 different pack silently; update this table in the same change if the matrix
 changes.
+
+For a Modrinth project, sync its library entry and record the project ID, version
+ID and project-level `server_side` declaration. If the project declares
+`unsupported`, try to deploy it and capture the rejection before allocating
+a server. This completes the negative case. Individual files can be shared,
+optional or client-only even when the project supports dedicated servers.
 
 ## Procedure per pack
 
@@ -48,7 +54,7 @@ changes.
 2. Start the server and record the start timestamp.
 3. Wait up to 15 minutes for `RUNNING`. Watch the console for `Done` and for
    mod-resolution, mixin, or missing-dependency errors.
-4. Once running, wait 5 minutes for the first full TPS sample. Run `list` and
+4. An accepted create/start request or completed job alone does not establish readiness. Once running, wait 5 minutes for the first full TPS sample. Run `list` and
    record online/max players and TPS.
 5. Join the server once from the same machine (or verify the port is accepting
    connections if a client is unavailable). Disconnect immediately.
@@ -88,7 +94,7 @@ the follow-up issue when it fails. A failure that is caused by the panel, not
 the pack, must also get a separate `Task` with the captured evidence and the
 governing concept updated.
 
-## Known environment blocker (2026-11-05)
+## Historical environment failure (2026-11-05)
 
 The local WSL Docker daemon had DNS servers `8.8.8.8`/`1.1.1.1` configured but
 no outbound route from the WSL NAT interface. Containers resolved names only
@@ -97,8 +103,7 @@ after switching Docker to the host resolver, then failed TCP connections with
 `UnknownHostException` / `NoRouteToHostException` and exited 1.
 
 This is an environment failure, not a panel bug. The panel correctly recorded
-`ERROR` and the container exit code. Recover the host network before running
-this sweep:
+`ERROR` and the container exit code. If the preflight reproduces this failure, recover the host network before running the sweep:
 
 ```powershell
 # Elevated PowerShell / Command Prompt

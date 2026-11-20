@@ -43,6 +43,9 @@ const (
 	// contains PlayerService, WorldService, WorldViewService and
 	// ModBrowseService.
 	PanelBuildPostStable PanelBuild = "post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e"
+	// PanelBuildProductRPCs is the first main build with the generated
+	// Packwiz and StagedConfig services mounted.
+	PanelBuildProductRPCs PanelBuild = "post-v1.0.40+eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3"
 )
 
 // CatalogEntry is one declared tool tuple. Scope is a canonical string of the

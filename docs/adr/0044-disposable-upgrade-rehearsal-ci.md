@@ -10,7 +10,7 @@
 ## Context
 
 The v1.0.40 → 2.0.0 migration policy documents additive SQLite schema growth
-(35 → 44 tables) and a copy-back/restore rollback. A real-binary rehearsal
+(35 → 45 tables) and a copy-back/restore rollback. A real-binary rehearsal
 existed only as evidence on the OSS-366 PR head, and the checked-in
 `scripts/rehearse_upgrade.py` is explicitly a synthetic MODEL. Nothing in CI
 ran an upgrade rehearsal, so a schema regression could merge without a live
@@ -31,7 +31,7 @@ caller-owned disposable workspace (a GitHub `$RUNNER_TEMP` directory):
    contract constants. Download the verified archive, `checksums.txt` and
    `release-manifest.json` from the public release and require the archive SHA
    to match **both** records and the manifest version/commit to equal the pinned
-   legacy baseline. Assert the documented 35 → 44 → 35 table shape.
+   legacy baseline. Assert the documented 35 → 45 → 35 table shape.
 2. **Current stable** — the highest published product stable derived from the
    authoritative GitHub release record through the OSS-395 product version
    contract (`published_stable_versions()` / `verified_previous_release_tag()`

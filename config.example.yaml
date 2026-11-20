@@ -195,6 +195,15 @@ proxy:
 
 # Minecraft server global configuration defaults
 minecraft:
+  # Direct moderation connections are scoped to a server ID and its current node.
+  # Use the panel's server ID as the key. Set the named secret in the controller
+  # environment. Unconfigured servers use their node-scoped exec fallback.
+  # player_endpoints:
+  #   your-server-id:
+  #     node_id: default
+  #     management_url: wss://minecraft-node.example.invalid:25585
+  #     management_secret_env: EXAMPLE_SERVER_MANAGEMENT_SECRET
+  #     rcon_host: minecraft-node.example.invalid  # optional direct RCON
   reset_global: false
   global_config: # Specifying any of these settings will override the global config default when it is first made, or existing if `reset_global` is `true`
     # JVM Configuration

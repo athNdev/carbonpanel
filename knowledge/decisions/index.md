@@ -10,6 +10,8 @@
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
+- [Channel promotion gates](channel-promotion.md) — Exact-revision, dual-registry and qualified-stage gates for docs and OCI channel moves.
+- [Channel promotion recovery and serialization](channel-promotion-recovery.md) — Prior-receipt rollback, exact docs restore, shared lock and target guard for channel promotion.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
@@ -27,11 +29,13 @@
 - [MCP controller stream session semantics](mcp-controller-stream-sessions.md) — Bounded controller-owned stream sessions use service-owned deadlines, exact server binding, idempotent frames and terminal partial reads to avoid lost bytes and leaked handles.
 - [MCP controller stream session semantics — Choice](mcp-controller-stream-sessions-choice.md) — The MCP gateway never opens panel/node storage. Bounded OpenStream,
 - [MCP controller stream session semantics — Verification + Read next](mcp-controller-stream-sessions-verification.md) — Service fixtures prove exact server binding with no state change on refusal,
+- [MCP Packwiz inventory reads](mcp-packwiz-read-boundary.md) — Typed MCP Packwiz reads page allowlisted Studio metadata under the existing global modpacks/read grant.
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
+- [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module form conversions — Choice](module-form-codecs-choice.md) — Environment keys, metadata keys and volume paths trim whitespace; blank keys
 - [Module form conversions — Choice (part 2)](module-form-codecs-choice-2.md) — Malformed persisted JSON is now reported explicitly rather than silently
@@ -40,6 +44,7 @@
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
+- [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.

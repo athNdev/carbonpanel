@@ -1,5 +1,6 @@
 {
   "schema_version": 3,
+  "catalog": "docs/release-history.json",
   "repository": "https://github.com/athNdev/carbonpanel",
   "channels": {
     "stable": {
@@ -102,7 +103,7 @@
       "rollback_version": "1.0.40",
       "next_stable_boundary": "major",
       "protocol": "v1",
-      "note": "The 1.0 line stays at 1.0.40; the next planned stable is carbonpanel-v2.0.0 (MAJOR)."
+      "note": "The 1.0 line stays at 1.0.40; the next planned stable is carbonpanel-v2.0.1 (MAJOR)."
     }
   },
   "versions": [

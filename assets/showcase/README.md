@@ -16,50 +16,46 @@ pixel size for every published image.
 These are unretouched browser crops of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage
 sample islands. The stack seeds a first admin, a local node, a running Vanilla
-1.21.1 server, real Packwiz mods, one World Library revision, and an offline
-player identity through the real allowlist RPC. A compatibility verdict is
+1.21.1 server, real Packwiz mods, one World Library revision, and a player session from a
+headless Minecraft client connecting to the disposable server. The panel
+creates the server-scoped roster row through its normal player observation
+path. The review game port must be bound to loopback before the game starts. A compatibility verdict is
 computed on demand by the read-only `CheckCompatibility` RPC; a panel that has
-not run that check correctly shows "No compatibility report yet". The expanded
-roster capture shows an offline identity's honest unavailable avatar state,
-not a skin profile. Resource figures and logs are observed values, not
+not run that check correctly shows "No compatibility report yet". The expanded roster capture shows the observed fixture identity and its provenance. Resource figures and logs are observed values, not
 performance claims. No production account, world, log or private player profile
 is used.
 
 ## Required and optional images
 
-`showcase-dashboard`, `showcase-dashboard-full`, `showcase-server-detail`,
-`showcase-studio`, `showcase-modpacks`, `showcase-library`,
-`showcase-library-revisions` and `showcase-player-allowlist` are the
-README-canonical set. Publication fails closed if any one is missing, corrupt,
-stale or inconsistent with the manifest. The `-full` shot is a full-window
-capture with navigation and shell; the others are inline feature crops.
-
-**Publication follow-up (completed):** the full-window PNG was published by
-trusted-main run 44517658952 (public asset commit `dbd6e4ea`), with raw URL
-HTTP 200, manifest SHA256 and byte count verified (2880x2000). The root README
-now links it prominently. Last-good assets and fail-closed validation remain
-in force.
-
-Feature-gated journey steps (`--features players,library,worldtab,worlds,
-playerdetail`) are mandatory when enabled, so a partial set cannot publish.
-World tab and Worlds list (`worldtab`) are independent of the renderer gate.
-Rendered BlueMap tiles (`worlds`) and a canonical player detail preview
-(`playerdetail`) are off by default and only linked from the README after a
-real capture passes: a visible decoded skin image or rendered map canvas. A
-Worlds list or a renderer status object is never presented as map imagery.
+The canonical bundle contains `showcase-dashboard`, `showcase-dashboard-full`,
+`showcase-server-detail`, `showcase-studio`, `showcase-modpacks`,
+`showcase-library`, `showcase-library-revisions`, `showcase-player-allowlist`,
+`showcase-worlds-list`, `showcase-world-tab`, and `showcase-world-view`.
+The full dashboard is a native 2× capture of the 1440 CSS-pixel desktop
+layout with navigation and shell.
+The leading dashboard image captures the content at a narrower desktop width
+for the README. Its link opens the original full-window PNG. The World View frame
+uses a broad camera over the seeded Vanilla server's generated Overworld,
+rendered by BlueMap through the authenticated panel route.
 
 ## Automated path
 
-`.github/workflows/showcase.yml` runs on main pushes that touch the represented
-UI, or on `workflow_dispatch` with explicit feature gates. The capture job is
-read-only and runs the real production journey. A separate minimal
+`.github/workflows/showcase.yml` runs on main pushes that affect the represented
+UI, every Monday at 03:17 UTC as a backstop, and on manual dispatch. The default
+dispatch captures the canonical set. To inspect a subset, disable the relevant
+feature inputs. A partial or non-main dispatch uploads the validated artifact
+without publishing. `playerdetail` is a manual opt-in and requires a decoded
+skin preview.
+
+The read-only capture job runs the production journey. A separate minimal
 `contents:write` job publishes only `showcase-assets`, in one atomic commit,
 after:
 
 - re-validating the bundle against the plan and validator from an exact pinned
   `github.sha` checkout (the artifact is data only, never executable code),
-- confirming the capture is live main and a descendant of the last published
-  source commit, and refusing a divergent re-run,
+- confirming both sources are in live main history and the new source advances
+  the published revision. An older or repeated capture remains available in
+  its run as a validated artifact,
 - requiring every README-canonical image, and
 - checking a content digest so an unchanged capture is a no-op.
 
@@ -68,29 +64,34 @@ Any failure leaves the previous good screenshots untouched.
 ## Regeneration
 
 ```sh
+bun install --cwd scripts/review/fixtures/minecraft-player --frozen-lockfile --ignore-scripts
+
+REVIEW_OBSERVED_PLAYER=1 \
 REVIEW_STACK_NAME=carbon-readme-review \
 REVIEW_PORT=18267 \
-REVIEW_DATA_DIR=/tmp/carbon-readme-review \
   bash scripts/review/devstack.sh up
+
+session="$HOME/.cache/carbon-panel-review/sessions/carbon-readme-review"
+export SHOWCASE_SERVER_ID="$(cat "$session/server-id")"
 
 node scripts/review/journey.mjs \
   --plan scripts/review/plan-showcase.json \
-  --base http://127.0.0.1:<port-from-devstack> \
+  --base "http://127.0.0.1:$(cat "$session/port")" \
   --out /tmp/showcase \
-  --features players,library
+  --features players,library,worldtab,worlds
 
 python3 scripts/showcase_assets.py build \
   --images-dir /tmp/showcase --publish-dir /tmp/showcase-bundle \
   --plan scripts/review/plan-showcase.json \
   --seed-script scripts/review/devstack.sh \
-  --features players,library \
+  --features players,library,worldtab,worlds \
   --source-sha <sha> --source-ref refs/heads/main \
   --repository athNdev/carbonpanel --run-id local --run-url <url> \
   --captured-at <utc-iso> --app-version <version> \
   --driver-version <version> --browser-version <version>
 python3 scripts/showcase_assets.py validate \
   --publish-dir /tmp/showcase-bundle \
-  --plan scripts/review/plan-showcase.json --features players,library \
+  --plan scripts/review/plan-showcase.json --features players,library,worldtab,worlds \
   --expected-source-sha <sha>
 ```
 

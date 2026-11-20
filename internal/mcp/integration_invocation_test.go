@@ -120,7 +120,9 @@ func integrationInvocationArgs() map[string]map[string]any {
 // tables. Family tables are test-only declarations already pinned by their own
 // suites; reusing them here keeps a single source of valid inputs.
 func allInvocationArgs() map[string]map[string]any {
-	out := map[string]map[string]any{}
+	out := map[string]map[string]any{
+		stagedConfigListSpec.Name: {"server_id": "srv-1", "status": "staged"},
+	}
 	for name, args := range firstSliceInvocationArgs() {
 		out[name] = args
 	}
@@ -218,7 +220,7 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 		if rec.Procedure == statusProc {
 			byProcedure[statusProc] = OperationInvocationEvidence{
 				ID: "rpc:" + statusProc, Procedure: statusProc,
-				Tool: "Clients.Verify (typed auth probe)",
+				Tool:    "Clients.Verify (typed auth probe)",
 				Reached: true, ArgsMapped: true, OutcomeObserved: true, ScopeEvidence: true,
 				Detail: "public auth probe invoked by Verify behind production interceptor; excluded from tool set",
 			}

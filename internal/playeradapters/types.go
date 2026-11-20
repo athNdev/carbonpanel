@@ -83,7 +83,11 @@ type CapabilitySet struct {
 // is advisory: it carries its own observation time and source and must not be
 // merged silently into a roster obtained at a different time.
 type Notification struct {
-	Kind       string // "joined" | "left"
+	// Kind is one of: joined, left, allowlist_added, allowlist_removed,
+	// ban_added, ban_removed, operator_added, operator_removed. Join/leave
+	// notifications are advisory presence signals; moderation notifications
+	// describe a completed server-side change. None mutate a List snapshot.
+	Kind       string
 	Name       string
 	UUID       string
 	Source     string

@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Product releases are tagged `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`; the displayed SemVer and immutable image tag stay `MAJOR.MINOR.PATCH`. Historical tags are classified in `docs/release-history.md` and `docs/release-history.json`; plain `v*`, `mod-*` and inherited tags remain separate domains and never start a panel release. The current 1.0 rollback line is `1.0.40`; the next planned stable is the MAJOR `carbonpanel-v2.0.0` because three operator-facing changes require migration from v1.0.40.
+- Product releases are tagged `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`; the displayed SemVer and immutable image tag stay `MAJOR.MINOR.PATCH`. Historical tags are classified in `docs/release-history.md` and `docs/release-history.json`; plain `v*`, `mod-*` and inherited tags remain separate domains and never start a panel release. The current 1.0 rollback line is `1.0.40`; the planned major upgrade uses the fresh product tag `carbonpanel-v2.0.1` because three operator-facing changes require migration from v1.0.40.
 - One machine-readable version contract (`docs/website-source.json`, generated `docs/version-index.json`) now drives the docs banner, version switcher, direct-route validation and Pages metadata. Published `/docs/` and `/docs/versions/<version>/` pages are built from exact peeled commits for `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39` (source-only, no download). `v3.0.0-beta.4` (upstream name collision) and `v1.0.38` (tag ancestry disagreement) are excluded. Channel and availability come from the classified catalog, never the label prefix.
 
 ## [3.0.0-alpha.1] - 2026-11-13

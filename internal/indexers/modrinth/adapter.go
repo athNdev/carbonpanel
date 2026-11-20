@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package modrinth
 
 import (
@@ -136,6 +135,7 @@ func (m *ModrinthIndexer) convertSearchProject(project Project) indexers.Modpack
 	}
 
 	return indexers.Modpack{
+		ServerSide:    project.ServerSide,
 		ID:            fmt.Sprintf("modrinth-%s", project.ProjectID),
 		IndexerID:     project.ProjectID,
 		Indexer:       "modrinth",
@@ -187,6 +187,7 @@ func (m *ModrinthIndexer) convertProject(project ProjectDetails) indexers.Modpac
 	}
 
 	return indexers.Modpack{
+		ServerSide:    project.ServerSide,
 		ID:            fmt.Sprintf("modrinth-%s", project.ID),
 		IndexerID:     project.ID,
 		Indexer:       "modrinth",

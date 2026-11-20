@@ -250,9 +250,19 @@ type DatabaseConfig struct {
 	PanelBackupKeep int `mapstructure:"panel_backup_keep" json:"panel_backup_keep"`
 }
 
+// PlayerEndpoint pins direct controller connections to one server and node.
+// The management bearer is read from the named controller environment variable.
+type PlayerEndpoint struct {
+	NodeID              string `mapstructure:"node_id"`
+	ManagementURL       string `mapstructure:"management_url"`
+	ManagementSecretEnv string `mapstructure:"management_secret_env"`
+	RCONHost            string `mapstructure:"rcon_host"`
+}
+
 type MinecraftConfig struct {
-	ResetGlobal  bool           `mapstructure:"reset_global" json:"reset_global"`
-	GlobalConfig map[string]any `mapstructure:"global_config" json:"global_config"`
+	PlayerEndpoints map[string]PlayerEndpoint `mapstructure:"player_endpoints" json:"-"`
+	ResetGlobal     bool                      `mapstructure:"reset_global" json:"reset_global"`
+	GlobalConfig    map[string]any            `mapstructure:"global_config" json:"global_config"`
 }
 
 type LoggingConfig struct {
