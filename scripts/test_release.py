@@ -3177,6 +3177,38 @@ class LocalOciWorkflowSeamTests(unittest.TestCase):
         self.assertIn("verify-immutable", source)
 
 
+class NightlyActivationTests(unittest.TestCase):
+    """First Nightly activation is explicit; mixed registries never skip silently."""
+
+    DIGEST = "sha256:" + "d" * 64
+    COMMIT = "a" * 40
+
+    def observations(self, hub, ghcr):
+        return {"docker_hub": hub, "ghcr": ghcr}
+
+    def test_mixed_and_missing_pairs_are_blocked_with_reasons(self):
+        present = ("present", {"digest": self.DIGEST, "revision": self.COMMIT})
+        absent = ("absent", {})
+        mixed = release.nightly_activation_decision(self.observations(present, absent))
+        self.assertEqual(mixed["action"], "blocked")
+        self.assertIn("mixed", mixed["reason"])
+        self.assertIn("ghcr", mixed["reason"])
+        missing = release.nightly_activation_decision(self.observations(absent, absent))
+        self.assertEqual(missing["action"], "blocked")
+        unknown = release.nightly_activation_decision(self.observations(present, ("unknown", None)))
+        self.assertEqual(unknown["action"], "blocked")
+        conflicting = release.nightly_activation_decision(self.observations(
+            present, ("present", {"digest": "sha256:" + "e" * 64, "revision": self.COMMIT})))
+        self.assertEqual(conflicting["action"], "blocked")
+
+    def test_verified_pair_activates(self):
+        pair = ("present", {"digest": self.DIGEST, "revision": self.COMMIT})
+        result = release.nightly_activation_decision(self.observations(pair, pair))
+        self.assertEqual(result["action"], "activate")
+        self.assertEqual(result["digest"], self.DIGEST)
+        self.assertEqual(result["revision"], self.COMMIT)
+
+
 class StableReleasePublicationTests(unittest.TestCase):
     """Fail-closed Stable publication: real observations and rendered identity."""
 

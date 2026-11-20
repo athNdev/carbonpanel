@@ -534,9 +534,26 @@ jobs:
         run: |
           OBS=$(python3 scripts/release.py channel-observe --reference "$REF" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - name: Classify first Nightly activation from real immutable observations
+        id: activation
+        if: steps.pinned.outputs.stable == 'true'
+        env:
+          OBS: ${{ steps.sha_obs.outputs.observations }}
+        run: |
+          # Mixed Hub/GHCR state is a BLOCKED qualification, never a silent skip.
+          python3 scripts/release.py nightly-activation-decision \
+            --observations "$OBS" > activation.json
+          cat activation.json >> "$GITHUB_STEP_SUMMARY"
+          ACTION=$(jq -r .action activation.json)
+          REASON=$(jq -r .reason activation.json)
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          if [ "$ACTION" = "blocked" ]; then
+            echo "::warning::Nightly first activation blocked: $REASON"
+          fi
       - name: Resolve the staged immutable digest (reuse on retry)
         id: stage
-        if: steps.pinned.outputs.stable == 'true'
+        if: steps.pinned.outputs.stable == 'true' && steps.activation.outputs.action == 'activate'
         env:
           OBS: ${{ steps.sha_obs.outputs.observations }}
         run: |

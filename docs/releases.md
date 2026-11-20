@@ -331,6 +331,24 @@ and repairs drift. `latest` and the `stable` alias move only from the verified
 stable digest (`sha256:ead260ef…`, commit `f88748be…`); the planned
 `carbonpanel-v2.0.0` stable is not a channel publication.
 
+**Planned-boundary data vs a later patch release.** The release scripts currently
+carry `NEXT_STABLE_GIT_TAG = carbonpanel-v2.0.0`, `NEXT_STABLE_SEMVER = 2.0.0`
+and `NEXT_STABLE_MINOR = 2.0` as reviewed policy data, and the classified catalog
+`docs/release-history.json` records the same `next_stable` boundary plus the
+MAJOR breaking changes. Validation and release reporting therefore assume the
+provisional 2.0.0 boundary today; a channel move to that tag is refused. A later
+`carbonpanel-v2.0.1` stable is **catalog-driven, not derived from the old 2.0.0
+literal**: it requires a new reviewed catalog entry classified as a Carbon Panel
+published stable (exact peeled commit and verified digest), the matching
+`next_stable`/compatibility update in `docs/website-source.json` and the shared
+index via `version_bump.py bump --apply`, and the corresponding reviewed update
+of those release-script constants on the same commit. The existing catalog rows
+`v2.0.0` and `v2.0.1` are `upstream-identical` historical records; their tag
+names, peel commits and provenance are immutable and are never rewritten or
+repurposed as panel releases. Release-note wording for the SSO/OIDC breaking
+changes belongs to the SSO owner; OSS-413 references it but does not edit those
+notes.
+
 No legacy alias-write step remains in any workflow: Nightly and Stable aliases
 move only inside the qualified transaction. A stable release binds its exact
 target version, both registry digests and the deployed public docs marker

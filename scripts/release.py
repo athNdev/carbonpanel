@@ -3034,6 +3034,53 @@ def verify_gate_script(path):
     return (not missing), missing
 
 
+def nightly_activation_decision(sha_observations):
+    """Classify first Nightly activation from ACTUAL immutable observations.
+
+    No silent skips: a mixed pair (normally Docker Hub present, GHCR absent),
+    an unknown registry or a missing pair is explicitly `blocked` with a reason
+    that must be surfaced by the caller. Only one digest/revision present in
+    BOTH registries may activate the candidate.
+    """
+    observations = (sha_observations if isinstance(sha_observations, dict)
+                    else _coerce_observation_map(
+                        json_argument(sha_observations, default={}) or {}))
+    states = {}
+    for name in CHANNEL_REGISTRIES:
+        value = observations.get(name) or ("unknown", {})
+        states[name] = value if isinstance(value, (list, tuple)) and len(value) >= 2 \
+            else ("unknown", {})
+    for name in CHANNEL_REGISTRIES:
+        if states[name][0] == "unknown":
+            return {"action": "blocked", "reason": f"{name} immutable observation is unknown"}
+    active = [name for name in CHANNEL_REGISTRIES if states[name][0] == "present"]
+    if not active:
+        return {"action": "blocked",
+                "reason": "no verified immutable sha pair in either registry; "
+                          "first Nightly activation needs both registries"}
+    if len(active) != len(CHANNEL_REGISTRIES):
+        missing = [name for name in CHANNEL_REGISTRIES if name not in active]
+        return {"action": "blocked",
+                "reason": f"immutable pair is mixed: present on {', '.join(active)}, "
+                          f"absent on {', '.join(missing)}; no alias move or docs promotion"}
+    digests = {(states[name][1] or {}).get("digest") for name in CHANNEL_REGISTRIES}
+    revisions = {(states[name][1] or {}).get("revision") for name in CHANNEL_REGISTRIES}
+    if len(digests) != 1 or len(revisions) != 1:
+        return {"action": "blocked", "reason": "immutable digests or revisions disagree across registries"}
+    digest, revision = next(iter(digests)), next(iter(revisions))
+    if not valid_digest(digest) or not valid_commit(revision):
+        return {"action": "blocked", "reason": "immutable digest or revision is not verified"}
+    return {"action": "activate", "reason": "verified immutable pair in both registries",
+            "digest": digest, "revision": revision}
+
+
+def nightly_activation_decision_cli(args):
+    decision = nightly_activation_decision(args.observations)
+    print(json.dumps(decision, indent=2))
+    write_output(decision)
+    return decision
+
+
 def stable_alias_decision(stable, latest):
     """Fail-closed alias decision from ACTUAL observations, including first publish."""
     def pair(state, name):
@@ -3695,6 +3742,8 @@ def build_parser():
     stable_site.add_argument("--digest", required=True)
     stable_site.add_argument("--version", required=True)
     stable_site.add_argument("--repository", required=True)
+    activation = commands.add_parser("nightly-activation-decision")
+    activation.add_argument("--observations", default="{}")
     parity = commands.add_parser("verify-channel-parity")
     parity.add_argument("--observations", default="{}")
     parity.add_argument("--digest", required=True)
@@ -3729,7 +3778,8 @@ def main():
                 "verify-staged-page-site": verify_staged_page_site_cli,
                 "local-oci-candidate": local_oci_candidate_cli,
                 "stable-alias-decision": stable_alias_decision_cli,
-                "verify-stable-release-site": verify_stable_release_site_cli}
+                "verify-stable-release-site": verify_stable_release_site_cli,
+                "nightly-activation-decision": nightly_activation_decision_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:
