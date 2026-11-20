@@ -16,6 +16,7 @@ sources:
 Reconciliation reads timestamped logs from the current boot for fatal loader
 diagnostics, including after the container exits during boot. Operator
 shutdown and Docker's OOM classification take precedence.
+Optional dependency recommendations remain console warnings.
 Server reads retain a recorded error when Docker reports a stopped
 container. A recorded stop or a healthy running container clears the error
 display.
