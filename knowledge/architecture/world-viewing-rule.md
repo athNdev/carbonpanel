@@ -23,6 +23,11 @@ server when the active level is unknown. World View uses server names only
 from the authorized server inventory. Setup and unavailable states do not
 mount a map.
 
+The native viewport reads saved Overworld terrain through its map session.
+It bounds visible tile requests and aborts work outside the current session
+or viewport. Empty and partial saves are explicit; controls move the map view
+and do not modify the world.
+
 Renderer traffic is same-origin only. The browser receives an opaque,
 short-lived session key, never a renderer URL or port; every proxied asset
 request re-authenticates with the cookie or bearer token and enforces
