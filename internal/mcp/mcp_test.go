@@ -385,6 +385,8 @@ func registerCombinedToolHandlers(mux *http.ServeMux, ic connect.UnaryIntercepto
 	registerOK[v1.UpdatePermissionsRequest, v1.UpdatePermissionsResponse](mux, "/carbonpanel.v1.RoleService/UpdatePermissions", ic, olderMode)
 	registerOK[v1.UpdateRoleRequest, v1.UpdateRoleResponse](mux, "/carbonpanel.v1.RoleService/UpdateRole", ic, olderMode)
 	registerOK[v1.ClearServerLogsRequest, v1.ClearServerLogsResponse](mux, "/carbonpanel.v1.ServerService/ClearServerLogs", ic, olderMode)
+	registerOK[v1.ExportServerArchiveRequest, v1.ExportServerArchiveResponse](mux, "/carbonpanel.v1.ServerService/ExportServerArchive", ic, olderMode)
+	registerOK[v1.PreviewServerArchiveRequest, v1.PreviewServerArchiveResponse](mux, "/carbonpanel.v1.ServerService/PreviewServerArchive", ic, olderMode)
 	registerOK[v1.CreateServerRequest, v1.CreateServerResponse](mux, "/carbonpanel.v1.ServerService/CreateServer", ic, olderMode)
 	registerOK[v1.DeleteServerRequest, v1.DeleteServerResponse](mux, "/carbonpanel.v1.ServerService/DeleteServer", ic, olderMode)
 	registerOK[v1.GetNextAvailablePortRequest, v1.GetNextAvailablePortResponse](mux, "/carbonpanel.v1.ServerService/GetNextAvailablePort", ic, olderMode)
