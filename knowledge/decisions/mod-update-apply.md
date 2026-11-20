@@ -49,8 +49,10 @@ The scheduler invokes the same planner through an injected interface.
   under the operation, inserts name the still-open chosen batch, discard shares
   the lock, cron config rows keep their schedule, and rejected transfers still
   consume the byte budget. A batch with a cron config row is refused by both
-  mod-staging entry points, preserving that row's batch and trigger. Discard
-  keeps typed Connect refusals and its own operation name. The guarded World
+  mod-staging entry points, preserving that row's batch and trigger; a cron
+  row likewise cannot join an existing timed mod batch, and legacy mixed data
+  is isolated by the publisher. Discard keeps typed Connect refusals and its
+  own operation name. The guarded World
   Library download client is reused and transient provider failures stay
   retryable.
 - The scheduler installs the planner before starting, applies timezone only to

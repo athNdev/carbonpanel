@@ -254,6 +254,18 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 	if err != nil {
 		return nil, err
 	}
+	if mode == StagedApplyScheduled {
+		// A due-batch publisher applies every config in a timed batch. Keep
+		// independently cron-scheduled work out of a batch that already holds
+		// staged content (for example a reviewed mod update).
+		content, err := s.ListBatchContent(ctx, batch.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(content) > 0 {
+			return nil, fmt.Errorf("open batch %s has staged content; schedule config changes in a separate batch", batch.ID)
+		}
+	}
 	if opts.SetBatchWindow {
 		batch.Window = string(opts.Window)
 		batch.ApplyAt = opts.ApplyAt

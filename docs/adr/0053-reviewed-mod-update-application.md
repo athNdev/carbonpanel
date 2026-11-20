@@ -66,8 +66,12 @@ request.
    downloads. A batch carrying an independently scheduled (cron) config row is
    refused by both mod-staging entry points, because the shared batch publisher
    applies every staged config when the window becomes due; the cron row keeps
-   its own batch and trigger. Discard serialization preserves typed Connect
-   refusals and records the discard operation under its own name.
+   its own batch and trigger. The inverse arrival is guarded too: a cron
+   config cannot join an open batch that already holds staged content. For
+   legacy mixed data, `ApplyBatch` excludes scheduled config rows from timed
+   publication, parks the batch on next restart and keeps the cron row on its
+   own trigger. Discard serialization preserves typed Connect refusals and
+   records the discard operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused and the task is disabled so
    it cannot run on every tick. The planner is installed before the scheduler

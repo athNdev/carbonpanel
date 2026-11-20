@@ -77,18 +77,23 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	cfg := store.CreateDefaultServerConfig(server.ID)
 	require.NoError(t, store.SaveServerConfig(ctx, cfg))
 
-	// Pre-existing data: a mod update that is already due.
+	// Pre-existing mixed data on the same server: a future cron config was
+	// staged first, then the batch was retargeted to a due mod update window.
+	cron, err := store.StageConfigChange(ctx, server.ID,
+		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
 	when := time.Now().Add(-time.Minute).UTC()
-	dueBatch := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	_, err = store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+
 	live := filepath.Join(data, "mods", "mod.jar")
 	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
 	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
-	digest := digest512("installed")
-	_, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
+	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
 		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
 		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
-		ExpectedLiveSha512: digest,
+		ExpectedLiveSha512: digest512("installed"),
 	})
 	require.NoError(t, err)
 	acc, err := nodestorage.NewLocal(data)
@@ -96,18 +101,6 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	require.NoError(t, acc.MkdirAll(".carbon-panel/staged/candidate"))
 	require.NoError(t, acc.WriteFile(".carbon-panel/staged/candidate/mod.jar", []byte("candidate")))
 	require.NoError(t, acc.Close())
-	_ = dueBatch
-
-	// Pre-existing independent cron work on another server stays on its own
-	// schedule and must not be swept into this mod update's due publication.
-	cronData := t.TempDir()
-	cronServer := &storage.Server{ID: "cron-future", Name: "cron-future", DataPath: cronData, Status: storage.StatusStopped}
-	require.NoError(t, store.CreateServer(ctx, cronServer))
-	cronCfg := store.CreateDefaultServerConfig(cronServer.ID)
-	require.NoError(t, store.SaveServerConfig(ctx, cronCfg))
-	cron, err := store.StageConfigChange(ctx, cronServer.ID,
-		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
-	require.NoError(t, err)
 
 	var publishes int
 	require.NoError(t, Sweep(ctx, store, nil, time.Now(), nil,
@@ -121,14 +114,19 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusStaged, staged.Status, "cron item must not be applied early")
-	current, err := store.GetServerConfig(ctx, cronServer.ID)
+	require.Equal(t, storage.StagedApplyScheduled, staged.ApplyMode)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch, "the cron row keeps its batch and schedule")
+	require.Equal(t, string(storage.UpdateWindowNextRestart), batch.Window)
+	current, err := store.GetServerConfig(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotEqual(t, "nightly", valueOf(current.MOTD))
 
 	// Its own trigger still applies it later.
 	_, err = store.ApplyStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
-	current, err = store.GetServerConfig(ctx, cronServer.ID)
+	current, err = store.GetServerConfig(ctx, server.ID)
 	require.NoError(t, err)
 	require.Equal(t, "nightly", valueOf(current.MOTD))
 }

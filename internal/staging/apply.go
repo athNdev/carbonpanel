@@ -139,8 +139,21 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 				return commitErr
 			}
 		}
-		applied := make([]*storage.StagedConfigChange, 0, len(configs))
+		// Independently scheduled (cron) config rows are not part of this
+		// timed batch publication. Either entry point refuses to create this
+		// mixed state, but legacy data may already contain it: never run a
+		// cron row early just because a mod update's window came due.
+		dueConfigs := make([]*storage.StagedConfigChange, 0, len(configs))
+		var scheduledConfigs []*storage.StagedConfigChange
 		for _, cfg := range configs {
+			if cfg.ApplyMode == storage.StagedApplyScheduled {
+				scheduledConfigs = append(scheduledConfigs, cfg)
+			} else {
+				dueConfigs = append(dueConfigs, cfg)
+			}
+		}
+		applied := make([]*storage.StagedConfigChange, 0, len(dueConfigs))
+		for _, cfg := range dueConfigs {
 			rec, applyErr := store.ApplyStagedConfigChange(ctx, cfg.ID)
 			if applyErr != nil {
 				return errors.Join(applyErr, undoApply(ctx, store, restore, applied, nil))
@@ -171,6 +184,15 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			if err := store.MarkStagedContentApplied(ctx, content[i].ID); err != nil {
 				return err
 			}
+		}
+		if len(scheduledConfigs) > 0 {
+			// Keep the cron rows and their batch for their own trigger. Park
+			// the batch on next_restart so the elapsed timed window is not
+			// re-published on every scheduler tick.
+			if _, err := store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowNextRestart, nil, 0); err != nil {
+				return err
+			}
+			return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 		}
 		if err := store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied); err != nil {
 			return err

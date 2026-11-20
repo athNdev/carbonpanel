@@ -381,6 +381,38 @@ func TestStagingRefusesBatchWithIndependentCronConfig(t *testing.T) {
 	require.Equal(t, "installed", string(live))
 }
 
+func TestCronCannotJoinAnExistingTimedModBatch(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "cron-inverse", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	res, err := func() (*connect.Response[v1.UpdateModResponse], error) {
+		svc := NewModService(store, nil, um, logger.New())
+		svc.SetModUpdateLookup(newPreviewFixture())
+		svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+		return svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	}()
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
+
+	_, err = store.StageConfigChange(ctx, server.ID,
+		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "has staged content")
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, res.Msg.GetUpdateBatchId(), batch.ID)
+	configs, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Empty(t, configs, "cron row must not join the timed mod batch")
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}
+
 func TestDiscardUpdateBatchPreservesTypedRefusals(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "discard-typed", storage.StatusStopped)
