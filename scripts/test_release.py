@@ -2026,9 +2026,9 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
         # The lock spans immutable publish -> verified aliases -> GitHub release:
         # no public release can survive a compensated alias rollback.
-        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction]",
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction]",
                       job_block("promote-aliases"))
-        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction, promote-aliases]",
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction, promote-aliases]",
                       job_block("publish"))
         self.assertIn("needs.promote-aliases.outputs.aliases_verified == 'true'",
                       job_block("publish"))
@@ -2438,14 +2438,17 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertTrue(any("verify-channel-parity" in str(step.get("run", ""))
                             for step in steps))
         transaction = next(step for step in steps if step.get("id") == "transaction")
-        self.assertIn("--argjson registries \"$OBSERVED\"", transaction["run"])
+        stage = next(step for step in steps if step.get("id") == "stage_decision")
+        self.assertIn('--argjson registries "$OBSERVED"', stage["run"])
+        self.assertIn("--phase stage", stage["run"])
+        self.assertIn("steps.stage_decision.outputs.candidate", transaction["env"]["STAGED"])
         self.assertNotIn("registries:{docker_hub:$digest,ghcr:$digest}", transaction["run"])
         # A stable publication is not a site-only landing dispatch; the commit
         # phase must not be refused as "manual/site-only deploy..." for a new
         # exact tag/release target.
         self.assertIn("--event release", transaction["run"])
         self.assertNotIn("--event workflow_dispatch", transaction["run"])
-        self.assertIn("--previous \"$PREV_JSON\"", transaction["run"])
+        self.assertIn('--previous "$PRIOR"', transaction["run"])
         self.assertIn("--live \"$LIVE\"", transaction["run"])
         self.assertIn("prior_receipt", str(job["outputs"]))
         self.assertIn("prior_hash", str(job["outputs"]))
@@ -3329,6 +3332,29 @@ class StableReleasePublicationTests(unittest.TestCase):
         self.assertEqual(release.stable_alias_decision(active, stale)["action"], "refuse")
         half = {**active, "ghcr": ("present", {**active["ghcr"][1], "platforms": set()})}
         self.assertEqual(release.stable_alias_decision(half, latest)["action"], "refuse")
+
+    def test_backward_release_and_conflicting_live_write_are_refused(self):
+        receipt = {"verified": True, "revision": self.COMMIT, "digest": self.DIGEST}
+        args = argparse.Namespace(prior_tag="carbonpanel-v2.0.2", candidate_tag=self.VERSION,
+                                  prior_receipt=json.dumps(receipt), commit=self.COMMIT, digest=self.DIGEST)
+        with self.assertRaisesRegex(ValueError, "backwards"):
+            release.verify_stable_order(args)
+        args.prior_tag = self.VERSION
+        release.verify_stable_order(args)
+        args.digest = "sha256:" + "e" * 64
+        with self.assertRaisesRegex(ValueError, "backwards"):
+            release.verify_stable_order(args)
+        with patch.object(release, "observe_reference", return_value=("unknown", None)), \
+             patch.object(release.subprocess, "run") as writer:
+            with self.assertRaisesRegex(ValueError, "determine"):
+                release._apply_channel_alias("stable", self.DIGEST, args.digest)
+            writer.assert_not_called()
+        with patch.object(release, "observe_reference",
+                          return_value=("present", {"digest": "sha256:" + "0" * 64})), \
+             patch.object(release.subprocess, "run") as writer:
+            with self.assertRaisesRegex(ValueError, "outside"):
+                release._apply_channel_alias("stable", self.DIGEST, args.digest)
+            writer.assert_not_called()
 
     def test_immutable_retry_fills_only_absent_registry_from_the_verified_archive(self):
         prior = self.alias("present", self.DIGEST, self.COMMIT)

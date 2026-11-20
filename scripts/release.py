@@ -3173,6 +3173,22 @@ def stable_alias_decision(stable, latest):
             "missing": missing}
 
 
+def verify_stable_order(args):
+    previous = json_argument(args.prior_receipt)
+    if previous.get("verified") is not True:
+        raise ValueError("A verified prior Stable identity is required")
+    prior = resolve_panel_version(args.prior_tag)
+    candidate = product_release(args.candidate_tag)
+    if candidate["prerelease"]:
+        raise ValueError("A prerelease cannot replace Stable")
+    if semver_key(candidate["version"]) > semver_key(prior):
+        return
+    if (candidate["version"] == prior and previous["revision"] == args.commit
+            and previous["digest"] == args.digest):
+        return
+    raise ValueError("Stable version or provenance would move backwards")
+
+
 def establish_stable_baseline(receipt, observe, write_alias):
     """Fill only missing stable aliases from the independently verified active release."""
     if (receipt.get("channel") != "stable" or receipt.get("verified") is not True
@@ -3360,7 +3376,7 @@ def channel_transaction_run(candidate, previous, writer=None, docs_publisher=Non
             "receipt": receipt, "steps": list(steps)}
 
 
-def channel_rollback(receipt, apply=False, bounded_baseline=False):
+def channel_rollback(receipt, apply=False, bounded_baseline=False, candidate_digest=None):
     """Roll both registry aliases and the docs marker back to a verified receipt.
 
     `bounded_baseline` covers the recorded first-nightly bootstrap, where no
@@ -3383,7 +3399,12 @@ def channel_rollback(receipt, apply=False, bounded_baseline=False):
               "bounded_baseline": bool(receipt.get("bounded_baseline")),
               "docs_commit": receipt.get("docs_commit", receipt["revision"])}
     if apply:
-        _apply_channel_alias(receipt.get("channel", "nightly"), receipt["digest"])
+        if receipt.get("channel") == "stable":
+            if not valid_digest(candidate_digest):
+                raise ValueError("Stable rollback needs the qualified candidate digest")
+            _apply_channel_alias("stable", receipt["digest"], previous_digest=candidate_digest)
+        else:
+            _apply_channel_alias(receipt.get("channel", "nightly"), receipt["digest"])
     return values
 
 
@@ -3391,7 +3412,8 @@ def channel_rollback_cli(args):
     """CLI: emit/apply the exact-digest rollback to a verified prior receipt."""
     receipt = json_argument(args.receipt, default={}) or {}
     values = channel_rollback(receipt, apply=args.apply,
-                              bounded_baseline=args.bounded_baseline)
+                              bounded_baseline=args.bounded_baseline,
+                              candidate_digest=args.candidate_digest)
     print(json.dumps(values, indent=2))
     write_output(values)
     return values
@@ -3494,7 +3516,10 @@ def channel_promote_cli(args):
     if action == "refuse":
         raise ValueError("Channel promotion refused: " + reason)
     if args.apply and action in ("publish", "rollback", "noop"):
-        _apply_channel_alias(args.channel, target)
+        if args.channel == "stable" and previous:
+            _apply_channel_alias(args.channel, target, previous_digest=previous["digest"])
+        else:
+            _apply_channel_alias(args.channel, target)
     return action
 
 
@@ -3581,35 +3606,26 @@ def promote_stable_alias_cli(args):
             verify_tag_digest(observe_reference(reference, strict=True), target)
 
 
-def _apply_channel_alias(channel, digest):
-    """Move a moving alias at an already verified digest in BOTH registries.
-
-    Immutable version tags are never touched and no tag is deleted. An alias is
-    skipped when it already holds the target digest (idempotent retry).
-    """
+def _apply_channel_alias(channel, digest, previous_digest=None):
+    """Move only the expected active aliases. A conflicting live tag is preserved."""
     if not valid_digest(digest):
         raise ValueError("Missing or invalid verified digest for alias move")
-    alias = "nightly" if channel == "nightly" else (
-        "latest" if channel == "stable" else channel)
-    for reference in (f"{DOCKER_HUB_IMAGE}:{alias}",
-                      f"ghcr.io/{ghcr_repository()}:{alias}"):
-        state, info = observe_reference(reference, strict=True)
-        if state == "present" and info.get("digest") == digest:
-            continue
-        source = reference.rsplit(":", 1)[0] + "@" + digest
-        subprocess.run(["docker", "buildx", "imagetools", "create",
-                        "--tag", reference, source], check=True, cwd=ROOT)
-        verify_tag_digest(observe_reference(reference, strict=True), digest)
-    # The stable alias is promoted alongside latest only from the verified digest.
-    if channel == "stable":
-        for reference in (f"{DOCKER_HUB_IMAGE}:stable",
-                          f"ghcr.io/{ghcr_repository()}:stable"):
+    if previous_digest is not None and not valid_digest(previous_digest):
+        raise ValueError("Invalid prior digest for alias move")
+    names = ("latest", "stable") if channel == "stable" else (channel,)
+    for name in names:
+        for repository in (DOCKER_HUB_IMAGE, "ghcr.io/" + ghcr_repository()):
+            reference = repository + ":" + name
             state, info = observe_reference(reference, strict=True)
-            if state == "present" and info.get("digest") == digest:
+            if state not in ("absent", "present"):
+                raise ValueError("Cannot determine current digest of " + reference)
+            current = (info or {}).get("digest")
+            if current == digest:
                 continue
-            source = reference.rsplit(":", 1)[0] + "@" + digest
-            subprocess.run(["docker", "buildx", "imagetools", "create",
-                            "--tag", reference, source], check=True, cwd=ROOT)
+            if previous_digest is not None and current != previous_digest:
+                raise ValueError("Alias changed outside the qualified transaction: " + reference)
+            subprocess.run(["docker", "buildx", "imagetools", "create", "--tag",
+                            reference, repository + "@" + digest], check=True, cwd=ROOT)
             verify_tag_digest(observe_reference(reference, strict=True), digest)
 
 
@@ -3774,6 +3790,9 @@ def build_parser():
     transaction.add_argument("--event", default="workflow_run")
     transaction.add_argument("--phase", default=TX_COMMIT,
                              choices=(TX_STAGE, TX_COMMIT))
+    order = commands.add_parser("verify-stable-order")
+    for field in ("prior-tag", "candidate-tag", "prior-receipt", "commit", "digest"):
+        order.add_argument("--" + field, required=True)
     baseline = commands.add_parser("establish-stable-baseline")
     baseline.add_argument("--receipt", required=True)
     active = commands.add_parser("channel-active-receipt")
@@ -3791,6 +3810,7 @@ def build_parser():
     marker.add_argument("--canonical", action="store_true")
     rollback = commands.add_parser("channel-rollback")
     rollback.add_argument("--receipt", default="{}")
+    rollback.add_argument("--candidate-digest")
     rollback.add_argument("--apply", action="store_true")
     rollback.add_argument("--bounded-baseline", action="store_true")
     bootstrap = commands.add_parser("channel-bootstrap-plan")
@@ -3877,6 +3897,7 @@ def main():
                 "local-oci-candidate": local_oci_candidate_cli,
                 "stable-alias-decision": stable_alias_decision_cli,
                 "establish-stable-baseline": establish_stable_baseline_cli,
+                "verify-stable-order": verify_stable_order,
                 "verify-stable-release-site": verify_stable_release_site_cli,
                 "nightly-activation-decision": nightly_activation_decision_cli}
     handler = handlers.get(args.command,

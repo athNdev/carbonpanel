@@ -705,6 +705,60 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
+      - name: Provision Chromium and pin expectations for stable live browser QA
+        id: stable_chromium
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
+          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          INDEX="$GITHUB_WORKSPACE/.website-build/site/version-index.json"
+          echo "CARBONPANEL_EXPECT_NIGHTLY_REVISION=$(jq -r '.channels.nightly.commit' "$INDEX")" >> "$GITHUB_ENV"
+          echo "CARBONPANEL_EXPECT_NIGHTLY_DIGEST=$(jq -r '.channels.nightly.image.digest' "$INDEX")" >> "$GITHUB_ENV"
+          echo "CARBONPANEL_EXPECT_PROMOTION_STATE=$(jq -r '.promotion.state' "$INDEX")" >> "$GITHUB_ENV"
+      - name: Check the packaged candidate in Chromium before publication
+        id: local_browser
+        run: python3 scripts/browser_version_check.py
+      - name: Qualify the candidate before the first external channel change
+        id: stage_decision
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          OBSERVED: ${{ steps.parity.outputs.observed }}
+          CI_VERIFIED: ${{ needs.plan.outputs.ci_verified }}
+          IMMUTABLE_OK: ${{ steps.parity.outcome == 'success' }}
+          CONTRACT_OK: ${{ steps.contract.outcome == 'success' }}
+          SITE_OK: ${{ steps.rendered.outcome == 'success' && steps.local_browser.outcome == 'success' }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          LIVE_COMMIT: ${{ steps.prior.outputs.live_commit }}
+          LIVE_DIGEST: ${{ steps.prior.outputs.live_digest }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          PREV_JSON=$(jq -ce 'select(.verified == true)' <<< "$PRIOR")
+          python3 scripts/release.py verify-stable-order --prior-tag "$(jq -er .channels.stable.tag .website-build/prior-site/version-index.json)" \
+            --candidate-tag "$RELEASE_VERSION" --prior-receipt "$PREV_JSON" --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST"
+          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
+          CANDIDATE=$(jq -nc \
+            --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
+            --arg tag "$RELEASE_VERSION" --argjson seq "$((SEQ + 1))" --arg ref "refs/heads/main" \
+            --argjson registries "$OBSERVED" --arg run_id "$RUN_ID" \
+            --arg ci "$CI_VERIFIED" --argjson immutable_ok "$IMMUTABLE_OK" \
+            --argjson contract_ok "$CONTRACT_OK" --argjson site_ok "$SITE_OK" \
+            '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
+              source_ref:$ref,ci_verified:$ci,immutable_ok:$immutable_ok,contract_valid:$contract_ok,
+              site_validated:$site_ok,docs_commit:$commit,docs_digest:$digest,
+              registries:$registries,
+              candidate_marker_verified:false,canonical_marker_verified:false,
+              run_ids:{release:$run_id}}')
+          LIVE=$(jq -c '{registries:.registries, docs_commit, docs_digest}' <<< "$PREV_JSON")
+          echo "candidate=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          python3 scripts/release.py channel-transaction --phase stage \
+            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
+            --event release
+
       - name: Sign in to Docker Hub for first-time Stable alias setup
         if: steps.stable_aliases.outputs.first_publication == 'true'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -761,20 +815,13 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
           test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$RELEASE_COMMIT"
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$IMAGE_DIGEST"
-      - name: Provision Chromium and pin expectations for stable live browser QA
-        id: stable_chromium
-        if: steps.deploy.outcome == 'success'
-        working-directory: scripts/manual-review/e2e
-        run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
-          INDEX="$GITHUB_WORKSPACE/.website-build/site/version-index.json"
-          echo "CARBONPANEL_EXPECT_NIGHTLY_REVISION=$(jq -r '.channels.nightly.commit' "$INDEX")" >> "$GITHUB_ENV"
-          echo "CARBONPANEL_EXPECT_NIGHTLY_DIGEST=$(jq -r '.channels.nightly.image.digest' "$INDEX")" >> "$GITHUB_ENV"
-          echo "CARBONPANEL_EXPECT_PROMOTION_STATE=$(jq -r '.promotion.state' "$INDEX")" >> "$GITHUB_ENV"
+          VERSION=$(jq -er .channels.stable.version .website-build/site/version-index.json)
+          for asset in version-index.json docs/version-index.json channel-marker.json \
+                      docs/source.json docs/schemav1.yaml "docs/versions/$VERSION/schemav1.yaml" \
+                      docs/nightly/source.json docs/nightly/schemav1.yaml; do
+            curl --retry 3 -fsSL "https://carbonpanel.dev/$asset" -o "$RUNNER_TEMP/public-asset"
+            cmp ".website-build/site/$asset" "$RUNNER_TEMP/public-asset"
+          done
       - name: Live browser QA of public Stable/Nightly channels after docs deploy
         id: stable_live_browser
         if: steps.deploy.outcome == 'success'
@@ -782,40 +829,16 @@ jobs:
       - name: Decide the qualified stable transaction before any alias move
         id: transaction
         env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-          OBSERVED: ${{ steps.parity.outputs.observed }}
-          CI_VERIFIED: ${{ needs.plan.outputs.ci_verified }}
-          IMMUTABLE_OK: ${{ steps.parity.outcome == 'success' }}
-          CONTRACT_OK: ${{ steps.contract.outcome == 'success' }}
-          SITE_OK: ${{ steps.rendered.outcome == 'success' && steps.stable_live_browser.outcome == 'success' }}
-          PROBE_OK: ${{ steps.probe.outcome == 'success' }}
-          CANONICAL_OK: ${{ steps.marker.outcome == 'success' }}
+          STAGED: ${{ steps.stage_decision.outputs.candidate }}
           PRIOR: ${{ steps.prior.outputs.prior_receipt }}
-          LIVE_COMMIT: ${{ steps.prior.outputs.live_commit }}
-          LIVE_DIGEST: ${{ steps.prior.outputs.live_digest }}
-          RUN_ID: ${{ github.run_id }}
+          PROBE_OK: ${{ steps.probe.outcome == 'success' }}
+          CANONICAL_OK: ${{ steps.marker.outcome == 'success' && steps.stable_live_browser.outcome == 'success' }}
         run: |
-          PREV_JSON=$(jq -ce 'select(.verified == true)' <<< "$PRIOR")
-          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
-          CANDIDATE=$(jq -nc \
-            --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
-            --arg tag "$RELEASE_VERSION" --argjson seq "$((SEQ + 1))" --arg ref "refs/heads/main" \
-            --argjson registries "$OBSERVED" --arg run_id "$RUN_ID" \
-            --arg ci "$CI_VERIFIED" --argjson immutable_ok "$IMMUTABLE_OK" \
-            --argjson contract_ok "$CONTRACT_OK" --argjson site_ok "$SITE_OK" \
-            --argjson probe_ok "$PROBE_OK" --argjson canonical_ok "$CANONICAL_OK" \
-            '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
-              source_ref:$ref,ci_verified:$ci,immutable_ok:$immutable_ok,contract_valid:$contract_ok,
-              site_validated:$site_ok,docs_commit:$commit,docs_digest:$digest,
-              registries:$registries,
-              candidate_marker_verified:$probe_ok,canonical_marker_verified:$canonical_ok,
-              run_ids:{release:$run_id}}')
-          LIVE=$(jq -c '{registries:.registries, docs_commit, docs_digest}' <<< "$PREV_JSON")
+          CANDIDATE=$(jq -ce --argjson probe "$PROBE_OK" --argjson canonical "$CANONICAL_OK" \
+            '.candidate_marker_verified=$probe | .canonical_marker_verified=$canonical' <<< "$STAGED")
+          LIVE=$(jq -c '{registries:.registries,docs_commit,docs_digest}' <<< "$PRIOR")
           python3 scripts/release.py channel-transaction --phase commit \
-            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
-            --event release
+            --candidate "$CANDIDATE" --previous "$PRIOR" --live "$LIVE" --event release
 
       # If the new stable marker was deployed but qualification/decision did not
       # authorize alias promotion, restore the exact prior docs bytes so the
@@ -904,6 +927,21 @@ jobs:
           python3 scripts/release.py release-record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
+      - name: Re-observe both active aliases and the served release immediately before exposure
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          for alias in latest stable; do
+            OBS=$(python3 scripts/release.py channel-observe --reference "$alias" | jq -ce .observations)
+            python3 scripts/release.py verify-channel-parity --observations "$OBS" \
+              --digest "$IMAGE_DIGEST" --commit "$RELEASE_COMMIT"
+          done
+          curl -fsSL https://carbonpanel.dev/docs/version-index.json -o "$RUNNER_TEMP/public-index.json"
+          jq -e --arg tag "$RELEASE_VERSION" --arg sha "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
+            '.channels.stable | .tag==$tag and .commit==$sha and .image.digest==$digest' "$RUNNER_TEMP/public-index.json"
       - name: Verify and expose the prepared private downloads
         if: steps.record.outputs.action == 'publish'
         env:
@@ -960,6 +998,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
       - name: Refuse an older target that lacks the trusted gate script
         run: python3 scripts/release.py verify-gate-script --path scripts/release.py
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -1036,12 +1075,13 @@ jobs:
       # BOTH aliases and the EXACT prior docs bytes, then fail the run.
       - name: Restore prior stable aliases after a failed dual-registry write
         id: stable_compensate
-        if: always() && (steps.stable_aliases.outcome == 'failure' || steps.alias_verify.outcome == 'failure')
+        if: always() && needs.plan.outputs.channel == 'stable' && (steps.stable_aliases.outcome != 'success' || steps.alias_verify.outcome != 'success')
         env:
           PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+          CANDIDATE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
         run: |
           test -n "$PRIOR" || { echo "::error::no prior stable receipt to restore"; exit 1; }
-          python3 scripts/release.py channel-rollback --receipt "$PRIOR" --apply
+          python3 scripts/release.py channel-rollback --receipt "$PRIOR" --candidate-digest "$CANDIDATE_DIGEST" --apply
       - name: Deploy the exact prior stable docs bytes
         id: stable_compensate_docs
         if: always() && steps.stable_compensate.outcome == 'success'
