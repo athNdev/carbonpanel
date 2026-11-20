@@ -89,6 +89,13 @@ inventory, Bedrock parity) have no verified vanilla source.
 
 Licence notes are orientation, not legal advice. "UNVERIFIED" is a decision gate, not a promise that a capability is absent forever.
 
+Controller-reachable endpoints are configured in `minecraft.player_endpoints`
+by server ID, with an explicit node ID. The controller reads the bearer from
+the environment variable named by `management_secret_env`. To migrate a
+legacy global management URL and secret, scope the URL to its intended server
+and node and move the secret to that variable. Direct RCON hosts use the same
+binding. See [the configuration example](../../config.example.yaml).
+
 ## Consequences
 
 - Roster and detail work on vanilla data alone; plugin-only fields degrade to

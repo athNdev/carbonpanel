@@ -20,14 +20,12 @@ is not zero.
 
 # Sources and capabilities
 
-The native management protocol is negotiated first only when explicitly
-configured on Java 1.21.9 or its 1.21.10 hotfix. The v1 adapter authenticates
-with a bearer header. Java 1.21.11 introduced protocol v2. Unrecognized
-versions, including prereleases, use a configured fallback. The live Java
-1.21.9 checks exercise list, join/leave, kick, allowlist, ban and operator
-changes. A kick succeeds only when the server acknowledges the target in its
-result. RCON and node-scoped exec are allowlisted fallbacks
-defined in `internal/playeradapters`; neither uses controller-local state.
+On Java 1.21.9 and 1.21.10 the native v1 adapter uses bearer authentication
+when its server ID and node match an operator-configured player endpoint.
+Direct RCON uses the same binding. Later versions and prereleases use an
+available fallback. Live 1.21.9 tests covered roster, join/leave, moderation
+and kicks. A kick requires the server to acknowledge the target. RCON and
+node-scoped exec use the allowlisted commands in `internal/playeradapters`.
 Optional plugin bridges (vitals, inventory, groups, mute) and full Bedrock
 identity parity are decision-gated: they are reported as decision-pending or
 unsupported with an actionable explanation, never shipped as implied vanilla

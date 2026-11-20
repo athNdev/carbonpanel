@@ -23,6 +23,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/playeradapters"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -138,11 +139,12 @@ func newMgmtServiceFixtureService(t *testing.T, f *mgmtServiceFixture, version s
 	}).Error; err != nil {
 		t.Fatalf("create server: %v", err)
 	}
-	cfg := &config.Config{Minecraft: config.MinecraftConfig{GlobalConfig: map[string]any{
-		"player_edition":           "java",
-		"management_server_url":    f.url,
-		"management_server_secret": mgmtServiceSecret,
-	}}}
+	t.Setenv("CARBON_TEST_MGMT_SECRET", mgmtServiceSecret)
+	cfg := &config.Config{Minecraft: config.MinecraftConfig{
+		PlayerEndpoints: map[string]config.PlayerEndpoint{
+			"srv-1": {NodeID: "default", ManagementURL: f.url, ManagementSecretEnv: "CARBON_TEST_MGMT_SECRET"},
+		},
+	}}
 	shim := newNegotiatorShim(cfg, nil)
 	t.Cleanup(shim.Close)
 	svc := NewPlayerService(store, logger.New(), nil)
@@ -253,5 +255,73 @@ func TestPlayerServiceManagementVersionMismatchFailsClosed(t *testing.T) {
 	f.check(t)
 	if frames := f.recorded(); len(frames) != 0 {
 		t.Fatalf("unqualified version sent management frames: %v", frames)
+	}
+}
+
+func TestDirectPlayerEndpointRequiresMatchingServerAndNode(t *testing.T) {
+	t.Setenv("CARBON_TEST_MGMT_SECRET", mgmtServiceSecret)
+	cfg := &config.Config{Minecraft: config.MinecraftConfig{
+		PlayerEndpoints: map[string]config.PlayerEndpoint{
+			"srv-1": {NodeID: "node-1", ManagementURL: "ws://example.invalid/management", ManagementSecretEnv: "CARBON_TEST_MGMT_SECRET", RCONHost: "example.invalid"},
+		},
+		GlobalConfig: map[string]any{"management_server_url": "ws://example.invalid/legacy", "management_server_secret": mgmtServiceSecret, "player_rcon_host": "example.invalid"},
+	}}
+	shim := newNegotiatorShim(cfg, nil)
+	defer shim.Close()
+	enabled, port, password := true, 25575, "fixture"
+	for _, tc := range []struct {
+		id, node string
+		allowed  bool
+	}{
+		{"srv-1", "node-1", true},
+		{"srv-2", "node-1", false},
+		{"srv-1", "node-2", false},
+		{"srv-2", "node-2", false},
+	} {
+		t.Run(tc.id+"/"+tc.node, func(t *testing.T) {
+			server := &storage.Server{ID: tc.id, NodeID: tc.node, MCVersion: "1.21.9"}
+			conf := &storage.ServerConfig{ServerID: tc.id, EnableRCON: &enabled, RCONPort: &port, RCONPassword: &password}
+			_, caps, err := shim.Negotiate(context.Background(), server, conf)
+			if caps.Management != tc.allowed || caps.RCON != tc.allowed || (err == nil) != tc.allowed {
+				t.Fatalf("unexpected capabilities for server/node: %+v, err=%v", caps, err)
+			}
+		})
+	}
+}
+
+func TestPlayerEndpointRotationRetiresOnlyTheOldGeneration(t *testing.T) {
+	f := newMgmtServiceFixture(t)
+	_, store, shim := newMgmtServiceFixtureService(t, f, "1.21.9")
+	server, err := store.GetServer(context.Background(), "srv-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, _, err := shim.Negotiate(context.Background(), server, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := source.(*refCountedSource)
+	var current *refCountedSource
+	err = old.with(func(playeradapters.Adapter) error {
+		endpoint := shim.cfg.Minecraft.PlayerEndpoints[server.ID]
+		endpoint.ManagementURL += "/updated"
+		shim.cfg.Minecraft.PlayerEndpoints[server.ID] = endpoint
+		replacement, _, err := shim.Negotiate(context.Background(), server, nil)
+		if err == nil {
+			current = replacement.(*refCountedSource)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.entry.refs != 0 || current.entry.refs != 0 {
+		t.Fatal("retiring a generation released a lease on the wrong adapter")
+	}
+	if err := old.with(func(playeradapters.Adapter) error { return nil }); err == nil {
+		t.Fatal("a stale source acquired the replacement adapter")
+	}
+	if err := current.with(func(playeradapters.Adapter) error { return nil }); err != nil {
+		t.Fatalf("replacement is unavailable: %v", err)
 	}
 }
