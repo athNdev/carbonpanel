@@ -127,6 +127,122 @@ func TestSweepPublishesDueBatchAndLeavesFutureBatch(t *testing.T) {
 	require.NotNil(t, still)
 }
 
+func TestConfigStagingReadsBaselineAfterPriorBatchPublishes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "config-base-after-publish", Name: "config-base-after-publish", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	now := time.Now().UTC()
+	when := now.Add(-time.Minute)
+	first, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "published"}, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+
+	// Pause just before the config producer claims the writer. A due
+	// publisher commits and closes the original batch before staging resumes.
+	var published bool
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register("fixture:publish_before_staging_claim", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*storage.ServerUpdateBatch); !ok {
+			return
+		}
+		require.NoError(t, Sweep(ctx, store, nil, now, nil, func(context.Context, *storage.Server, Plan) error {
+			published = true
+			return nil
+		}))
+	}))
+	staged, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "after"}, storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.True(t, published)
+	require.NotEqual(t, first.BatchID, staged.BatchID)
+	require.JSONEq(t, `{"motd":"published"}`, staged.BasePayload)
+	_, err = store.ApplyStagedConfigChange(ctx, staged.ID)
+	require.NoError(t, err)
+}
+
+func TestSweepRejectsNewConfigAndContentDuringPublication(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "publish-admission", Name: "publish-admission", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	now := time.Now().UTC()
+	when := now.Add(-time.Minute)
+	first, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "first"}, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+
+	var published bool
+	addContent := func() (*storage.StagedContentChange, error) {
+		return store.AddStagedContent(ctx, &storage.StagedContentChange{
+			ServerID: server.ID, Kind: storage.StagedKindFile, Action: storage.StagedActionDelete,
+			TargetPath: "untouched.txt",
+		})
+	}
+	addConfig := func() (*storage.StagedConfigChange, error) {
+		return store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"}, storage.UpdateWindowAtTime, &when, 0)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(data, "untouched.txt"), []byte("original"), 0o600))
+	require.NoError(t, Sweep(ctx, store, nil, now, nil, func(_ context.Context, _ *storage.Server, _ Plan) error {
+		published = true
+		// The publisher is past its config and content snapshot, but still
+		// owns the journal and has not closed the batch.
+		_, err := addConfig()
+		require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+		_, err = addContent()
+		require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+		return nil
+	}))
+	require.True(t, published)
+	configs, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Empty(t, configs)
+	contents, err := store.ListBatchContent(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Empty(t, contents)
+	old, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, old)
+	original, err := os.ReadFile(filepath.Join(data, "untouched.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "original", string(original))
+
+	retry, err := addConfig()
+	require.NoError(t, err)
+	require.NotEqual(t, first.BatchID, retry.BatchID)
+	content, err := addContent()
+	require.NoError(t, err)
+	require.Equal(t, retry.BatchID, content.BatchID)
+}
+
+func TestSweepReevaluatesAWindowRetargetedBeforeJournalAcquisition(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "publish-retarget", Name: "publish-retarget", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	now := time.Now().UTC()
+	past, future := now.Add(-time.Minute), now.Add(time.Hour)
+	first, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "first"}, storage.UpdateWindowAtTime, &past, 0)
+	require.NoError(t, err)
+	var published, retargeted bool
+	require.NoError(t, Sweep(ctx, store, nil, now, func(string) (int, bool) {
+		// Sweep has read the old window, but the writer has not acquired the
+		// operation journal yet. This config retarget wins admission.
+		_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"}, storage.UpdateWindowAtTime, &future, 0)
+		require.NoError(t, err)
+		retargeted = true
+		return 0, false
+	}, func(_ context.Context, _ *storage.Server, _ Plan) error {
+		published = true
+		return nil
+	}))
+	require.True(t, retargeted)
+	require.False(t, published)
+	configs, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+	for _, row := range configs {
+		require.True(t, row.ApplyAt.Equal(future))
+	}
+}
+
 func TestApplyRollsBackWhenPublishFails(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)

@@ -97,14 +97,29 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
 	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
-		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
+		// Admission can retarget the batch after Sweep decides it is due but
+		// before this journal owns it. Let the next sweep evaluate any change.
+		current, err := store.OpenUpdateBatch(ctx, server.ID)
+		if err != nil {
 			return err
 		}
-		if err := store.StagedConfigConflict(ctx, server.ID, batch.ID); err != nil {
+		if current == nil || current.ID != batch.ID || !current.UpdatedAt.Equal(batch.UpdatedAt) {
+			return nil
+		}
+		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
 			return err
 		}
 		configs, err := store.ListBatchConfig(ctx, batch.ID)
 		if err != nil {
+			return err
+		}
+		dueConfigIDs := make([]string, 0, len(configs))
+		for _, config := range configs {
+			if config.ApplyMode != storage.StagedApplyScheduled {
+				dueConfigIDs = append(dueConfigIDs, config.ID)
+			}
+		}
+		if err := store.StagedConfigConflictForIDs(ctx, server.ID, dueConfigIDs); err != nil {
 			return err
 		}
 		content, err := store.ListBatchContent(ctx, batch.ID)
@@ -139,8 +154,21 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 				return commitErr
 			}
 		}
-		applied := make([]*storage.StagedConfigChange, 0, len(configs))
+		// Independently scheduled (cron) config rows are not part of this
+		// timed batch publication. Either entry point refuses to create this
+		// mixed state, but legacy data may already contain it: never run a
+		// cron row early just because a mod update's window came due.
+		dueConfigs := make([]*storage.StagedConfigChange, 0, len(configs))
+		var scheduledConfigs []*storage.StagedConfigChange
 		for _, cfg := range configs {
+			if cfg.ApplyMode == storage.StagedApplyScheduled {
+				scheduledConfigs = append(scheduledConfigs, cfg)
+			} else {
+				dueConfigs = append(dueConfigs, cfg)
+			}
+		}
+		applied := make([]*storage.StagedConfigChange, 0, len(dueConfigs))
+		for _, cfg := range dueConfigs {
 			rec, applyErr := store.ApplyStagedConfigChange(ctx, cfg.ID)
 			if applyErr != nil {
 				return errors.Join(applyErr, undoApply(ctx, store, restore, applied, nil))
@@ -171,6 +199,15 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			if err := store.MarkStagedContentApplied(ctx, content[i].ID); err != nil {
 				return err
 			}
+		}
+		if len(scheduledConfigs) > 0 {
+			// Keep the cron rows and their batch for their own trigger. Park
+			// the batch on next_restart so the elapsed timed window is not
+			// re-published on every scheduler tick.
+			if _, err := store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowNextRestart, nil, 0); err != nil {
+				return err
+			}
+			return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 		}
 		if err := store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied); err != nil {
 			return err

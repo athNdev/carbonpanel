@@ -4,6 +4,7 @@ package staging
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,7 @@ type undoEntry struct {
 	SHA256  string `json:"sha256,omitempty"`
 }
 
-func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, limit int64) (int64, string, error) {
+func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, expectedSHA512 string, limit int64) (int64, string, error) {
 	r, err := acc.OpenRead(ctx, src)
 	if err != nil {
 		return 0, "", err
@@ -41,7 +42,12 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	}
 	defer func() { _ = w.Close() }()
 	h := sha256.New()
-	n, err := io.CopyBuffer(io.MultiWriter(w, h), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	writer := io.MultiWriter(w, h)
+	reviewed := sha512.New()
+	if expectedSHA512 != "" {
+		writer = io.MultiWriter(writer, reviewed)
+	}
+	n, err := io.CopyBuffer(writer, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
 	err = errors.Join(err, r.Close())
 	if err != nil {
 		return n, "", err
@@ -50,6 +56,9 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 		return n, "", fmt.Errorf("staged transfer exceeds %d bytes", limit)
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
+	if expectedSHA512 != "" && !strings.EqualFold(hex.EncodeToString(reviewed.Sum(nil)), expectedSHA512) {
+		return n, sum, fmt.Errorf("live target %q changed since review; staged bytes preserved", src)
+	}
 	if want != nil && (n != want.Size || sum != want.SHA256) {
 		return n, sum, fmt.Errorf("staged recovery checksum mismatch for %s", want.Target)
 	}
@@ -60,7 +69,7 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 }
 
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	type pending struct{ source, target, action string }
+	type pending struct{ source, target, action, expectedSHA512 string }
 	var files []pending
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -79,7 +88,10 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				files = append(files, pending{source: e.stage, target: e.live, action: storage.StagedActionReplace})
 			}
 		} else {
-			files = append(files, pending{source: row.StagePath, target: row.TargetPath, action: row.Action})
+			files = append(files, pending{
+				source: row.StagePath, target: row.TargetPath,
+				action: row.Action, expectedSHA512: row.ExpectedLiveSha512,
+			})
 		}
 	}
 	if len(files) == 0 {
@@ -112,6 +124,9 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 		if err != nil && !os.IsNotExist(err) {
 			return abortPreparation(err)
 		}
+		if file.expectedSHA512 != "" && (err != nil || !info.Mode().IsRegular()) {
+			return abortPreparation(fmt.Errorf("live target %q changed since review; staged bytes preserved", file.target))
+		}
 		item := fileSnap{target: file.target, recoveryRoot: recovery}
 		record := undoEntry{Target: file.target}
 		if err == nil {
@@ -122,7 +137,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			item.backup = path.Join(recovery, fmt.Sprintf("%06d.data", i))
 			record.Existed = true
 			record.Backup = item.backup
-			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, storageworker.MaxStreamBytes-total)
+			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, file.expectedSHA512, storageworker.MaxStreamBytes-total)
 			if err != nil {
 				return abortPreparation(err)
 			}
@@ -160,7 +175,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				return snaps, err
 			}
 		} else {
-			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, storageworker.MaxStreamBytes-published)
+			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, "", storageworker.MaxStreamBytes-published)
 			if err != nil {
 				return snaps, err
 			}
@@ -175,7 +190,7 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 	for i := len(snaps) - 1; i >= 0; i-- {
 		item := snaps[i]
 		if item.existed {
-			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, item.size)
+			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, "", item.size)
 			if err != nil {
 				failed = errors.Join(failed, fmt.Errorf("staged rollback incomplete; recovery %q: %w", item.recoveryRoot, err))
 			}
