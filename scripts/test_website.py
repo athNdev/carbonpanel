@@ -455,6 +455,17 @@ class ChannelChangelogTests(unittest.TestCase):
         self.assertIn("item.pages?.includes(slug)", banner)
         self.assertNotIn("current.channel + ' / ' + current.availability", banner)
 
+    def test_browser_gate_is_wired_into_normal_website_validation(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assertTrue((root / "scripts/changelog_browser_check.py").is_file())
+        self.assertTrue((root / "scripts/manual-review/e2e/changelog-switcher-dom.mjs").is_file())
+        docs_ci = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/changelog_browser_check.py", docs_ci)
+        self.assertIn("bunx playwright install --with-deps chromium", docs_ci)
+        self.assertIn("scripts/manual-review/e2e/changelog-switcher-dom.mjs", docs_ci)
+        published = (root / "docs/website-publishing.md").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/changelog_browser_check.py", published)
+
     def test_builder_generates_and_excludes_changelog_from_rebasing(self):
         source = (Path(__file__).resolve().parent / "build_website.py").read_text(encoding="utf-8")
         self.assertIn("changelog_page.GENERATED_PAGE", source)
