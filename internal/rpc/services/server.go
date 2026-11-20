@@ -1022,7 +1022,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 // validateModpackServerSupport checks the provider declaration before a deployment changes server resources.
 func validateModpackServerSupport(pack *storage.IndexedModpack) error {
 	if pack != nil && pack.Indexer == "modrinth" && pack.ServerSide == "unsupported" {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("Modrinth lists %q as unsupported on dedicated servers. Choose a pack that supports server installation", pack.Name))
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot deploy %q: Modrinth lists this project as unsupported on dedicated servers. Choose a pack that supports server installation", pack.Name))
 	}
 	return nil
 }
@@ -1285,9 +1285,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		DockerOverrides: msg.DockerOverrides,
 	}
 
-	// Confinement check for the volume/device/network gap. This runs here —
+	// Confinement check for the volume/device/network gap. This runs here â€”
 	// not next to the privileged-overrides check at the top of this function
-	// — because the safe roots are derived from the server's own data path,
+	// â€” because the safe roots are derived from the server's own data path,
 	// which is only assigned above.
 	if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, serverDataPath); err != nil {
 		return nil, err

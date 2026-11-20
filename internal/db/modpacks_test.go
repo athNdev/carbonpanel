@@ -136,7 +136,11 @@ func TestSearchIndexedModpacks(t *testing.T) {
 
 func TestIndexedModpackUpgradePreservesUnknownServerSupport(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close test store: %v", err)
+		}
+	})
 	if err := store.DB().Exec("ALTER TABLE indexed_modpacks DROP COLUMN server_side").Error; err != nil {
 		t.Fatal(err)
 	}
