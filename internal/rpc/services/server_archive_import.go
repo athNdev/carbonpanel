@@ -125,7 +125,7 @@ func (s *ServerService) openServerArchive(ctx context.Context, uploadID string) 
 	if s.archiveUploads == nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("server archive uploads are unavailable"))
 	}
-	path, _, err := s.archiveUploads.GetTempPathFor(uploadID, uploadOwnerID(ctx))
+	path, _, err := s.archiveUploads.GetOwnedTempPathFor(uploadID, uploadOwnerID(ctx))
 	if err != nil {
 		if denied := ownerMismatchError(err); denied != nil {
 			return nil, denied

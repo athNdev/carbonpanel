@@ -92,6 +92,14 @@ func TestServerArchiveRoundTripThroughCreateServer(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, done)
 
+			legacy, err := uploads.InitSession("legacy-archive", int64(len(data)), int32(len(data)))
+			require.NoError(t, err)
+			done, err = uploads.WriteChunk(legacy.ID, 0, data)
+			require.NoError(t, err)
+			require.True(t, done)
+			_, err = svc.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{UploadId: legacy.ID}))
+			require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+
 			preview := &v1.PreviewServerArchiveRequest{UploadId: uploadSession.ID, NodeId: original.NodeID}
 			_, err = svc.PreviewServerArchive(other, connect.NewRequest(preview))
 			require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
