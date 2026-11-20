@@ -65,8 +65,23 @@ func (m *NativeMap) inspect(ctx context.Context, server *storage.Server, ref *v1
 	if err != nil {
 		return nativeScope{}, err
 	}
-	if _, err := m.manifest(ctx, scope); err != nil {
-		return nativeScope{}, err
+	// Inventory/status opens only the level header. Manifest and tile requests
+	// validate saved content later, under the shared work budget.
+	ctx, stop := context.WithTimeout(ctx, nativeTimeout)
+	defer stop()
+	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
+	if err != nil {
+		return nativeScope{}, errNativeSourceAbsent
+	}
+	defer func() { _ = acc.Close() }()
+	f, err := acc.OpenRead(ctx, path.Join(scope.level, "level.dat"))
+	if err != nil {
+		return nativeScope{}, errNativeSourceAbsent
+	}
+	defer func() { _ = f.Close() }()
+	var header [2]byte
+	if _, err := io.ReadFull(f, header[:]); err != nil || (header[0] != 10 && header != [2]byte{0x1f, 0x8b}) {
+		return nativeScope{}, errNativeSourceAbsent
 	}
 	return scope, nil
 }
@@ -127,10 +142,27 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		http.Error(w, "world changed or is temporarily unavailable; reopen the map", http.StatusConflict)
 		return
 	}
+	select {
+	case m.slots <- struct{}{}:
+		defer func() { <-m.slots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "map rendering is busy; retry the tile", http.StatusTooManyRequests)
+		return
+	}
+
 	if asset == nativeManifestPath {
 		manifest, err := m.manifest(ctx, scope)
+		if errors.Is(err, worldterrain.ErrTerrainUnsupported) {
+			http.Error(w, "this saved terrain format is unsupported", http.StatusUnprocessableEntity)
+			return
+		}
 		if err != nil {
 			http.Error(w, "saved terrain is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !m.currentScopeMatches(ctx, scope) {
+			http.Error(w, "world changed; reopen the map", http.StatusConflict)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -138,15 +170,6 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		if r.Method == http.MethodGet {
 			_ = json.NewEncoder(w).Encode(manifest)
 		}
-		return
-	}
-
-	select {
-	case m.slots <- struct{}{}:
-		defer func() { <-m.slots }()
-	default:
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "map rendering is busy; retry the tile", http.StatusTooManyRequests)
 		return
 	}
 
@@ -188,13 +211,17 @@ func (m *NativeMap) renderTile(ctx context.Context, scope nativeScope, coord wor
 	if err != nil {
 		return worldterrain.Tile{}, err
 	}
-	current, err := m.store.GetServer(ctx, scope.serverID)
-	if err != nil {
-		return worldterrain.Tile{}, errNativeWorldMismatch
-	}
-	fresh, err := resolveNativeScope(ctx, m.store, current, nil)
-	if err != nil || fresh != scope {
+	if !m.currentScopeMatches(ctx, scope) {
 		return worldterrain.Tile{}, errNativeWorldMismatch
 	}
 	return tile, nil
+}
+
+func (m *NativeMap) currentScopeMatches(ctx context.Context, scope nativeScope) bool {
+	server, err := m.store.GetServer(ctx, scope.serverID)
+	if err != nil {
+		return false
+	}
+	current, err := resolveNativeScope(ctx, m.store, server, nil)
+	return err == nil && current == scope
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -85,6 +86,13 @@ func TestNativeScopeUsesActualLevelAndCurrentNode(t *testing.T) {
 	second, err := resolveNativeScope(ctx, f, server, ref)
 	if err != nil || second == first {
 		t.Fatalf("same-folder replacement retained previous scope: %+v (%v)", second, err)
+	}
+	// A new binding event can publish a revision with the same identity.
+	f.binding.RevisionID = first.revisionID
+	f.binding.BoundAt = time.Unix(12345, 0)
+	rebound, err := resolveNativeScope(ctx, f, server, ref)
+	if err != nil || rebound == first {
+		t.Fatalf("rebinding the same revision retained previous scope: %+v (%v)", rebound, err)
 	}
 	f.node.EndpointGeneration++
 	if _, err := resolveNativeScope(ctx, f, server, ref); !errors.Is(err, errNativeWorldMismatch) {

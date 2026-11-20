@@ -20,6 +20,8 @@ test('every renderer state maps to exactly one honest UI state', () => {
 	assert.equal(deriveViewState(target(RendererState.INSTALLING)), 'installing');
 	assert.equal(deriveViewState(target(RendererState.RENDERING)), 'rendering');
 	assert.equal(deriveViewState(target(RendererState.READY)), 'ready');
+	assert.equal(deriveViewState(target(RendererState.NATIVE_AVAILABLE)), 'saved');
+	assert.equal(liveOverlaysEnabled('saved'), false);
 	assert.equal(deriveViewState(target(RendererState.STALE)), 'stale');
 	assert.equal(deriveViewState(target(RendererState.STOPPED)), 'stopped');
 	assert.equal(deriveViewState(target(RendererState.ERROR)), 'error');
@@ -30,6 +32,7 @@ test('every renderer state maps to exactly one honest UI state', () => {
 test('only fresh or last-known maps with a path may mount a frame', () => {
 	for (const state of [
 		'onboarding',
+		'saved',
 		'installing',
 		'rendering',
 		'stopped',

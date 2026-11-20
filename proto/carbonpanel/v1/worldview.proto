@@ -57,6 +57,7 @@ enum RendererState {
   RENDERER_STATE_STOPPED = 6;     // renderer stopped, no live overlay
   RENDERER_STATE_ERROR = 7;       // renderer failed/unreachable, diagnostics available
   RENDERER_STATE_UNSUPPORTED = 8; // renderer type has no verified adapter capability
+  RENDERER_STATE_NATIVE_AVAILABLE = 9; // saved terrain can be inspected; tile coverage is unknown
 }
 
 // RendererDescriptor lists only capabilities verified against the renderer's

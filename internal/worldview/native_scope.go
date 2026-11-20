@@ -42,6 +42,7 @@ type nativeScope struct {
 	nodeGeneration int64
 	bindingID      string
 	revisionID     string
+	bindingStamp   int64
 }
 
 func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *storage.Server, requested *v1.WorldRef) (nativeScope, error) {
@@ -87,6 +88,9 @@ func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *sto
 			return nativeScope{}, errNativeWorldMismatch
 		}
 		scope.bindingID, scope.revisionID = binding.ID, binding.RevisionID
+		if !binding.BoundAt.IsZero() {
+			scope.bindingStamp = binding.BoundAt.UnixNano()
+		}
 	}
 
 	switch requested.GetKind() {

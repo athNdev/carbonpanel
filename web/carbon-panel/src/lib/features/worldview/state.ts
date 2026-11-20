@@ -14,6 +14,7 @@ export type ViewState =
 	| 'installing'
 	| 'rendering'
 	| 'ready'
+	| 'saved'
 	| 'stale'
 	| 'stopped'
 	| 'error'
@@ -31,6 +32,8 @@ export function deriveViewState(target: WorldViewTarget | undefined): ViewState 
 			return 'rendering';
 		case RendererState.READY:
 			return 'ready';
+		case RendererState.NATIVE_AVAILABLE:
+			return 'saved';
 		case RendererState.STALE:
 			return 'stale';
 		case RendererState.STOPPED:
@@ -51,6 +54,7 @@ export const VIEW_STATE_LABEL: Record<ViewState, string> = {
 	installing: 'INSTALLING',
 	rendering: 'RENDERING',
 	ready: 'LIVE',
+	saved: 'BUILT-IN MAP',
 	stale: 'LAST-KNOWN TILES',
 	stopped: 'RENDERER STOPPED',
 	error: 'ERROR',
@@ -68,6 +72,7 @@ export const VIEW_STATE_TONE: Record<ViewState, StateTone> = {
 	installing: 'cyan',
 	rendering: 'purple',
 	ready: 'green',
+	saved: 'teal',
 	stale: 'yellow',
 	stopped: 'gray',
 	error: 'red',

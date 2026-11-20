@@ -289,7 +289,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
 			{/snippet}
 			{#snippet observation(target: WorldViewTarget)}
-				{formatAge(target.freshness?.observedAt ?? target.lastRender)}
+				{deriveViewState(target) === 'saved'
+					? 'Saved chunks'
+					: formatAge(target.freshness?.observedAt ?? target.lastRender)}
 			{/snippet}
 
 			<section class="border border-border bg-card xl:hidden" aria-label="Viewable worlds">

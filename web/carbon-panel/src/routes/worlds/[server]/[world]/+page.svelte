@@ -64,6 +64,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		formatAge,
 		canMountEmbed,
 		liveOverlaysEnabled,
+		timestampToMs,
 		VIEW_STATE_LABEL,
 		VIEW_STATE_TONE
 	} from '$lib/features/worldview/state';
@@ -80,6 +81,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/features/worldview/overlays';
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
+	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
 	import { prefersReducedMotion } from '$lib/motion';
 
 	const store = createWorldViewStore({
@@ -272,12 +274,30 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		session = undefined;
 		sessionError = null;
-		if (canRead && worldRef && !statusUnavailable && (view === 'ready' || view === 'stale')) {
+		if (
+			canRead &&
+			worldRef &&
+			!statusUnavailable &&
+			(view === 'ready' || view === 'stale' || view === 'saved')
+		) {
 			void loadSession();
 		}
 	});
 
-	let embed = $derived(evaluateSession(canMountEmbed(view, session?.proxyPath), session));
+	$effect(() => {
+		if (!canRead || denied || view !== 'saved') return;
+		const expiresAt = timestampToMs(session?.expiresAt);
+		if (expiresAt === null) return;
+		const refresh = setTimeout(
+			() => void loadSession(),
+			Math.max(1_000, expiresAt - Date.now() - 20_000)
+		);
+		return () => clearTimeout(refresh);
+	});
+
+	let embed = $derived(
+		evaluateSession(view === 'saved' || canMountEmbed(view, session?.proxyPath), session)
+	);
 	let visibleOverlays = $derived(
 		liveOverlaysEnabled(view)
 			? filterOverlays(overlays, dimension, playerVisible && canObserve)
@@ -486,7 +506,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			message="This URL does not carry a recognisable world reference. Return to the world picker and open the world again."
 		/>
 	{:else}
-		<div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+		<div class={['grid min-w-0 gap-4', view !== 'saved' && 'lg:grid-cols-[minmax(0,1fr)_20rem]']}>
 			<section class="min-w-0 space-y-3" aria-label="Map surface">
 				<div class="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2">
 					<span class="mono-label">WORLD</span>
@@ -577,6 +597,27 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							{formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}.
 						</p>
 					</div>
+				{:else if view === 'saved'}
+					{#if embed.src}
+						{#key statusKey}
+							<NativeMapViewport
+								proxyPath={embed.src}
+								title="World terrain"
+								preservePositionOnRenewal
+								onReopen={() => void loadSession()}
+							/>
+						{/key}
+					{:else if sessionError || session}
+						<CarbonErrorState
+							title="Map unavailable"
+							message={sessionError
+								? formatRpcError(sessionError, 'Could not open the map.')
+								: embed.reason}
+							onretry={retry}
+						/>
+					{:else}
+						<CarbonInlineLoading description="Opening saved terrain" />
+					{/if}
 				{:else if view === 'stale' || view === 'ready'}
 					{#if view === 'stale'}
 						<div
@@ -622,7 +663,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			</section>
 
-			<aside class="min-w-0 space-y-3">
+			<aside class="min-w-0 space-y-3" class:hidden={view === 'saved'}>
 				{#if rendererControlsAvailable}
 					<p class="text-xs text-muted-foreground">
 						Use the controls inside the map to pan, zoom, or search for coordinates.

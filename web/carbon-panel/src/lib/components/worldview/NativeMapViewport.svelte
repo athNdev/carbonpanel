@@ -23,7 +23,17 @@
 	} from '$lib/features/worldview/native-map';
 	import { createNativeTileLoader } from '$lib/features/worldview/native-map-loader';
 
-	let { proxyPath, title }: { proxyPath: string; title: string } = $props();
+	let {
+		proxyPath,
+		title,
+		preservePositionOnRenewal = false,
+		onReopen
+	}: {
+		proxyPath: string;
+		title: string;
+		preservePositionOnRenewal?: boolean;
+		onReopen?: () => void;
+	} = $props();
 	const id = $props.id();
 	const mostImportantFailure: NativeMapFailure[] = [
 		'access',
@@ -79,7 +89,7 @@
 				if (abort.signal.aborted) return;
 				source = { path, revision: generation, result: manifest };
 				if (manifest.status !== 'ready') return;
-				if (positionedPath !== path) {
+				if (!positionedPath || (!preservePositionOnRenewal && positionedPath !== path)) {
 					positionedPath = path;
 					center = manifest.manifest.spawn ?? { x: 0, z: 0 };
 					zoom = initialZoom;
@@ -205,8 +215,14 @@
 	}
 
 	function retryMap() {
-		if (result?.status === 'ready') loader?.refresh();
-		else revision += 1;
+		const failure = result?.status === 'ready' ? summary.failure : result?.status;
+		if (onReopen && (failure === 'access' || failure === 'changed')) {
+			onReopen();
+		} else if (result?.status === 'ready') {
+			loader?.refresh();
+		} else {
+			revision += 1;
+		}
 	}
 
 	function tilePixel(block: number, centerBlock: number, viewport: number): number {

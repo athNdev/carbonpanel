@@ -373,6 +373,10 @@ jobs:
         working-directory: scripts/manual-review/e2e
         run: node a11y-check.mjs
 
+      - name: Native terrain viewport and packaged World View (Chromium)
+        working-directory: scripts/manual-review/e2e
+        run: node native-map-viewport-check.mjs
+
       - name: Local administrator OIDC linking (Chromium)
         working-directory: web/carbon-panel
         run: node e2e/oidc-admin-linking.mjs

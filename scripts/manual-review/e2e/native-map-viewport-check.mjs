@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Builds the isolated component fixture and drives its real browser controls.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -61,6 +62,93 @@ function fixtureTile(tileX, tileZ) {
     pngChunk("IDAT", deflateSync(rows)),
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+async function runPackagedWorldView(browser) {
+  const child = spawn(process.execPath, [path.join(web, "test/a11y-routes/serve.mjs")], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  let context;
+  try {
+    const origin = await new Promise((resolve, reject) => {
+      let output = "";
+      const timer = globalThis.setTimeout(() => reject(new Error("packaged app did not start")), 20000);
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error("packaged app server exited: " + code));
+      });
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+        const address = output.match(/A11Y_ROUTES_URL=(http:\/\/127\.0\.0\.1:\d+\/)/)?.[1];
+        if (!address) return;
+        clearTimeout(timer);
+        resolve(address);
+      });
+    });
+    const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "native-server", levelName: "overworld" };
+    const native = {
+      serverId: worldRef.serverId,
+      name: "Fixture native world",
+      worldRef,
+      rendererType: "RENDERER_TYPE_NATIVE",
+      rendererState: "RENDERER_STATE_NATIVE_AVAILABLE",
+      renderer: { type: "RENDERER_TYPE_NATIVE", capabilities: ["map.2d"] },
+    };
+    const session = "/api/v1/worldview/map/native-route-fixture/";
+    let tileRequests = 0;
+    context = await browser.newContext({
+      viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
+      const method = new URL(route.request().url()).pathname.split("/").at(-1);
+      const responses = {
+        GetAuthStatus: {localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false},
+        GetCurrentUser: { user: {id: "fixture", username: "Fixture"}, permissions: [
+          {resource: "*", action: "*", objectId: "*"},
+        ]},
+        GetWorldViewStatus: { target: native },
+        GetWorldViewSession: { state: native.rendererState, proxyPath: session },
+        ListWorldViewTargets: { targets: [native] },
+        ListCapabilities: {rendererType: native.rendererType, capabilities: [{name: "map.2d", supported: true}]},
+        ListServers: {servers: [{id: native.serverId, name: native.name}]},
+      };
+      await route.fulfill({ json: responses[method] ?? {} });
+    });
+    await page.route("**" + session + "**", async (route) => {
+      if (route.request().url().endsWith("/native/manifest.json")) {
+        await route.fulfill({json: {tileBlocks: 128, dimension: "overworld", spawn: {x: 12, z: -34}}});
+        return;
+      }
+      const match = route.request().url().match(/\/native\/overworld\/(-?\d+)\/(-?\d+)\.png$/);
+      assert.ok(match, "packaged map requests exactly one scoped tile");
+      tileRequests += 1;
+      await route.fulfill({
+        body: fixtureTile(Number(match[1]), Number(match[2])),
+        contentType: "image/png",
+        headers: { "X-CarbonPanel-Rendered-Chunks": "64", "X-CarbonPanel-Tile-Saved-At": "2026-11-12T12:32:00Z" },
+      });
+    });
+    const key = "w1." + Buffer.from(JSON.stringify([2, native.serverId, worldRef.levelName, "", ""])).toString("base64url");
+    await page.goto(origin + "worlds/" + native.serverId + "/" + key);
+    await page.getByRole("heading", { name: "World terrain" }).waitFor();
+    const surface = page.getByRole("region", { name: "Map surface" });
+    const tile = surface.locator("img").first();
+    await tile.waitFor({ state: "visible" });
+    await tile.evaluate((img) => img.decode());
+    assert.equal(await tile.evaluate((img) => img.naturalWidth), 128);
+    assert.equal(await surface.locator("iframe").count(), 0);
+    assert.ok(tileRequests > 0);
+    await page.screenshot({path: path.join(evidence, "packaged-world-view-native.png")});
+    results.push("the packaged World View renders scoped native tiles without an iframe or module");
+  } finally {
+    await context?.close();
+    child.kill();
+  }
 }
 
 const storage = new Map();
@@ -384,6 +472,7 @@ try {
   }
 
   assert.deepEqual(errors, []);
+  await runPackagedWorldView(browser);
   await fs.writeFile(
     path.join(evidence, "report.json"),
     JSON.stringify({ results }, null, 2),

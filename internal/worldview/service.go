@@ -89,7 +89,8 @@ func (s *Service) ListWorldViewTargets(ctx context.Context, _ *connect.Request[v
 		if server == nil || !s.authorized(ctx, user, server.ID, rbac.ActionRead) {
 			continue
 		}
-		targets = append(targets, s.targetFor(ctx, server, nil))
+		target, _ := s.targetFor(ctx, server, nil)
+		targets = append(targets, target)
 	}
 	return connect.NewResponse(&v1.ListWorldViewTargetsResponse{Targets: targets}), nil
 }
@@ -107,7 +108,8 @@ func (s *Service) GetWorldViewStatus(ctx context.Context, req *connect.Request[v
 	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
 	}
-	return connect.NewResponse(&v1.GetWorldViewStatusResponse{Target: s.targetFor(ctx, server, ref)}), nil
+	target, _ := s.targetFor(ctx, server, ref)
+	return connect.NewResponse(&v1.GetWorldViewStatusResponse{Target: target}), nil
 }
 
 func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[v1.GetWorldViewSessionRequest]) (*connect.Response[v1.GetWorldViewSessionResponse], error) {
@@ -123,7 +125,7 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
 	}
-	target := s.targetFor(ctx, server, ref)
+	target, native := s.targetFor(ctx, server, ref)
 	state := target.GetRendererState()
 	// A STALE renderer is still reachable (its health probe succeeded): its
 	// last-known tiles can be served, so the workspace must receive a session
@@ -133,7 +135,10 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 	// state but do not offer an iframe that could never load.
 	staticWithoutProxy := state == v1.RendererState_RENDERER_STATE_STALE &&
 		target.GetRendererType() == v1.RendererType_RENDERER_TYPE_STATIC
-	if (state != v1.RendererState_RENDERER_STATE_READY && state != v1.RendererState_RENDERER_STATE_STALE) || staticWithoutProxy {
+	canOpen := state == v1.RendererState_RENDERER_STATE_READY ||
+		state == v1.RendererState_RENDERER_STATE_STALE ||
+		state == v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE
+	if !canOpen || staticWithoutProxy {
 		reason := target.GetError()
 		if reason == "" {
 			reason = "renderer is not ready; no map session was issued"
@@ -144,15 +149,6 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 		return connect.NewResponse(&v1.GetWorldViewSessionResponse{State: state, Reason: reason}), nil
 	}
 
-	var native nativeScope
-	if target.GetRendererType() == v1.RendererType_RENDERER_TYPE_NATIVE {
-		native, err = resolveNativeScope(ctx, s.deps.Native.store, server, ref)
-		if err != nil {
-			return connect.NewResponse(&v1.GetWorldViewSessionResponse{
-				State: v1.RendererState_RENDERER_STATE_ABSENT, Reason: err.Error(),
-			}), nil
-		}
-	}
 	key, expires := s.deps.Sessions.issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL, native)
 	if key == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
@@ -180,7 +176,7 @@ func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.
 	}
 	renderer, resolveErr := s.resolver().Resolve(ctx, canonicalNodeID(server.NodeID), serverID)
 	if resolveErr != nil || renderer == nil {
-		if s.hasNativeTerrain(ctx, server, nil, resolveErr) {
+		if _, ok := s.nativeScopeFor(ctx, server, nil, resolveErr); ok {
 			return connect.NewResponse(&v1.ListCapabilitiesResponse{
 				RendererType: v1.RendererType_RENDERER_TYPE_NATIVE,
 				Capabilities: nativeCapabilities(),
@@ -344,7 +340,7 @@ func (s *Service) authorized(ctx context.Context, user *auth.AuthenticatedUser, 
 // targetFor builds one honest target. A missing renderer is an onboarding
 // state with an empty level name and unknown confidence, never a guessed folder
 // name or a fabricated freshness timestamp.
-func (s *Service) targetFor(ctx context.Context, server *storage.Server, requested *v1.WorldRef) *v1.WorldViewTarget {
+func (s *Service) targetFor(ctx context.Context, server *storage.Server, requested *v1.WorldRef) (*v1.WorldViewTarget, nativeScope) {
 	nodeID := canonicalNodeID(server.NodeID)
 	var ref *v1.WorldRef
 	if requested == nil {
@@ -380,10 +376,14 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 
 	renderer, err := s.resolver().Resolve(ctx, nodeID, server.ID)
 	if err != nil || renderer == nil {
-		if s.hasNativeTerrain(ctx, server, ref, err) {
+		if native, ok := s.nativeScopeFor(ctx, server, ref, err); ok {
+			ref.LevelName = native.level
+			if ref.GetKind() == v1.WorldRef_KIND_UNSPECIFIED {
+				ref.Kind = v1.WorldRef_KIND_SERVER_LOCAL
+			}
 			target.Dimension = "overworld"
 			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
-			target.RendererState = v1.RendererState_RENDERER_STATE_READY
+			target.RendererState = v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE
 			target.Renderer = &v1.RendererDescriptor{
 				Type: target.RendererType, Capabilities: []string{CapabilityMap2D}, WebBasePath: ProxyPrefix,
 			}
@@ -391,7 +391,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 				Source: nativeSource, Applicability: "saved Java terrain", Confidence: "detected",
 				Note: "Terrain updates after Minecraft saves its chunks.",
 			}
-			return target
+			return target, native
 		}
 		if errors.Is(err, ErrUnsupportedRenderer) {
 			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
@@ -412,7 +412,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 			target.Error = reason
 			target.Freshness.Note = reason
 		}
-		return target
+		return target, nativeScope{}
 	}
 
 	h, healthErr := renderer.Health(ctx)
@@ -428,7 +428,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		target.Error = "renderer health probe returned no observation"
 		target.Freshness.Confidence = "unknown"
 		target.Freshness.Note = target.Error
-		return target
+		return target, nativeScope{}
 	}
 	target.RendererState = h.State
 	target.LastRender = h.LastRender
@@ -442,18 +442,18 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 	if healthErr != nil && target.Error == "" {
 		target.Error = "renderer health probe failed; see panel logs"
 	}
-	return target
+	return target, nativeScope{}
 }
 
-func (s *Service) hasNativeTerrain(ctx context.Context, server *storage.Server, ref *v1.WorldRef, resolveErr error) bool {
+func (s *Service) nativeScopeFor(ctx context.Context, server *storage.Server, ref *v1.WorldRef, resolveErr error) (nativeScope, bool) {
 	if s.deps.Native == nil || !errors.Is(resolveErr, ErrRendererUnavailable) {
-		return false
+		return nativeScope{}, false
 	}
 	if _, exists := s.resolver().cfg.endpointFor(canonicalNodeID(server.NodeID), server.ID); exists {
-		return false
+		return nativeScope{}, false
 	}
-	_, err := s.deps.Native.inspect(ctx, server, ref)
-	return err == nil
+	scope, err := s.deps.Native.inspect(ctx, server, ref)
+	return scope, err == nil
 }
 
 func nativeCapabilities() []*v1.Capability {

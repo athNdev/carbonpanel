@@ -84,6 +84,7 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 	status.Header().Set("Authorization", "Bearer "+granted)
 	observation, err := api.GetWorldViewStatus(ctx, status)
 	if err != nil || observation.Msg.GetTarget().GetRendererType() != v1.RendererType_RENDERER_TYPE_NATIVE ||
+		observation.Msg.GetTarget().GetRendererState() != v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE ||
 		observation.Msg.GetTarget().GetWorldRef().GetLevelName() != level ||
 		observation.Msg.GetTarget().GetLastRender() != nil {
 		t.Fatalf("native target did not report the active scoped world: %v, %v", observation, err)
@@ -123,7 +124,7 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		body, err := io.ReadAll(res.Body)
 		if err != nil || res.StatusCode != want {
 			t.Fatalf("%s status = %d, want %d: %s (%v)", path, res.StatusCode, want, body, err)
