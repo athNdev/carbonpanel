@@ -23,10 +23,10 @@ import (
 // Decoder limits. level.dat is a small file; anything approaching these bounds
 // is either corrupt or an attack, and is refused rather than partially parsed.
 const (
-	maxNBTDecompressed = 8 << 20   // 8 MiB of decompressed NBT
-	maxNBTString       = 64 << 10  // 64 KiB per NBT string
-	maxNBTEntries      = 100_000   // list/array elements and compound readers
-	maxNBTDepth        = 16        // nested compound/list depth
+	maxNBTDecompressed = 8 << 20  // 8 MiB of decompressed NBT
+	maxNBTString       = 64 << 10 // 64 KiB per NBT string
+	maxNBTEntries      = 100_000  // list/array elements and compound readers
+	maxNBTDepth        = 16       // nested compound/list depth
 )
 
 // NBT tag types (the Java edition wire format).
@@ -336,21 +336,9 @@ func LevelDataFacts(data []byte) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &nbtCursor{data: raw}
-	typ, name, err := c.tagHeader(1)
+	root, name, err := parseNBTDocument(&nbtCursor{data: raw})
 	if err != nil {
-		return nil, fmt.Errorf("nbt: root tag: %w", err)
-	}
-	if typ != nbtCompound {
-		return nil, fmt.Errorf("nbt: root tag has type %d, want compound", typ)
-	}
-	rootValue, err := c.payload(typ, 1)
-	if err != nil {
-		return nil, fmt.Errorf("nbt: root payload: %w", err)
-	}
-	root, ok := rootValue.(map[string]any)
-	if !ok {
-		return nil, errors.New("nbt: root payload is not a compound")
+		return nil, err
 	}
 	// Both shapes occur in the wild: an unnamed root holding a Data compound,
 	// and a root compound that is itself named "Data".
@@ -365,6 +353,27 @@ func LevelDataFacts(data []byte) (map[string]any, error) {
 		return dataCompound, nil
 	}
 	return root, nil
+}
+
+// parseNBTDocument reads the named root compound. The caller owns and bounds
+// the decompressed payload before calling it.
+func parseNBTDocument(c *nbtCursor) (map[string]any, string, error) {
+	typ, name, err := c.tagHeader(1)
+	if err != nil {
+		return nil, "", fmt.Errorf("nbt: root tag: %w", err)
+	}
+	if typ != nbtCompound {
+		return nil, "", fmt.Errorf("nbt: root tag has type %d, want compound", typ)
+	}
+	rootValue, err := c.payload(typ, 1)
+	if err != nil {
+		return nil, "", fmt.Errorf("nbt: root payload: %w", err)
+	}
+	root, ok := rootValue.(map[string]any)
+	if !ok {
+		return nil, "", errors.New("nbt: root payload is not a compound")
+	}
+	return root, name, nil
 }
 
 func stringsEqualFold(a, b string) bool {
