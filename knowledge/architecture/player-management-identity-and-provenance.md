@@ -25,7 +25,8 @@ configured on Java 1.21.9 or its 1.21.10 hotfix. The v1 adapter authenticates
 with a bearer header. Java 1.21.11 introduced protocol v2. Unrecognized
 versions, including prereleases, use a configured fallback. The live Java
 1.21.9 checks exercise list, join/leave, kick, allowlist, ban and operator
-changes. RCON and node-scoped exec are allowlisted fallbacks
+changes. A kick succeeds only when the server acknowledges the target in its
+result. RCON and node-scoped exec are allowlisted fallbacks
 defined in `internal/playeradapters`; neither uses controller-local state.
 Optional plugin bridges (vitals, inventory, groups, mute) and full Bedrock
 identity parity are decision-gated: they are reported as decision-pending or

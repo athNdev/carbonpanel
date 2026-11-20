@@ -142,6 +142,9 @@ func TestManagementAdapterFixtureProtocolAndMutations(t *testing.T) {
 				{"uuid": "00000000000000000000000000000002", "name": "Alex"},
 			}}, nil
 		}
+		if req.Method == MethodPlayersKick {
+			return []managementPlayer{{Name: "Steve"}}, nil
+		}
 		return map[string]any{"ok": true}, nil
 	}, nil)
 

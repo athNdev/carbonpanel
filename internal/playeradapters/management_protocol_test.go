@@ -440,3 +440,24 @@ func TestManagementAdapterVersionProfileMismatch(t *testing.T) {
 		})
 	}
 }
+
+func TestManagementKickRequiresConfirmationForTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		removed []managementPlayer
+	}{
+		{name: "player already left", removed: []managementPlayer{}},
+		{name: "different player", removed: []managementPlayer{{Name: "Alex"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newManagementFixture(t, fixtureManagementSecret, func(req rpcRequest, _ *websocket.Conn, _ func(any) error) (any, *rpcErrorPayload) {
+				return tc.removed, nil
+			}, nil)
+			adapter := newManagementAdapter(fixtureServerInfo(fixture.url))
+			t.Cleanup(func() { _ = adapter.Close() })
+			if err := adapter.Kick(context.Background(), "Steve", ""); err == nil {
+				t.Fatal("unconfirmed kick reported success")
+			}
+		})
+	}
+}

@@ -617,7 +617,16 @@ func (m *ManagementAdapter) Kick(ctx context.Context, name, reason string) error
 	if reason != "" {
 		kick.Message = &displayMessage{Literal: reason}
 	}
-	return m.call(ctx, MethodPlayersKick, kickPlayersParams{Kick: []kickSpec{kick}}, nil)
+	var removed []managementPlayer
+	if err := m.call(ctx, MethodPlayersKick, kickPlayersParams{Kick: []kickSpec{kick}}, &removed); err != nil {
+		return err
+	}
+	for _, player := range removed {
+		if strings.EqualFold(player.Name, name) {
+			return nil
+		}
+	}
+	return m.info.sourceError(SourceManagementProtocol, errors.New("the server did not report kicking the requested player"))
 }
 
 func (m *ManagementAdapter) Ban(ctx context.Context, name, reason string) error {
