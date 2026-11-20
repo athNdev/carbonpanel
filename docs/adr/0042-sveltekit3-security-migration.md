@@ -9,8 +9,8 @@ Four open Dependabot alerts affect `@sveltejs/kit` in
 GHSA-6cf5-gc4q-fm3x (medium, fixed in 3.1.1), GHSA-pfhg-q3qv-9q6r (low, fixed
 in 3.0.0) and GHSA-27mw-82g8-phjj (low, fixed in 3.0.0). No 2.x patch exists.
 Kit 3 requires Vite 8, `@sveltejs/vite-plugin-svelte` 7 and Svelte 5.57.1 or
-newer. The `typescript` and `@opentelemetry/api` peers are optional, and there
-is no stable TypeScript 6 release, so TypeScript can remain on 5.9.3.
+newer. The `typescript` and `@opentelemetry/api` peers are optional. The
+security migration kept the repository's existing TypeScript 5.9.3.
 
 ## Decision
 
@@ -62,6 +62,18 @@ coordinated migration follow the recurring path in
 `docs/dependency-security-review.md`. Per-directory security-update groups in
 `.github/dependabot.yml` keep security fixes able to land independently of any
 held routine bump.
+
+### Formatter and TypeScript follow-up
+
+Prettier 3.10.1 and the Tailwind formatter plugin 0.7.4 address the
+`getVisitorKeys` crash from the older Tailwind adapter. The Svelte formatter
+plugin stays on 3.x and loads before the Tailwind formatter plugin to preserve
+class sorting.
+
+TypeScript 6.0.3 satisfies the peer ranges of SvelteKit, svelte-check and
+typescript-eslint. The frontend manifest uses `~6.0.3` to respect the lint
+parser's `<6.1.0` limit. The compiler configuration keeps the relative
+`$lib` paths and drops the deprecated `baseUrl`.
 
 ## Consequences
 
