@@ -152,7 +152,8 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 	asset("", tileAsset, http.StatusUnauthorized)
 	asset(unrelated, tileAsset, http.StatusForbidden)
 	manifest, _ := asset(granted, "native/manifest.json", http.StatusOK)
-	if !bytes.Contains(manifest, []byte(`"tileBlocks":128`)) {
+	if !bytes.Contains(manifest, []byte(`"tileBlocks":128`)) || !bytes.Contains(manifest, []byte(`"dimension":"overworld"`)) ||
+		bytes.Contains(manifest, []byte(`"dimensions"`)) {
 		t.Fatalf("native manifest did not describe the tile scale: %s", manifest)
 	}
 	body, header := asset(granted, tileAsset, http.StatusOK)

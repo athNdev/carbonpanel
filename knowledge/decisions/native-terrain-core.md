@@ -21,6 +21,10 @@ owning server's confined read accessor. The core takes an authorized caller's
 canonical level directory. It exposes no route and supplies no authorization.
 The caller owns the finite worker pool, cache, and delivery policy.
 
+The Vanilla End reader uses a fixed DIM1/region profile with standard End
+heights and Java 1.21.9 chunks. It shares the confined reader and publishes
+no browser capability. OSS-440 tracks qualification of the packaged map.
+
 # Alternatives
 
 A game-side plugin or external renderer would require an installation on each

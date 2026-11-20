@@ -34,9 +34,45 @@ test('native markers admit only supported, non-sensitive and valid Overworld poi
 		overlay('')
 	]);
 	assert.deepEqual(markers, [
-		{ id: 'marker', kind: 'marker', label: 'Spawn hall', x: -8.5, z: 31.25 },
-		{ id: 'waypoint', kind: 'waypoint', label: 'Waypoint', x: -8.5, z: 31.25 },
-		{ id: 'poi', kind: 'poi', label: 'Point of interest', x: -8.5, z: 31.25 }
+		{
+			id: 'marker',
+			kind: 'marker',
+			dimension: 'overworld',
+			label: 'Spawn hall',
+			x: -8.5,
+			z: 31.25
+		},
+		{
+			id: 'waypoint',
+			kind: 'waypoint',
+			dimension: 'overworld',
+			label: 'Waypoint',
+			x: -8.5,
+			z: 31.25
+		},
+		{
+			id: 'poi',
+			kind: 'poi',
+			dimension: 'overworld',
+			label: 'Point of interest',
+			x: -8.5,
+			z: 31.25
+		}
+	]);
+});
+
+test('native End markers exclude other dimensions and sensitive points', () => {
+	const markers = nativeMapMarkers(
+		[
+			overlay('shared'),
+			overlay('shared', { dimension: 'end', kind: 'poi' }),
+			overlay('private', { dimension: 'end', sensitive: true }),
+			overlay('player', { dimension: 'end', kind: 'player' })
+		],
+		'end'
+	);
+	assert.deepEqual(markers, [
+		{ id: 'shared', kind: 'poi', dimension: 'end', label: 'Point of interest', x: -8.5, z: 31.25 }
 	]);
 });
 

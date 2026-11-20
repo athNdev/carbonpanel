@@ -17,12 +17,14 @@
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonErrorState from '$lib/components/carbon/CarbonErrorState.svelte';
 	import CarbonInlineLoading from '$lib/components/carbon/CarbonInlineLoading.svelte';
+	import CarbonSelect from '$lib/components/carbon/CarbonSelect.svelte';
 	import CarbonTextInput from '$lib/components/carbon/CarbonTextInput.svelte';
 	import {
 		blockScale,
 		CHUNKS_PER_TILE,
 		clampBlock,
 		loadNativeManifest,
+		loadNativeTile,
 		NATIVE_FAILURE_MESSAGE,
 		parseNativeCoordinate,
 		TILE_BLOCKS,
@@ -31,6 +33,7 @@
 		type ManifestResult,
 		type MapPoint,
 		type MapSize,
+		type NativeDimension,
 		type NativeMapFailure,
 		type TileResult
 	} from '$lib/features/worldview/native-map';
@@ -48,6 +51,9 @@
 		preservePositionOnRenewal = false,
 		onReopen,
 		location = null,
+		requestedDimension = 'overworld',
+		onDimensionChange,
+		onActiveDimensionChange,
 		mapLink,
 		markers = [],
 		markersUnavailable = false
@@ -57,7 +63,10 @@
 		preservePositionOnRenewal?: boolean;
 		onReopen?: () => void;
 		location?: MapPoint | null;
-		mapLink?: (point: MapPoint) => string;
+		requestedDimension?: NativeDimension;
+		onDimensionChange?: (dimension: NativeDimension) => void;
+		onActiveDimensionChange?: (dimension: NativeDimension | null) => void;
+		mapLink?: (point: MapPoint, dimension: NativeDimension) => string;
 		markers?: readonly NativeMapMarker[];
 		markersUnavailable?: boolean;
 	} = $props();
@@ -71,6 +80,7 @@
 		'busy',
 		'unavailable'
 	];
+	const dimensionLabels = { overworld: 'Overworld', end: 'The End' };
 	const initialZoom = 1;
 	const maximumZoom = 3;
 	const formatTime = new Intl.DateTimeFormat(undefined, {
@@ -87,27 +97,47 @@
 	let copyNote = $state('');
 	let revision = $state(0);
 	let source = $state.raw<{ path: string; revision: number; result: ManifestResult } | undefined>();
-	let tiles = $state.raw<ReadonlyMap<string, TileResult>>(new Map());
+	let tileState = $state.raw<{
+		path: string;
+		revision: number;
+		dimension: NativeDimension;
+		results: ReadonlyMap<string, TileResult>;
+	}>();
 	let loader = $state.raw<ReturnType<typeof createNativeTileLoader> | undefined>();
 	let dragging = $state(false);
 	let showMarkers = $state(true);
 	let selectedMarkerId = $state('');
 	let viewport = $state<HTMLDivElement>();
 	let markerTrigger: HTMLButtonElement | undefined;
-	let selectedMarker = $derived(markers.find((marker) => marker.id === selectedMarkerId));
 	let positionedPath: string | undefined;
+	let positionedDimension: NativeDimension | undefined;
+	let appliedLocation: MapPoint | null;
 	let drag: { pointer: number; x: number; y: number; center: MapPoint } | undefined;
 
 	let result = $derived(
 		source?.path === proxyPath && source.revision === revision ? source.result : undefined
 	);
-	let spawn = $derived(result?.status === 'ready' ? result.manifest.spawn : null);
+	let manifest = $derived(result?.status === 'ready' ? result.manifest : undefined);
+	let activeDimension = $derived<NativeDimension>(
+		manifest?.dimensions.includes(requestedDimension) ? requestedDimension : 'overworld'
+	);
+	let spawn = $derived(activeDimension === 'overworld' ? (manifest?.spawn ?? null) : null);
+	let dimensionMarkers = $derived(markers.filter((marker) => marker.dimension === activeDimension));
+	let selectedMarker = $derived(dimensionMarkers.find((marker) => marker.id === selectedMarkerId));
+	let tiles = $derived(
+		manifest &&
+			tileState?.path === proxyPath &&
+			tileState.revision === revision &&
+			tileState.dimension === activeDimension
+			? tileState.results
+			: undefined
+	);
 	let scale = $derived(blockScale(size, zoom));
 	let visible = $derived(visibleNativeTiles(center, size, scale));
 	let block = $derived({ x: Math.floor(center.x), z: Math.floor(center.z) });
 	let visiblePins = $derived(
 		showMarkers
-			? markers
+			? dimensionMarkers
 					.map((marker) => ({ marker, ...projectNativeMapPoint(marker, center, size, scale) }))
 					.filter(
 						({ left, top }) =>
@@ -123,43 +153,65 @@
 		const path = proxyPath;
 		const generation = revision;
 		const abort = new AbortController();
-		let tileLoader: typeof loader;
 		source = undefined;
-		loader = undefined;
-		tiles = new Map();
+		tileState = undefined;
 		copyNote = '';
 		drag = undefined;
 		dragging = false;
 		void loadNativeManifest(path, abort.signal)
 			.catch((): ManifestResult => ({ status: 'unavailable' }))
 			.then((manifest) => {
-				if (abort.signal.aborted) return;
-				source = { path, revision: generation, result: manifest };
-				if (manifest.status !== 'ready') return;
-				if (!positionedPath || (!preservePositionOnRenewal && positionedPath !== path)) {
-					positionedPath = path;
-					center = location ?? manifest.manifest.spawn ?? { x: 0, z: 0 };
-					zoom = initialZoom;
-				}
-				tileLoader = createNativeTileLoader(path, (results) => (tiles = results));
-				loader = tileLoader;
+				if (!abort.signal.aborted) source = { path, revision: generation, result: manifest };
 			});
-		return () => {
-			abort.abort();
-			tileLoader?.dispose();
-		};
+		return () => abort.abort();
+	});
+
+	$effect(() => {
+		onActiveDimensionChange?.(manifest ? activeDimension : null);
+	});
+
+	$effect(() => {
+		if (!manifest) return;
+		const nextLocation = requestedDimension === activeDimension ? location : null;
+		const path = proxyPath;
+		if (
+			!positionedPath ||
+			(!preservePositionOnRenewal && positionedPath !== path) ||
+			positionedDimension !== activeDimension
+		) {
+			const position = nextLocation ?? spawn ?? { x: 0, z: 0 };
+			moveTo(position.x, position.z);
+			zoom = initialZoom;
+			selectedMarkerId = '';
+			markerTrigger = undefined;
+		} else if (nextLocation && appliedLocation !== nextLocation) {
+			moveTo(nextLocation.x, nextLocation.z);
+		}
+		positionedPath = path;
+		positionedDimension = activeDimension;
+		appliedLocation = nextLocation;
+	});
+
+	$effect(() => {
+		if (!manifest) return;
+		const path = proxyPath;
+		const dimension = activeDimension;
+		const generation = revision;
+		const tileLoader = createNativeTileLoader(
+			path,
+			(results) => (tileState = { path, revision: generation, dimension, results }),
+			(root, tile, signal) => loadNativeTile(root, tile, signal, dimension)
+		);
+		loader = tileLoader;
+		return () => tileLoader.dispose();
 	});
 
 	$effect(() => {
 		loader?.setVisible(visible);
 	});
 
-	$effect(() => {
-		if (location) moveTo(location.x, location.z);
-	});
-
 	let summary = $derived.by(() => {
-		const states = visible.map((tile) => tiles.get(tileKey(tile)));
+		const states = visible.map((tile) => tiles?.get(tileKey(tile)));
 		const saved = states.filter((tile) => tile?.status === 'saved');
 		const loading = states.length === 0 || states.some((tile) => !tile);
 		const failure = mostImportantFailure.find((status) =>
@@ -216,7 +268,7 @@
 	async function copyMapLink() {
 		if (!mapLink) return;
 		try {
-			await navigator.clipboard.writeText(mapLink(block));
+			await navigator.clipboard.writeText(mapLink(block, activeDimension));
 			copyNote = 'Map link copied.';
 		} catch {
 			copyNote = 'Could not copy the map link.';
@@ -323,8 +375,24 @@
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
 		<div class="min-w-0">
 			<h2 id={id + '-title'} class="text-sm font-semibold text-foreground">{title}</h2>
-			<p class="mt-1 text-xs text-muted-foreground">Overworld · Saved terrain</p>
+			<p class="mt-1 text-xs text-muted-foreground">
+				{dimensionLabels[activeDimension]} · Saved terrain
+			</p>
 		</div>
+		{#if manifest && manifest.dimensions.length > 1 && onDimensionChange}
+			<CarbonSelect
+				label="Map dimension"
+				value={activeDimension}
+				onchange={(event) => {
+					const next = (event.currentTarget as HTMLSelectElement).value;
+					if (next === 'overworld' || next === 'end') onDimensionChange?.(next);
+				}}
+			>
+				{#each manifest.dimensions as option (option)}
+					<option value={option}>{dimensionLabels[option]}</option>
+				{/each}
+			</CarbonSelect>
+		{/if}
 		{#if result?.status === 'ready'}
 			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap gap-1">
 				<CarbonButton
@@ -362,6 +430,11 @@
 		{/if}
 	</header>
 
+	{#if manifest && requestedDimension !== activeDimension}
+		<p class="border-b border-border px-4 py-3 text-sm text-foreground" role="status">
+			The End is unavailable for this save. Showing the Overworld.
+		</p>
+	{/if}
 	{#if !result}
 		<div class="px-4 py-10" role="status">
 			<CarbonInlineLoading description="Loading saved terrain…" />
@@ -392,7 +465,7 @@
 			onlostpointercapture={endPan}
 		>
 			{#each visible as tile (tileKey(tile))}
-				{@const saved = tiles.get(tileKey(tile))}
+				{@const saved = tiles?.get(tileKey(tile))}
 				{@const left = tilePixel(tile.x, center.x, size.width)}
 				{@const top = tilePixel(tile.z, center.z, size.height)}
 				<div
@@ -520,14 +593,14 @@
 		</div>
 		{#if markersUnavailable}
 			<p role="status" class="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-				{markers.length
+				{dimensionMarkers.length
 					? 'Could not refresh map markers. Showing the last known markers.'
 					: 'Map markers are unavailable.'}
 			</p>
 		{/if}
 		{#if markers.length}
 			<CarbonAccordion>
-				<CarbonAccordionItem title={'Map markers (' + markers.length + ')'}>
+				<CarbonAccordionItem title={'Map markers (' + dimensionMarkers.length + ')'}>
 					<label class="mb-3 flex items-center gap-2 text-xs text-foreground">
 						<input
 							type="checkbox"
@@ -540,7 +613,7 @@
 						class="max-h-56 divide-y divide-border overflow-auto"
 						aria-label="Map marker locations"
 					>
-						{#each markers as marker (marker.id)}
+						{#each dimensionMarkers as marker (marker.id)}
 							<li>
 								<button
 									type="button"

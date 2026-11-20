@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { pushState, replaceState } from '$app/navigation';
+	import { goto, pushState, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
@@ -83,7 +83,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
-	import { parseNativeCoordinate, type MapPoint } from '$lib/features/worldview/native-map';
+	import {
+		parseNativeCoordinate,
+		type MapPoint,
+		type NativeDimension
+	} from '$lib/features/worldview/native-map';
 	import { nativeMapMarkers } from '$lib/features/worldview/native-map-markers';
 	import { prefersReducedMotion } from '$lib/motion';
 
@@ -162,6 +166,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 	let overlays = $state<MapOverlay[]>([]);
 	let overlaysError = $state<unknown>(null);
+	let overlayErrorDimension = $state<string>();
 	let playerVisible = $state(false);
 	let visibilityNote = $state('');
 
@@ -169,15 +174,37 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let overlayControlsOpen = $state(false);
 	let adminOpen = $state(false);
 
-	// URL-backed selection state (deep-link intent, not a renderer camera).
-	// Pan/zoom are renderer-owned and are not simulated here: no renderer API
-	// for camera control has been verified, so this surface exposes no inert
-	// pan/zoom controls. Back/forward restores the selection without a reload.
+	let embed = $derived(
+		sessionExpired
+			? { src: null, reason: 'The map session expired. Reconnecting…' }
+			: evaluateSession(
+					!denied &&
+						sessionOwner === sessionScope &&
+						(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
+					session
+				)
+	);
+
+	// URL state restores the native map's dimension and location. External
+	// renderers own their camera and use these values for panel-side controls.
 	let dimension = $derived(
 		page.url.searchParams.get('dimension') || statusTarget?.dimension || 'overworld'
 	);
-	let overlayDimension = $derived(view === 'saved' ? 'overworld' : dimension);
-	let nativeMarkers = $derived(nativeMapMarkers(overlays));
+	let nativeRequestedDimension = $derived<NativeDimension>(
+		page.url.searchParams.get('dimension') === 'end' ? 'end' : 'overworld'
+	);
+	let nativeSelection = $state<{ scope: string; path: string; dimension: NativeDimension } | null>(
+		null
+	);
+	let nativeDimension = $derived(
+		nativeSelection?.scope === statusKey && nativeSelection.path === embed.src
+			? nativeSelection.dimension
+			: null
+	);
+	let overlayDimension = $derived(
+		view === 'saved' ? nativeDimension : rendererControlsAvailable ? dimension : null
+	);
+	let nativeMarkers = $derived(nativeDimension ? nativeMapMarkers(overlays, nativeDimension) : []);
 	let x = $derived(parseNumber(page.url.searchParams.get('x')) ?? 0);
 	let z = $derived(parseNumber(page.url.searchParams.get('z')) ?? 0);
 	let layer = $derived(page.url.searchParams.get('layer') || 'all');
@@ -187,11 +214,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return x === null || z === null ? null : { x, z };
 	});
 
-	function mapLink(point: MapPoint): string {
+	function mapLink(point: MapPoint, dimension: NativeDimension): string {
 		const path = resolve('/worlds/[server]/[world]', { server: serverId, world: worldKey });
 		const url = new URL(path, window.location.origin);
 		url.searchParams.set('x', String(point.x));
 		url.searchParams.set('z', String(point.z));
+		if (dimension === 'end') url.searchParams.set('dimension', 'end');
 		return url.href;
 	}
 
@@ -201,7 +229,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return Number.isFinite(parsed) ? parsed : null;
 	}
 
-	function writeQuery(patch: Record<string, string | null>, mode: 'push' | 'replace' = 'push') {
+	function writeQuery(
+		patch: Record<string, string | null>,
+		mode: 'push' | 'replace' | 'navigate' = 'push'
+	) {
 		if (typeof window === 'undefined') return;
 		const url = new URL(
 			resolve('/worlds/[server]/[world]', { server: serverId, world: worldKey }),
@@ -214,9 +245,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		url.searchParams.set('server', serverId);
 		url.searchParams.set('world', worldKey);
-		// The URL is built from resolve(); these are shallow query-only updates.
+		// Native dimension changes must update the router's reactive URL.
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		if (mode === 'push') pushState(url, {});
+		if (mode === 'navigate') void goto(url, { reset: false });
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		else if (mode === 'push') pushState(url, {});
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
 		else replaceState(url, {});
 	}
@@ -295,20 +328,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function loadOverlays() {
-		if (!worldRef) return;
+		const selectedDimension = overlayDimension;
+		if (!worldRef || !selectedDimension) return;
 		const current = scopeGuard();
 		const attempt = ++overlaysAttempt;
+		const accepts = () =>
+			current() && attempt === overlaysAttempt && selectedDimension === overlayDimension;
 		try {
 			const response = await rpcClient.worldView.listMapOverlays(
-				create(ListMapOverlaysRequestSchema, { serverId, worldRef, dimension: overlayDimension }),
+				create(ListMapOverlaysRequestSchema, { serverId, worldRef, dimension: selectedDimension }),
 				silentCallOptions
 			);
-			if (!current() || attempt !== overlaysAttempt) return;
+			if (!accepts()) return;
 			overlays = response.overlays;
 			overlaysError = null;
 		} catch (error) {
-			if (!current() || attempt !== overlaysAttempt) return;
+			if (!accepts()) return;
 			handleError(error);
+			overlayErrorDimension = selectedDimension;
 			overlaysError = error;
 		}
 	}
@@ -399,16 +436,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	});
 
-	let embed = $derived(
-		sessionExpired
-			? { src: null, reason: 'The map session expired. Reconnecting…' }
-			: evaluateSession(
-					!denied &&
-						sessionOwner === sessionScope &&
-						(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
-					session
-				)
-	);
 	let visibleOverlays = $derived(
 		!statusError && liveOverlaysEnabled(view)
 			? filterOverlays(overlays, dimension, playerVisible && canObserve)
@@ -731,9 +758,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								title="World terrain"
 								preservePositionOnRenewal
 								location={nativeLocation}
+								requestedDimension={nativeRequestedDimension}
+								onDimensionChange={(next) =>
+									writeQuery(
+										{ dimension: next === 'end' ? 'end' : null, x: null, z: null },
+										'navigate'
+									)}
+								onActiveDimensionChange={(dimension) => {
+									nativeSelection =
+										dimension && embed.src
+											? { scope: statusKey, path: embed.src, dimension }
+											: null;
+								}}
 								{mapLink}
 								markers={nativeMarkers}
-								markersUnavailable={Boolean(overlaysError)}
+								markersUnavailable={Boolean(
+									overlaysError && overlayErrorDimension === nativeDimension
+								)}
 								onReopen={() => void loadSession()}
 							/>
 						{/key}

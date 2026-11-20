@@ -19,9 +19,12 @@ export interface MapSize {
 	height: number;
 }
 
+export type NativeDimension = 'overworld' | 'end';
+
 export interface NativeManifest {
 	tileBlocks: typeof TILE_BLOCKS;
 	dimension: 'overworld';
+	dimensions: NativeDimension[];
 	spawn: MapPoint | null;
 }
 
@@ -146,16 +149,22 @@ export async function loadNativeManifest(
 	const response = await request(root + 'native/manifest.json', signal);
 	if (!response.ok) return { status: failure(response) };
 	if (mediaType(response) !== 'application/json') return { status: 'unavailable' };
-	const manifest: Partial<NativeManifest> | null = await response.json();
+	const manifest: (Partial<Omit<NativeManifest, 'dimensions'>> & { dimensions?: unknown }) | null =
+		await response.json();
 	if (
 		manifest?.tileBlocks !== TILE_BLOCKS ||
 		manifest.dimension !== 'overworld' ||
 		(manifest.spawn !== null && !isPoint(manifest.spawn))
 	)
 		return { status: 'unavailable' };
+	const options = manifest.dimensions;
+	const dimensions: NativeDimension[] = ['overworld'];
+	if (Array.isArray(options) && options.includes('overworld') && options.includes('end')) {
+		dimensions.push('end');
+	}
 	return {
 		status: 'ready',
-		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', spawn: manifest.spawn }
+		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', dimensions, spawn: manifest.spawn }
 	};
 }
 
@@ -172,18 +181,20 @@ function toImageSource(image: Blob): Promise<string> {
 export async function loadNativeTile(
 	path: string,
 	tile: MapPoint,
-	signal: AbortSignal
+	signal: AbortSignal,
+	dimension: NativeDimension = 'overworld'
 ): Promise<TileResult> {
 	const root = nativeSessionRoot(path);
 	if (
 		!root ||
+		(dimension !== 'overworld' && dimension !== 'end') ||
 		![tile.x, tile.z].every(
 			(index) => Number.isInteger(index) && index >= MIN_TILE && index <= MAX_TILE
 		)
 	) {
 		return { status: 'unavailable' };
 	}
-	const url = root + 'native/overworld/' + tile.x + '/' + tile.z + '.png';
+	const url = root + 'native/' + dimension + '/' + tile.x + '/' + tile.z + '.png';
 	let response = await request(url, signal);
 	if (response.status === 503 && failure(response) === 'busy') {
 		// Minecraft may rewrite the region header during a read. Give that save

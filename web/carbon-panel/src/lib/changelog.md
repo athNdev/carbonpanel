@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - World View opens saved Overworld terrain for supported local Java servers. Pan and zoom with a pointer or keyboard, jump to spawn or coordinates, share a coordinate link, and view saved markers, waypoints and points of interest.
+- World View opens saved terrain and markers in The End for qualified local Vanilla Java 1.21.9 saves. Shared map links reopen the selected dimension.
 - Player lookup shows the account's name, UUID and full Minecraft skin when available. Server history follows the account's existing presence permissions.
 
 ### Fixed
