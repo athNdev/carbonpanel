@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Compose release qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      staged_run:
+        description: Successful Carbon Panel Release Actions run with retained staging artifacts
+        required: true
+        type: string
+      staged_sha:
+        description: Full product SHA built by that run
+        required: true
+        type: string
+      baseline_tag:
+        description: Prior published Stable GitHub release tag
+        required: true
+        default: v1.0.40
+        type: string
+  # Opt-in rehearsal for changes to the harness before they reach main.
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - .github/workflows/compose-release-qualification.yml
+      - scripts/qualify-compose-*.*
+      - scripts/qualify-compose-client/**
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  compose:
+    name: Compose packaged ${{ matrix.mode }} network
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.body, 'Compose staging: ')
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [host, bridge]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout the qualification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate explicit input coordinates
+        id: coordinates
+        env:
+          STAGED_RUN: ${{ inputs.staged_run }}
+          STAGED_SHA: ${{ inputs.staged_sha }}
+          BASELINE_TAG: ${{ inputs.baseline_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            body=$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" | tr -d '\r')
+            line=$(sed -n 's/^Compose staging: //p' <<< "$body")
+            [[ -n "$line" && "$line" != *$'\n'* ]]
+            read -r STAGED_RUN STAGED_SHA BASELINE_TAG extra <<< "$line"
+            [[ -z "$extra" ]]
+          fi
+          [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$STAGED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_TAG" =~ ^(mod-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'staged_run=%s\nstaged_sha=%s\nbaseline_tag=%s\n' \
+            "$STAGED_RUN" "$STAGED_SHA" "$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the staged product's Dockerfile and operator scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.coordinates.outputs.staged_sha }}
+          path: qualification-product
+          persist-credentials: false
+
+      - name: Stage exact payload and immutable image references
+        id: artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGED_RUN: ${{ steps.coordinates.outputs.staged_run }}
+          STAGED_SHA: ${{ steps.coordinates.outputs.staged_sha }}
+          BASELINE_TAG: ${{ steps.coordinates.outputs.baseline_tag }}
+        run: bash scripts/qualify-compose-artifacts.sh "$RUNNER_TEMP/compose-qualification" "$PWD/qualification-product"
+
+      - name: Prepare the pinned Minecraft client
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install client dependencies and validate tooling
+        run: |
+          set -euo pipefail
+          npm ci --prefix scripts/qualify-compose-client --ignore-scripts --no-audit --no-fund
+          command -v sqlite3
+          bash -n scripts/qualify-compose-artifacts.sh
+          bash -n scripts/qualify-compose-release.sh
+          node --check scripts/qualify-compose-game.mjs
+
+      - name: Run the shipped install, upgrade and rollback entry points
+        env:
+          STAGED_SHA: ${{ steps.coordinates.outputs.staged_sha }}
+          BASELINE_IMAGE: ${{ steps.artifacts.outputs.baseline_image }}
+          BASELINE_COMMIT: ${{ steps.artifacts.outputs.baseline_commit }}
+          CANDIDATE_IMAGE: ${{ steps.artifacts.outputs.candidate_image }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          export QUALIFY_NPM_PREFIX="$PWD/scripts/qualify-compose-client"
+          bash scripts/qualify-compose-release.sh "$RUNNER_TEMP/compose-qualification" "$PWD/qualification-product" "$MODE"
+
+      - name: Remove the job's loopback registry
+        if: always()
+        run: docker rm -f compose-qualification-registry || true
+
+      - name: Upload Compose qualification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compose-release-qualification-${{ matrix.mode }}
+          path: ${{ runner.temp }}/compose-qualification/evidence
+          if-no-files-found: error
+          retention-days: 14
