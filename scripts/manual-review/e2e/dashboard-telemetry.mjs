@@ -36,6 +36,13 @@ export async function verifyDashboardTelemetry(page, root, state) {
 			memory: [/1\.0 GiB/, /25% of reporting limits/i, /6\.0 GiB allocated/i]
 		},
 		{
+			name: 'playable-without-current-ram',
+			fleet: [server('playable', 4096, { joinObservationKind: 'playable' })],
+			players: [/\b0\s*all running servers reporting/i, /20 slots configured/i],
+			memory: [/—/, /usage unavailable/i, /4\.0 GiB allocated/i],
+			missingUsage: true
+		},
+		{
 			name: 'partial',
 			fleet: [
 				server('recorded-sample', 4096, {
