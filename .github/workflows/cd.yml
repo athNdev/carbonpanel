@@ -856,9 +856,27 @@ jobs:
         if: steps.browser_ui.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
+      - name: Provision Chromium for live browser QA
+        id: chromium
+        if: steps.final_deploy.outcome == 'success'
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
+          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Live browser QA on deployed HTTPS (switcher, pins, both channels)
+        id: live_browser
+        if: steps.final_deploy.outcome == 'success'
+        env:
+          CARBONPANEL_EXPECT_NIGHTLY_REVISION: ${{ steps.pinned.outputs.sha }}
+          CARBONPANEL_EXPECT_NIGHTLY_DIGEST: ${{ steps.stage.outputs.digest }}
+          CARBONPANEL_EXPECT_PROMOTION_STATE: final
+        run: python3 scripts/browser_version_check.py --base-url https://carbonpanel.dev
       - name: Confirm final alias and canonical docs agreement
         id: final_verify
-        if: steps.final_deploy.outcome == 'success'
+        if: steps.live_browser.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -887,7 +905,8 @@ jobs:
            steps.commit_decision.outcome == 'failure' ||
            steps.commit_decision.outputs.action == 'rollback' ||
            steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
-           steps.final_deploy.outcome == 'failure' || steps.final_verify.outcome == 'failure')
+           steps.final_deploy.outcome == 'failure' || steps.chromium.outcome == 'failure' ||
+           steps.live_browser.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
         run: |

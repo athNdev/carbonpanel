@@ -9,6 +9,7 @@ qualified only at its non-active `/docs/candidate/<sha>/` staging path; canonica
 routes are checked only in a final/default artifact. Set CHROME_PATH to a
 Chromium-family executable. No network, registry or site deployment is used.
 """
+import argparse
 import functools
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -46,18 +47,33 @@ def chrome_path():
 
 
 def main():
-    site = Path(sys.argv[1]) if len(sys.argv) > 1 else SITE
-    index_path = site / "version-index.json"
-    if not index_path.is_file():
-        raise RuntimeError(f"{site} is not a packaged multi-channel site")
-    index = json.loads(index_path.read_text(encoding="utf-8"))
+    global BASE
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("site", nargs="?", default=str(SITE))
+    parser.add_argument("--base-url", default="",
+                        help="verify the DEPLOYED public HTTPS site instead of a local artifact")
+    args = parser.parse_args()
+    site = Path(args.site)
+    live = bool(args.base_url)
+    if live:
+        origin = args.base_url.rstrip("/")
+        BASE = origin
+        index = json.loads(urlopen(origin + "/version-index.json", timeout=60).read())
+        marker_path = None
+        marker = json.loads(urlopen(origin + "/channel-marker.json", timeout=60).read())
+        server = None
+    else:
+        index_path = site / "version-index.json"
+        if not index_path.is_file():
+            raise RuntimeError(f"{site} is not a packaged multi-channel site")
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        marker_path = site / "channel-marker.json"
+        if not marker_path.is_file():
+            raise RuntimeError("packaged site has no public channel-marker.json")
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
     if index.get("schema_version") != 3 or sorted(index.get("channels", {})) != ["nightly", "stable"]:
         raise RuntimeError("packaged site does not have the schema 3 Stable/Nightly channels")
     channels = index["channels"]
-    marker_path = site / "channel-marker.json"
-    if not marker_path.is_file():
-        raise RuntimeError("packaged site has no public channel-marker.json")
-    marker = json.loads(marker_path.read_text(encoding="utf-8"))
     if marker != vc.channel_marker(index):
         raise RuntimeError("public channel marker disagrees with the version index")
     nightly_marker = marker["channels"]["nightly"]
@@ -66,13 +82,25 @@ def main():
         def log_message(self, *_args):
             pass
 
-    handler = functools.partial(QuietHandler, directory=str(site))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    origin = f"http://127.0.0.1:{server.server_port}"
+    if not live:
+        handler = functools.partial(QuietHandler, directory=str(site))
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        origin = f"http://127.0.0.1:{server.server_port}"
     binary = chrome_path()
     failures = []
+
+    def published(path):
+        """Does the exact URL exist (local artifact file or live public route)?"""
+        if not live:
+            return (site / path.lstrip("/")).is_file()
+        try:
+            urlopen(origin + "/" + path.lstrip("/"), timeout=10)
+            return True
+        except HTTPError:
+            return False
+
 
     def dom(path, width=1440):
         for attempt in range(3):
@@ -125,7 +153,7 @@ def main():
 
     def absent(path):
         # A directory listing is not a published route; check for the page file.
-        if (site / path.lstrip("/") / "index.html").is_file():
+        if published(path.lstrip("/") + "/index.html"):
             failures.append(f"{path}: unexpected active route in this artifact")
 
     def sitemap_locations(text):
@@ -161,8 +189,7 @@ def main():
             for route in ACTIVE_ROUTES:
                 if f"{BASE}{route}" in locations:
                     failures.append(f"sitemap.xml: candidate published active route {route}")
-            pagefind = site / staging.lstrip("/") / "pagefind/pagefind-entry.json"
-            if not pagefind.is_file():
+            if not published(staging.lstrip("/") + "pagefind/pagefind-entry.json"):
                 failures.append("candidate: missing scoped pagefind index")
         else:
             expect("/docs/", shared_banner("stable") + ["Stable", "Nightly"])
@@ -201,11 +228,11 @@ def main():
                 if f"{BASE}/docs/versions/{retired}/" in locations:
                     failures.append(f"sitemap.xml: retired route {retired} is published")
             for version in index["versions"]:
-                pagefind = site / version["route"].lstrip("/") / "pagefind/pagefind-entry.json"
-                if not pagefind.is_file():
+                if not published(version["route"].lstrip("/") + "pagefind/pagefind-entry.json"):
                     failures.append(f"{version['channel_display']}: missing scoped pagefind index")
     finally:
-        server.shutdown()
+        if server:
+            server.shutdown()
 
     if failures:
         raise ValueError("browser version check failed:\n- " + "\n- ".join(sorted(set(failures))))

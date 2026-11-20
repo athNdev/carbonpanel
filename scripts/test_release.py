@@ -672,11 +672,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("--alias latest", source)
         self.assertIn("  stable-channel-transaction:\n", source)
         self.assertIn("channel-promote \\\n", source)
-        self.assertIn("needs: [plan, publish-immutable, publish, stable-channel-transaction]", source)
+        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction]", source)
         self.assertIn("python3 scripts/release.py release-record", source)
         self.assertIn("--immutable-only", source)
         # Durable release record completes before alias promotion.
-        self.assertLess(source.index("  publish:\n"), source.index("  promote-aliases:\n"))
+        # Dependency graph (not file order) is the enforced publication boundary.
         self.assertNotIn("github.event_name == 'push'", source)
         self.assertNotIn("type=raw,value=latest", source)
 
@@ -2024,17 +2024,20 @@ class ReleaseTests(unittest.TestCase):
         for name in writers:
             with self.subTest(writer=name):
                 self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
-        # The lock spans immutable publish -> GitHub release -> alias promotion:
-        # promotion depends on both earlier writing phases in the same run.
-        self.assertIn("needs: [plan, publish-immutable, publish, stable-channel-transaction]",
-                      job_block("promote-aliases"))
+        # The lock spans immutable publish -> verified aliases -> GitHub release:
+        # no public release can survive a compensated alias rollback.
         self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction]",
+                      job_block("promote-aliases"))
+        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction, promote-aliases]",
                       job_block("publish"))
-        # (e) alias promotion still re-preflights with LIVE state inside the lock.
+        self.assertIn("needs.promote-aliases.outputs.aliases_verified == 'true'",
+                      job_block("publish"))
+        # (e) alias promotion re-preflights with LIVE state inside the lock and
+        # verifies the promoted aliases before the release is exposed.
         promotion = job_block("promote-aliases")
-        for step in ("Re-verify the durable release record before any alias move",
-                     "Decide which aliases may advance",
-                     "verify-release-record", "alias-promotion", "promote-alias"):
+        for step in ("Decide which aliases may advance",
+                     "Verify promoted aliases by live observation before publication",
+                     "alias_verify", "alias-promotion", "promote-alias"):
             self.assertIn(step, promotion)
         # (f) stranded-after-immutable is impossible: one run holds the lock for
         # all phases, and recovery for a resumed immutable version is inside that
@@ -2536,6 +2539,29 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         self.assertEqual(by_id["browser_ui"]["run"],
                          "python3 scripts/browser_version_check.py")
         self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_deploy"]["if"])
+
+    def test_public_release_waits_for_verified_aliases_and_live_browser(self):
+        import yaml
+        doc = yaml.safe_load(
+            (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+        jobs = doc["jobs"]
+        self.assertIn("promote-aliases", jobs["publish"]["needs"])
+        self.assertNotIn("publish", jobs["promote-aliases"]["needs"])
+        self.assertIn("needs.promote-aliases.outputs.aliases_verified == 'true'",
+                      str(jobs["publish"]["if"]))
+        promoted = {step.get("id"): step for step in jobs["promote-aliases"]["steps"]
+                    if step.get("id")}
+        self.assertIn("verified=true", promoted["alias_verify"]["run"])
+        stable_runs = "\n".join(str(step.get("run", ""))
+                                for step in jobs["stable-channel-transaction"]["steps"])
+        self.assertIn("playwright install --with-deps chromium", stable_runs)
+        self.assertIn("browser_version_check.py --base-url https://carbonpanel.dev", stable_runs)
+        cd = yaml.safe_load(
+            (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8"))
+        cd_runs = "\n".join(str(step.get("run", ""))
+                            for step in cd["jobs"]["channel-transaction"]["steps"])
+        self.assertIn("playwright install --with-deps chromium", cd_runs)
+        self.assertIn("browser_version_check.py --base-url https://carbonpanel.dev", cd_runs)
 
     def test_release_lock_is_shared_pages_deploy(self):
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
