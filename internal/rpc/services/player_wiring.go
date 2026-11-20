@@ -32,7 +32,9 @@ import (
 // never tear down a moderation adapter that is mid-mutation.
 type adapterEntry struct {
 	adapter playeradapters.Adapter
-	closer  interface{ Close() }
+	// ManagementAdapter.Close returns error; a plain Close() assertion would
+	// silently match nothing and leak its background WebSocket reader.
+	closer  interface{ Close() error }
 	info    playeradapters.ServerInfo
 	caps    capabilityInfo
 	refs    int
@@ -119,8 +121,8 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 			n.mu.Unlock()
 			return nil, toCapabilityInfo(caps), err
 		}
-		var closer interface{ Close() }
-		if candidate, ok := adapter.(interface{ Close() }); ok {
+		var closer interface{ Close() error }
+		if candidate, ok := adapter.(interface{ Close() error }); ok {
 			closer = candidate
 		}
 		entry = &adapterEntry{adapter: adapter, closer: closer, info: info, caps: toCapabilityInfo(caps)}
@@ -144,7 +146,7 @@ func toCapabilityInfo(caps playeradapters.CapabilitySet) capabilityInfo {
 
 func closeAdapterEntry(entry *adapterEntry) {
 	if entry.closer != nil {
-		entry.closer.Close()
+		_ = entry.closer.Close()
 	}
 }
 

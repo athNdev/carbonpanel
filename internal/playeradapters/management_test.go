@@ -64,7 +64,7 @@ func newManagementFixture(t *testing.T, secret string, respond fixtureResponder,
 		defer func(closer func() error) { _ = closer() }(conn.Close)
 		fixture.mu.Lock()
 		fixture.connections++
-		fixture.subprotos = append(fixture.subprotos, conn.Subprotocol())
+		fixture.subprotos = append(fixture.subprotos, r.Header.Get("Sec-WebSocket-Protocol"))
 		fixture.mu.Unlock()
 		if onConnect != nil {
 			onConnect(conn)
@@ -196,8 +196,8 @@ func TestManagementAdapterFixtureProtocolAndMutations(t *testing.T) {
 	if len(authHeaders) == 0 || authHeaders[0] != "Bearer "+fixtureManagementSecret {
 		t.Fatalf("missing bearer auth header: %+v", authHeaders)
 	}
-	if len(subprotos) == 0 || subprotos[0] != fixtureManagementSecret {
-		t.Fatalf("secret subprotocol was not negotiated: %+v", subprotos)
+	if len(subprotos) == 0 || subprotos[0] != "" {
+		t.Fatal("the bearer credential must only be sent in Authorization")
 	}
 	wantMethods := []string{
 		MethodPlayersList, MethodPlayersKick, MethodBansAdd, MethodBansRemove,

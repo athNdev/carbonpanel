@@ -25,7 +25,7 @@ inventory, Bedrock parity) have no verified vanilla source.
    confidence, applicability, conflict_note}`. Unknown and stale values are
    rendered as such; an empty field is not treated as a zero.
 3. The structured management protocol is negotiated first when explicitly
-   configured on Java 1.21.9+; RCON and node-scoped `exec` are allowlisted
+   configured on Java 1.21.9 or 1.21.10; RCON and node-scoped `exec` are allowlisted
    fallbacks. No adapter falls back to controller-local state, and no live
    Minecraft server is assumed in tests.
 4. Skins and capes are fetched server-side from the signed Mojang texture
@@ -79,7 +79,7 @@ inventory, Bedrock parity) have no verified vanilla source.
 
 | Candidate | Capability evidence | Licence evidence | Decision |
 | --- | --- | --- | --- |
-| Native management protocol (Java 1.21.9+) | Structured `Player{id,name}`, typed allowlist/bans/ops, joined/left notifications — Minecraft Wiki, *Minecraft Server Management Protocol* (accessed 2026-11-18) | First-party protocol; no bundled artifact | **GO** behind explicit configuration and version gate; fixture tests only, one real 1.21.9+ server qualification still required |
+| Native management protocol (Java 1.21.9+) | Structured `Player{id,name}`, typed allowlist/bans/ops, joined/left notifications — Minecraft Wiki, *Minecraft Server Management Protocol* (accessed 2026-11-18) | First-party protocol; no bundled artifact | **GO** for the v1 adapter with explicit configuration on 1.21.9 and 1.21.10. A live vanilla 1.21.9 server verified roster, moderation and notifications. |
 | RCON / node-scoped exec fallback | Java-only, text replies with ambiguous termination — Minecraft Wiki, *RCON* and */list* (accessed 2026-11-18) | In-repo wrappers, no new dependency | **GO** with allowlisted commands, bounded timeout, redaction and node-scoped exec only |
 | Paper bridge (vitals, inventory, groups, mute) | Loader API can enumerate players and listen to join/leave (PaperMC docs) but specific field parity is **UNVERIFIED**; mute/groups are plugin-only | Paper server is GPL-3.0; plugins compile against the API — legal review required | **NO-GO for bundling now**; decision-pending in the capability RPC; revisit only with a separate licence-reviewed artifact |
 | Fabric bridge | Loader-side bridge feasibility documented (fabricmc.net); field parity **UNVERIFIED** | Fabric API Apache-2.0 | **NO-GO now**; separate artifact and verification required |
@@ -104,5 +104,10 @@ Licence notes are orientation, not legal advice. "UNVERIFIED" is a decision gate
 
 `product-plans/player-management.md` §§5,7,8,9,15 and `product-plans/
 integrated-roadmap.md` §§2,4,6, with primary sources cited there and accessed
-2026-11-18. No live Minecraft server, RCON endpoint, skin service or container
-was contacted by the implementation work.
+2026-11-18. OSS-350 subsequently exercised the adapter against vanilla Java 1.21.9
+(server jar SHA-1 `11e54c2081420a4d49db3007e66c80a22579ff2a`).
+Two disposable clients joined and were kicked with and without a reason.
+The server persisted allowlist, ban and operator changes and emitted matching
+notifications. A 1.21.10 server and TLS were outside that run. Mojang
+introduced management protocol v2 in 1.21.11.
+[Java 1.21.11 release notes](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-11)

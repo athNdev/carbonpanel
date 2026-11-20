@@ -10,7 +10,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,20 +20,31 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// JSON-RPC method and notification names. They are constants so fixtures are
-// deterministic; D-MGMT requires validation against a real 1.21.9+ server
-// before any real-server interoperability claim is made (see package doc).
+// JSON-RPC method and notification names for the vanilla Minecraft Server
+// Management Protocol. These are the documented names, confirmed against a
+// real pinned 1.21.9 server in the OSS-350 qualification run. Note the
+// notification namespace is "minecraft:notification/...", not
+// "minecraft:players/...", and the list/list-like endpoints have no trailing
+// slash (minecraft:players, minecraft:allowlist, minecraft:bans,
+// minecraft:operators).
 const (
-	MethodPlayersList        = "minecraft:players"
-	MethodPlayersKick        = "minecraft:players/kick"
-	MethodAllowlistAdd       = "minecraft:allowlist/add"
-	MethodAllowlistRemove    = "minecraft:allowlist/remove"
-	MethodBansAdd            = "minecraft:bans/add"
-	MethodBansRemove         = "minecraft:bans/remove"
-	MethodOperatorsAdd       = "minecraft:operators/add"
-	MethodOperatorsRemove    = "minecraft:operators/remove"
-	NotificationPlayerJoined = "minecraft:players/joined"
-	NotificationPlayerLeft   = "minecraft:players/left"
+	MethodPlayersList     = "minecraft:players"
+	MethodPlayersKick     = "minecraft:players/kick"
+	MethodAllowlistAdd    = "minecraft:allowlist/add"
+	MethodAllowlistRemove = "minecraft:allowlist/remove"
+	MethodBansAdd         = "minecraft:bans/add"
+	MethodBansRemove      = "minecraft:bans/remove"
+	MethodOperatorsAdd    = "minecraft:operators/add"
+	MethodOperatorsRemove = "minecraft:operators/remove"
+
+	NotificationPlayerJoined     = "minecraft:notification/players/joined"
+	NotificationPlayerLeft       = "minecraft:notification/players/left"
+	NotificationAllowlistAdded   = "minecraft:notification/allowlist/added"
+	NotificationAllowlistRemoved = "minecraft:notification/allowlist/removed"
+	NotificationBanAdded         = "minecraft:notification/bans/added"
+	NotificationBanRemoved       = "minecraft:notification/bans/removed"
+	NotificationOperatorAdded    = "minecraft:notification/operators/added"
+	NotificationOperatorRemoved  = "minecraft:notification/operators/removed"
 )
 
 const (
@@ -44,11 +57,14 @@ const (
 	jsonRPCVersion               = "2.0"
 )
 
+// Params is raw JSON so a no-argument method can omit the field entirely.
+// Vanilla 1.21.9 rejects an empty object ("Expected no params, or an empty
+// array") for minecraft:players; an omitted field is accepted.
 type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      uint64 `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      uint64          `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
 }
 
 type rpcErrorPayload struct {
@@ -79,14 +95,27 @@ type managementPlayer struct {
 	Username string `json:"username"`
 }
 
+// Minecraft 1.21.11 introduced protocol v2. Select the v1 release
+// explicitly so snapshots and later wire formats use the configured fallback.
+func selectManagementProfile(version string) (string, error) {
+	switch strings.TrimSpace(version) {
+	case "1.21.9", "1.21.10":
+		return "minecraft-v1/1.21.9", nil
+	default:
+		return "", fmt.Errorf("no verified management protocol signature for Minecraft version %q", version)
+	}
+}
+
 // ManagementAdapter is a bounded JSON-RPC 2.0 client. It lazily connects on
 // first use, reconnects on later calls, and fails outstanding calls when a
 // connection generation dies. Owner must call Close.
 type ManagementAdapter struct {
-	info   ServerInfo
-	url    string
-	dialer websocket.Dialer
-	header http.Header
+	info       ServerInfo
+	url        string
+	dialer     websocket.Dialer
+	header     http.Header
+	profile    string
+	profileErr error
 
 	mu         sync.Mutex
 	conn       *websocket.Conn
@@ -108,19 +137,26 @@ func newManagementAdapter(info ServerInfo) *ManagementAdapter {
 	header.Set("Authorization", "Bearer "+info.ManagementSecret)
 	dialer := websocket.Dialer{
 		HandshakeTimeout:  managementDialTimeout,
-		Subprotocols:      []string{info.ManagementSecret},
 		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
 		EnableCompression: false,
 	}
+	profile, profileErr := selectManagementProfile(info.MCVersion)
 	return &ManagementAdapter{
-		info:     info,
-		url:      info.ManagementURL,
-		dialer:   dialer,
-		header:   header,
-		pending:  make(map[uint64]chan rpcReply),
-		notifyCh: make(chan Notification, managementNotificationBuffer),
+		info:       info,
+		url:        info.ManagementURL,
+		dialer:     dialer,
+		header:     header,
+		profile:    profile,
+		profileErr: profileErr,
+		pending:    make(map[uint64]chan rpcReply),
+		notifyCh:   make(chan Notification, managementNotificationBuffer),
 	}
 }
+
+// ProtocolProfile reports the verified wire signature this adapter uses. It is
+// empty when no signature matches the configured version; such an adapter
+// refuses every call instead of guessing a shape.
+func (m *ManagementAdapter) ProtocolProfile() string { return m.profile }
 
 func (m *ManagementAdapter) Source() string { return SourceManagementProtocol }
 
@@ -294,51 +330,103 @@ func (m *ManagementAdapter) deliverReply(id uint64, frame rpcFrame) {
 	}
 }
 
-func (m *ManagementAdapter) recordNotification(method string, params json.RawMessage) {
-	kind := ""
+func notificationKind(method string) (string, bool) {
 	switch method {
 	case NotificationPlayerJoined:
-		kind = "joined"
+		return "joined", true
 	case NotificationPlayerLeft:
-		kind = "left"
+		return "left", true
+	case NotificationAllowlistAdded:
+		return "allowlist_added", true
+	case NotificationAllowlistRemoved:
+		return "allowlist_removed", true
+	case NotificationBanAdded:
+		return "ban_added", true
+	case NotificationBanRemoved:
+		return "ban_removed", true
+	case NotificationOperatorAdded:
+		return "operator_added", true
+	case NotificationOperatorRemoved:
+		return "operator_removed", true
 	default:
-		return
-	}
-	player := decodeNotificationPlayer(params)
-	if player.Name == "" {
-		return
-	}
-	notification := Notification{
-		Kind:       kind,
-		Name:       player.Name,
-		UUID:       player.UUID,
-		Source:     SourceManagementProtocol,
-		ObservedAt: time.Now().UTC(),
-	}
-	select {
-	case m.notifyCh <- notification:
-	default:
-		m.mu.Lock()
-		m.dropped++
-		m.mu.Unlock()
+		return "", false
 	}
 }
 
-func decodeNotificationPlayer(params json.RawMessage) ObservedPlayer {
+func (m *ManagementAdapter) recordNotification(method string, params json.RawMessage) {
+	kind, known := notificationKind(method)
+	if !known {
+		return
+	}
+	for _, player := range decodeNotificationPlayers(params) {
+		if player.Name == "" {
+			continue
+		}
+		notification := Notification{
+			Kind:       kind,
+			Name:       player.Name,
+			UUID:       player.UUID,
+			Source:     SourceManagementProtocol,
+			ObservedAt: time.Now().UTC(),
+		}
+		select {
+		case m.notifyCh <- notification:
+		default:
+			m.mu.Lock()
+			m.dropped++
+			m.mu.Unlock()
+		}
+	}
+}
+
+// decodeNotificationPlayers understands the real 1.21.9 notification params,
+// which are a bare JSON array of players. Allowlist/ban/operator notifications
+// may nest the player under "player" with additional fields beside it. The
+// {"player": ...} wrapper and a flat object are also accepted so older
+// fixtures still exercise the same adapter path.
+func decodeNotificationPlayers(params json.RawMessage) []ObservedPlayer {
+	if len(params) == 0 {
+		return nil
+	}
+	if params[0] == '[' {
+		var items []json.RawMessage
+		if json.Unmarshal(params, &items) != nil {
+			return nil
+		}
+		out := make([]ObservedPlayer, 0, len(items))
+		for _, item := range items {
+			if player, ok := decodeNotificationPlayer(item); ok {
+				out = append(out, player)
+			}
+		}
+		return out
+	}
+	if player, ok := decodeNotificationPlayer(params); ok {
+		return []ObservedPlayer{player}
+	}
+	return nil
+}
+
+func decodeNotificationPlayer(raw json.RawMessage) (ObservedPlayer, bool) {
 	var wrapped struct {
 		Player *managementPlayer `json:"player"`
 	}
-	if json.Unmarshal(params, &wrapped) == nil && wrapped.Player != nil {
-		return normaliseManagementPlayer(*wrapped.Player)
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Player != nil {
+		player := normaliseManagementPlayer(*wrapped.Player)
+		return player, player.Name != ""
 	}
 	var flat managementPlayer
-	if json.Unmarshal(params, &flat) != nil {
-		return ObservedPlayer{}
+	if json.Unmarshal(raw, &flat) != nil {
+		return ObservedPlayer{}, false
 	}
-	return normaliseManagementPlayer(flat)
+	player := normaliseManagementPlayer(flat)
+	return player, player.Name != ""
 }
 
 func (m *ManagementAdapter) call(ctx context.Context, method string, params any, out any) error {
+	if m.profileErr != nil {
+		return m.info.sourceError(SourceManagementProtocol, m.profileErr)
+	}
 	callCtx, cancel := context.WithTimeout(ctx, managementCallTimeout)
 	defer cancel()
 
@@ -362,7 +450,16 @@ func (m *ManagementAdapter) call(ctx context.Context, method string, params any,
 		m.mu.Unlock()
 	}()
 
-	payload, err := json.Marshal(rpcRequest{JSONRPC: jsonRPCVersion, ID: id, Method: method, Params: params})
+	// A nil params means "no parameters": omit the field rather than sending
+	// {}, which vanilla 1.21.9 rejects for minecraft:players.
+	var rawParams json.RawMessage
+	if params != nil {
+		rawParams, err = json.Marshal(params)
+		if err != nil {
+			return m.info.sourceError(SourceManagementProtocol, err)
+		}
+	}
+	payload, err := json.Marshal(rpcRequest{JSONRPC: jsonRPCVersion, ID: id, Method: method, Params: rawParams})
 	if err != nil {
 		return m.info.sourceError(SourceManagementProtocol, err)
 	}
@@ -441,7 +538,9 @@ func parseManagementPlayers(raw json.RawMessage) ([]ObservedPlayer, error) {
 
 func (m *ManagementAdapter) List(ctx context.Context) ([]ObservedPlayer, error) {
 	var raw json.RawMessage
-	if err := m.call(ctx, MethodPlayersList, struct{}{}, &raw); err != nil {
+	// minecraft:players takes no parameters; sending {} is a -32602 on a real
+	// 1.21.9 server. nil omits the params field from the frame.
+	if err := m.call(ctx, MethodPlayersList, nil, &raw); err != nil {
 		return nil, err
 	}
 	players, err := parseManagementPlayers(raw)
@@ -455,23 +554,56 @@ func (m *ManagementAdapter) List(ctx context.Context) ([]ObservedPlayer, error) 
 	return append([]ObservedPlayer(nil), players...), nil
 }
 
-type managementTarget struct {
-	Player managementPlayer `json:"player"`
+// The 1.21.9 signature uses named array parameters, not a single "player"
+// object: {"add":[{"name":"..."}]}, {"remove":[{"name":"..."}]},
+// {"kick":[{"player":{"name":"..."},"message":{"literal":"..."}}]},
+// {"add":[{"player":{"name":"..."},"permissionLevel":4}]}. Note the camelCase
+// permissionLevel and the structured message. All names are validated before
+// a request is built, so no caller string is ever interpolated into JSON.
+type playerSpec struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
-type managementKickParams struct {
-	Player  managementPlayer `json:"player"`
-	Message string           `json:"message"`
+func namedPlayer(name string) playerSpec { return playerSpec{Name: name} }
+
+type addPlayersParams struct {
+	Add []playerSpec `json:"add"`
 }
 
-type managementReasonParams struct {
-	Player managementPlayer `json:"player"`
-	Reason string           `json:"reason"`
+type removePlayersParams struct {
+	Remove []playerSpec `json:"remove"`
 }
 
-type managementOpAddParams struct {
-	Player          managementPlayer `json:"player"`
-	PermissionLevel int32            `json:"permission_level"`
+type displayMessage struct {
+	Literal string `json:"literal"`
+}
+
+type kickSpec struct {
+	Player  playerSpec      `json:"player"`
+	Message *displayMessage `json:"message,omitempty"`
+}
+
+type kickPlayersParams struct {
+	Kick []kickSpec `json:"kick"`
+}
+
+type banSpec struct {
+	Player playerSpec `json:"player"`
+	Reason string     `json:"reason,omitempty"`
+}
+
+type addBansParams struct {
+	Add []banSpec `json:"add"`
+}
+
+type operatorSpec struct {
+	Player          playerSpec `json:"player"`
+	PermissionLevel int32      `json:"permissionLevel"`
+}
+
+type addOperatorsParams struct {
+	Add []operatorSpec `json:"add"`
 }
 
 func (m *ManagementAdapter) Kick(ctx context.Context, name, reason string) error {
@@ -481,11 +613,11 @@ func (m *ManagementAdapter) Kick(ctx context.Context, name, reason string) error
 	if err := validReason(reason); err != nil {
 		return err
 	}
-	params := managementKickParams{
-		Player:  managementPlayer{Name: name},
-		Message: reason,
+	kick := kickSpec{Player: namedPlayer(name)}
+	if reason != "" {
+		kick.Message = &displayMessage{Literal: reason}
 	}
-	return m.call(ctx, MethodPlayersKick, params, nil)
+	return m.call(ctx, MethodPlayersKick, kickPlayersParams{Kick: []kickSpec{kick}}, nil)
 }
 
 func (m *ManagementAdapter) Ban(ctx context.Context, name, reason string) error {
@@ -495,18 +627,17 @@ func (m *ManagementAdapter) Ban(ctx context.Context, name, reason string) error 
 	if err := validReason(reason); err != nil {
 		return err
 	}
-	params := managementReasonParams{
-		Player: managementPlayer{Name: name},
+	return m.call(ctx, MethodBansAdd, addBansParams{Add: []banSpec{{
+		Player: namedPlayer(name),
 		Reason: reason,
-	}
-	return m.call(ctx, MethodBansAdd, params, nil)
+	}}}, nil)
 }
 
 func (m *ManagementAdapter) Pardon(ctx context.Context, name string) error {
 	if err := validName(name); err != nil {
 		return err
 	}
-	return m.call(ctx, MethodBansRemove, managementTarget{Player: managementPlayer{Name: name}}, nil)
+	return m.call(ctx, MethodBansRemove, removePlayersParams{Remove: []playerSpec{namedPlayer(name)}}, nil)
 }
 
 func (m *ManagementAdapter) SetOperator(ctx context.Context, name string, level int32, remove bool) error {
@@ -517,21 +648,20 @@ func (m *ManagementAdapter) SetOperator(ctx context.Context, name string, level 
 		return errors.New("playeradapters: invalid operator level")
 	}
 	if remove {
-		return m.call(ctx, MethodOperatorsRemove, managementTarget{Player: managementPlayer{Name: name}}, nil)
+		return m.call(ctx, MethodOperatorsRemove, removePlayersParams{Remove: []playerSpec{namedPlayer(name)}}, nil)
 	}
-	return m.call(ctx, MethodOperatorsAdd, managementOpAddParams{
-		Player:          managementPlayer{Name: name},
+	return m.call(ctx, MethodOperatorsAdd, addOperatorsParams{Add: []operatorSpec{{
+		Player:          namedPlayer(name),
 		PermissionLevel: level,
-	}, nil)
+	}}}, nil)
 }
 
 func (m *ManagementAdapter) SetWhitelist(ctx context.Context, name string, remove bool) error {
 	if err := validName(name); err != nil {
 		return err
 	}
-	method := MethodAllowlistAdd
 	if remove {
-		method = MethodAllowlistRemove
+		return m.call(ctx, MethodAllowlistRemove, removePlayersParams{Remove: []playerSpec{namedPlayer(name)}}, nil)
 	}
-	return m.call(ctx, method, managementTarget{Player: managementPlayer{Name: name}}, nil)
+	return m.call(ctx, MethodAllowlistAdd, addPlayersParams{Add: []playerSpec{namedPlayer(name)}}, nil)
 }
