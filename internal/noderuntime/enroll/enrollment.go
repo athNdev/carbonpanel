@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -763,10 +764,13 @@ func (b *NodeBundle) String() string { return "NodeBundle[" + b.EnrollmentID + "
 // and the private key are written to a 0600 file under runtimeDir; the caller
 // receives a PublicBundle and a handle for the later claim.
 func GenerateNodeBundle(runtimeDir, nodeID, label string) (*NodeBundle, *v1.CreateEnrollmentRequest, error) {
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
+	entropy := make([]byte, 32)
+	if _, err := rand.Read(entropy); err != nil {
 		return nil, nil, err
 	}
+	// The protobuf claim carries S in a string. Hash the same base64url
+	// bytes the node stores and sends, retaining all 256 bits of entropy.
+	secret := []byte(base64.RawURLEncoding.EncodeToString(entropy))
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, nil, err

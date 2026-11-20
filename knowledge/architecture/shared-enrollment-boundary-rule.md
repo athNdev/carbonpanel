@@ -52,6 +52,9 @@ claim context, add a second certificate policy or duplicate a domain check.
   commit. Verified mTLS certificate DER resolves to its current persisted
   node grant. See [Node enrollment state](../decisions/node-enrollment-state.md).
 
+- The node encodes its generated secret as base64url before hashing the
+  registration digest. The claim carries those same UTF-8 bytes.
+
 # Why
 
 Parallel deployment modes previously each risked reimplementing proof of
