@@ -389,6 +389,11 @@ class ShowcasePipelineTest(unittest.TestCase):
         self.assertIn('if [ ! -f "${DATA}/config/config.yaml" ]; then', devstack)
         self.assertIn("JSON.stringify({minecraft:{global_config:{seed:", devstack)
         self.assertNotIn("ConfigService/UpdateServerConfig", devstack)
+        # Region readiness must use the shared GetServer.dataPath resolver and
+        # real .mca header coverage, never a guessed slug+ID path.
+        self.assertIn("review_server_host_path", devstack)
+        self.assertIn(".mca", devstack)
+        self.assertNotIn('servers/${server_id}/world/region', devstack)
         # The World View camera must be zoomed out for a landscape capture.
         distance = re.search(r"world:0:0:0:(\d+):0:0:0:0:perspective", devstack)
         self.assertTrue(distance, "no BlueMap startLocation found")

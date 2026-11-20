@@ -338,6 +338,19 @@ seed_showcase_pack() {
 	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
 }
 
+# Resolve a disposable server's host data root from the panel's authoritative
+# GetServer.dataPath. Shared by the terrain-readiness and BlueMap lanes so a
+# slug+ID directory (review-vanilla_<id>) is never guessed as a bare id.
+review_server_host_path() {
+	local token="$1" server_id="$2" data_path host_path
+	data_path="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null | json_path 'server.dataPath')"
+	case "${data_path}" in
+		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
+		*) host_path="${DATA}/data/servers/${server_id}" ;;
+	esac
+	printf '%s' "${host_path}"
+}
+
 # Guarantee real terrain under the fixed initial camera. A fresh Minecraft
 # world has a random seed, so relying on whatever chunks happen to exist at
 # origin makes the map capture intermittently black. Force-load a small grid
@@ -365,29 +378,49 @@ seed_showcase_terrain() {
 		echo "review terrain batch ${range}: success=${success}" >&2
 		[ "${success}" = "true" ] || return 0
 	done
-	# Chunks generate asynchronously. Wait for the persisted region files to
-	# grow beyond a small floor and then stop changing (bounded, not a blind
-	# sleep) before asking the renderer to read the world.
-	local region_dir="${DATA}/data/servers/${server_id}/world/region"
-	local stable=0 prev_size=-1 size poll
+	# Four 256-chunk batches cover chunks x=-16..15, z=-16..15, i.e. four
+	# region files r.{-1,0}.{-1,0}.mca with 256 chunks each. Wait for real
+	# headers in those files, not just a stable size: a small spawn region can
+	# otherwise look settled while most of the landscape is still missing.
+	local host_path region_dir coverage_line coverage bytes stable=0 prev_coverage=-1 poll
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
+	region_dir="${host_path}/world/region"
+	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
+	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
 	for ((poll = 0; poll < 40; poll++)); do
-		size=0
-		if [ -d "${region_dir}" ]; then
-			size="$(find "${region_dir}" -maxdepth 1 -name '*.mca' -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')"
-		fi
-		size="${size:-0}"
-		if [ "${size}" -gt 102400 ] && [ "${size}" = "${prev_size}" ]; then
+		# Flush before each sample so the header we read is persisted.
+		rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+		coverage_line="$(REGION_DIR="${region_dir}" python3 - <<'PY'
+import os
+root = os.environ['REGION_DIR']
+covered = size = 0
+for rx in (-1, 0):
+    for rz in (-1, 0):
+        path = os.path.join(root, 'r.%d.%d.mca' % (rx, rz))
+        if not os.path.isfile(path):
+            continue
+        size += os.path.getsize(path)
+        with open(path, 'rb') as handle:
+            header = handle.read(4096)
+        if len(header) < 4096:
+            continue
+        covered += sum(1 for i in range(0, 4096, 4) if header[i + 3] != 0)
+print('%d:%d' % (covered, size))
+PY
+)"
+		coverage_line="${coverage_line:-0:0}"
+		coverage="${coverage_line%%:*}"
+		bytes="${coverage_line##*:}"
+		if [ "${coverage}" -ge 900 ] && [ "${coverage}" = "${prev_coverage}" ]; then
 			stable=$((stable + 1))
 		else
 			stable=0
 		fi
-		prev_size="${size}"
-		[ "${stable}" -ge 3 ] && break
+		prev_coverage="${coverage}"
+		[ "${stable}" -ge 2 ] && break
 		sleep 3
 	done
-	echo "review persisted region bytes: ${prev_size} (stable checks: ${stable})" >&2
-	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
-	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+	echo "review persisted region coverage: ${prev_coverage}/1024 chunks, ${bytes} bytes (stable checks: ${stable})" >&2
 }
 
 # A real BlueMap renderer for the gated World View capture. Managed install is
@@ -405,10 +438,7 @@ seed_showcase_bluemap() {
 		echo "could not resolve seeded server/node facts for BlueMap; skipping renderer" >&2
 		return 0
 	fi
-	case "${data_path}" in
-		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
-		*) host_path="${DATA}/data/servers/${server_id}" ;;
-	esac
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
 	DATA_PATH_FOR_BLUEMAP="${host_path}"
 	echo "review BlueMap world path: ${data_path} -> ${host_path}" >&2
 	if [ ! -d "${host_path}/${level}" ]; then
