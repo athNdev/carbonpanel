@@ -40,9 +40,13 @@ After the upload/download byte-transport lanes were mounted in production, the
 same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
-gate reports `201/201 supported operations verified`. Live counts are
-`supported=201 listed=201 reachable=201 verified=201 excluded=78`.
-Per-family evidence includes `FileService=17/17`, `UploadService=4/4` and `surface=2/2`.
+gate reports `203/203 supported operations verified`. Live counts are
+`supported=203 listed=203 reachable=203 verified=203 excluded=76`.
+Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
+`PackwizService=2/2` and `surface=2/2`. The Packwiz fixture drives real Packwiz
+storage through both typed tools and the production auth interceptor.
+A global `modpacks/read` grant succeeds. A pack-specific grant and a token
+without a grant both receive `permission_denied`.
 The two supported byte transfers are exercised through their mounted MCP tools.
 Prometheus scrapes are classified among the excluded HTTP surfaces. The hold mechanism remains live: adding an unmounted operation
 back to `PendingInventory` re-reds both gates.

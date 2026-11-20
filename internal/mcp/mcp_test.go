@@ -478,6 +478,7 @@ func newFixture(t *testing.T, olderMode string, authEnabled bool) *fixture {
 	registerAuthHandlers(mux, interceptor, authEnabled)
 	registerToolHandlers(mux, interceptor, olderMode)
 	registerCombinedToolHandlers(mux, interceptor, olderMode)
+	registerPackwizReadFixture(t, mux, interceptor, olderMode)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 

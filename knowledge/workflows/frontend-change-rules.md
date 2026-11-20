@@ -30,6 +30,7 @@ sources:
 - Proto generation uses pinned remote plugins rather than frontend-installed Buf
   or protoc generator executables. Keep the frontend protobuf runtime dependency;
   validate its compatibility through the actual generated client checks.
+- Follow [ADR 0042](../../docs/adr/0042-sveltekit3-security-migration.md) for TypeScript peers and formatter checks.
 - A missing metric is unavailable, not zero. Render `—`, `IDLE` or `AWAITING
   SAMPLE`; never substitute a plausible-looking number.
 - Use the approved artwork in [brand assets](../../assets/branding/README.md)

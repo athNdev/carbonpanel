@@ -19,10 +19,10 @@ Carbon Panel includes a read-first Model Context Protocol (MCP) stdio gateway.
 The gateway's OCI package has its own version and release workflow.
 [Distribution decision](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md)
 
-The gateway mounts the generated **212-tool combined catalogue**. The
+The gateway mounts the generated **214-tool combined catalogue**. The
 controller has 251 declared RPCs across 28 proto services and
 241 mounted/reachable RPCs across 27 services. The strict gate verifies the
-201 supported operations. The audit matrix documents 78 excluded operations
+203 supported operations. The audit matrix documents 76 excluded operations
 and their equivalents where available.
 
 Use `get_server` for per-server status and cached CPU, memory, disk, TPS and
@@ -156,6 +156,21 @@ authentication, `tools/list` and `list_servers` against an isolated mock
 controller. See the runbook for the additional evidence required to qualify a
 public digest and a specific controller build.
 [Binary smoke run](https://github.com/athNdev/carbonpanel/actions/runs/44689211233/job/136130719518) · [Distribution smoke runbook](https://github.com/athNdev/carbonpanel/blob/main/docs/runbook-mcp-smoke.md)
+
+## Packwiz Studio inventory
+
+For the Studio authoring library, `packwiz_list_packs` lists pack summaries and
+`packwiz_get_pack` shows metadata and content for an exact pack ID. Both tools
+require the global `modpacks/read` grant on a controller containing the
+generated `PackwizService`. The first `main` build that mounts it is
+`eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3`. The service is absent from `v1.0.40`
+and from the earlier post-stable build listed above.
+
+Each call returns up to 50 entries. Use `next_offset` to request the next page.
+Pack details include mods, datapacks, resource packs and shaders. The response
+omits download URLs, file names, folders and raw pack options. The gateway
+rejects controller responses over 4 MiB. Use Modpack Studio for edits, imports,
+exports and provider update checks.
 
 ## Check the connection
 
