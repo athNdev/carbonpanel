@@ -328,11 +328,11 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	module.Status = storage.ModuleStatusStopped
 	if err := m.store.UpdateModule(ctx, module); err != nil {
 		if ctx.Err() != nil {
-			// Docker already returned the ID. Preserve it even if cancellation
-			// interrupted the initial write, so a retry can reuse the container.
+			// Preserve the created container and its stopped state together
+			// when cancellation interrupted the initial write.
 			stateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			if updateErr := m.store.UpdateModuleContainerID(stateCtx, module.ID, containerID); updateErr != nil {
+			if updateErr := m.store.RecordCreatedModuleContainer(stateCtx, module.ID, containerID); updateErr != nil {
 				m.logger.Error("Failed to record created module %s container: %v", module.ID, updateErr)
 			}
 		}

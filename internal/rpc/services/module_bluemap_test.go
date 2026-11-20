@@ -674,9 +674,28 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			}
 			waitFor(creating, "container create")
 			assertHeld("container create")
+			start := func() error {
+				_, err := client.StartModule(ctx, connect.NewRequest(&v1.StartModuleRequest{Id: moduleID}))
+				return err
+			}
+			if err := start(); connect.CodeOf(err) != connect.CodeAborted || creates.Load() != 1 {
+				t.Fatalf("manual Start raced container creation: %v; creates=%d", err, creates.Load())
+			}
 			unblockCreate()
 			waitFor(starting, "container start")
 			assertHeld("container start")
+			if err := start(); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Start raced background startup: %v", err)
+			}
+			if _, err := client.RestartModule(ctx, connect.NewRequest(&v1.RestartModuleRequest{Id: moduleID})); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Restart raced background startup: %v", err)
+			}
+			if _, err := client.RecreateModule(ctx, connect.NewRequest(&v1.RecreateModuleRequest{Id: moduleID})); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Recreate raced background startup: %v", err)
+			}
+			if starts.Load() != 1 {
+				t.Fatalf("unexpected daemon starts during managed startup: %d", starts.Load())
+			}
 			retry, err := install()
 			if err != nil || retry.Msg.GetModule().GetId() != moduleID {
 				t.Fatalf("same-assignment install did not adopt the committed renderer: %v %v", retry, err)
@@ -719,6 +738,13 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			}
 			if inspects.Load() != starts.Load() || len(proxyManager.GetModuleRoutes()) != 0 {
 				t.Fatalf("private renderer reached host route setup: %d inspects for %d starts", inspects.Load(), starts.Load())
+			}
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"node_id": "different-node"}); err != nil {
+				t.Fatal(err)
+			}
+			before := starts.Load()
+			if err := start(); connect.CodeOf(err) != connect.CodeFailedPrecondition || starts.Load() != before {
+				t.Fatalf("manual Start reached the previous assignment: %v", err)
 			}
 		})
 	}

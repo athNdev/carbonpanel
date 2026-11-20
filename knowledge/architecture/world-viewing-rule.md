@@ -32,5 +32,7 @@ Managed BlueMap install and private discovery share one node eligibility
 check. It accepts legacy controller aliases and enabled registered nodes
 marked local in persisted state. Discovery uses the controller Docker client,
 checks the server's current node assignment and opens only its confined storage.
-Managed startup holds the server transition through a bounded Docker operation;
-on timeout it records an error while keeping any known container ID for retry.
+Managed startup holds the server transition through its bounded Docker call
+and terminal state write. Manual Start, Restart and Recreate share that lease
+and recheck the node assignment. A canceled post-create write records the
+known container ID with its stopped state so a later Start can reuse it.

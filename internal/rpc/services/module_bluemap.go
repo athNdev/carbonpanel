@@ -295,6 +295,54 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	return false, nil, fin, nil
 }
 
+func isManagedBlueMapModule(module *storage.Module) bool {
+	return module.TemplateID == blueMapTemplateID && module.ServerID != "" &&
+		strings.EqualFold(strings.TrimSpace(module.Metadata[blueMapManagedSignalKey]), "true")
+}
+
+// beginManagedBlueMapStart serializes manual starts with the managed install
+// worker, including its terminal status write, and with server transitions.
+func (s *ModuleService) beginManagedBlueMapStart(ctx context.Context, module *storage.Module) (*storage.Module, *docker.Transition, error) {
+	if !isManagedBlueMapModule(module) {
+		return module, nil, nil
+	}
+	transition, err := docker.TryBeginServerTransition(module.ServerID)
+	if err != nil {
+		return nil, nil, connect.NewError(connect.CodeAborted, err)
+	}
+	fail := func(code connect.Code, err error) (*storage.Module, *docker.Transition, error) {
+		transition.Release()
+		return nil, nil, connect.NewError(code, err)
+	}
+	if err := s.store.AssertNoServerOperation(ctx, module.ServerID); err != nil {
+		return fail(connect.CodeAborted, err)
+	}
+	current, err := s.store.GetModule(ctx, module.ID)
+	if err != nil {
+		return fail(connect.CodeNotFound, errors.New("module not found"))
+	}
+	if current.ServerID != module.ServerID || !isManagedBlueMapModule(current) {
+		return fail(connect.CodeAborted, errors.New("managed renderer assignment changed; retry the request"))
+	}
+	server, err := s.store.GetServer(ctx, current.ServerID)
+	if err != nil {
+		return fail(connect.CodeNotFound, errors.New("renderer server not found"))
+	}
+	if !bluemapdiscovery.SameRendererNode(current.NodeID, server.NodeID) {
+		return fail(connect.CodeFailedPrecondition, errors.New("the managed renderer belongs to a previous node assignment"))
+	}
+	return current, transition, nil
+}
+
+func (s *ModuleService) guardManagedBlueMapStart(ctx context.Context, moduleID string) (*docker.Transition, error) {
+	module, err := s.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get module: %w", err))
+	}
+	_, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	return transition, err
+}
+
 func (s *ModuleService) startManagedBlueMap(moduleID string, startImmediately bool) {
 	timeout := s.blueMapStartupTimeout
 	if timeout == 0 {

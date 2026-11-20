@@ -1099,6 +1099,12 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
+
 	// If no container exists, create one first
 	if module.ContainerID == "" {
 		if err := s.moduleManager.CreateAndStartModule(ctx, msg.Id, true); err != nil {
@@ -1136,6 +1142,11 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
 	}
@@ -1151,6 +1162,11 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RecreateModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate module: %w", err))
 	}
