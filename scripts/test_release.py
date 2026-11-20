@@ -3117,6 +3117,90 @@ class LocalOciWorkflowSeamTests(unittest.TestCase):
         self.assertIn("verify-immutable", source)
 
 
+class StableReleasePublicationTests(unittest.TestCase):
+    """Fail-closed Stable publication: real observations and rendered identity."""
+
+    COMMIT = "b" * 40
+    DIGEST = "sha256:" + "d" * 64
+    VERSION = "1.0.41"
+
+    def alias(self, state, digest="", revision=""):
+        return (state, {"digest": digest, "revision": revision})
+
+    def test_first_publication_requires_verified_latest_pair(self):
+        latest = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
+                  "ghcr": self.alias("present", self.DIGEST, self.COMMIT)}
+        absent = {"docker_hub": self.alias("absent"), "ghcr": self.alias("absent")}
+        result = release.stable_alias_decision(absent, latest)
+        self.assertEqual(result["action"], "first-publish")
+        self.assertTrue(result["first_publication"])
+        mixed = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
+                 "ghcr": self.alias("absent")}
+        self.assertEqual(release.stable_alias_decision(mixed, latest)["action"], "refuse")
+        self.assertEqual(release.stable_alias_decision(absent, mixed)["action"], "refuse")
+        active = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
+                  "ghcr": self.alias("present", self.DIGEST, self.COMMIT)}
+        self.assertEqual(release.stable_alias_decision(active, latest)["action"], "promote")
+
+    def site(self):
+        root = Path(tempfile.mkdtemp())
+        contract = ChannelPromotionTests().contract(commit=self.COMMIT, digest=self.DIGEST)
+        contract["channels"]["stable"]["commit"] = self.COMMIT
+        contract["channels"]["stable"]["image"]["digest"] = self.DIGEST
+        index = json.dumps(contract)
+        (root / "version-index.json").write_text(index, encoding="utf-8")
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs/version-index.json").write_text(index, encoding="utf-8")
+        pin = f"https://github.com/athNdev/carbonpanel/commit/{self.COMMIT}"
+        for page in ("docs/index.html", "docs/getting-started/proxmox/index.html",
+                     "docs/faq/index.html"):
+            Path(root / page).parent.mkdir(parents=True, exist_ok=True)
+            Path(root / page).write_text(f"<html><a href=\"{pin}\">pin</a></html>",
+                                         encoding="utf-8")
+        (root / "docs/versions").mkdir(exist_ok=True)
+        (root / "docs/versions/index.html").write_text(
+            f"<html>{self.VERSION}</html>", encoding="utf-8")
+        (root / "docs/source.json").write_text(
+            json.dumps({"revision": self.COMMIT}), encoding="utf-8")
+        return root
+
+    def test_release_workflow_uses_real_prior_bytes_and_qualifies_before_deploy(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        job = source.split("  stable-channel-transaction:\n", 1)[1].split("\n  publish:\n", 1)[0]
+        self.assertNotIn("cp -a .website-build/site", job)
+        self.assertIn("pages-baseline", job)
+        self.assertIn("fetch-prior-pages", job)
+        self.assertIn("stable-alias-decision", job)
+        self.assertIn("verify-stable-release-site", job)
+        self.assertLess(job.index("verify-stable-release-site"), job.index("id: deploy"))
+        self.assertLess(job.index("id: deploy"),
+                        job.index("channel-transaction --phase commit"))
+
+    def test_rendered_stable_identity_and_both_index_routes_qualify(self):
+        root = self.site()
+        ok, problems = release.verify_stable_release_site(
+            root, self.COMMIT, self.DIGEST, self.VERSION,
+            "https://github.com/athNdev/carbonpanel")
+        self.assertTrue(ok, problems)
+        # An old pinned link under a new Stable identity fails closed.
+        page = root / "docs/getting-started/proxmox/index.html"
+        page.write_text("<html>old guide</html>", encoding="utf-8")
+        ok, problems = release.verify_stable_release_site(
+            root, self.COMMIT, self.DIGEST, self.VERSION,
+            "https://github.com/athNdev/carbonpanel")
+        self.assertFalse(ok)
+        self.assertTrue(any("pinned link" in item for item in problems))
+        # A drifted docs copy of the index fails closed too.
+        page.write_text(f"<html><a href=\"https://github.com/athNdev/carbonpanel/commit/"
+                        f"{self.COMMIT}\">pin</a></html>", encoding="utf-8")
+        (root / "docs/version-index.json").write_text("{}", encoding="utf-8")
+        ok, problems = release.verify_stable_release_site(
+            root, self.COMMIT, self.DIGEST, self.VERSION,
+            "https://github.com/athNdev/carbonpanel")
+        self.assertFalse(ok)
+        self.assertTrue(any("routes disagree" in item for item in problems))
+
+
 class LocalOciCandidateTests(unittest.TestCase):
     """No-write exact candidate: local OCI bytes bound to the tested commit."""
 

@@ -3023,6 +3023,106 @@ def verify_gate_script(path):
     return (not missing), missing
 
 
+def stable_alias_decision(stable, latest):
+    """Fail-closed alias decision from ACTUAL observations, including first publish."""
+    def pair(state, name):
+        value = (state or {}).get(name) or ("absent", {})
+        return value if isinstance(value, (list, tuple)) and len(value) >= 2 else ("unknown", {})
+
+    def present(value):
+        return value[0] == "present"
+
+    states = {name: pair(stable, name) for name in CHANNEL_REGISTRIES}
+    active = [name for name in CHANNEL_REGISTRIES if present(states[name])]
+    if any(not present(value) and value[0] == "unknown" for value in states.values()):
+        return {"action": "refuse", "reason": "stable alias state is unknown"}
+    if active and len(active) != len(CHANNEL_REGISTRIES):
+        return {"action": "refuse", "reason": "stable alias is mixed across registries"}
+    if active:
+        digests = {(states[name][1] or {}).get("digest") for name in active}
+        if len(digests) != 1 or not valid_digest(next(iter(digests))):
+            return {"action": "refuse", "reason": "stable aliases disagree or are unverified"}
+        return {"action": "promote", "reason": "stable alias active in both registries",
+                "digest": next(iter(digests)), "first_publication": False}
+    baseline = {name: pair(latest, name) for name in CHANNEL_REGISTRIES}
+    for name in CHANNEL_REGISTRIES:
+        if not present(baseline[name]):
+            return {"action": "refuse",
+                    "reason": f"latest is {baseline[name][0]} on {name}; no verified first-publish baseline"}
+    digests = {(baseline[name][1] or {}).get("digest") for name in CHANNEL_REGISTRIES}
+    revisions = {(baseline[name][1] or {}).get("revision") for name in CHANNEL_REGISTRIES}
+    if (len(digests) != 1 or len(revisions) != 1
+            or not valid_digest(next(iter(digests))) or not valid_commit(next(iter(revisions)))):
+        return {"action": "refuse",
+                "reason": "latest baseline is not one verified digest/revision in both registries"}
+    return {"action": "first-publish",
+            "reason": "stable alias absent in both; bounded first publication from verified latest",
+            "digest": next(iter(digests)), "revision": next(iter(revisions)),
+            "first_publication": True}
+
+
+def verify_stable_release_site(site, commit, digest, version, repository):
+    """Qualify RENDERED Stable docs, both published indexes and pinned links."""
+    root = Path(site)
+    problems = []
+    paths = ("version-index.json", "docs/version-index.json")
+    if any(not (root / path).is_file() for path in paths):
+        return False, [f"missing published index: {path}" for path in paths
+                       if not (root / path).is_file()]
+    if (root / paths[0]).read_bytes() != (root / paths[1]).read_bytes():
+        problems.append("published index routes disagree")
+    document = json.loads((root / paths[0]).read_text(encoding="utf-8"))
+    stable = (document.get("channels") or {}).get("stable") or {}
+    if stable.get("commit") != commit:
+        problems.append("stable index commit does not match the release revision")
+    if (stable.get("image") or {}).get("digest") != digest:
+        problems.append("stable index digest does not match the verified image")
+    route = (stable.get("route") or "/docs/").strip("/")
+    pin = f"{repository.rstrip('/')}/commit/{commit}"
+    for page in ("index.html", "getting-started/proxmox/index.html", "faq/index.html"):
+        target = root / route / page
+        if not target.is_file():
+            problems.append(f"stable canonical page missing: {page}")
+            continue
+        if pin not in target.read_text(encoding="utf-8", errors="replace"):
+            problems.append(f"stable page {page} lacks the exact full-SHA pinned link")
+    source = root / route / "source.json"
+    if not source.is_file():
+        problems.append("stable source.json missing")
+    elif json.loads(source.read_text(encoding="utf-8")).get("revision") != commit:
+        problems.append("stable source.json revision does not match the release")
+    versions = root / route / "versions" / "index.html"
+    if not versions.is_file():
+        problems.append("stable versions page missing")
+    elif version not in versions.read_text(encoding="utf-8", errors="replace"):
+        problems.append("stable versions page lacks the release version stamp")
+    return (not problems), problems
+
+
+def stable_alias_decision_cli(args):
+    decision = stable_alias_decision(
+        json_argument(args.stable, default={}) or {},
+        json_argument(args.latest, default={}) or {})
+    values = {key: str(value).lower() if isinstance(value, bool) else value
+              for key, value in decision.items()}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if decision["action"] == "refuse":
+        raise ValueError("Stable publication refused: " + decision["reason"])
+    return decision
+
+
+def verify_stable_release_site_cli(args):
+    ok, problems = verify_stable_release_site(
+        args.site, args.commit, args.digest, args.version, args.repository)
+    values = {"verified": str(ok).lower(), "problems": problems}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Stable release site verification failed: " + "; ".join(problems))
+    return ok
+
+
 def verify_gate_script_cli(args):
     ok, missing = verify_gate_script(args.path)
     values = {"verified": str(ok).lower(), "missing": json.dumps(missing)}
@@ -3570,6 +3670,15 @@ def build_parser():
     oci_candidate = commands.add_parser("local-oci-candidate")
     oci_candidate.add_argument("--archive", required=True)
     oci_candidate.add_argument("--commit", required=True)
+    alias_decision = commands.add_parser("stable-alias-decision")
+    alias_decision.add_argument("--stable", default="{}")
+    alias_decision.add_argument("--latest", default="{}")
+    stable_site = commands.add_parser("verify-stable-release-site")
+    stable_site.add_argument("--site", required=True)
+    stable_site.add_argument("--commit", required=True)
+    stable_site.add_argument("--digest", required=True)
+    stable_site.add_argument("--version", required=True)
+    stable_site.add_argument("--repository", required=True)
     parity = commands.add_parser("verify-channel-parity")
     parity.add_argument("--observations", default="{}")
     parity.add_argument("--digest", required=True)
@@ -3602,7 +3711,9 @@ def main():
                 "fetch-prior-pages": fetch_prior_pages_cli,
                 "verify-channel-docs": verify_channel_docs_cli,
                 "verify-staged-page-site": verify_staged_page_site_cli,
-                "local-oci-candidate": local_oci_candidate_cli}
+                "local-oci-candidate": local_oci_candidate_cli,
+                "stable-alias-decision": stable_alias_decision_cli,
+                "verify-stable-release-site": verify_stable_release_site_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

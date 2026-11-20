@@ -479,6 +479,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      deployments: read
       pages: write
       id-token: write
     environment:
@@ -535,10 +536,17 @@ jobs:
           test "$GHCR" = "$IMAGE_DIGEST"
           printf 'observed=%s\n' "$(jq -nc --arg h "$HUB" --arg g "$GHCR" \
             '{docker_hub:$h,ghcr:$g}')" >> "$GITHUB_OUTPUT"
+      - name: Decide first publication or promotion from ACTUAL alias observations
+        id: stable_aliases
+        run: |
+          STABLE=$(python3 scripts/release.py channel-observe --reference stable | jq -c .observations)
+          LATEST=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          python3 scripts/release.py stable-alias-decision \
+            --stable "$STABLE" --latest "$LATEST"
       - name: Capture the verified prior receipt and exact prior docs bytes
         id: prior
         env:
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
@@ -550,10 +558,19 @@ jobs:
             --channel stable --aliases "$ALIASES" \
             --docs-commit "$PRIOR_COMMIT" --docs-digest "$PRIOR_DIGEST" 2>/dev/null || echo '{"receipt":{}}')
           printf 'prior_receipt=%s\n' "$(printf '%s' "$RECEIPT" | jq -c .receipt)" >> "$GITHUB_OUTPUT"
-          rm -rf .website-build/prior-site
-          cp -a .website-build/site .website-build/prior-site
-          PRIOR_HASH=$(sha256sum .website-build/prior-site/version-index.json | cut -d' ' -f1)
-          echo "hash=sha256:$PRIOR_HASH" >> "$GITHUB_OUTPUT"
+          # Rollback bytes come from the ACTUAL live deployment, resolved by
+          # the shared docs gate - never from this freshly rebuilt site.
+          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
+            --repository "$GITHUB_REPOSITORY")
+          test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
+          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
+            --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
+            --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
+            --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
+          test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
+          echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
+          echo "prior_artifact=$(printf '%s' "$BASE" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
       - name: Keep the exact prior docs bytes for alias-write compensation
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
@@ -569,6 +586,16 @@ jobs:
             --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST" --canonical
           python3 scripts/release.py validate-channel-contract \
             --path .website-build/site/version-index.json
+      - name: Qualify rendered Stable HTML, version stamp, pins and both index routes
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py verify-stable-release-site \
+            --site .website-build/site --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST" --version "$RELEASE_VERSION" \
+            --repository "$GITHUB_REPOSITORY"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
