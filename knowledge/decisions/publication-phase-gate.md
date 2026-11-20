@@ -41,7 +41,13 @@ sources:
   recognized channel (`stable`/`prerelease`); a blank/false decision or unknown
   job result can never be reported as a green rehearsal. Stable transaction
   outcomes are allowlisted to `publish`/`noop`; `reconcile`, `rollback`,
-  `refuse`, `stage` and empty are not positive publication results.
+  `refuse`, `stage` and empty are not positive publication results. The same
+  allowlist is applied by the `action_gate` step inside the Stable transaction
+  (before any alias or GitHub write) and by every alias/publish guard; a job can
+  only export a validated `publish`/`noop` action. Any other outcome fails that
+  gate and triggers restoration of the exact prior docs bytes, so a qualified
+  `reconcile` can never slip through a negative-list guard and be refused only
+  after public writes.
 - No registry, Pages, tag or release write is added or bypassed by this fix; it
   only makes a silent no-op publication impossible to report as success.
 

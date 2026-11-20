@@ -670,7 +670,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     outputs:
-      action: ${{ steps.transaction.outputs.action }}
+      # Only the positively validated action may reach any write guard. A
+      # transaction outcome outside the allowlist leaves this empty, so every
+      # downstream phase refuses before mutating aliases or the GitHub release.
+      action: ${{ steps.action_gate.outputs.action }}
       receipt: ${{ steps.transaction.outputs.receipt }}
       prior_receipt: ${{ steps.prior.outputs.prior_receipt }}
       prior_hash: ${{ steps.prior.outputs.hash }}
@@ -965,6 +968,20 @@ jobs:
           LIVE=$(jq -c '{registries:.registries,docs_commit,docs_digest}' <<< "$PRIOR")
           python3 scripts/release.py channel-transaction --phase commit \
             --candidate "$CANDIDATE" --previous "$PRIOR" --live "$LIVE" --event release
+      # One positive action contract at the side-effect boundary. The engine can
+      # also return 'reconcile', 'rollback', 'refuse' or empty; only an exact
+      # publish/noop may proceed. Anything else fails here, BEFORE aliases or
+      # the GitHub release move, and drives the prior-docs restoration below.
+      - name: Allow only positive transaction outcomes before any write
+        id: action_gate
+        if: always() && steps.transaction.outcome == 'success'
+        env:
+          ACTION: ${{ steps.transaction.outputs.action }}
+        run: |
+          case "$ACTION" in
+            publish|noop) echo "action=$ACTION" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unsupported stable transaction action: $ACTION"; exit 1 ;;
+          esac
 
       # If the new stable marker was deployed but qualification/decision did not
       # authorize alias promotion, restore the exact prior docs bytes so the
@@ -974,8 +991,10 @@ jobs:
         if: >-
           always() && (steps.deploy_probe.outcome == 'success' || steps.deploy.outcome == 'success') &&
           (steps.marker.outcome != 'success' || steps.transaction.outcome != 'success' ||
+           steps.action_gate.outcome != 'success' ||
            steps.transaction.outputs.action == 'refuse' ||
            steps.transaction.outputs.action == 'rollback' ||
+           steps.transaction.outputs.action == 'reconcile' ||
            steps.transaction.outputs.action == '')
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         with:
@@ -1019,9 +1038,8 @@ jobs:
       needs.promote-aliases.result == 'success' &&
       (needs.plan.outputs.channel != 'stable' ||
        (needs.stable-channel-transaction.result == 'success' &&
-        needs.stable-channel-transaction.outputs.action != '' &&
-        needs.stable-channel-transaction.outputs.action != 'refuse' &&
-        needs.stable-channel-transaction.outputs.action != 'rollback' &&
+        (needs.stable-channel-transaction.outputs.action == 'publish' ||
+         needs.stable-channel-transaction.outputs.action == 'noop') &&
         needs.promote-aliases.outputs.aliases_verified == 'true'))
     runs-on: ubuntu-24.04
     # GitHub latest is selected here under product-only verified stable ordering,
@@ -1128,9 +1146,8 @@ jobs:
       needs.prepare-draft.outputs.release_id != '' &&
       (needs.plan.outputs.channel != 'stable' ||
        (needs.stable-channel-transaction.result == 'success' &&
-        needs.stable-channel-transaction.outputs.action != '' &&
-        needs.stable-channel-transaction.outputs.action != 'refuse' &&
-        needs.stable-channel-transaction.outputs.action != 'rollback'))
+        (needs.stable-channel-transaction.outputs.action == 'publish' ||
+         needs.stable-channel-transaction.outputs.action == 'noop')))
     runs-on: ubuntu-24.04
     # Alias decisions are recomputed with LIVE preflight inside the ONE shared
     # pages-deploy lock inherited from the workflow level: the same lock held
@@ -1188,9 +1205,8 @@ jobs:
         id: stable_aliases
         if: >-
           needs.plan.outputs.channel == 'stable' &&
-          needs.stable-channel-transaction.outputs.action != '' &&
-          needs.stable-channel-transaction.outputs.action != 'refuse' &&
-          needs.stable-channel-transaction.outputs.action != 'rollback'
+          (needs.stable-channel-transaction.outputs.action == 'publish' ||
+           needs.stable-channel-transaction.outputs.action == 'noop')
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}

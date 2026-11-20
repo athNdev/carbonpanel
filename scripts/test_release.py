@@ -726,7 +726,8 @@ class ReleaseTests(unittest.TestCase):
             release_src.count("needs.plan.outputs.publish == 'true'"), 3)
         # Stable release creation and alias moves are gated on the synced
         # transaction; a prerelease keeps its product-only flow.
-        self.assertIn("needs.stable-channel-transaction.outputs.action != 'rollback'", release_src)
+        self.assertIn("needs.stable-channel-transaction.outputs.action == 'publish'", release_src)
+        self.assertIn("needs.stable-channel-transaction.outputs.action == 'noop'", release_src)
         self.assertIn("needs.publish-immutable.outputs.verified == 'true'", release_src)
         self.assertNotIn("if: github.event_name == 'push'", release_src)
         modules_src = (release.ROOT / ".github/workflows/modules.yml").read_text(encoding="utf-8")
@@ -2494,8 +2495,8 @@ class ChannelPromotionTests(unittest.TestCase):
             job_block = doc["jobs"][job_name]
             self.assertIn("stable-channel-transaction", job_block["needs"])
             condition = str(job_block.get("if", ""))
-            self.assertIn("stable-channel-transaction.outputs.action != 'refuse'", condition)
-            self.assertIn("stable-channel-transaction.outputs.action != 'rollback'", condition)
+            self.assertIn("stable-channel-transaction.outputs.action == 'publish'", condition)
+            self.assertIn("stable-channel-transaction.outputs.action == 'noop'", condition)
 
     def test_no_legacy_alias_write_path_remains_outside_the_qualified_transaction(self):
         import yaml
@@ -3762,6 +3763,38 @@ class PublicationDagPathTests(unittest.TestCase):
         with patch("sys.argv", argv), redirect_stdout(out):
             with self.assertRaisesRegex(ValueError, "affirmative plan decision"):
                 release.main()
+
+    def test_single_positive_transaction_contract_across_all_write_guards(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        jobs = yaml.safe_load(source)["jobs"]
+        transaction = jobs["stable-channel-transaction"]
+        self.assertEqual(transaction["outputs"]["action"],
+                         "${{ steps.action_gate.outputs.action }}")
+        steps = transaction["steps"]
+        gate = next(s for s in steps if s.get("id") == "action_gate")
+        gate_run = str(gate["run"])
+        self.assertIn("publish|noop", gate_run)
+        for outcome in ("reconcile", "rollback", "refuse", ""):
+            self.assertIn("::error::unsupported stable transaction action", gate_run)
+        compensate = next(s for s in steps if s.get("id") == "docs_compensate")
+        compensation = " ".join(str(compensate["if"]).split())
+        self.assertIn("steps.action_gate.outcome != 'success'", compensation)
+        self.assertIn("steps.transaction.outputs.action == 'reconcile'", compensation)
+        for job in ("promote-aliases", "publish"):
+            condition = " ".join(str(jobs[job]["if"]).split())
+            self.assertIn("action == 'publish'", condition, job)
+            self.assertIn("action == 'noop'", condition, job)
+            self.assertNotIn("action != 'refuse'", condition, job)
+            self.assertNotIn("action != 'rollback'", condition, job)
+
+    def test_reconcile_is_refused_before_writes_not_only_at_terminal(self):
+        # DAG outcome case: the engine's qualified 'reconcile' must be stopped by
+        # the pre-write action gate, and the terminal rejects it even if reached.
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"out_stable-channel-transaction_action": "reconcile"}))
+        self.assertFalse(ok)
+        self.assertIn("allowlist", reason)
 
     def test_terminal_gate_receives_raw_event_and_request_from_workflow(self):
         import yaml
