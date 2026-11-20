@@ -430,7 +430,9 @@ one at https://mozilla.org/MPL/2.0/.
 						</CarbonAccordionItem>
 
 						<CarbonAccordionItem title="Environment Variables" bind:open={envVarsOpen}>
-							<div class="space-y-1.5 font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
+							<div
+								class="space-y-1.5 font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground"
+							>
 								<p>
 									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code>
 								</p>
