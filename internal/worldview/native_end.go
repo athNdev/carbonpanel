@@ -43,8 +43,10 @@ func qualifiesNativeEnd(facts map[string]any) bool {
 		return false
 	}
 	generator, _ := dimension["generator"].(map[string]any)
+	biomeType, _ := worldlib.FactNested(generator, "biome_source", "type")
 	return dimension["type"] == "minecraft:the_end" &&
-		generator["type"] == "minecraft:noise" && generator["settings"] == "minecraft:end"
+		generator["type"] == "minecraft:noise" && generator["settings"] == "minecraft:end" &&
+		biomeType == "minecraft:the_end"
 }
 
 // endSource pins the saved dimension under the active local level. Its read

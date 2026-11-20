@@ -20,9 +20,9 @@ node endpoint generation, active revision and the last restore journal ID in the
 key's private scope. Recheck server authorization and the bounded level format
 before serving assets. Refuse assets while lifecycle operations hold the world.
 
-The End assets use a closed Java 1.21.9 Vanilla save profile. Pin ordinary
-local directories to the active level and its DIM1/region tree, then recheck
-the source identity, active world and renderer precedence before publication.
+End assets require the built-in Java 1.21.9 Vanilla generator and biome source.
+Pin ordinary local directories to the active level and its DIM1/region tree.
+Recheck the source identity, active world and renderer before publication.
 The optional manifest dimensions describe only qualified saved sources.
 The viewport offers only those dimensions and opens the Overworld by default.
 The active native dimension also scopes panel-owned marker reads and copied

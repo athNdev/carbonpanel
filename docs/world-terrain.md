@@ -13,8 +13,9 @@ through 1.21.9 (DataVersion 2860–4554). It uses the saved
 from the owning world's `region/` directory. It does not follow external
 `.mcc` chunk payloads. Gzip, zlib, and uncompressed records are supported.
 The End uses a separate profile for controller-local Vanilla Java 1.21.9 saves
-(DataVersion 4554) with the built-in generator, the vanilla datapack, and a
-saved `DIM1/region/` directory. The map keeps the Overworld as the default.
+(DataVersion 4554) with the built-in generator and End biome source, the
+vanilla datapack, and a saved `DIM1/region/` directory. The map keeps the
+Overworld as the default.
 For a qualified save, choose **The End** under **Map dimension**. The End
 uses the same elevation shading and starts at X 0, Z 0. If End storage is
 unavailable, the map can still show the Overworld from the current save.

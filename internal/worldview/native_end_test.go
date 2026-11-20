@@ -22,17 +22,24 @@ func TestNativeEndSaveQualification(t *testing.T) {
 		packs     []any
 		dimension string
 		settings  string
+		biome     string
 		want      bool
 	}{
-		{"qualified Vanilla", 4554, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", true},
-		{"older save", 4553, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", false},
-		{"newer save", 4555, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", false},
-		{"custom pack", 4554, []any{"vanilla", "file/custom"}, "minecraft:the_end", "minecraft:end", false},
-		{"custom dimension", 4554, []any{"vanilla"}, "fixture:custom", "minecraft:end", false},
-		{"custom generator", 4554, []any{"vanilla"}, "minecraft:the_end", "fixture:custom", false},
-		{"unknown packs", 4554, nil, "minecraft:the_end", "minecraft:end", false},
+		{"qualified Vanilla", 4554, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", "minecraft:the_end", true},
+		{"older save", 4553, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", "minecraft:the_end", false},
+		{"newer save", 4555, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", "minecraft:the_end", false},
+		{"custom pack", 4554, []any{"vanilla", "file/custom"}, "minecraft:the_end", "minecraft:end", "minecraft:the_end", false},
+		{"custom dimension", 4554, []any{"vanilla"}, "fixture:custom", "minecraft:end", "minecraft:the_end", false},
+		{"custom generator", 4554, []any{"vanilla"}, "minecraft:the_end", "fixture:custom", "minecraft:the_end", false},
+		{"unknown packs", 4554, nil, "minecraft:the_end", "minecraft:end", "minecraft:the_end", false},
+		{"fixed biome", 4554, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", "minecraft:fixed", false},
+		{"missing biome source", 4554, []any{"vanilla"}, "minecraft:the_end", "minecraft:end", "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			generator := map[string]any{"type": "minecraft:noise", "settings": test.settings}
+			if test.biome != "" {
+				generator["biome_source"] = map[string]any{"type": test.biome}
+			}
 			facts := map[string]any{
 				"DataVersion": test.version,
 				"DataPacks":   map[string]any{"Enabled": test.packs},
@@ -40,7 +47,7 @@ func TestNativeEndSaveQualification(t *testing.T) {
 					"dimensions": map[string]any{
 						"minecraft:the_end": map[string]any{
 							"type":      test.dimension,
-							"generator": map[string]any{"type": "minecraft:noise", "settings": test.settings},
+							"generator": generator,
 						},
 					},
 				},
@@ -133,7 +140,9 @@ func nativeEndLevelNBT() []byte {
 	tag(10, "generator")
 	stringTag("type", "minecraft:noise")
 	stringTag("settings", "minecraft:end")
-	b.Write(make([]byte, 6))
+	tag(10, "biome_source")
+	stringTag("type", "minecraft:the_end")
+	b.Write(make([]byte, 7))
 	return b.Bytes()
 }
 
