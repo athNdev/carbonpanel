@@ -199,8 +199,8 @@ func TestLookupAuthoritativeNotFoundWithLocalObservationIsEphemeral(t *testing.T
 	if err != nil || res.Msg.Status != v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND {
 		t.Fatalf("local fallback: res=%+v err=%v", res, err)
 	}
-	if res.Msg.Observation.Source != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB {
-		t.Fatalf("local fallback provenance = %v", res.Msg.Observation.Source)
+	if res.Msg.Observation.Source != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB || res.Msg.Observation.GetObservedAt() != nil {
+		t.Fatalf("local fallback provenance or timestamp = %v", res.Msg.Observation)
 	}
 	if got := countIdentities(t, store); got != before {
 		t.Fatalf("local fallback persisted an identity: %d -> %d", before, got)
@@ -478,10 +478,10 @@ func TestLookupProfileOptInStaysReadOnly(t *testing.T) {
 			t.Fatalf("incorrect asset or observation: %v", res.Msg)
 		}
 		if tc.includeSkin {
-			if res.Msg.ObservedIdentityKey != known.ID || !res.Msg.LastSeen.AsTime().Equal(seenAt) {
+			if res.Msg.ObservedIdentityKey != known.ID {
 				t.Fatalf("profile did not match exact online UUID and observation: %v", res.Msg)
 			}
-		} else if calls != 0 || res.Msg.ObservedIdentityKey != "" || res.Msg.LastSeen != nil {
+		} else if calls != 0 || res.Msg.ObservedIdentityKey != "" {
 			t.Fatal("lookup without opt-in enriched the identity")
 		}
 	}
@@ -506,7 +506,8 @@ func TestLookupProfileDoesNotFetchSkinForLocalOnlyIdentity(t *testing.T) {
 	})
 	res, err := svc.LookupPlayer(context.Background(), connect.NewRequest(&v1.LookupPlayerRequest{Query: "Observed", IncludeSkin: true}))
 	if err != nil || res.Msg.ObservedIdentityKey != known.ID || res.Msg.Skin != nil ||
-		res.Msg.Observation.GetSource() != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB {
+		res.Msg.Observation.GetSource() != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB ||
+		res.Msg.Observation.GetObservedAt() != nil {
 		t.Fatalf("local profile=%v error=%v", res, err)
 	}
 }

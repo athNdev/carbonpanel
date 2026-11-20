@@ -84,7 +84,8 @@ func renderPortrait(src image.Image, slim bool) ([]byte, error) {
 }
 
 func legacyHatUsesAlpha(src image.Image, origin image.Point) bool {
-	for y := range 32 {
+	// Only the head overlay occupies these rows in the legacy atlas.
+	for y := range 16 {
 		for x := 32; x < 64; x++ {
 			_, _, _, alpha := src.At(origin.X+x, origin.Y+y).RGBA()
 			if alpha < 0x8000 {

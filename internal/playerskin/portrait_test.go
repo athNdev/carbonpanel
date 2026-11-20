@@ -101,6 +101,8 @@ func TestLegacyOpaqueAtlasDoesNotObscureFace(t *testing.T) {
 	draw.Draw(atlas, atlas.Bounds(), image.NewUniform(color.Black), image.Point{}, draw.Src)
 	face := color.NRGBA{R: 238, G: 180, B: 159, A: 255}
 	atlas.SetNRGBA(8, 8, face)
+	// Transparency below the hat belongs to a different part of the atlas.
+	atlas.SetNRGBA(63, 31, color.NRGBA{})
 	portrait, err := renderPortrait(atlas, false)
 	if err != nil {
 		t.Fatal(err)

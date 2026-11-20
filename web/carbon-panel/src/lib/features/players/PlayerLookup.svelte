@@ -35,7 +35,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let response = $state<LookupPlayerResponse | null>(null);
 	let error = $state<string | null>(null);
 	let copyStatus = $state('');
-	let lastSession = $state<{ serverName: string; joinedAt: Timestamp } | null>(null);
+	let lastSession = $state<{ serverName?: string; joinedAt: Timestamp } | null>(null);
 	let imageFailed = $state(false);
 	let request: AbortController | null = null;
 	let generation = 0;
@@ -61,7 +61,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const identityKey = response?.observedIdentityKey;
 		void authState;
 		lastSession = null;
-		if (!canLookup || !identityKey || !serverOptions.length) return;
+		if (!canLookup || !identityKey) return;
 		const controller = new AbortController();
 		void loadLastSession(identityKey, serverOptions, controller.signal);
 		return () => controller.abort();
@@ -120,12 +120,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		servers: { id: string; name: string }[],
 		signal: AbortSignal
 	) {
+		const permitted = new Set(
+			servers
+				.filter(({ id }) => authStore.hasPermission('players', 'presence', id))
+				.map(({ id }) => id)
+		);
+		for (const { resource, action, objectId } of authState.permissions) {
+			if (
+				(resource === 'players' || resource === '*') &&
+				(action === 'presence' || action === '*') &&
+				objectId &&
+				objectId !== '*'
+			) {
+				permitted.add(objectId);
+			}
+		}
+		if (permitted.size === 0) return;
+
 		const globalPresence = authStore.hasPermission('players', 'presence', '*');
-		const scopes = globalPresence
-			? ['']
-			: servers
-					.filter((server) => authStore.hasPermission('players', 'presence', server.id))
-					.map((server) => server.id);
+		const scopes = globalPresence ? [''] : [...permitted];
 		const results = await Promise.allSettled(
 			scopes.map((serverId) =>
 				rpcClient.player.listPlayerSessions(
@@ -138,14 +151,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const serverNames = new Map(servers.map(({ id, name }) => [id, name]));
 		let latest: typeof lastSession = null;
 		let latestTime = -Infinity;
-		for (const result of results) {
+		for (const [index, result] of results.entries()) {
 			if (result.status !== 'fulfilled') continue;
+			const scope = scopes[index];
 			for (const session of result.value.sessions) {
-				const serverName = serverNames.get(session.serverId);
-				if (!serverName || session.estimate || !session.joinedAt) continue;
+				if (
+					!permitted.has(session.serverId) ||
+					(scope && session.serverId !== scope) ||
+					session.estimate ||
+					!session.joinedAt
+				)
+					continue;
 				const time = timestampDate(session.joinedAt).getTime();
 				if (time > latestTime) {
-					latest = { serverName, joinedAt: session.joinedAt };
+					latest = { serverName: serverNames.get(session.serverId), joinedAt: session.joinedAt };
 					latestTime = time;
 				}
 			}
@@ -240,7 +259,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</CarbonButton>
 			</div>
 		</form>
-		{#if canLookup && !(response?.status === PlayerLookupStatus.FOUND)}
+		{#if canLookup}
 			<p class="text-xs text-muted-foreground">
 				Looking up an account does not add it to your roster.
 			</p>
@@ -336,24 +355,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<dd class="text-sm md:col-start-1 md:row-start-2">
 							{fromPanel ? 'Carbon Panel observations' : 'Mojang'}
 						</dd>
-						<dt class="mt-2 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:mt-0">
-							{fromPanel ? 'Last seen on this panel' : 'Checked at'}
-						</dt>
-						<dd class="text-sm md:col-start-2 md:row-start-2">
-							{formatTimestamp(response.observation?.observedAt, 'Unavailable')}
-						</dd>
+						{#if !fromPanel && response.observation?.observedAt}
+							<dt class="mt-2 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:mt-0">
+								Checked at
+							</dt>
+							<dd class="text-sm md:col-start-2 md:row-start-2">
+								{formatTimestamp(response.observation.observedAt)}
+							</dd>
+						{/if}
 					</dl>
-					{#if response.lastSeen && !fromPanel}
-						<dl class="py-3">
-							<dt class="text-xs text-muted-foreground">Last seen on this panel</dt>
-							<dd class="mt-1 text-sm">{formatTimestamp(response.lastSeen)}</dd>
-						</dl>
-					{/if}
 					{#if lastSession}
 						<dl class="py-3">
 							<dt class="text-xs text-muted-foreground">Recorded server join</dt>
 							<dd class="mt-1 text-sm">
-								{lastSession.serverName} · {formatTimestamp(lastSession.joinedAt)}
+								{#if lastSession.serverName}{lastSession.serverName} ·
+								{/if}
+								{formatTimestamp(lastSession.joinedAt)}
 							</dd>
 						</dl>
 					{/if}

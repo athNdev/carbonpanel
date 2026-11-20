@@ -453,7 +453,7 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 			}
 			matches, err := s.store.FindPlayerIdentitiesByExact(ctx, strings.ToLower(provider.UUID), "")
 			if err == nil && len(matches) == 1 && !matches[0].OfflineUUID {
-				addObservedPlayer(out, matches[0])
+				out.ObservedIdentityKey = matches[0].ID
 			}
 			if err := ctx.Err(); err != nil {
 				return nil, lookupContextError(err)
@@ -499,13 +499,13 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 			Observation: observation(
 				v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
 				v1.PlayerConfidence_PLAYER_CONFIDENCE_STALE,
-				identity.LastSeenAt,
+				time.Time{},
 				"",
 			),
 			Note: "No online Mojang profile; shown from this panel's observations only. No identity, roster entry or presence was created.",
 		}
 		if req.Msg.IncludeSkin {
-			addObservedPlayer(out, identity)
+			out.ObservedIdentityKey = identity.ID
 		}
 		return connect.NewResponse(out), nil
 	}
@@ -575,13 +575,6 @@ func lookupContextError(err error) error {
 		return connect.NewError(connect.CodeDeadlineExceeded, err)
 	}
 	return connect.NewError(connect.CodeCanceled, err)
-}
-
-func addObservedPlayer(out *v1.LookupPlayerResponse, identity storage.PlayerIdentity) {
-	out.ObservedIdentityKey = identity.ID
-	if !identity.LastSeenAt.IsZero() {
-		out.LastSeen = timestamppb.New(identity.LastSeenAt)
-	}
 }
 
 func isCanonicalUUID(value string) bool {

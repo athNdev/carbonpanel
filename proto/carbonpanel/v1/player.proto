@@ -284,7 +284,9 @@ message LookupPlayerResponse {
   PlayerSkinAsset skin = 6;
   // Existing roster record matched by identity; omitted when no match is known.
   string observed_identity_key = 7;
-  google.protobuf.Timestamp last_seen = 8;
+  // Historical activity is available through ListPlayerSessions.
+  reserved 8;
+  reserved "last_seen";
 }
 
 // Roster request. An empty server_id means a cross-server search.

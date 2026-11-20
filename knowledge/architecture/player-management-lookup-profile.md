@@ -19,7 +19,8 @@ A caller with global `players:read` can opt into the lookup profile with
 front portrait from classic, slim, or legacy Java skin atlases. Missing
 textures leave the identity result intact. Mojang's legacy HTTP texture
 locator supplies only a validated CDN hash; downloads stay on pinned HTTPS.
-An exact existing panel identity may link to its record and last observed time.
-The lookup itself never refreshes presence or reads from Minecraft servers.
-The profile may show a previously recorded join on a visible server through
-the separate `players:presence` session read, using its existing scope checks.
+An exact existing panel identity may link to its record. Lookup can show when
+Mojang checked the account. History comes only from a separately authorized
+`players:presence` session read. Explicit scoped grants work without server
+inventory. A join without visible server metadata shows its time alone.
+Lookup never refreshes presence or reads from Minecraft servers.

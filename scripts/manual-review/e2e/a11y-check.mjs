@@ -313,7 +313,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 					? {}
 					: {
 							user: { id: 'a11y', username: 'A11y Reviewer' },
-							permissions: [{ resource: '*', action: '*', objectId: '*' }]
+							permissions: state.permissions ?? [{ resource: '*', action: '*', objectId: '*' }]
 						}
 			);
 		}
@@ -371,6 +371,18 @@ async function seedPackagedRoutes(page, state, authMode) {
 			if (request?.query === 'FixtureMissing') {
 				return reply({ status: 'PLAYER_LOOKUP_STATUS_NOT_FOUND' });
 			}
+			if (request?.query === 'FixtureObserved') {
+				return reply({
+					status: 'PLAYER_LOOKUP_STATUS_FOUND',
+					name: request.query,
+					uuid: LOOKUP_UUID,
+					observedIdentityKey: 'fixture-identity',
+					observation: {
+						source: 'PLAYER_DATA_SOURCE_PANEL_DB',
+						observedAt: '2039-01-01T00:00:00Z'
+					}
+				});
+			}
 			return reply({
 				status: 'PLAYER_LOOKUP_STATUS_FOUND',
 				name: request?.query,
@@ -379,6 +391,19 @@ async function seedPackagedRoutes(page, state, authMode) {
 				...(request?.query === 'FixtureSkin'
 					? { skin: { data: LOOKUP_PNG, contentType: 'image/png' } }
 					: {})
+			});
+		}
+		if (method === 'ListPlayerSessions' && state.lookupSessionRequests) {
+			const request = route.request().postDataJSON();
+			state.lookupSessionRequests.push(request);
+			if (request?.serverId !== 'fixture-presence-server' || state.lookupSessionDenied) {
+				return reply({ code: 'permission_denied', message: 'No presence grant' }, 403);
+			}
+			return reply({
+				sessions: [
+					{ identityKey: 'fixture-identity', serverId: 'fixture-presence-server', joinedAt: '2003-06-01T10:30:00Z' },
+					{ identityKey: 'fixture-identity', serverId: 'fixture-hidden-server', joinedAt: '2039-01-01T00:00:00Z' }
+				]
 			});
 		}
 		if (method === 'ListWorldEntries') return reply({ entries: WORLD_ENTRIES });
@@ -692,6 +717,7 @@ async function checkPlayerLookup(page, state, root, width, theme) {
 			await lookup.getByRole('heading', { name: 'FixtureSkin', exact: true }).waitFor();
 			await lookup.getByText(LOOKUP_UUID, { exact: true }).waitFor();
 			await lookup.getByText('Mojang', { exact: true }).waitFor();
+			await lookup.getByText('Looking up an account does not add it to your roster.', { exact: true }).waitFor();
 			if (await lookup.getByRole('link', { name: 'View player record' }).count()) {
 				throw new Error('An unknown account linked to a roster identity');
 			}
@@ -720,6 +746,55 @@ async function checkPlayerLookup(page, state, root, width, theme) {
 		} finally {
 			page.off('request', listen);
 			delete state.lookupQueries;
+		}
+	});
+	await check(`player lookup @${width} ${theme}: historical joins respect explicit server scope`, async () => {
+		const allServers = state.servers;
+		const identityGrant = { resource: 'players', action: 'read', objectId: '*' };
+		const presenceGrant = { resource: 'players', action: 'presence', objectId: 'fixture-presence-server' };
+		state.servers = 'empty';
+		state.lookupSessionRequests = [];
+		const profile = async () => {
+			await page.goto(root + '/players', { waitUntil: 'domcontentloaded' });
+			const lookup = page.getByRole('region', { name: 'Look up a player' });
+			const input = lookup.getByRole('textbox', { name: 'Minecraft username or UUID' });
+			await input.fill('FixtureObserved');
+			await input.press('Enter');
+			await lookup.getByRole('heading', { name: 'FixtureObserved', exact: true }).waitFor();
+			await lookup.getByText('Looking up an account does not add it to your roster.', { exact: true }).waitFor();
+			return lookup;
+		};
+		try {
+			state.permissions = [identityGrant];
+			const readOnly = await profile();
+			if (state.lookupSessionRequests.length || /recorded server join|last seen|2039/i.test(await readOnly.innerText())) {
+				throw new Error('Identity-only lookup displayed or requested historical presence');
+			}
+
+			state.permissions = [identityGrant, presenceGrant];
+			const scoped = await profile();
+			await scoped.getByText('Recorded server join', { exact: true }).waitFor();
+			const text = await scoped.innerText();
+			if (!text.includes('2003') || /2039|fixture-presence-server|fixture-hidden-server|last seen/i.test(text)) {
+				throw new Error('Wrong session timestamp or a hidden server identifier appeared');
+			}
+			if (state.lookupSessionRequests.length !== 1 || state.lookupSessionRequests[0]?.serverId !== presenceGrant.objectId) {
+				throw new Error('An explicit presence grant did not use exactly its own server scope');
+			}
+
+			state.lookupSessionDenied = true;
+			const refused = page.waitForResponse((response) => response.url().endsWith('/ListPlayerSessions') && response.status() === 403);
+			const denied = await profile();
+			await refused;
+			if (/recorded server join|last seen|2039|2003/i.test(await denied.innerText())) {
+				throw new Error('A refused session request altered or leaked the profile history');
+			}
+			return 'Known identity remained visible. History used the authorized scope with no server inventory.';
+		} finally {
+			state.servers = allServers;
+			delete state.permissions;
+			delete state.lookupSessionRequests;
+			delete state.lookupSessionDenied;
 		}
 	});
 }
