@@ -22,10 +22,13 @@ Dispatch Compose release qualification with `world_swap: true` only on the
 final candidate after the three World Library ancestry commits are present.
 The staging-artifact contract is owned by the release staging decision: the
 same successful `publish=false` run retains `verified-release-oci` and the raw
-`release-image-context` that the matrix builds from. The harness refuses a
-missing or ambiguous artifact and never falls back to a different run or an
-unstaged image; check the stage identity against the exact staged SHA and
-digest before treating a matrix run as release evidence.
+`release-image-context` that the matrix builds from. The harness prefers that
+raw context, byte-compares it with the release bundle, and refuses a missing or
+ambiguous artifact. For earlier immutable stage runs that predate the restored
+contract, it may reconstruct the context from the verified Linux bundle only
+after checking `stage.json.commit` against the staged SHA and finding the OCI
+index blob named by `stage.json.digest`; the sample config belongs at the
+context root. Never fall back to a different run or an unstaged image.
 
 The optional phase reuses the live candidate JVM from the upgrade leg. It
 packages a distinct disposable world from a second server, imports two

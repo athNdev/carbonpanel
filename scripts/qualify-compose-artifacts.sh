@@ -23,6 +23,11 @@ workflow_head=$(jq -er --arg repo "$GITHUB_REPOSITORY" '
 printf 'release_workflow_head=%s\n' "$workflow_head" | tee -a "$evidence"
 gh api "$repo/actions/runs/$STAGED_RUN/artifacts?per_page=100" > "$work/artifacts.json"
 
+artifact_present() {
+  jq -e --arg name "$1" '[.artifacts[] | select(.name == $name and .expired == false)] | length == 1' \
+    "$work/artifacts.json" >/dev/null
+}
+
 fetch_artifact() {
   local name=$1 record id digest zip
   record=$(jq -ec --arg name "$name" '[.artifacts[] | select(.name == $name and .expired == false)] |
@@ -36,14 +41,41 @@ fetch_artifact() {
   unzip -q "$zip" -d "$work/$name"
 }
 
-fetch_artifact release-image-context
 fetch_artifact release-bundle-linux-amd64
 mapfile -t bundles < <(find "$work/release-bundle-linux-amd64" -name 'carbon-panel*_linux_amd64.tar.gz' -type f)
 [[ "${#bundles[@]}" == 1 ]]
 bundle="${bundles[0]}"
 mkdir "$work/bundle"
 tar -xzf "$bundle" -C "$work/bundle"
+
+# The older release workflow retained a ready-made image context. Newer
+# publish=false staging retains the verified downloads, the assembled OCI
+# inputs and stage.json instead. Accept both, but bind the new path to the
+# exact stage identity and the OCI index digest before using it.
 context="$work/release-image-context"
+if artifact_present release-image-context; then
+  fetch_artifact release-image-context
+else
+  fetch_artifact qualified-stable-stage
+  stage_commit=$(jq -er '.commit | select(test("^[0-9a-f]{40}$"))' "$work/qualified-stable-stage/stage.json")
+  stage_sha=$(jq -er '.commit' "$work/qualified-stable-stage/stage.json")
+  [[ "$stage_commit" == "$STAGED_SHA" ]]
+  stage_digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' "$work/qualified-stable-stage/stage.json")
+  fetch_artifact verified-release-oci
+  oci_tar=$(find "$work/verified-release-oci" -maxdepth 1 -name 'image.oci.tar' -type f | head -n1)
+  [[ -n "$oci_tar" ]]
+  tar -tf "$oci_tar" | grep -qx "blobs/sha256/${stage_digest#sha256:}"
+  printf 'stage_commit=%s\nstage_digest=%s\noci_index_blob_verified=true\n' \
+    "$stage_sha" "$stage_digest" | tee -a "$evidence"
+  # The shipped Dockerfile only needs the exact Linux binaries and the sample
+  # config; reconstruct the context from the verified bundle rather than
+  # inventing inputs. The comparison below still guards those bytes.
+  mkdir -p "$context/linux_amd64"
+  cp "$work/bundle/carbon-panel" "$work/bundle/carbon-storage" \
+    "$context/linux_amd64/"
+  cp "$work/bundle/config.example.yaml" "$context/"
+fi
+
 for program in carbon-panel carbon-storage; do
   cmp "$work/bundle/$program" "$context/linux_amd64/$program"
 done

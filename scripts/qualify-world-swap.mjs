@@ -3,11 +3,11 @@
 // Real final-candidate World Library swap/rejoin proof on a disposable Compose JVM.
 // Drives the documented operator RPCs and an actual Minecraft 1.21.1 client.
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
@@ -193,23 +193,39 @@ async function main() {
   const sourceId = source.server.id;
   assert.ok(sourceId, "source server id missing");
   await waitRunning(sourceId, 250);
+  // keepInventory must survive the later rollback leg; doFireTick is the
+  // distinct new-world marker observed after the rejoin.
+  assert.match(await command(sourceId, "gamerule keepInventory true"), /keepInventory.*true/i);
   assert.match(await command(sourceId, "gamerule doFireTick false"), /doFireTick.*false/i);
   await command(sourceId, "save-all flush");
-  await rpc("ServerService", "StopServer", { id: sourceId, requestId: "world-swap-source-stop" });
-  await waitFor("source world stopped", 120, async () => {
+  await rpc("ServerService", "StopServer", { id: sourceId, requestId: "world-swap-source-stop-a" });
+  await waitFor("source world stopped before first archive", 120, async () => {
     assert.equal((await serverRecord(sourceId)).status, "SERVER_STATUS_STOPPED");
   });
   const sourceWorld = resolve(dataDir, "servers", sourceId, "world");
   const archiveA = resolve(work, "world-source-a.zip");
   execFileSync("zip", ["-qr", archiveA, "."], { cwd: sourceWorld });
-  const archiveSha = sha256(archiveA);
-  report.sourceArchiveSha256 = archiveSha;
-  check("distinct known-good world packaged through the operator fixture", "sha256=" + archiveSha);
+  report.sourceArchiveSha256 = sha256(archiveA);
 
-  // Two revisions of the same archive give distinct revision IDs so the
-  // idempotency-key replay check cannot hide behind an identical revision.
+  // A genuinely different second archive: revisions are content-addressed,
+  // so re-uploading identical bytes returns the same revision and the replay
+  // check would be meaningless. Add a second marker to the source world.
+  await rpc("ServerService", "StartServer", { id: sourceId, requestId: "world-swap-source-start-b" });
+  await waitRunning(sourceId, 250);
+  assert.match(await command(sourceId, "gamerule doDaylightCycle false"), /doDaylightCycle.*false/i);
+  await command(sourceId, "save-all flush");
+  await rpc("ServerService", "StopServer", { id: sourceId, requestId: "world-swap-source-stop-b" });
+  await waitFor("source world stopped before second archive", 120, async () => {
+    assert.equal((await serverRecord(sourceId)).status, "SERVER_STATUS_STOPPED");
+  });
+  const archiveB = resolve(work, "world-source-b.zip");
+  execFileSync("zip", ["-qr", archiveB, "."], { cwd: sourceWorld });
+  assert.notEqual(sha256(archiveA), sha256(archiveB), "the two source archives are identical");
+  check("distinct known-good worlds packaged through the operator fixture",
+    "a=" + sha256(archiveA) + " b=" + sha256(archiveB));
+
   const sessionA = await uploadArchive(archiveA, "world-source-a");
-  const sessionB = await uploadArchive(archiveA, "world-source-b");
+  const sessionB = await uploadArchive(archiveB, "world-source-b");
   const revisionA = await importRevision(sessionA, "world-source-a");
   const revisionB = await importRevision(sessionB, "world-source-b");
   assert.notEqual(revisionA, revisionB, "imports did not produce distinct revisions");
@@ -223,6 +239,11 @@ async function main() {
   assert.ok(compatibility, "compatibility preview missing");
   check("compatibility preview completed without mutation");
 
+  // Re-hash immediately before the bind: Minecraft rewrites level.dat on
+  // autosave, so the baseline hash would be stale by the time the binder
+  // retains the retired world family.
+  const preservedSha = sha256(originalLevel);
+  report.preservedLevelSha256AtBind = preservedSha;
   const bindKey = "world-swap-bind-" + randomBytes(8).toString("hex");
   const bind = await rpc("WorldService", "BindWorld", {
     server_id: state.id, level_name: "world", revision_id: revisionA,
@@ -251,14 +272,16 @@ async function main() {
   const retainedLevels = execFileSync("find", [resolve(dataDir, "servers", state.id), "-name", "level.dat", "-type", "f"], {
     encoding: "utf8",
   }).trim().split(/\r?\n/).filter(Boolean);
-  const preserved = retainedLevels.filter(candidate => sha256(candidate) === originalSha);
+  const preserved = retainedLevels.filter(candidate => sha256(candidate) === preservedSha);
   assert.ok(preserved.length >= 1, "original level.dat bytes were not retained");
   report.retainedLevelDat = preserved;
   check("original world bytes preserved after swap", "copies=" + preserved.length);
 
   const events = await waitFor("one world.bind success event", 120, async () => {
+    // auditWorldOperation emits EventWorldBind only for a successful outcome;
+    // its properties carry level/revision/operation ids, not a success word.
     const entries = (await activityEntries()).filter(entry =>
-      entry.event === "world.bind" && entry.requestId === bindKey && /success|complete/i.test(entry.properties || ""));
+      entry.event === "world.bind" && entry.requestId === bindKey);
     assert.equal(entries.length, 1, "expected exactly one success event, saw " + entries.length);
     return entries;
   });
