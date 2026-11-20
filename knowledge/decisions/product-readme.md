@@ -35,6 +35,8 @@ Use focused crops and native UI controls to make the represented feature readabl
 Do not repaint labels, invent activity or hide a missing reading behind a plausible
 metric. Capture provenance records the application revision, date, data origin and
 framing. Review exports at README display size and refresh them when that UI changes.
+The inline dashboard is a native-width content crop. Link it to the original
+full-window PNG so readers can inspect the surrounding shell at native scale.
 
 The standard journey maintains the canonical captures. Local review stacks
 preserve worlds and databases during shutdown and use their own fixture data.

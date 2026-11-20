@@ -67,6 +67,10 @@
       "focus": "Shell navigation, cluster overview and the seeded server fleet"
     },
     {
+      "setViewport": { "width": 1216, "height": 1000 },
+      "name": "frame the dashboard content for README width"
+    },
+    {
       "screenshot": "showcase-dashboard",
       "element": "[data-testid=\"showcase-dashboard-content\"]",
       "scroll": false,
@@ -74,6 +78,10 @@
       "alt": "Cluster dashboard with server state and observed host resource tiles",
       "focus": "Server state and observed host resources",
       "required": true
+    },
+    {
+      "setViewport": { "width": 1440, "height": 1000 },
+      "name": "restore the standard desktop viewport"
     },
     {
       "goto": "/servers",

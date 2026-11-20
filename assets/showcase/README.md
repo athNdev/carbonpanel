@@ -32,7 +32,8 @@ The canonical bundle contains `showcase-dashboard`, `showcase-dashboard-full`,
 `showcase-library`, `showcase-library-revisions`, `showcase-player-allowlist`,
 `showcase-worlds-list`, `showcase-world-tab`, and `showcase-world-view`.
 The full dashboard is a native 2880 × 2000 capture with navigation and shell.
-The focused crops make specific features readable inline. The World View frame
+The leading dashboard image captures the content at a narrower desktop width
+for the README. Its link opens the original full-window PNG. The World View frame
 uses a broad camera over the seeded Vanilla server's generated Overworld,
 rendered by BlueMap through the authenticated panel route.
 

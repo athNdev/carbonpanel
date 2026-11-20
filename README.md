@@ -31,9 +31,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 </div>
 
-[![Full Carbon Panel desktop dashboard with navigation, populated resource panels and a named server fleet](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[![Carbon Panel cluster dashboard with host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
-[View the full-resolution dashboard capture ↗](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[Open the original 2880 × 2000 dashboard PNG ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
 ## Modpack Studio. Modpacks, made simple.
 
@@ -47,7 +47,7 @@ with your players. **Modpack Studio** keeps the workflow in one place.
 - **Take it with you.** Export `.mrpack`, CurseForge or packwiz formats, share
   with friends, or deploy to a server.
 
-[![Modpack Studio: a real pack, with mod sides, pinned versions and export controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-studio.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-studio.png)
+[![Modpack Studio with installed mods, version and side settings, and export controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-studio.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-studio.png)
 
 [Explore Modpack Studio ↗](https://carbonpanel.dev/docs/guides/modpack-studio/)
 
@@ -81,7 +81,7 @@ Open a rendered map of a world in the panel, with real terrain tiles and the ren
 Add a player to a server's allowlist before they have joined, with a typed,
 auditable action.
 
-[![Server Players tab with the real allowlist form](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-player-allowlist.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-player-allowlist.png)
+[![Server Players tab with the allowlisted fixture player and add-player form](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-player-allowlist.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-player-allowlist.png)
 
 ### The next update. When you're ready.
 
@@ -128,7 +128,7 @@ depend on the server version, host and idle-mode configuration.
 
 </details>
 
-<sub>UI captures come from the current application in an isolated review installation, with seeded review data. Images are published to a dedicated `showcase-assets` branch so these URLs stay stable; [capture notes, manifest and source revision](assets/showcase/README.md).</sub>
+<sub>UI captures come from a packaged build in an isolated installation with seeded review data. Images are published to a dedicated `showcase-assets` branch so these URLs stay stable; [capture notes, manifest and source revision](assets/showcase/README.md).</sub>
 
 ### Considered down to the controls.
 
