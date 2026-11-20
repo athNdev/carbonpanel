@@ -238,7 +238,8 @@ official Carbon Panel MCP image.
 
 1. Look up io.github.athNdev/carbon-panel in the official MCP Registry. Pin its
    exact version and GHCR sha256 digest. Stop if the listing or anonymous pull
-   is unavailable.
+   is unavailable. Follow the guide's Docker setup for my operating system
+   (Windows, macOS or Linux).
 2. Use my existing panel. If I requested a new installation, follow the
    Carbon Panel Stable installation guide and set up authentication on a
    separate instance. Preserve all existing services, worlds and databases.

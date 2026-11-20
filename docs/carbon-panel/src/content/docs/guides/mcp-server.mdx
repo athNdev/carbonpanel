@@ -58,6 +58,14 @@ logs and source control.
 
 ## Client configuration
 
+Use a Docker runtime that can launch Linux containers from your MCP client.
+
+- **Windows** uses Docker Desktop with the WSL 2 backend and Linux containers.
+- **macOS** uses Docker Desktop. The digest selects a Linux image for Apple
+  Silicon or Intel.
+- **Linux** uses Docker Engine. Run `docker` from the same account as the MCP
+  client and restrict access to any client configuration containing a token.
+
 Use a controller URL reachable from the MCP container. This example starts
 the official image on a shared Compose bridge network. Replace the network,
 image and token placeholders with your own values.

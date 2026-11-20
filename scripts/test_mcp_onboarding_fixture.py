@@ -136,6 +136,7 @@ class CopyablePromptTests(unittest.TestCase):
         required = [
             "io.github.athNdev/carbon-panel",
             "Stop if the listing or anonymous pull is unavailable",
+            "Windows, macOS or Linux",
             "Preserve all existing services, worlds and databases",
             "Ask before changing the installed panel version or channel",
             "servers:read", "files:read", "backups:read",
