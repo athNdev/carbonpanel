@@ -135,10 +135,10 @@ func TestScopedReadOperationalTools(t *testing.T) {
 			t.Fatalf("expected default result limit, got %d", len(rows))
 		}
 
-		assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-2"}), tool, ErrKindPermissionDenied)
-		assertStructuredError(t, callTool(t, serverReader, tool, map[string]any{"server_id": "srv-1"}), tool, ErrKindPermissionDenied)
-		assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-1", "status": "unknown"}), tool, ErrKindInvalidArguments)
-		assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-1", "limit": maxLimit + 1}), tool, ErrKindInvalidArguments)
+		_ = assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-2"}), tool, ErrKindPermissionDenied)
+		_ = assertStructuredError(t, callTool(t, serverReader, tool, map[string]any{"server_id": "srv-1"}), tool, ErrKindPermissionDenied)
+		_ = assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-1", "status": "unknown"}), tool, ErrKindInvalidArguments)
+		_ = assertStructuredError(t, callTool(t, configReader, tool, map[string]any{"server_id": "srv-1", "limit": maxLimit + 1}), tool, ErrKindInvalidArguments)
 
 		if err := store.DB().Model(&storage.StagedConfigChange{}).Where("id = ?", "applied-change").
 			Update("payload", strings.Repeat("x", stagedConfigResponseLimit+1)).Error; err != nil {
@@ -169,7 +169,7 @@ func TestScopedReadOperationalTools(t *testing.T) {
 			got.GetDiskUsage() != 1024 || got.GetPlayersOnline() != 7 || got.GetTps() != 19.8 {
 			t.Fatalf("server operational snapshot: %v", got)
 		}
-		assertStructuredError(t, callTool(t, serverReader, "get_server", map[string]any{"id": "srv-2"}), "get_server", ErrKindPermissionDenied)
-		assertStructuredError(t, callTool(t, configReader, "get_server", map[string]any{"id": "srv-1"}), "get_server", ErrKindPermissionDenied)
+		_ = assertStructuredError(t, callTool(t, serverReader, "get_server", map[string]any{"id": "srv-2"}), "get_server", ErrKindPermissionDenied)
+		_ = assertStructuredError(t, callTool(t, configReader, "get_server", map[string]any{"id": "srv-1"}), "get_server", ErrKindPermissionDenied)
 	})
 }
