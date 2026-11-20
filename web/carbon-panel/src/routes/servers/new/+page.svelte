@@ -517,18 +517,12 @@ one at https://mozilla.org/MPL/2.0/.
 		loading = true;
 		const attempt = beginLifecycleRequest(formData.name.trim() || 'new-server', 'create');
 		try {
-			const selectedVersion = modpackVersions.find((v) => v.id === selectedVersionId);
-			const versionToSend =
-				selectedModpack?.indexer === 'modrinth' && selectedVersion?.versionNumber
-					? selectedVersion.versionNumber
-					: selectedVersionId;
-
 			const createRequest = {
 				...formData,
 				nodeId: nodePlacementMode === 'manual' ? selectedNodeId : '',
 				placementStrategy: nodePlacementMode === 'auto' ? placementStrategy : '',
 				modpackId: selectedModpack?.id || '',
-				modpackVersionId: versionToSend || '',
+				modpackVersionId: selectedVersionId || '',
 				port: useProxyMode ? 0 : formData.port,
 				proxyHostname: useProxyMode && proxyEnabled ? formData.proxyHostname : '',
 				proxyListenerId: useProxyMode && proxyEnabled ? formData.proxyListenerId : '',

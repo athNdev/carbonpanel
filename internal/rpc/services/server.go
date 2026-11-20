@@ -1044,6 +1044,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 
 	// If modpack is selected, load it and derive settings
 	var modpackURL string
+	modpackVersion := msg.ModpackVersionId
 	if msg.ModpackId != "" {
 		modpack, err := s.store.GetIndexedModpack(ctx, msg.ModpackId)
 		if err != nil {
@@ -1068,11 +1069,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		// Record the real game loader for display. The container TYPE must
 		// stay the platform so the image fetches the pack; the console names
 		// the loader players actually run.
-		if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
-			modpackLoader = resolveModpackGameLoader(modpack, files, msg.ModpackVersionId)
-		} else {
-			modpackLoader = resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId)
-		}
+		modpackLoader, modpackVersion = s.resolveAttachedModpack(ctx, modpack, modpackVersion)
 
 		// Get MC version from modpack if not explicitly set
 		if msg.McVersion == "" {
@@ -1521,7 +1518,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 				serverConfig.CFPageURL = &modpackURL
 			}
 		} else if modpack != nil && modpack.Indexer == "modrinth" {
-			configureModrinthModpack(serverConfig, modpack.IndexerID, msg.ModpackVersionId)
+			configureModrinthModpack(serverConfig, modpack.IndexerID, modpackVersion)
 		}
 
 		// Update config with modpack settings
@@ -1892,6 +1889,9 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 
 		modpackURL := modpack.WebsiteURL
+		// A re-attached pack replaces the previous display loader.
+		loader, version := s.resolveAttachedModpack(ctx, modpack, msg.ModpackVersionId)
+		server.ModpackLoader = loader
 
 		switch modpack.Indexer {
 		case "fuego", "manual":
@@ -1908,18 +1908,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			server.ModLoader = storage.ModLoaderModrinth
 			needsRecreation = true
 
-			configureModrinthModpack(serverConfig, modpack.IndexerID, msg.ModpackVersionId)
-		}
-
-		// A re-attached pack replaces the previous display loader; an
-		// unresolvable pack falls back to showing the platform.
-		server.ModpackLoader = ""
-		if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
-			if loader := resolveModpackGameLoader(modpack, files, msg.ModpackVersionId); loader != "" {
-				server.ModpackLoader = loader
-			}
-		} else if loader := resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId); loader != "" {
-			server.ModpackLoader = loader
+			configureModrinthModpack(serverConfig, modpack.IndexerID, version)
 		}
 
 		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
