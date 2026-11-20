@@ -637,6 +637,50 @@ class SignedArchiveFixtureTests(unittest.TestCase):
                 "--provenance", str(prov), "--version", "runtime-v6.0.0",
                 "--platform", "amd64", "--base-tarball", str(tampered_root))
 
+    # ----------------------------------------------------- boot qualification
+    def test_20_boot_qualify_fail_closed_with_real_signed_archive_evidence(self) -> None:
+        work, prov = self._make_archive("boot-qual-blocked")
+        boot_work = self.work / "boot-qual-blocked-run"
+        result = refused(
+            "BOOT_QUALIFICATION_BLOCKED", "boot-qualify",
+            "--provenance", str(prov), "--arch", "amd64",
+            "--work-dir", str(boot_work), "--signed-archive-dir", str(work),
+        )
+        self.assertEqual(result["schema"], "carbonpanel.node-lxc.boot-qualification/v1")
+        self.assertEqual(result["signed_archive_verification"]["status"], "ok")
+        self.assertEqual(result["signed_archive_verification"]["gpg_signature"], "GOOD")
+        self.assertIn("NOT live import/boot evidence", result["signed_archive_verification"]["evidence_scope"])
+        boot = result["boot_qualification"]
+        self.assertEqual(boot["status"], "blocked")
+        self.assertFalse(boot["attempted"])
+        self.assertIsInstance(boot["prerequisite_checks"], list)
+        self.assertGreater(len(boot["prerequisite_checks"]), 0)
+        self.assertIsInstance(boot["blockers"], list)
+        self.assertGreater(len(boot["blockers"]), 0)
+        report = Path(result.get("report_path") or (boot_work / "boot-qualification-report.json"))
+        self.assertTrue(report.is_file(), report)
+        saved = json.loads(report.read_text())
+        self.assertEqual(saved["reason_code"], "BOOT_QUALIFICATION_BLOCKED")
+        self.assertEqual(saved["signed_archive_verification"]["status"], "ok")
+
+    def test_21_boot_qualify_refuses_when_signed_archive_not_verified(self) -> None:
+        work, prov = self._make_archive("boot-qual-nosig")
+        # Tamper the staged root tarball so signed archive verification fails closed.
+        root = next(work.glob("*-root.tar.xz"))
+        with root.open("ab") as fh:
+            fh.write(b"tamper")
+        boot_work = self.work / "boot-qual-nosig-run"
+        result = refused(
+            "SIGNED_ARCHIVE_NOT_VERIFIED", "boot-qualify",
+            "--provenance", str(prov), "--arch", "amd64",
+            "--work-dir", str(boot_work), "--signed-archive-dir", str(work),
+        )
+        self.assertEqual(result["signed_archive_verification"]["status"], "refused")
+        self.assertEqual(result["signed_archive_verification"]["reason_code"], "UPSTREAM_DIGEST_MISMATCH")
+        self.assertEqual(result["boot_qualification"]["status"], "blocked")
+        self.assertEqual(result["boot_qualification"]["reason"], "signed archive verification did not pass")
+
 
 if __name__ == "__main__":
     unittest.main()
+

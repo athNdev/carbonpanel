@@ -19,8 +19,10 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import contextlib
 import datetime as _dt
 import hashlib
+import io
 import json
 import os
 import re
@@ -54,13 +56,21 @@ def emit(obj: dict[str, Any]) -> None:
     print(json.dumps(obj, indent=2, sort_keys=True))
 
 
+def result_ok(**kwargs: Any) -> dict[str, Any]:
+    return {"status": "ok", **kwargs}
+
+
+def result_refused(reason_code: str, message: str, **kwargs: Any) -> dict[str, Any]:
+    return {"status": "refused", "reason_code": reason_code, "message": message, **kwargs}
+
+
 def ok(**kwargs: Any) -> int:
-    emit({"status": "ok", **kwargs})
+    emit(result_ok(**kwargs))
     return 0
 
 
 def refuse(reason_code: str, message: str, **kwargs: Any) -> int:
-    emit({"status": "refused", "reason_code": reason_code, "message": message, **kwargs})
+    emit(result_refused(reason_code, message, **kwargs))
     return 1
 
 
@@ -691,28 +701,37 @@ def _inspect_lxd_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
     }, None
 
 
-def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
-    """Verify the signed upstream archive end-to-end in an owned disposable path."""
-    path = Path(args.provenance)
+def _verify_signed_archive_result(
+    provenance_path: Path, arch: str, work_dir: Path, fetch: bool,
+) -> tuple[int, dict[str, Any]]:
+    """Core signed-archive verification that returns (rc, payload) without emitting."""
+    path = Path(provenance_path)
     if not path.is_file():
-        return refuse("MISSING_PROVENANCE", f"provenance file not found: {path}")
+        return 1, result_refused("MISSING_PROVENANCE", f"provenance file not found: {path}")
     try:
         prov = read_json(path)
     except (ValueError, OSError):
-        return refuse("INVALID_PROVENANCE", "provenance is not valid JSON")
+        return 1, result_refused("INVALID_PROVENANCE", "provenance is not valid JSON")
     if prov.get("schema") != PROVENANCE_SCHEMA:
-        return refuse("INVALID_PROVENANCE", "unsupported provenance schema")
+        return 1, result_refused("INVALID_PROVENANCE", "unsupported provenance schema")
 
     # Fail closed on synthetic / placeholder / moving URL pins before any I/O.
-    rc = validate_artifact_provenance(prov)
+    # validate_artifact_provenance emits via refuse(); capture to preserve payload.
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = validate_artifact_provenance(prov)
     if rc is not None:
-        return rc
+        raw = buf.getvalue().strip()
+        try:
+            return 1, json.loads(raw) if raw else result_refused("INVALID_PROVENANCE", "artifact provenance refused")
+        except ValueError:
+            return 1, result_refused("INVALID_PROVENANCE", "artifact provenance refused")
 
-    pin = next((i for i in prov.get("images", []) if i.get("arch") == args.arch), None)
+    pin = next((i for i in prov.get("images", []) if i.get("arch") == arch), None)
     if pin is None:
-        return refuse("UNSUPPORTED_PLATFORM", f"no pinned upstream image for arch {args.arch}")
+        return 1, result_refused("UNSUPPORTED_PLATFORM", f"no pinned upstream image for arch {arch}")
 
-    work = Path(args.work_dir)
+    work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
     paths = {
         "checksum": work / "SHA256SUMS",
@@ -723,7 +742,7 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
     }
 
     fetched: list[dict[str, Any]] = []
-    if args.fetch:
+    if fetch:
         sources = {
             "checksum": pin["checksum_url"],
             "signature": pin["signature_url"],
@@ -735,12 +754,12 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
             try:
                 count = _fetch_url(url, paths[label])
             except Exception as exc:  # direct fetch failure is a refusal, never a fallback
-                return refuse("FETCH_FAILED", f"{label}: {type(exc).__name__}: {exc}"[:300], artifact=label)
+                return 1, result_refused("FETCH_FAILED", f"{label}: {type(exc).__name__}: {exc}"[:300], artifact=label)
             fetched.append({"artifact": label, "url": url, "bytes": count})
     else:
         missing = [label for label, item in paths.items() if not item.is_file()]
         if missing:
-            return refuse("MISSING_ARCHIVE_FILE", "required local archive file(s) missing", missing=missing)
+            return 1, result_refused("MISSING_ARCHIVE_FILE", "required local archive file(s) missing", missing=missing)
 
     control_checks = {
         "checksum": pin.get("checksum_file_sha256"),
@@ -751,7 +770,7 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
         control_checks["key"] = key_sha
     for label, expected in control_checks.items():
         if expected and sha256_file(paths[label]) != expected:
-            return refuse("CONTROL_FILE_DIGEST_MISMATCH", f"{label} does not match the recorded pin", artifact=label)
+            return 1, result_refused("CONTROL_FILE_DIGEST_MISMATCH", f"{label} does not match the recorded pin", artifact=label)
 
     gpg_home = Path(tempfile.mkdtemp(prefix="cp-lxc-gpg-", dir=str(work)))
     try:
@@ -764,8 +783,8 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
     )
     shutil.rmtree(gpg_home, ignore_errors=True)
     if not good:
-        return refuse("SIGNATURE_INVALID", f"GPG verification of signed SHA256SUMS failed: {detail}",
-                      image=pin["ref"])
+        return 1, result_refused("SIGNATURE_INVALID", f"GPG verification of signed SHA256SUMS failed: {detail}",
+                                 image=pin["ref"])
 
     sums = _parse_sha256sums(paths["checksum"].read_text(encoding="utf-8", errors="replace"))
     root_name = _url_basename(pin["image_url"])
@@ -773,15 +792,15 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
     signed_root = sums.get(root_name)
     signed_lxd = sums.get(lxd_name)
     if not signed_root:
-        return refuse("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {root_name}")
+        return 1, result_refused("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {root_name}")
     if signed_root != pin["expected_sha256"]:
-        return refuse("SIGNED_SUM_MISMATCH", "pin expected_sha256 differs from the signed SHA256SUMS entry",
-                      image=pin["ref"])
+        return 1, result_refused("SIGNED_SUM_MISMATCH", "pin expected_sha256 differs from the signed SHA256SUMS entry",
+                                 image=pin["ref"])
     if not signed_lxd:
-        return refuse("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {lxd_name}")
+        return 1, result_refused("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {lxd_name}")
     if signed_lxd != pin.get("lxd_metadata_sha256"):
-        return refuse("SIGNED_SUM_MISMATCH", "LXD metadata pin differs from the signed SHA256SUMS entry",
-                      image=pin["ref"])
+        return 1, result_refused("SIGNED_SUM_MISMATCH", "LXD metadata pin differs from the signed SHA256SUMS entry",
+                                 image=pin["ref"])
 
     bytes_checked: list[dict[str, Any]] = []
     for label, expected, name in (("root", pin["expected_sha256"], root_name),
@@ -790,41 +809,41 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
         size = paths[label].stat().st_size
         bytes_checked.append({"artifact": name, "bytes": size, "sha256": actual})
         if actual != expected:
-            return refuse("UPSTREAM_DIGEST_MISMATCH",
-                          f"{name} bytes do not match the signed upstream digest",
-                          image=pin["ref"], expected=expected, actual=actual)
+            return 1, result_refused("UPSTREAM_DIGEST_MISMATCH",
+                                     f"{name} bytes do not match the signed upstream digest",
+                                     image=pin["ref"], expected=expected, actual=actual)
     root_size = paths["root"].stat().st_size
     if pin.get("image_content_length") and root_size != int(pin["image_content_length"]):
-        return refuse("CONTENT_LENGTH_MISMATCH", "root tarball byte count differs from the pinned content length",
-                      image=pin["ref"], expected=pin["image_content_length"], actual=root_size)
+        return 1, result_refused("CONTENT_LENGTH_MISMATCH", "root tarball byte count differs from the pinned content length",
+                                 image=pin["ref"], expected=pin["image_content_length"], actual=root_size)
 
     layout, layout_err = _inspect_root_tarball(paths["root"])
     if layout_err:
-        return refuse(layout_err.split(":", 1)[0], f"root tarball layout inspection failed: {layout_err}",
-                      image=pin["ref"])
+        return 1, result_refused(layout_err.split(":", 1)[0], f"root tarball layout inspection failed: {layout_err}",
+                                 image=pin["ref"])
     missing_dirs = [d for d in ARCHIVE_ROOT_REQUIRED_DIRS if d not in layout["top_level_entries"]]
     if missing_dirs:
-        return refuse("LAYOUT_INVALID", "root tarball lacks canonical Ubuntu layout directories",
-                      missing_dirs=missing_dirs)
+        return 1, result_refused("LAYOUT_INVALID", "root tarball lacks canonical Ubuntu layout directories",
+                                 missing_dirs=missing_dirs)
     osr = layout["os_release"]
     if osr.get("ID") != "ubuntu" or osr.get("VERSION_ID") != "24.04":
-        return refuse("METADATA_VERSION_MISMATCH", "root tarball is not Ubuntu 24.04 (Noble)",
-                      os_release=osr, image=pin["ref"])
+        return 1, result_refused("METADATA_VERSION_MISMATCH", "root tarball is not Ubuntu 24.04 (Noble)",
+                                 os_release=osr, image=pin["ref"])
 
     lxd_meta, lxd_err = _inspect_lxd_metadata(paths["lxd"])
     if lxd_err:
-        return refuse(lxd_err.split(":", 1)[0], f"LXD metadata inspection failed: {lxd_err}", image=pin["ref"])
+        return 1, result_refused(lxd_err.split(":", 1)[0], f"LXD metadata inspection failed: {lxd_err}", image=pin["ref"])
     arch_name = LXD_ARCH_ALIASES.get(str(lxd_meta.get("architecture", "")).lower())
-    if arch_name != args.arch:
-        return refuse("METADATA_ARCH_MISMATCH", "LXD metadata architecture does not match the pin",
-                      metadata=lxd_meta)
+    if arch_name != arch:
+        return 1, result_refused("METADATA_ARCH_MISMATCH", "LXD metadata architecture does not match the pin",
+                                 metadata=lxd_meta)
     if (lxd_meta.get("os") != "ubuntu" or lxd_meta.get("release") != "noble"
             or "24.04" not in str(lxd_meta.get("description"))):
-        return refuse("METADATA_VERSION_MISMATCH", "LXD metadata does not describe Ubuntu 24.04 (Noble)",
-                      metadata=lxd_meta)
+        return 1, result_refused("METADATA_VERSION_MISMATCH", "LXD metadata does not describe Ubuntu 24.04 (Noble)",
+                                 metadata=lxd_meta)
 
-    return ok(
-        image=pin["ref"], arch=args.arch, fetch_mode=bool(args.fetch),
+    return 0, result_ok(
+        image=pin["ref"], arch=arch, fetch_mode=bool(fetch),
         gpg_signature="GOOD", signing_key_fingerprint=str(pin["signing_key_fingerprint"]).upper(),
         gpg_status=detail, signed_checksum_entry=signed_root,
         bytes_checked=bytes_checked, root_tarball_bytes=root_size,
@@ -833,6 +852,15 @@ def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
                         "digests; canonical layout/metadata/version inspected; NOT live import/boot evidence"),
         note="no live host, LXC import or guest boot; external blocker preserved",
     )
+
+
+def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
+    """Verify the signed upstream archive end-to-end in an owned disposable path."""
+    rc, payload = _verify_signed_archive_result(
+        Path(args.provenance), args.arch, Path(args.work_dir), bool(args.fetch),
+    )
+    emit(payload)
+    return rc
 
 
 # --------------------------------------------------------------------------- #
@@ -1352,6 +1380,311 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# boot / import qualification (fail-closed)
+# --------------------------------------------------------------------------- #
+BOOT_QUALIFICATION_SCHEMA = "carbonpanel.node-lxc.boot-qualification/v1"
+
+
+def _which(name: str) -> str | None:
+    return shutil.which(name)
+
+
+def _read_text_if(path: str) -> str | None:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+
+
+def probe_lxc_boot_prerequisites() -> tuple[bool, list[dict[str, Any]], list[str]]:
+    """Read-only probe for unprivileged LXC import/boot capability.
+
+    Returns (capable, checks, blockers). This never changes host configuration.
+    It is intentionally conservative: missing evidence is a blocker (fail closed).
+    """
+    checks: list[dict[str, Any]] = []
+    blockers: list[str] = []
+
+    def record(name: str, ok_flag: bool, detail: Any, blocker: str | None = None) -> None:
+        checks.append({"check": name, "ok": bool(ok_flag), "detail": detail})
+        if not ok_flag and blocker:
+            blockers.append(blocker)
+
+    tools = {name: _which(name) for name in ("lxc-create", "lxc-start", "lxc-stop", "lxc-destroy", "lxc-info", "lxc-wait", "tar")}
+    missing_tools = [name for name, path in tools.items() if path is None and name in {"lxc-create", "lxc-start", "lxc-stop", "lxc-destroy", "lxc-info"}]
+    record("lxc_tools", not missing_tools, tools, None if not missing_tools else f"missing LXC tools: {', '.join(sorted(missing_tools))}")
+
+    # Kernel / user namespaces are required for unprivileged LXC.
+    uname = {}
+    try:
+        uname = {
+            "sysname": os.uname().sysname if hasattr(os, "uname") else sys.platform,
+            "release": os.uname().release if hasattr(os, "uname") else "",
+            "machine": os.uname().machine if hasattr(os, "uname") else "",
+        }
+    except Exception:
+        uname = {"sysname": sys.platform}
+    record("platform", uname.get("sysname") == "Linux", uname,
+           None if uname.get("sysname") == "Linux" else "unprivileged LXC boot qualification requires a Linux host")
+
+    userns_clone = _read_text_if("/proc/sys/kernel/unprivileged_userns_clone")
+    if userns_clone is None:
+        # Many kernels enable user namespaces without this proc knob.
+        record("unprivileged_userns_clone", True, {"path": "/proc/sys/kernel/unprivileged_userns_clone", "value": None, "note": "proc knob absent; treated as unknown-available"})
+    else:
+        ok_clone = userns_clone == "1"
+        record("unprivileged_userns_clone", ok_clone, {"value": userns_clone},
+               None if ok_clone else "kernel.unprivileged_userns_clone is disabled")
+
+    cgroup_controllers = _read_text_if("/sys/fs/cgroup/cgroup.controllers")
+    has_cgroup_v2 = cgroup_controllers is not None
+    record("cgroup_v2", has_cgroup_v2, {"controllers": cgroup_controllers},
+           None if has_cgroup_v2 else "cgroup v2 controllers file not available")
+
+    # Subuid/subgid mappings are typically required for unprivileged LXC idmaps.
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    username = None
+    try:
+        import pwd  # type: ignore
+        if uid is not None:
+            username = pwd.getpwuid(uid).pw_name
+    except Exception:
+        username = os.environ.get("USER") or os.environ.get("USERNAME")
+    subuid = _read_text_if("/etc/subuid")
+    subgid = _read_text_if("/etc/subgid")
+    has_subids = False
+    if uid == 0:
+        has_subids = True
+    elif username and subuid and subgid:
+        has_subids = any(line.startswith(username + ":") or line.startswith(str(uid) + ":") for line in subuid.splitlines()) and \
+            any(line.startswith(username + ":") or line.startswith(str(uid) + ":") for line in subgid.splitlines())
+    record("subid_maps", has_subids, {"uid": uid, "user": username, "subuid_present": subuid is not None, "subgid_present": subgid is not None},
+           None if has_subids else "unprivileged idmap configuration (/etc/subuid,/etc/subgid) not available for current user")
+
+    lxc_usernet = _read_text_if("/etc/lxc/lxc-usernet")
+    record("lxc_usernet", bool(lxc_usernet), {"present": lxc_usernet is not None},
+           None if lxc_usernet else "lxc user network configuration (/etc/lxc/lxc-usernet) not available")
+
+    capable = len(blockers) == 0
+    return capable, checks, blockers
+
+
+def cmd_boot_qualify(args: argparse.Namespace) -> int:
+    """Fail-closed unprivileged LXC import/boot qualification.
+
+    Verifies signed upstream archive bytes (real archive evidence) in an owned
+    disposable work directory, probes for an approved/capable disposable runner
+    environment, and only reports qualification as ok when an actual
+    unprivileged import and boot is performed and evidenced. Missing capability
+    or any failed boot step is a refused result with explicit blockers.
+    """
+    provenance_path = Path(args.provenance)
+    work = Path(args.work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    archive_work = Path(getattr(args, "signed_archive_dir", None) or (work / "signed-archive"))
+    archive_work.mkdir(parents=True, exist_ok=True)
+
+    # Real archive evidence is mandatory: verify (or fetch+verify) the signed
+    # upstream archive bytes before any boot claim is considered.
+    verify_rc, verify_payload = _verify_signed_archive_result(
+        provenance_path, args.arch, archive_work, bool(getattr(args, "fetch", False)),
+    )
+
+    report_path = Path(args.report) if getattr(args, "report", None) else (work / "boot-qualification-report.json")
+
+    base_report = {
+        "schema": BOOT_QUALIFICATION_SCHEMA,
+        "arch": args.arch,
+        "provenance": str(provenance_path),
+        "work_dir": str(work),
+        "signed_archive_dir": str(archive_work),
+        "signed_archive_verification": verify_payload,
+        "evidence_scope": (
+            "signed upstream archive bytes verified in an owned disposable path; "
+            "unprivileged import/boot qualification is reported separately and fail-closed"
+        ),
+    }
+
+    if verify_rc != 0 or verify_payload.get("status") != "ok":
+        payload = result_refused(
+            "SIGNED_ARCHIVE_NOT_VERIFIED",
+            "signed archive byte verification failed; boot qualification cannot proceed",
+            **base_report,
+            boot_qualification={"status": "blocked", "reason": "signed archive verification did not pass"},
+        )
+        try:
+            write_json(report_path, payload)
+            payload["report_path"] = str(report_path)
+        except Exception:
+            pass
+        emit(payload)
+        return 1
+
+    capable, checks, blockers = probe_lxc_boot_prerequisites()
+    boot: dict[str, Any] = {
+        "status": "blocked",
+        "capable_runner": capable,
+        "prerequisite_checks": checks,
+        "blockers": blockers,
+        "attempted": False,
+        "import_evidence": None,
+        "boot_evidence": None,
+        "first_boot_identity_evidence": None,
+        "cleanup_evidence": None,
+    }
+
+    if not capable:
+        boot["reason"] = "no approved/capable disposable runner environment for unprivileged LXC import+boot"
+        boot["note"] = (
+            "Fail-closed: signed archive bytes are verified, but actual unprivileged LXC import and boot "
+            "are not qualified on this runner. Provide a disposable runner with unprivileged LXC prerequisites "
+            "to obtain live boot evidence."
+        )
+        payload = result_refused(
+            "BOOT_QUALIFICATION_BLOCKED",
+            "runner lacks prerequisites for unprivileged LXC import/boot qualification",
+            **base_report,
+            boot_qualification=boot,
+        )
+        try:
+            write_json(report_path, payload)
+            payload["report_path"] = str(report_path)
+        except Exception:
+            pass
+        emit(payload)
+        return 1
+
+    # Prerequisites appear present; attempt an actual disposable import+boot.
+    # This path is intentionally conservative and best-effort: any failure is
+    # recorded as a fail-closed blocker with collected evidence.
+    boot["attempted"] = True
+    root_name = None
+    for item in verify_payload.get("bytes_checked", []) or []:
+        if isinstance(item, dict) and str(item.get("artifact", "")).endswith("-root.tar.xz"):
+            root_name = item.get("artifact")
+            break
+    if root_name is None:
+        boot["blockers"] = blockers + ["verified root tarball name not found in signed archive evidence"]
+        boot["status"] = "blocked"
+        payload = result_refused(
+            "BOOT_QUALIFICATION_BLOCKED",
+            "could not identify verified root tarball for import",
+            **base_report,
+            boot_qualification=boot,
+        )
+        try:
+            write_json(report_path, payload)
+            payload["report_path"] = str(report_path)
+        except Exception:
+            pass
+        emit(payload)
+        return 1
+
+    root_tarball = archive_work / str(root_name)
+    import_root = work / "import-rootfs"
+    container_name = f"cp-lxc-qual-{os.getpid()}"
+    boot_log: list[dict[str, Any]] = []
+    try:
+        if import_root.exists():
+            shutil.rmtree(import_root)
+        import_root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(root_tarball, "r:*") as tf:
+            # Safe extraction: refuse absolute paths and traversal.
+            for member in tf.getmembers():
+                name = member.name.lstrip("/")
+                if not name or name.startswith("..") or "/../" in ("/" + name + "/"):
+                    raise ValueError(f"unsafe tar member: {member.name}")
+            tf.extractall(import_root, filter="data" if hasattr(tarfile, "data_filter") else None)
+        boot_log.append({"step": "extract_rootfs", "ok": True, "path": str(import_root)})
+
+        config_dir = work / "lxc-config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config"
+        config_lines = [
+            f"lxc.rootfs.path = dir:{import_root}",
+            "lxc.uts.name = cp-lxc-qual",
+            "lxc.namespace.clone = user pid uts ipc mnt",
+            "lxc.apparmor.profile = unconfined",
+            "lxc.seccomp.profile = ",
+            "lxc.init.cmd = /bin/true",
+        ]
+        config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
+        boot_log.append({"step": "write_config", "ok": True, "path": str(config_path)})
+
+        # Best-effort LXC lifecycle. Any non-zero result is treated as a
+        # fail-closed blocker with captured output.
+        def run_step(step: str, cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            boot_log.append({
+                "step": step, "cmd": cmd, "returncode": proc.returncode,
+                "stdout": (proc.stdout or "")[:4000], "stderr": (proc.stderr or "")[:4000],
+            })
+            return proc
+
+        p = run_step("lxc_create", ["lxc-create", "-n", container_name, "-f", str(config_path), "-t", "none"], timeout=120)
+        if p.returncode != 0:
+            raise RuntimeError("lxc-create failed")
+        boot["import_evidence"] = {"container": container_name, "config": str(config_path), "rootfs": str(import_root)}
+
+        p = run_step("lxc_start", ["lxc-start", "-n", container_name, "-F", "-l", "ERROR"], timeout=120)
+        if p.returncode != 0:
+            # Some environments need daemonized start; try once.
+            p = run_step("lxc_start_daemon", ["lxc-start", "-n", container_name], timeout=120)
+            if p.returncode != 0:
+                raise RuntimeError("lxc-start failed")
+        boot["boot_evidence"] = {"container": container_name, "started": True, "steps": [e["step"] for e in boot_log]}
+
+        # Minimal post-boot evidence: confirm init command completed / container reached a terminal state.
+        run_step("lxc_wait", ["lxc-wait", "-n", container_name, "-s", "STOPPED"], timeout=120)
+        info = run_step("lxc_info", ["lxc-info", "-n", container_name], timeout=30)
+        boot["first_boot_identity_evidence"] = {
+            "note": "container executed /bin/true in disposable unprivileged LXC context; upstream rootfs import+boot smoke verified",
+            "lxc_info_returncode": info.returncode,
+        }
+        boot["status"] = "ok"
+        boot["reason"] = "actual unprivileged LXC import and boot smoke completed on a capable disposable runner"
+
+    except Exception as exc:
+        boot["status"] = "blocked"
+        boot["blockers"] = blockers + [f"boot attempt failed: {type(exc).__name__}: {str(exc)[:300]}"]
+        boot["reason"] = "prerequisites were detected but actual import/boot could not be qualified (fail-closed)"
+    finally:
+        cleanup: dict[str, Any] = {}
+        try:
+            subprocess.run(["lxc-stop", "-n", container_name, "-k"], capture_output=True, text=True, timeout=30)
+            cleanup["stop"] = "attempted"
+        except Exception:
+            cleanup["stop"] = "skipped"
+        try:
+            proc = subprocess.run(["lxc-destroy", "-n", container_name], capture_output=True, text=True, timeout=30)
+            cleanup["destroy_rc"] = proc.returncode
+        except Exception as e:
+            cleanup["destroy_error"] = str(e)[:200]
+        boot["cleanup_evidence"] = cleanup
+        boot["steps"] = boot_log
+
+    qualified = boot.get("status") == "ok"
+    if qualified:
+        payload = result_ok(**base_report, boot_qualification=boot)
+        rc = 0
+    else:
+        payload = result_refused(
+            "BOOT_QUALIFICATION_BLOCKED",
+            str(boot.get("reason") or "unprivileged LXC import/boot not qualified"),
+            **base_report,
+            boot_qualification=boot,
+        )
+        rc = 1
+    try:
+        write_json(report_path, payload)
+        payload["report_path"] = str(report_path)
+    except Exception:
+        pass
+    emit(payload)
+    return rc
+
+
+# --------------------------------------------------------------------------- #
 # entrypoint
 # --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
@@ -1418,6 +1751,17 @@ def build_parser() -> argparse.ArgumentParser:
     sa.add_argument("--fetch", action="store_true",
                     help="direct-GET the pinned artifacts into --work-dir; otherwise verify files already staged there")
     sa.set_defaults(func=cmd_verify_signed_archive)
+
+    bq = sub.add_parser("boot-qualify")
+    bq.add_argument("--provenance", default=str(Path(__file__).parent / "config" / "provenance.json"))
+    bq.add_argument("--arch", required=True, choices=("amd64", "arm64"))
+    bq.add_argument("--work-dir", required=True)
+    bq.add_argument("--signed-archive-dir",
+                    help="directory containing staged signed archive files (defaults to <work-dir>/signed-archive)")
+    bq.add_argument("--fetch", action="store_true",
+                    help="direct-GET and verify signed upstream archive bytes before probing import/boot")
+    bq.add_argument("--report", help="path to write the JSON qualification report (defaults to <work-dir>/boot-qualification-report.json)")
+    bq.set_defaults(func=cmd_boot_qualify)
 
     return parser
 

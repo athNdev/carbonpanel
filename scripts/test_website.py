@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
 """Integration checks for snapshot isolation and subpath publication."""
+import hashlib
 from html.parser import HTMLParser
 import copy
 import json
@@ -14,6 +15,7 @@ from scripts.build_website import (
     export_snapshot,
     normalize_mdx,
     publish_design_system,
+    publish_shared_index,
     render_astro_config,
     scoped_links,
 )
@@ -110,6 +112,19 @@ class WebsiteTests(unittest.TestCase):
     def test_floating_ref_is_rejected_before_archive(self):
         with self.assertRaises(ValueError):
             export_snapshot(Path("."), "main", Path("."))
+
+    def test_shared_index_is_published_at_root_and_docs(self):
+        index = {"schema_version": 2, "stable": {"tag": "v1.0.40"}, "versions": []}
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            payload = publish_shared_index(output, index)
+            root_index = output / "version-index.json"
+            docs_index = output / "docs" / "version-index.json"
+            self.assertEqual(root_index.read_text(encoding="utf-8"), payload)
+            self.assertEqual(docs_index.read_text(encoding="utf-8"), payload)
+            self.assertEqual(
+                hashlib.sha256(root_index.read_bytes()).hexdigest(),
+                hashlib.sha256(docs_index.read_bytes()).hexdigest())
 
     def test_hero_frontmatter_links_are_rebased(self):
         source = "---\nhero:\n  actions:\n      link: /introduction/\n      link: https://example.com/\n---\n"

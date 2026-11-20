@@ -27,7 +27,8 @@ live only on owning node storage.
   A shared reference is read-only metadata and is never mounted writable.
 - A live world change is a journalled stop → quiesce → node-side stage/verify →
   atomic level-family publish → rebind → restart → verify transaction with
-  `request_id` idempotency and an operator-resolution path for unknown outcomes.
+  `request_id` idempotency, an operator-resolution path for unknown outcomes,
+  and an idempotent request-keyed activity event on successful bind/unbind.
   A folder rename is not a hot swap. Never auto-retry an uncertain outcome.
 - Node resolution is strict and fail-closed: remote-without-transport returns
   `ErrUnavailable`; there is no controller-local fallback. Work that outlives

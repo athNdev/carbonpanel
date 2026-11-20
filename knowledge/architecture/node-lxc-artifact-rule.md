@@ -4,7 +4,7 @@ title: "Unprivileged LXC node artifact lane — Rule"
 description: "The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at"
 status: draft
 owners: [oss-runtime]
-code_refs: [packaging/node-lxc, packaging/node-lxc/node_lxc_artifact.py, packaging/node-lxc/config/provenance.json, packaging/node-lxc/config/provenance.fixture.json, packaging/node-lxc/qualification/QUALIFICATION.md, packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md, packaging/node-lxc/tests/test_node_lxc.py, docs/node-lxc-mode.md]
+code_refs: [packaging/node-lxc, packaging/node-lxc/node_lxc_artifact.py, packaging/node-lxc/config/provenance.json, packaging/node-lxc/config/provenance.fixture.json, packaging/node-lxc/qualification/QUALIFICATION.md, packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md, packaging/node-lxc/tests/test_node_lxc.py, docs/node-lxc-mode.md, .github/workflows/lxc-boot-qualification.yml]
 sources:
   - title: Parent concept
     resource: node-lxc-artifact.md
@@ -50,9 +50,3 @@ credential type, TLS stack or publication workflow.
 - Persistent worlds and identity are imported, backed up and restored with
   integrity checks and data-preserving refusals. Upgrade/rollback uses verified
   staged slots.
-- Runtime behavior is qualified only by disposable offline fixtures. Real guest
-  boot is externally blocked on the authoring host (no `/dev/kvm`, no LXC
-  tooling; the owned WSL 2 distribution has neither and installing would need
-  elevation/host configuration); live import/boot, effective kernel enforcement
-  and gameplay compatibility are not claimed. Pin and signed-archive byte
-  verification is evidence about upstream artifacts, not boot evidence.

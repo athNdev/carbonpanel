@@ -24,7 +24,14 @@ const { default: tailwind } = await import(
 
 const scenarioIndex = process.argv.indexOf('--scenario');
 const scenario = scenarioIndex >= 0 ? process.argv[scenarioIndex + 1] : 'all';
-const scenarios = ['stale-listing', 'auth-fail', 'non-idempotent', 'recreation', 'snapshot-race'];
+const scenarios = [
+	'stale-listing',
+	'auth-fail',
+	'non-idempotent',
+	'recreation',
+	'snapshot-race',
+	'transient-reconnect'
+];
 if (scenario !== 'all' && !scenarios.includes(scenario)) {
 	throw new Error(`Unknown OSS-245 scenario ${scenario}; expected one of ${scenarios.join(', ')}`);
 }
@@ -248,6 +255,57 @@ async function run(page, base) {
 		assert.ok(text.includes('FRESH-SNAPSHOT'), 'the newer full snapshot must stay rendered');
 		assert.ok(!text.includes('SLOW-STALE-LISTING'), 'an older listing must not repaint it');
 		console.log('PASS: a full WebSocket snapshot fences an in-flight listing (Chromium)');
+	}
+
+	if (scenario === 'all' || scenario === 'transient-reconnect') {
+		await open(page, base);
+		await page.evaluate(() =>
+			globalThis.__oss245Rpc.resolveListing(0, [{ message: 'BEFORE-DISCONNECT' }])
+		);
+		await page.waitForFunction(() =>
+			document.querySelector('[role="log"]')?.textContent?.includes('BEFORE-DISCONNECT')
+		);
+		const before = await wsState();
+		assert.equal(before.socketCount, 1);
+
+		// A transport drop is not a credential rejection: the console must show
+		// a reconnecting state and recover continuity automatically.
+		await page.evaluate(() => globalThis.__oss245Ws.drop());
+		await page.waitForFunction(
+			() => globalThis.__oss245Ws.state().connectionState === 'disconnected'
+		);
+		await page.getByText('RECONNECTING').waitFor();
+		await page.waitForFunction(() => {
+			const alert = document.querySelector('[role="alert"]');
+			return alert?.textContent?.includes('Console connection lost. Attempting to reconnect.');
+		});
+
+		await page.waitForFunction(() => globalThis.__oss245Ws.state().socketCount >= 2, null, {
+			timeout: 15000
+		});
+		await page.evaluate(() => globalThis.__oss245Ws.open());
+		await page.waitForFunction(
+			() => globalThis.__oss245Ws.state().connectionState === 'authenticated',
+			null,
+			{ timeout: 15000 }
+		);
+		// state() reports counts for the latest (reconnected) socket instance.
+		await page.waitForFunction(
+			() => globalThis.__oss245Ws.state().subscribeCount >= 1,
+			null,
+			{ timeout: 15000 }
+		);
+
+		const after = await wsState();
+		assert.ok(after.subscribeCount >= 1, 'reconnect must resubscribe');
+		assert.ok(after.socketCount > before.socketCount, 'reconnect must create a replacement socket');
+		assert.equal(after.error, null);
+		await emitEntry('server-A', 'AFTER-RECONNECT-LIVE');
+		const text = await logText();
+		assert.ok(text.includes('BEFORE-DISCONNECT'), 'existing console history must remain visible');
+		assert.ok(text.includes('AFTER-RECONNECT-LIVE'), 'live log delivery must continue after reconnect');
+		assert.equal(await page.getByText('SIGNED OUT').count(), 0, 'transport loss must not sign out');
+		console.log('PASS: transient disconnect reconnects, resubscribes and continues live delivery (Chromium)');
 	}
 }
 

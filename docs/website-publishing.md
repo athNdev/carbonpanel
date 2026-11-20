@@ -141,6 +141,13 @@ Pages metadata. Each channel is a separate Starlight build with its own base,
 so asset URLs, search indices and canonical URLs stay isolated. A missing page
 falls back to the 404 page under that channel's base.
 
+The same index is published byte-identically at two public URLs: the site root
+`/version-index.json` and the documented documentation URL
+`/docs/version-index.json`. One SHA-256 therefore verifies either surface.
+`check_website.py` fails closed when the `/docs/` copy is missing or drifts
+from the root copy, so a dispatch that would leave the documented URL at 404
+cannot be called a verified publication.
+
 Older snapshots may use HTML license comments and sidebar slugs that the
 current MDX/Starlight tooling no longer accepts. The builder applies a narrow
 presentation-only compatibility rewrite: SPDX HTML comments become MDX comments,
@@ -205,6 +212,21 @@ artifacts first, then redeploy Pages, then verify the published `source.json`,
 then reconcile registries/GitHub. There is no cross-provider atomic transaction;
 a failed step is retried from the verified artifact, never by moving a published
 tag or overwriting a release. See [release operations](releases.md).
+
+Pages publication is an explicit `workflow_dispatch` of
+`.github/workflows/landing.yml` with `deploy=true` on the trusted
+`refs/heads/main` ref. The dispatched commit is the exact main HEAD at trigger
+time; `verify-main-ci` refuses it unless that SHA is an ancestor of `main` and
+has a completed successful push run of `ci.yml`. The artifact is the
+`github-pages` artifact uploaded by that same run. Derive the documented
+publication from the contract (stable tag and peeled commit), not from a
+free-form input: after the deploy job succeeds, check the run ID and artifact
+SHA-256, then fetch the live `/docs/source.json` (stable tag, channel and
+peeled commit), `/docs/version-index.json`, `/docs/` (stable default plus
+switcher) and each `/docs/versions/<version>/` route. A missing route is a
+failed publication, not a cache delay to be assumed away; retry the dispatch
+only after re-verifying the exact-commit artifact, and never retag, overwrite
+an immutable route or mutate a registry to reconcile a Pages failure.
 
 Generated output stays in ignored `.website-build/site/`. The builder excludes
 landing QA pages. The link check validates local page and asset paths, including

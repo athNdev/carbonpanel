@@ -54,3 +54,5 @@ chunk CRCs, alt text, provenance, no credential material, no unexpected files).
 An unchanged content digest is a no-op; a failed capture never removes the
 previous good images. Login-route bootstrap selection must wait for one
 mutually exclusive semantic state rather than counting nodes before hydration.
+The gated World View capture has its own fail-closed rule: see
+[World View capture evidence](world-view-capture-evidence.md).

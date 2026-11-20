@@ -380,6 +380,21 @@ def build_sitemap(output, base, site, lastmod=None, bases=None):
     ET.ElementTree(sitemap).write(output / "sitemap.xml", encoding="utf-8", xml_declaration=True)
 
 
+def publish_shared_index(output, index):
+    """Publish the one shared index at both the site root and /docs/.
+
+    The root copy drives published metadata and direct-URL validation. The
+    /docs/ copy is the documented public URL for the machine-readable version
+    contract. Both are byte-identical, so one SHA-256 verifies either surface.
+    """
+    shared = version_contract.render_index(index)
+    (output / "version-index.json").write_text(shared, encoding="utf-8")
+    docs = output / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "version-index.json").write_text(shared, encoding="utf-8")
+    return shared
+
+
 def build(root, base, site, promotion=None):
     if not base.startswith("/") or not base.endswith("/") or ".." in base:
         raise ValueError("The website base must be an absolute path ending in /.")
@@ -436,7 +451,9 @@ def build(root, base, site, promotion=None):
     # Index and marker are shared by the switcher, banner, direct URL validation,
     # public candidate verification and metadata. The marker is only written to
     # the generated artifact; promotion inputs never touch a tracked main file.
-    (output / "version-index.json").write_text(version_contract.render_index(index), encoding="utf-8")
+    # One source of bytes publishes both public URLs; a missing/drifted docs
+    # copy fails the published-route liveness gate.
+    publish_shared_index(output, index)
     marker = version_contract.channel_marker(index)
     marker_text = json.dumps(marker, indent=2, ensure_ascii=False) + "\n"
     (output / "channel-marker.json").write_text(marker_text, encoding="utf-8")

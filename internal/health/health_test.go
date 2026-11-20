@@ -7,6 +7,7 @@ package health
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -455,6 +456,7 @@ func TestClassifyKeepsLastGoodOnStaleStatus(t *testing.T) {
 	if !got[0].LastGoodAt.Equal(lastGood) {
 		t.Fatalf("lastGoodAt = %s, want %s", got[0].LastGoodAt, lastGood)
 	}
+	assertSafeActionableRecovery(t, got[0], "stale reading must include safe actionable recovery")
 	snap := Compute(in)
 	if snap.Servers.Stale != 1 || snap.Servers.Playable != 0 || snap.Servers.Stopped != 0 {
 		t.Fatalf("summary = %+v, want stale not playable or stopped", snap.Servers)
@@ -472,6 +474,116 @@ func TestClassifyDoesNotCallStaleJoinPlayable(t *testing.T) {
 	}
 	if got.LastGoodAt.IsZero() {
 		t.Fatal("last-good join time must survive an unobserved reading")
+	}
+	assertSafeActionableRecovery(t, got, "unobserved reading must include safe actionable recovery")
+}
+
+func TestClassifyServerProvidesFreshnessEvidenceAndSafeRecovery(t *testing.T) {
+	in := baseInput()
+	now := in.CheckedAt
+	tests := []struct {
+		name      string
+		server    ServerObservation
+		observed  time.Time
+		wantKind  ReadingKind
+		wantGood  bool
+		wantFresh bool
+	}{
+		{
+			name: "playable has fresh join evidence",
+			server: ServerObservation{
+				ID: "play", Status: "running", UpdatedAt: now,
+				Game: Probe{Source: SourceSLP, ObservedAt: now.Add(-time.Second), OK: true},
+			},
+			wantKind:  ReadingPlayable,
+			wantGood:  true,
+			wantFresh: true,
+		},
+		{
+			name: "unjoinable has fresh failed probe",
+			server: ServerObservation{
+				ID: "bad", Status: "running", UpdatedAt: now,
+				Game: Probe{Source: SourceSLP, ObservedAt: now.Add(-time.Second), OK: false},
+			},
+			wantKind:  ReadingUnjoinable,
+			wantFresh: true,
+		},
+		{
+			name: "unobserved running keeps last-good join",
+			server: ServerObservation{
+				ID: "none", Status: "running", UpdatedAt: now,
+				Game: Probe{Source: SourceSLP, ObservedAt: now.Add(-10 * time.Minute), OK: true},
+			},
+			wantKind: ReadingUnobserved,
+			wantGood: true,
+		},
+		{
+			name: "stale status keeps status observation time",
+			server: ServerObservation{
+				ID: "stale", Status: "running", UpdatedAt: now.Add(-10 * time.Minute),
+				Game: Probe{Source: SourceSLP, ObservedAt: now.Add(-11 * time.Minute), OK: true},
+			},
+			wantKind: ReadingStale,
+			wantGood: true,
+		},
+		{
+			name: "starting is fresh startup evidence",
+			server: ServerObservation{
+				ID: "start", Status: "starting", UpdatedAt: now, StartedAt: now.Add(-30 * time.Second),
+			},
+			wantKind: ReadingStarting,
+		},
+		{
+			name: "timed out startup is actionable",
+			server: ServerObservation{
+				ID: "slow", Status: "starting", UpdatedAt: now, StartedAt: now.Add(-10 * time.Minute),
+			},
+			wantKind: ReadingTimedOut,
+		},
+		{
+			name: "stopped status is fresh non-running evidence",
+			server: ServerObservation{
+				ID: "off", Status: "stopped", UpdatedAt: now,
+			},
+			wantKind: ReadingStopped,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caseIn := in
+			if !tt.observed.IsZero() {
+				caseIn.ObservedAt = tt.observed
+			}
+			got := ClassifyServer(tt.server, caseIn)
+			if got.Kind != tt.wantKind {
+				t.Fatalf("kind = %s, want %s", got.Kind, tt.wantKind)
+			}
+			if got.StatusObservedAt.IsZero() && tt.wantKind != ReadingStarting {
+				t.Fatalf("statusObservedAt missing for %s", tt.wantKind)
+			}
+			if tt.wantFresh && got.JoinObservedAt.IsZero() {
+				t.Fatalf("joinObservedAt missing for fresh probe reading %s", tt.wantKind)
+			}
+			if tt.wantGood && got.LastGoodAt.IsZero() {
+				t.Fatalf("lastGoodAt missing for reading %s", tt.wantKind)
+			}
+			assertSafeActionableRecovery(t, got, "reading must include safe actionable recovery")
+		})
+	}
+}
+
+func assertSafeActionableRecovery(t *testing.T, got Reading, msg string) {
+	t.Helper()
+	if got.Recovery == "" {
+		t.Fatalf("%s: recovery is empty for kind %s", msg, got.Kind)
+	}
+	if got.Detail == "" {
+		t.Fatalf("%s: detail is empty for kind %s", msg, got.Kind)
+	}
+	for _, leaked := range []string{"/", "\\", "://", "C:", "secret", "password", "token"} {
+		if strings.Contains(got.Recovery, leaked) || strings.Contains(got.Detail, leaked) {
+			t.Fatalf("%s: reading leaked unsafe marker %q: detail=%q recovery=%q", msg, leaked, got.Detail, got.Recovery)
+		}
 	}
 }
 

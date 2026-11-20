@@ -186,32 +186,49 @@ use only synthetic keys and fixture files — no daemon, host or real credential
 ### Linux systemd qualification fixture
 
 `scripts/qualify-node-installer-systemd.sh` runs **inside an owned Linux
-systemd environment** (PID 1 = systemd). It renders both modes, installs the
-rendered rootless unit in the user unit directory and the rendered rootful unit
-in the runtime unit directory (`/run/systemd/system`, never `/etc`), then
-records real `systemctl` status, `ExecMainStatus`, heartbeat logs and a second
-boot record after `restart`. It also resets the rootless `XDG_RUNTIME_DIR`,
-verifies state survives and the unit restarts, checks canonical/distinct/owned/
-contained roots with `realpath`/`stat`, and exercises six fail-closed refusals
-(shared socket/data/containerd roots, traversal, world-writable parent and a
-symlink escape) using temporary paths only.
+systemd environment** (PID 1 = systemd). It is a disposable, data-only fixture:
+every path is temporary, units are transient or runtime-dir scoped, and no real
+dockerd, package install, `/etc` write, network, registry/release, world or
+database change is performed.
 
-`ValidateDaemonPaths` is the read-only path guard called by `render-daemon`
-before any rendering: it rejects shared daemon paths, traversal, overlapping or
-escaping roots, world-writable ancestors, symlinks outside the owned roots and
-collisions with an existing daemon. `RuntimeRoot`/`StateRoot` are required in
-every spec.
+Where runtime support allows in that fixture, it records installer-specific
+acceptance with explicit evidence levels:
+
+- **Installer selection + rendered daemon profiles:** native rootless (per-user
+  launcher, `--config-file` only), native rootful (explicit-root system unit with
+  capability bound), and a captive-rootless deployment context rendered as a
+  rootless daemon profile. Captive rootful is recorded as **unsupported** for an
+  unprivileged LXC captive deployment by design (privileged nesting refused); no
+  VM/LXC workflow is exercised.
+- **Real systemd behavior (fixture daemon):** rendered rootless and rootful
+  units start and restart via `systemctl`, with `ExecMainStatus`/result/status
+  evidence and fresh boot records; rootless survives an `XDG_RUNTIME_DIR` reset.
+- **Canonical roots and refusals:** distinct, owned, contained roots and six
+  fail-closed refusals (shared socket/data/containerd roots, traversal,
+  world-writable parent, and symlink escape) using temporary paths only.
+  `ValidateDaemonPaths` remains the read-only guard called by `render-daemon`.
+- **Authenticated enrollment acceptance (shared boundary seam):** exercises the
+  installer-generated enrollment material through the shared production boundary
+  integration fixtures (`internal/noderuntime/enroll` lifecycle qualification and
+  `internal/rpc` enrollment integration), using synthetic keys and disposable
+  state in that environment. This is not a live host, not a mounted production
+  enrollment RPC, and not a deployment.
+- **Upgrade/rollback (installer seam):** verifies/promotes/rolls back versioned
+  artifacts in caller-owned disposable state directories for native rootless,
+  native rootful, and captive-rootless profiles. No live runtime workload, image
+  publish, or host service mutation is involved.
 
 **Fixture-only accommodations (honest limits):** a no-op daemon script replaces
-the real dockerd binary (only the `ExecStart` executable differs); the fixture
-copies change `Type=notify` to `simple` and add `ReadWritePaths` so the no-op
-daemon can write a heartbeat. The rootless unit is structurally per-user but
-runs in the existing user manager with a non-root *path* UID because the owned
-fixture has no non-root account. Evidence covers a service **restart**, not a
-full OS reboot; no real Docker engine, storage driver, container network or
-live host was started or changed.
+the real dockerd binary (only the `ExecStart` executable differs); fixture unit
+copies change `Type=notify` to `simple` and add `ReadWritePaths` for heartbeat
+logging. The rootless unit is structurally per-user but may run in the existing
+user manager with a non-root *path* UID when no non-root account exists. Evidence
+covers service **restart**, not a full OS reboot.
 
-> Evidence boundary: these are M3 disposable fixtures. They prove refusal,
-> state-machine and data-preservation behavior only. No live host import/boot,
-> no real hypervisor/LXC, no production enrollment handler and no artifact
-> publication is claimed by this page. Those belong to later milestones.
+> Evidence boundary: these are disposable fixtures. They prove installer
+> selection/rendering, refusal, state-machine, shared-boundary enrollment
+> acceptance, and upgrade/rollback behavior at the installer seam only. No live
+> host/guest import or boot, no real hypervisor/LXC, no nested captive-docker
+> runtime in an unprivileged LXC, no live host deployability, no shipped-unit
+> boot with real dockerd, no OS reboot, no production enrollment success, and no
+> artifact publication or release is claimed.

@@ -16,6 +16,14 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
+func isModuleNotFoundError(err error) bool {
+	return err != nil && err.Error() == "module not found"
+}
+
+func isServerNotFoundError(err error) bool {
+	return err != nil && err.Error() == "server not found"
+}
+
 // ReconcileOutcome says what a module convergence pass did. It is returned
 // rather than only logged so the reconciler and its tests can assert on it.
 type ReconcileOutcome string
@@ -30,8 +38,9 @@ const (
 	// ReconcileRecreated means a missing container was recreated for a running
 	// module whose parent server is running.
 	ReconcileRecreated ReconcileOutcome = "recreated"
-	// ReconcileStopped means the container is gone and the module is recorded
-	// as stopped instead of claiming it runs.
+	// ReconcileStopped means the module converged to stopped: the container was
+	// already gone, or an orphan sidecar was stopped because its parent server
+	// no longer exists.
 	ReconcileStopped ReconcileOutcome = "stopped"
 	// ReconcileSkipped means there was nothing safe to do: the module is gone,
 	// its node cannot be reached, or its parent is not running.
@@ -50,6 +59,7 @@ const (
 	actionAdopt             moduleAction = "adopt"
 	actionRecreate          moduleAction = "recreate"
 	actionMarkGone          moduleAction = "mark_gone"
+	actionStopOrphan        moduleAction = "stop_orphan"
 	actionWaitForDependency moduleAction = "wait_for_dependency"
 	actionWaitForPorts      moduleAction = "wait_for_ports"
 	actionWaitForParent     moduleAction = "wait_for_parent"
@@ -109,6 +119,14 @@ func decideModuleObservation(mod *storage.Module, parent *storage.Server, obs Mo
 		return actionRecreate
 	}
 
+	// A sidecar whose parent server record is gone is an orphan. It must be
+	// stopped and recorded as stopped rather than adopted or left running
+	// without an owning server. Do not remove the container: RemoveContainer
+	// purges volumes and this convergence must not casually destroy data.
+	if parent == nil {
+		return actionStopOrphan
+	}
+
 	if obs.ContainerID != "" && obs.ContainerID != mod.ContainerID {
 		return actionAdopt
 	}
@@ -145,20 +163,27 @@ func applyReconcileGates(mod *storage.Module, action moduleAction, gates reconci
 
 // ReconcileModule converges one module record with the container the daemon
 // reports. It adopts a drifted container id or status, records a container that
-// disappeared as stopped, and recreates a missing container only when the
-// module and its parent server are both meant to be running.
+// disappeared as stopped, stops an orphan sidecar whose parent server record is
+// gone, and recreates a missing container only when the module and its parent
+// server are both meant to be running.
 //
 // A node that cannot be reached leaves the record untouched: an unreachable
-// daemon is not evidence that the container is gone. A missing container is
-// restored without RemoveVolumes so sidecar data is not purged on reconnect.
+// daemon is not evidence that the container is gone. Missing or orphaned
+// containers are never removed with volumes so sidecar data is not purged.
 func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (ReconcileOutcome, error) {
 	if strings.TrimSpace(moduleID) == "" {
 		return ReconcileSkipped, nil
 	}
 
 	mod, err := m.store.GetModule(ctx, moduleID)
-	if err != nil || mod == nil {
-		// Deleted between the event and this pass; nothing to converge.
+	if err != nil {
+		if isModuleNotFoundError(err) {
+			// Deleted between the event and this pass; nothing to converge.
+			return ReconcileSkipped, nil
+		}
+		return ReconcileSkipped, fmt.Errorf("load module %s: %w", moduleID, err)
+	}
+	if mod == nil {
 		return ReconcileSkipped, nil
 	}
 
@@ -172,7 +197,13 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 		return ReconcileSkipped, err
 	}
 
-	parent, _ := m.store.GetServer(ctx, mod.ServerID)
+	parent, err := m.store.GetServer(ctx, mod.ServerID)
+	if err != nil {
+		if !isServerNotFoundError(err) {
+			return ReconcileSkipped, fmt.Errorf("load parent server for module %s: %w", mod.Name, err)
+		}
+		parent = nil
+	}
 	depsReady, err := m.moduleDependenciesRunning(ctx, mod)
 	if err != nil {
 		return ReconcileSkipped, fmt.Errorf("check dependencies for module %s: %w", mod.Name, err)
@@ -204,6 +235,27 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 			}
 		}
 		m.logger.Info("Module %s has no container; recorded as stopped", mod.Name)
+		return ReconcileStopped, nil
+
+	case actionStopOrphan:
+		containerID := obs.ContainerID
+		if containerID == "" {
+			containerID = mod.ContainerID
+		}
+		if containerID != "" {
+			if _, err := cli.StopContainer(ctx, containerID); err != nil {
+				return ReconcileSkipped, fmt.Errorf("stop orphan module %s container: %w", mod.Name, err)
+			}
+		}
+		if err := m.store.UpdateModuleStatus(ctx, mod.ID, storage.ModuleStatusStopped); err != nil {
+			return ReconcileSkipped, fmt.Errorf("record orphan module %s as stopped: %w", mod.Name, err)
+		}
+		if mod.ContainerID != "" {
+			if err := m.store.UpdateModuleContainerID(ctx, mod.ID, ""); err != nil {
+				return ReconcileSkipped, fmt.Errorf("clear container id for orphan module %s: %w", mod.Name, err)
+			}
+		}
+		m.logger.Info("Stopped orphan module %s because its parent server record is gone", mod.Name)
 		return ReconcileStopped, nil
 
 	case actionAdopt:

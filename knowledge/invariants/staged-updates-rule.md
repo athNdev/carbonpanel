@@ -5,7 +5,7 @@ description: "A server has one open update batch. Staging adds to that batch. It
 status: stable
 owners: [oss-runtime]
 code_refs: [internal/db/staged_config.go, internal/db/staged_content.go, internal/rpc/services/stage_content.go, internal/staging, internal/rpc/services/update_batch.go, internal/scheduler/scheduler.go, web/carbon-panel/src/lib/components/server-configuration.svelte, web/carbon-panel/src/lib/components/server-tasks.svelte]
-verified: { by: agent:codex, at: 2026-11-13 }
+verified: { by: agent:opencode, at: 2026-11-20 }
 sources:
   - title: Parent concept
     resource: staged-updates.md
@@ -43,8 +43,10 @@ the time that stretch started is stored on the batch. A player joining clears
 it. Deep sleep commits the batch onto the stopped server and does not start
 the JVM. A running server is saved and restarted once. A frozen server gets a
 real stop and start and is left running. If that publish fails, the previous
-files and config are restored and the batch stays open. A live config field
-that moved after it was staged stops the publish before anything is written.
+files and config are restored and the batch stays open. Failed publications
+keep rows staged and reconcile rolled-back batch configs; retries after
+completed publication only finish bookkeeping. A live config field that moved
+after it was staged stops the publish before anything is written.
 
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same

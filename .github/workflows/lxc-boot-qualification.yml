@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: MPL-2.0
+# Fail-closed unprivileged LXC import/boot qualification for the node-lxc
+# packaging lane (OSS-378/402). It always verifies real signed upstream archive
+# bytes in an owned disposable path, then probes for a capable unprivileged LXC
+# runner. Actual import/boot is reported as qualified only when performed and
+# evidenced; missing capability or any failed boot step is a refused, fail-closed
+# result. This job does not provision hosts, publish artifacts, or claim boot
+# evidence when blocked.
+name: LXC boot qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: Target architecture for the pinned signed upstream archive
+        required: true
+        type: choice
+        default: amd64
+        options:
+          - amd64
+          - arm64
+      ref:
+        description: Git ref to check out (defaults to the workflow ref)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lxc-boot-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Verify signed archive and probe fail-closed boot qualification (${{ inputs.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Run fail-closed boot qualification (real signed archive evidence)
+        id: qualify
+        env:
+          ARCH: ${{ inputs.arch }}
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/lxc-boot-qualification"
+          mkdir -p "$WORK"
+          set +e
+          python3 packaging/node-lxc/node_lxc_artifact.py boot-qualify \
+            --provenance packaging/node-lxc/config/provenance.json \
+            --arch "$ARCH" \
+            --work-dir "$WORK" \
+            --fetch \
+            --report "$WORK/boot-qualification-report.json"
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ -f "$WORK/boot-qualification-report.json" ]; then
+            python3 - "$WORK/boot-qualification-report.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1], encoding='utf-8'))
+          sa = r.get('signed_archive_verification', {})
+          bq = r.get('boot_qualification', {})
+          print('status:', r.get('status'), 'reason:', r.get('reason_code'))
+          print('signed_archive:', sa.get('status'), sa.get('gpg_signature'), sa.get('arch'))
+          print('boot_qualification:', bq.get('status'), 'attempted:', bq.get('attempted'), 'capable:', bq.get('capable_runner'))
+          print('blockers:', len(bq.get('blockers') or []))
+          PY
+          fi
+          exit "$rc"
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lxc-boot-qualification-${{ inputs.arch }}-${{ github.sha }}
+          path: ${{ runner.temp }}/lxc-boot-qualification/boot-qualification-report.json
+          if-no-files-found: warn
+          retention-days: 14

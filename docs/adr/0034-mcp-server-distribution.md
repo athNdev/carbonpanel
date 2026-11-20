@@ -50,7 +50,7 @@ The 30-tool first slice is retained as the highest-precedence pinned subset
 inside that combined catalogue; it is not the total tool count. The three
 counts stay deliberately distinct: declared RPCs include 10 `NodeControlService`
 RPCs that are never mounted, and audit exclusions plus duplicate-name
-resolution reduce the 235 mounted RPCs to 211 exposed tools. A `tools/list`
+resolution reduce the 240 mounted reachable RPCs to 211 exposed tools. A `tools/list`
 result is therefore evidence of the exposed tool catalogue, not of RPC
 coverage or of a panel build's capability (see the two compatibility concepts
 below). This note supersedes the historical counts above for present-tense

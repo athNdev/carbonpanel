@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -142,5 +143,46 @@ func TestRestorePanelDatabaseRejectsCorruptBackup(t *testing.T) {
 	}
 	if _, err := os.Stat(dbPath + ".pre-restore"); !os.IsNotExist(err) {
 		t.Fatalf("a refused restore must not churn the live database, stat err = %v", err)
+	}
+}
+
+// TestRestorePanelDatabaseReportsUnremovableStaleSidecar asserts partial-failure
+// durability: when a stale sidecar cannot be removed after the verified snapshot
+// is installed, restore must report the error (operator action required) while
+// leaving the restored database and pre-restore copy in place.
+func TestRestorePanelDatabaseReportsUnremovableStaleSidecar(t *testing.T) {
+	dir := t.TempDir()
+	dbPath, snapshot := makeSnapshot(t, dir)
+	writeRow(t, dbPath, "after")
+
+	walSidecar := dbPath + "-wal"
+	if err := os.MkdirAll(walSidecar, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(walSidecar, "held"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := RestorePanelDatabase(dbPath, snapshot)
+	if err == nil {
+		t.Fatal("want error when stale sidecar cannot be removed")
+	}
+	if !strings.Contains(err.Error(), "restored database in place") || !strings.Contains(err.Error(), "could not be removed") {
+		t.Fatalf("restore error = %v, want installed-but-unremovable-sidecar report", err)
+	}
+
+	// The restored file is installed at dbPath, but the unremovable sidecar path
+	// can prevent SQLite from opening the database in place; verify contents via a
+	// copy to prove the snapshot was installed despite cleanup failure.
+	verifyPath := filepath.Join(dir, "restored-verify.sqlite")
+	if copyErr := copyFileContents(dbPath, verifyPath); copyErr != nil {
+		t.Fatalf("copy restored database for verification: %v", copyErr)
+	}
+	rows := readRows(t, verifyPath)
+	if !rows["before"] || rows["after"] {
+		t.Fatalf("restored rows = %v, want snapshot contents installed despite sidecar cleanup failure", rows)
+	}
+	if _, err := os.Stat(dbPath + ".pre-restore"); err != nil {
+		t.Fatalf("previous database should be kept at .pre-restore: %v", err)
 	}
 }

@@ -266,13 +266,18 @@ func TestAddObservationsToBundleMarksStaleWithoutPrivateData(t *testing.T) {
 	var payload struct {
 		Summary map[string]int `json:"summary"`
 		Servers []struct {
-			ID         string `json:"id"`
-			Kind       string `json:"kind"`
-			LastGoodAt string `json:"lastGoodAt"`
+			ID               string `json:"id"`
+			Kind             string `json:"kind"`
+			StatusObservedAt string `json:"statusObservedAt"`
+			LastGoodAt       string `json:"lastGoodAt"`
+			Recovery         string `json:"recovery"`
+			Detail           string `json:"detail"`
 		} `json:"servers"`
 		Nodes []struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
+			ID            string `json:"id"`
+			Kind          string `json:"kind"`
+			LastHeartbeat string `json:"lastHeartbeat"`
+			Recovery      string `json:"recovery"`
 		} `json:"nodes"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -287,9 +292,13 @@ func TestAddObservationsToBundleMarksStaleWithoutPrivateData(t *testing.T) {
 	if payload.Servers[0].Kind != string(health.ReadingStale) {
 		t.Errorf("server kind = %q, want stale", payload.Servers[0].Kind)
 	}
+	if payload.Servers[0].StatusObservedAt == "" {
+		t.Error("status observation timestamp missing on a stale server reading")
+	}
 	if payload.Servers[0].LastGoodAt == "" {
 		t.Error("last-good timestamp missing on a stale reading")
 	}
+	assertBundleRecovery(t, "server", payload.Servers[0].Kind, payload.Servers[0].Recovery)
 	var foundNode bool
 	for _, n := range payload.Nodes {
 		if n.ID != "obs-stale-node" {
@@ -299,9 +308,195 @@ func TestAddObservationsToBundleMarksStaleWithoutPrivateData(t *testing.T) {
 		if n.Kind != "stale" {
 			t.Errorf("node kind = %q, want stale", n.Kind)
 		}
+		if n.LastHeartbeat == "" {
+			t.Error("stale node evidence missing last heartbeat timestamp")
+		}
+		assertBundleRecovery(t, "node", n.Kind, n.Recovery)
 	}
 	if !foundNode {
 		t.Fatalf("stale node missing from observations: %+v", payload.Nodes)
+	}
+}
+
+func assertBundleRecovery(t *testing.T, subject, kind, recovery string) {
+	t.Helper()
+	if recovery == "" {
+		t.Fatalf("%s recovery missing for kind %s", subject, kind)
+	}
+	for _, leaked := range []string{"/", "\\", "://", "C:", "tcp://", "secret", "password", "token", "Bearer ", "Basic "} {
+		if strings.Contains(recovery, leaked) {
+			t.Fatalf("%s recovery leaked unsafe marker %q for kind %s: %q", subject, leaked, kind, recovery)
+		}
+	}
+}
+
+func assertBundleRecoveryIntent(t *testing.T, subject, kind, recovery string, wantAction bool) {
+	t.Helper()
+	if !wantAction {
+		if recovery != "" && !strings.Contains(recovery, "No recovery action required") {
+			t.Fatalf("%s kind %s must not suggest recovery, got %q", subject, kind, recovery)
+		}
+		return
+	}
+	if recovery == "" {
+		t.Fatalf("%s kind %s is recoverable but has no guidance", subject, kind)
+	}
+	if strings.Contains(recovery, "No recovery action required") {
+		t.Fatalf("%s kind %s is recoverable but guidance says no action: %q", subject, kind, recovery)
+	}
+}
+
+func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing.T) {
+	ctx := context.Background()
+	svc := newSupportOperationsService(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	freshJoin := now.Add(-30 * time.Second)
+	staleAt := now.Add(-30 * time.Minute)
+	staleHB := now.Add(-30 * time.Minute)
+	freshHB := now.Add(-30 * time.Second)
+
+	servers := []*storage.Server{
+		{ID: "srv-fresh", Name: "fresh-private", NodeID: "node-fresh", Port: 25601, Memory: 1024, Status: storage.StatusRunning, DataPath: t.TempDir(), UpdatedAt: now},
+		{ID: "srv-stale", Name: "stale-private", NodeID: "node-stale", Port: 25602, Memory: 1024, Status: storage.StatusRunning, DataPath: t.TempDir(), UpdatedAt: staleAt},
+		{ID: "srv-unobserved", Name: "unobserved-private", NodeID: "node-fresh", Port: 25603, Memory: 1024, Status: storage.StatusRunning, DataPath: t.TempDir(), UpdatedAt: now},
+	}
+	for _, srv := range servers {
+		if err := svc.store.CreateServer(ctx, srv); err != nil {
+			t.Fatalf("CreateServer(%s): %v", srv.ID, err)
+		}
+		if err := svc.store.DB().Model(&storage.Server{}).Where("id = ?", srv.ID).Update("updated_at", srv.UpdatedAt).Error; err != nil {
+			t.Fatalf("backdate server %s: %v", srv.ID, err)
+		}
+	}
+	if err := svc.store.CreateNode(ctx, &storage.Node{ID: "node-fresh", Name: "fresh-node-name", Host: "tcp://fresh.example:2376", Enabled: true, LastHeartbeat: &freshHB, EndpointGeneration: 2}); err != nil {
+		t.Fatalf("CreateNode(fresh): %v", err)
+	}
+	if err := svc.store.CreateNode(ctx, &storage.Node{ID: "node-stale", Name: "stale-node-name", Host: "tcp://stale.example:2376", Enabled: true, LastHeartbeat: &staleHB, EndpointGeneration: 3}); err != nil {
+		t.Fatalf("CreateNode(stale): %v", err)
+	}
+	if err := svc.store.CreateNode(ctx, &storage.Node{ID: "node-never", Name: "never-node-name", Host: "tcp://never.example:2376", Enabled: true}); err != nil {
+		t.Fatalf("CreateNode(never): %v", err)
+	}
+
+	collector := metrics.NewCollectorWithPool(nil, nil, nil, nil, nil, nil, nil)
+	collector.SeedMetrics(metrics.ServerMetrics{ServerID: "srv-fresh", SLPAvailable: true, SLPLastUpdated: freshJoin, MOTD: "private-motd", PlayerSample: []string{"secret-player"}})
+	collector.SeedMetrics(metrics.ServerMetrics{ServerID: "srv-stale", SLPAvailable: true, SLPLastUpdated: staleAt.Add(-time.Hour), MOTD: "stale-motd", PlayerSample: []string{"stale-player"}})
+	svc.SetMetricsCollector(collector)
+
+	var buf strings.Builder
+	tw := tar.NewWriter(newStringTarWriter(&buf))
+	if err := svc.addObservationsToBundle(ctx, tw); err != nil {
+		t.Fatalf("addObservationsToBundle: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	data := readTarEntry(t, strings.NewReader(buf.String()), "observations.json")
+	body := string(data)
+	for _, leaked := range []string{"fresh-private", "stale-private", "unobserved-private", "private-motd", "stale-motd", "secret-player", "stale-player", "fresh-node-name", "stale-node-name", "never-node-name", "fresh.example", "stale.example", "never.example", "tcp://", "/home/", "C:\\"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("observations.json leaked %q:\n%s", leaked, body)
+		}
+	}
+
+	var payload struct {
+		Servers []struct {
+			ID               string `json:"id"`
+			Kind             string `json:"kind"`
+			StatusObservedAt string `json:"statusObservedAt"`
+			JoinObservedAt   string `json:"joinObservedAt"`
+			LastGoodAt       string `json:"lastGoodAt"`
+			Detail           string `json:"detail"`
+			Recovery         string `json:"recovery"`
+		} `json:"servers"`
+		Nodes []struct {
+			ID            string `json:"id"`
+			Kind          string `json:"kind"`
+			LastHeartbeat string `json:"lastHeartbeat"`
+			Recovery      string `json:"recovery"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("observations.json invalid: %v\n%s", err, data)
+	}
+
+	serverByID := map[string]struct {
+		ID               string `json:"id"`
+		Kind             string `json:"kind"`
+		StatusObservedAt string `json:"statusObservedAt"`
+		JoinObservedAt   string `json:"joinObservedAt"`
+		LastGoodAt       string `json:"lastGoodAt"`
+		Detail           string `json:"detail"`
+		Recovery         string `json:"recovery"`
+	}{}
+	for _, s := range payload.Servers {
+		serverByID[s.ID] = s
+	}
+	for _, want := range []struct {
+		id, kind   string
+		needJoin   bool
+		needGood   bool
+		wantAction bool
+	}{
+		{id: "srv-fresh", kind: string(health.ReadingPlayable), needJoin: true, needGood: true, wantAction: false},
+		{id: "srv-stale", kind: string(health.ReadingStale), needGood: true, wantAction: true},
+		{id: "srv-unobserved", kind: string(health.ReadingUnobserved), wantAction: true},
+	} {
+		got, ok := serverByID[want.id]
+		if !ok {
+			t.Fatalf("server %s missing from observations: %+v", want.id, payload.Servers)
+		}
+		if got.Kind != want.kind {
+			t.Fatalf("server %s kind = %q, want %q", want.id, got.Kind, want.kind)
+		}
+		if got.StatusObservedAt == "" || got.Detail == "" {
+			t.Fatalf("server %s missing freshness evidence: %+v", want.id, got)
+		}
+		if want.needJoin && got.JoinObservedAt == "" {
+			t.Fatalf("server %s missing join observation timestamp: %+v", want.id, got)
+		}
+		if want.needGood && got.LastGoodAt == "" {
+			t.Fatalf("server %s missing last-good evidence timestamp: %+v", want.id, got)
+		}
+		assertBundleRecovery(t, "server", got.Kind, got.Recovery)
+		assertBundleRecoveryIntent(t, "server", got.Kind, got.Recovery, want.wantAction)
+	}
+
+	nodeByID := map[string]struct {
+		ID            string `json:"id"`
+		Kind          string `json:"kind"`
+		LastHeartbeat string `json:"lastHeartbeat"`
+		Recovery      string `json:"recovery"`
+	}{}
+	for _, n := range payload.Nodes {
+		nodeByID[n.ID] = n
+	}
+	for _, want := range []struct {
+		id, kind   string
+		needHB     bool
+		wantAction bool
+	}{
+		{id: "node-fresh", kind: "fresh", needHB: true, wantAction: false},
+		{id: "node-stale", kind: "stale", needHB: true, wantAction: true},
+		{id: "node-never", kind: "never", wantAction: true},
+	} {
+		got, ok := nodeByID[want.id]
+		if !ok {
+			t.Fatalf("node %s missing from observations: %+v", want.id, payload.Nodes)
+		}
+		if got.Kind != want.kind {
+			t.Fatalf("node %s kind = %q, want %q", want.id, got.Kind, want.kind)
+		}
+		if want.needHB && got.LastHeartbeat == "" {
+			t.Fatalf("node %s missing heartbeat freshness evidence: %+v", want.id, got)
+		}
+		if !want.needHB && got.LastHeartbeat != "" {
+			t.Fatalf("node %s should not have heartbeat timestamp: %+v", want.id, got)
+		}
+		assertBundleRecovery(t, "node", got.Kind, got.Recovery)
+		assertBundleRecoveryIntent(t, "node", got.Kind, got.Recovery, want.wantAction)
 	}
 }
 
