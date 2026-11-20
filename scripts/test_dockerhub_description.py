@@ -84,7 +84,10 @@ class DockerHubDescriptionTests(unittest.TestCase):
             self.assertIn("`1.0.40` (`v1.0.40`", text)
             self.assertIn("docker pull atharvnaphade/carbonpanel:1.0.40", text)
 
-    def test_generated_body_has_absolute_links_and_no_false_alias_promise(self):
+    def test_generated_body_has_absolute_links_and_both_channel_explanations(self):
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
+        self.assertIn("Release channels", config["sections"])
+        self.assertIn("## Release channels", README.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "body.md"
             generate_to(target)
@@ -92,15 +95,57 @@ class DockerHubDescriptionTests(unittest.TestCase):
             self.assertIn("https://github.com/athNdev/carbonpanel/blob/main/README.md", body)
             self.assertIn("https://github.com/athNdev/carbonpanel/tree/showcase-assets/assets/showcase", body)
             self.assertIn("https://carbonpanel.dev/docs/", body)
+            self.assertIn("https://carbonpanel.dev/docs/nightly/", body)
+            self.assertIn("https://github.com/athNdev/carbonpanel/releases", body)
             self.assertIn("https://github.com/athNdev/carbonpanel/blob/main/docs/carbon-panel/src/content/docs/guides/mcp-server.mdx", body)
             self.assertIn("https://hub.docker.com/r/atharvnaphade/carbonpanel", body)
             self.assertIn("https://github.com/athNdev/carbonpanel/blob/main/docs/releases.md", body)
-            self.assertIn(":latest` is a moving alias; there is no `:stable` tag", body)
+            self.assertIn("## Release channels", body)
+            self.assertIn("`:latest` follows tested releases", body)
+            self.assertIn("`:nightly` follows qualified main builds as a preview", body)
+            self.assertIn("contain changes ahead of Stable", body)
+            self.assertNotIn("there is no `:stable` tag", body)
             self.assertNotIn("## AI assistant integration (MCP)", body)
             self.assertNotIn("The verified stable is", body)
             relative = [link for link in re.findall(r"\]\(([^)]+)\)", body)
                         if not link.startswith(("http://", "https://", "#", "mailto:"))]
             self.assertEqual(relative, [])
+
+    def test_readme_has_no_hardcoded_stable_version_and_hub_section_matches_it(self):
+        readme = README.read_text(encoding="utf-8")
+        self.assertNotIn("The verified stable is", readme)
+        self.assertNotIn("development snapshot", readme)
+        self.assertNotIn("1.0.40", readme)
+        self.assertIn("Prereleases never move `latest` or a minor alias", readme)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "body.md"
+            generate_to(target)
+            readme_section = description.split_sections(readme)["Release channels"]
+            hub_section = description.split_sections(
+                target.read_text(encoding="utf-8"))["Release channels"]
+            self.assertEqual(hub_section, description.absolute_links(
+                readme_section, "athNdev/carbonpanel", "main"))
+
+    def test_channel_links_are_derived_from_the_shared_readme_section(self):
+        readme = README.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as folder:
+            custom = Path(folder) / "README.md"
+            custom.write_text(readme.replace("https://carbonpanel.dev/docs/nightly/",
+                                             "https://carbonpanel.dev/docs/preview/"),
+                              encoding="utf-8")
+            body = Path(folder) / "body.md"
+            generate_to(body, readme=custom)
+            text = body.read_text(encoding="utf-8")
+            self.assertIn("https://carbonpanel.dev/docs/preview/", text)
+            self.assertNotIn("https://carbonpanel.dev/docs/nightly/", text)
+
+            without_section = Path(folder) / "no-channels.md"
+            without_section.write_text(
+                readme.split("## Release channels")[0] + "## Quick start\n\nInstall.\n",
+                encoding="utf-8")
+            result = generate_to(body, readme=without_section, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Release channels", result.stderr)
 
     def test_relative_links_become_absolute_and_images_use_raw_host(self):
         text = """\

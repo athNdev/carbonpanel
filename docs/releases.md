@@ -542,8 +542,12 @@ unavailable or older than the checked-in baseline: a temporary docs outage or a
 pre-promotion identity can never put an obsolete Stable on the public page.
 Offline fixtures may opt into the baseline explicitly. A main-head guard
 prevents an in-flight scheduled run from reverting a newly promoted Stable, and
-CD/release no longer write the description. There is no `:stable` image tag;
-use the exact published version tag or the moving `:latest` alias.
+CD/release no longer write the description. Both the README and the derived Hub
+body describe the two channels: `:latest` follows controlled, tested Stable
+releases and an immutable version tag pins one exactly, while `:nightly` follows
+qualified main builds as a preview that may contain changes ahead of Stable. The
+Stable and [Nightly](https://carbonpanel.dev/docs/nightly/) documentation routes
+are published in the version index.
 The immutable product tag, image and exact draft downloads remain available
 after recovery. Use the verified digest and original artifacts for subsequent
 qualification and promotion.
