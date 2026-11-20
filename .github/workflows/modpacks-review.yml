@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/modpacks-review.yml'
       - 'docker/Dockerfile.carbon-panel'
+      - 'go.mod'
+      - 'go.sum'
       - 'internal/indexers/**'
       - 'internal/rpc/services/modpack*.go'
       - 'proto/carbonpanel/v1/modpack.proto'
@@ -13,12 +15,18 @@ on:
       - 'scripts/manual-review/e2e/package.json'
       - 'scripts/review/**'
       - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/src/lib/**'
+      - 'web/carbon-panel/src/routes/+layout.*'
+      - 'web/carbon-panel/src/routes/login/**'
       - 'web/carbon-panel/src/routes/modpacks/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/modpacks-review.yml'
       - 'docker/Dockerfile.carbon-panel'
+      - 'go.mod'
+      - 'go.sum'
       - 'internal/indexers/**'
       - 'internal/rpc/services/modpack*.go'
       - 'proto/carbonpanel/v1/modpack.proto'
@@ -26,6 +34,10 @@ on:
       - 'scripts/manual-review/e2e/package.json'
       - 'scripts/review/**'
       - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/src/lib/**'
+      - 'web/carbon-panel/src/routes/+layout.*'
+      - 'web/carbon-panel/src/routes/login/**'
       - 'web/carbon-panel/src/routes/modpacks/**'
 
 permissions:
@@ -41,11 +53,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      PANEL_REVIEW_USER: reviewer
       REVIEW_STACK_NAME: carbon-panel-review-modpacks
       REVIEW_IMAGE: carbon-panel:review-modpacks
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -54,6 +68,11 @@ jobs:
         with:
           bun-version: '1.4.2'
       - run: node scripts/review/setup-browser.mjs --with-deps
+      - name: Generate isolated fixture password
+        run: |
+          password="$(node -p '"review-" + require("node:crypto").randomBytes(16).toString("hex")')"
+          printf '::add-mask::%s\n' "${password}"
+          printf 'PANEL_REVIEW_PASSWORD=%s\n' "${password}" >> "${GITHUB_ENV}"
       - name: Boot owned review stack
         id: boot
         run: bash scripts/review/devstack.sh up
@@ -61,12 +80,15 @@ jobs:
         id: review
         run: |
           port="$(cat "${HOME}/.cache/carbon-panel-review/sessions/${REVIEW_STACK_NAME}/port")"
+          output_dir="${RUNNER_TEMP}/modpacks-review"
+          mkdir -p "${output_dir}"
+          git rev-parse HEAD > "${output_dir}/source-commit.txt"
           result=0
           for plan in modpacks-library modpacks-studio-library; do
             node scripts/review/journey.mjs \
               --plan "scripts/review/plan-${plan}.json" \
               --base "http://127.0.0.1:${port}" \
-              --out "${RUNNER_TEMP}/modpacks-review/${plan}" || result=1
+              --out "${output_dir}/${plan}" || result=1
           done
           exit "${result}"
       - name: Upload browser review receipts
