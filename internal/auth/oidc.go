@@ -41,6 +41,7 @@ var ErrLinkRequired = errors.New("oidc identity requires explicit local admin li
 const (
 	oidcStateCookie    = "oidc_state"
 	oidcSource         = "oidc"
+	oidcLinkQuery      = "link_token"
 	maxExtraClaimsBody = 1 << 20 // 1 MiB; bounded even if the operator URL misbehaves
 )
 
@@ -63,6 +64,7 @@ type OIDCHandler struct {
 	storesOnce       sync.Once
 	txStore          *oidcTxStore
 	exchangeStore    *oidcExchangeStore
+	linkStore        *OIDCLinkStore
 	loginThrottle    *LoginThrottle
 	callbackThrottle *LoginThrottle
 }
@@ -76,6 +78,7 @@ type oidcTransaction struct {
 	CreatedAt    time.Time
 	Issuer       string
 	RedirectURL  string
+	LinkUserID   string // set only for an explicit local-admin link flow
 }
 
 // oidcTxStore is a bounded, TTL'd, single-use transaction store. consume is a
@@ -187,6 +190,78 @@ func (s *oidcExchangeStore) consume(code, remoteIP string) (string, bool) {
 	return entry.Token, true
 }
 
+// OIDCLinkIntent is a short-lived intent created by an authenticated local
+// admin. It authorises one OIDC sign-in to bind the verified (issuer, subject)
+// pair to that admin's existing account. No IdP-provided identity value is
+// accepted from the operator; those are proven only by the callback.
+type OIDCLinkIntent struct {
+	UserID    string
+	CreatedAt time.Time
+}
+
+// OIDCLinkStore is a bounded, TTL'd, single-use intent store. The token is an
+// opaque capability, not a session credential, and is never logged.
+type OIDCLinkStore struct {
+	mu      sync.Mutex
+	intents map[string]*OIDCLinkIntent
+	max     int
+	ttl     time.Duration
+	now     func() time.Time
+}
+
+func newOIDCLinkStore() *OIDCLinkStore {
+	return &OIDCLinkStore{intents: make(map[string]*OIDCLinkIntent), max: 100, ttl: 5 * time.Minute, now: time.Now}
+}
+
+// CreateIntent records a local admin's consent to link exactly one verified
+// OIDC identity to their own account.
+func (s *OIDCLinkStore) CreateIntent(userID string) (string, error) {
+	if s == nil || userID == "" {
+		return "", errors.New("oidc link target is required")
+	}
+	token, err := generateState()
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	for key, intent := range s.intents {
+		if now.Sub(intent.CreatedAt) > s.ttl {
+			delete(s.intents, key)
+		}
+	}
+	if len(s.intents) >= s.max {
+		return "", errors.New("oidc link store at capacity")
+	}
+	s.intents[token] = &OIDCLinkIntent{UserID: userID, CreatedAt: now}
+	return token, nil
+}
+
+// consume atomically redeems a link token once and only while it is fresh.
+func (s *OIDCLinkStore) consume(token string) (*OIDCLinkIntent, bool) {
+	if s == nil || token == "" {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	intent, ok := s.intents[token]
+	if !ok {
+		return nil, false
+	}
+	delete(s.intents, token)
+	if s.now().Sub(intent.CreatedAt) > s.ttl {
+		return nil, false
+	}
+	return intent, true
+}
+
+// LinkStore exposes the process-local intent store for the admin RPC seam.
+func (h *OIDCHandler) LinkStore() *OIDCLinkStore {
+	h.ensureStores()
+	return h.linkStore
+}
+
 // oidcInsecureSkipVerify reports whether config skip_tls_verify may disable
 // IdP certificate checks. The config flag alone never does (MINE-197).
 func oidcInsecureSkipVerify(requested bool) bool {
@@ -253,6 +328,9 @@ func (h *OIDCHandler) ensureStores() {
 		if h.exchangeStore == nil {
 			h.exchangeStore = newOIDCExchangeStore()
 		}
+		if h.linkStore == nil {
+			h.linkStore = newOIDCLinkStore()
+		}
 		if h.loginThrottle == nil {
 			h.loginThrottle = NewLoginThrottle()
 		}
@@ -304,6 +382,74 @@ func subjectHash(subject string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// consumeLinkToken redeems an explicit local-admin intent. The token carries
+// no identity claims; it only names an already authenticated local admin.
+func (h *OIDCHandler) consumeLinkToken(ctx context.Context, token string) (string, error) {
+	if token == "" {
+		return "", nil
+	}
+	intent, ok := h.linkStore.consume(token)
+	if !ok {
+		return "", errors.New("invalid or expired oidc link token")
+	}
+	user, err := h.store.GetUser(ctx, intent.UserID)
+	if err != nil || !user.IsActive || user.AuthProvider != "local" || !userHasRoleFromSource(ctx, h.store, user.ID, "admin", "local") {
+		return "", errors.New("oidc link target is no longer an active local admin")
+	}
+	return user.ID, nil
+}
+
+func userHasRoleFromSource(ctx context.Context, store *db.Store, userID, role, source string) bool {
+	got, err := store.GetUserRoleSource(ctx, userID, role)
+	return err == nil && got == source
+}
+
+// linkVerifiedOIDCIdentity binds a verified (issuer, subject) pair to the
+// existing local admin named by an explicit intent. It never links by email,
+// display name or locally unique subject, and never changes AuthProvider or
+// existing role ownership.
+func (h *OIDCHandler) linkVerifiedOIDCIdentity(ctx context.Context, userID, issuer, sub string) (*db.User, error) {
+	if userID == "" || issuer == "" || sub == "" {
+		return nil, errors.New("verified link identity is incomplete")
+	}
+	user, err := h.store.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsActive || user.AuthProvider != "local" || !userHasRoleFromSource(ctx, h.store, user.ID, "admin", "local") {
+		return nil, errors.New("oidc link target is not an active local admin")
+	}
+	if user.OIDCSubject != "" || user.OIDCIssuer != "" {
+		return nil, ErrLinkRequired
+	}
+	if existing, err := h.store.GetUserByOIDCIssuerAndSubject(ctx, issuer, sub); err == nil && existing != nil {
+		return nil, ErrLinkRequired
+	}
+	if existing, err := h.store.GetUserByOIDCSubject(ctx, sub); err == nil && existing != nil {
+		return nil, ErrLinkRequired
+	}
+	user.OIDCIssuer = issuer
+	user.OIDCSubject = sub
+	if err := h.store.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	h.emitAudit("oidc.link.completed", "ok", issuer, subjectHash(sub), user.ID, "local_admin_explicit")
+	return user, nil
+}
+
+func withoutRole(roles []string, role string) []string {
+	// Allocate a fresh backing array: the caller removes roles while ranging
+	// over the original slice, so in-place compaction would skip following
+	// privileged roles and leave an unreconciled OIDC grant behind.
+	out := make([]string, 0, len(roles))
+	for _, item := range roles {
+		if item != role {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	h.ensureStores()
 	if !h.IsEnabled() {
@@ -314,6 +460,13 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if ok, wait := h.loginThrottle.Allow("start:" + ip); !ok {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
 		writeCanonicalError(w, r, "locked_out")
+		return
+	}
+
+	linkUserID, err := h.consumeLinkToken(r.Context(), r.URL.Query().Get(oidcLinkQuery))
+	if err != nil {
+		h.emitAudit("oidc.link.started", "rejected", h.config.IssuerURI, "", "", "invalid_or_ineligible_intent")
+		writeCanonicalError(w, r, "link_invalid")
 		return
 	}
 
@@ -341,6 +494,7 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 		Issuer:       h.config.IssuerURI,
 		RedirectURL:  h.config.RedirectURL,
+		LinkUserID:   linkUserID,
 	}
 	if err := h.txStore.create(tx); err != nil {
 		h.emitAudit("oidc.login.started", "rejected", h.config.IssuerURI, "", "", "transaction_store_full")
@@ -523,7 +677,13 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	user, err := h.findOrCreateOIDCUser(ctx, h.config.IssuerURI, sub, username, email)
+	var user *db.User
+	linkedLocalAdmin := tx.LinkUserID != ""
+	if linkedLocalAdmin {
+		user, err = h.linkVerifiedOIDCIdentity(ctx, tx.LinkUserID, h.config.IssuerURI, sub)
+	} else {
+		user, err = h.findOrCreateOIDCUser(ctx, h.config.IssuerURI, sub, username, email)
+	}
 	if err != nil {
 		if errors.Is(err, ErrLinkRequired) {
 			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "link_required")
@@ -541,6 +701,15 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		source, srcErr := h.store.GetUserRoleSource(ctx, user.ID, role)
 		if srcErr == nil && source != "" && source != oidcSource {
+			// An explicitly linked local admin keeps local ownership of their
+			// privileged grant. The OIDC mapping is accepted as proof of the
+			// sign-in, but it does not silently reattribute or revoke that
+			// break-glass grant.
+			if linkedLocalAdmin && user.AuthProvider == "local" && source == "local" &&
+				user.OIDCIssuer == h.config.IssuerURI && user.OIDCSubject == sub {
+				desired = withoutRole(desired, role)
+				continue
+			}
 			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, user.ID, "privileged_role_conflict")
 			writeCanonicalError(w, r, "role_conflict")
 			return

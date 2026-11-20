@@ -22,9 +22,46 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_user: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChljYXJib25wYW5lbC92MS91c2VyLnByb3RvEg5jYXJib25wYW5lbC52MSISChBMaXN0VXNlcnNSZXF1ZXN0IjgKEUxpc3RVc2Vyc1Jlc3BvbnNlEiMKBXVzZXJzGAEgAygLMhQuY2FyYm9ucGFuZWwudjEuVXNlciIcCg5HZXRVc2VyUmVxdWVzdBIKCgJpZBgBIAEoCSI1Cg9HZXRVc2VyUmVzcG9uc2USIgoEdXNlchgBIAEoCzIULmNhcmJvbnBhbmVsLnYxLlVzZXIiVQoRQ3JlYXRlVXNlclJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSDQoFZW1haWwYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDQoFcm9sZXMYBCADKAkiOAoSQ3JlYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyInIKEVVwZGF0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKBWVtYWlsGAIgASgJSACIAQESFgoJaXNfYWN0aXZlGAMgASgISAGIAQESDQoFcm9sZXMYBCADKAlCCAoGX2VtYWlsQgwKCl9pc19hY3RpdmUiOAoSVXBkYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJMqoDCgtVc2VyU2VydmljZRJQCglMaXN0VXNlcnMSIC5jYXJib25wYW5lbC52MS5MaXN0VXNlcnNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdFVzZXJzUmVzcG9uc2USSgoHR2V0VXNlchIeLmNhcmJvbnBhbmVsLnYxLkdldFVzZXJSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0VXNlclJlc3BvbnNlElMKCkNyZWF0ZVVzZXISIS5jYXJib25wYW5lbC52MS5DcmVhdGVVc2VyUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZVVzZXJSZXNwb25zZRJTCgpVcGRhdGVVc2VyEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlVXNlclJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVVc2VyUmVzcG9uc2USUwoKRGVsZXRlVXNlchIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVVzZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlVXNlclJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		'ChljYXJib25wYW5lbC92MS91c2VyLnByb3RvEg5jYXJib25wYW5lbC52MSIWChRCZWdpbk9JRENMaW5rUmVxdWVzdCIrChVCZWdpbk9JRENMaW5rUmVzcG9uc2USEgoKbGlua190b2tlbhgBIAEoCSISChBMaXN0VXNlcnNSZXF1ZXN0IjgKEUxpc3RVc2Vyc1Jlc3BvbnNlEiMKBXVzZXJzGAEgAygLMhQuY2FyYm9ucGFuZWwudjEuVXNlciIcCg5HZXRVc2VyUmVxdWVzdBIKCgJpZBgBIAEoCSI1Cg9HZXRVc2VyUmVzcG9uc2USIgoEdXNlchgBIAEoCzIULmNhcmJvbnBhbmVsLnYxLlVzZXIiVQoRQ3JlYXRlVXNlclJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSDQoFZW1haWwYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDQoFcm9sZXMYBCADKAkiOAoSQ3JlYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyInIKEVVwZGF0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKBWVtYWlsGAIgASgJSACIAQESFgoJaXNfYWN0aXZlGAMgASgISAGIAQESDQoFcm9sZXMYBCADKAlCCAoGX2VtYWlsQgwKCl9pc19hY3RpdmUiOAoSVXBkYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJMogECgtVc2VyU2VydmljZRJQCglMaXN0VXNlcnMSIC5jYXJib25wYW5lbC52MS5MaXN0VXNlcnNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdFVzZXJzUmVzcG9uc2USSgoHR2V0VXNlchIeLmNhcmJvbnBhbmVsLnYxLkdldFVzZXJSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0VXNlclJlc3BvbnNlElMKCkNyZWF0ZVVzZXISIS5jYXJib25wYW5lbC52MS5DcmVhdGVVc2VyUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZVVzZXJSZXNwb25zZRJTCgpVcGRhdGVVc2VyEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlVXNlclJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVVc2VyUmVzcG9uc2USUwoKRGVsZXRlVXNlchIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVVzZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlVXNlclJlc3BvbnNlElwKDUJlZ2luT0lEQ0xpbmsSJC5jYXJib25wYW5lbC52MS5CZWdpbk9JRENMaW5rUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLkJlZ2luT0lEQ0xpbmtSZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM',
 		[file_carbonpanel_v1_common]
 	);
+
+/**
+ * Begin an explicit OIDC link for the calling local admin. There are no
+ * attacker-supplied identity claims: issuer and subject are proven later by a
+ * verified OIDC callback using the returned token.
+ *
+ * @generated from message carbonpanel.v1.BeginOIDCLinkRequest
+ */
+export type BeginOIDCLinkRequest = Message<'carbonpanel.v1.BeginOIDCLinkRequest'> & {};
+
+/**
+ * Describes the message carbonpanel.v1.BeginOIDCLinkRequest.
+ * Use `create(BeginOIDCLinkRequestSchema)` to create a new message.
+ */
+export const BeginOIDCLinkRequestSchema: GenMessage<BeginOIDCLinkRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_user, 0);
+
+/**
+ * Short-lived single-use token for /api/v1/auth/oidc/login?link_token=...
+ *
+ * @generated from message carbonpanel.v1.BeginOIDCLinkResponse
+ */
+export type BeginOIDCLinkResponse = Message<'carbonpanel.v1.BeginOIDCLinkResponse'> & {
+	/**
+	 * @generated from field: string link_token = 1;
+	 */
+	linkToken: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.BeginOIDCLinkResponse.
+ * Use `create(BeginOIDCLinkResponseSchema)` to create a new message.
+ */
+export const BeginOIDCLinkResponseSchema: GenMessage<BeginOIDCLinkResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_user, 1);
 
 /**
  * Empty user list request
@@ -39,7 +76,7 @@ export type ListUsersRequest = Message<'carbonpanel.v1.ListUsersRequest'> & {};
  */
 export const ListUsersRequestSchema: GenMessage<ListUsersRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 0);
+	messageDesc(file_carbonpanel_v1_user, 2);
 
 /**
  * All system users
@@ -59,7 +96,7 @@ export type ListUsersResponse = Message<'carbonpanel.v1.ListUsersResponse'> & {
  */
 export const ListUsersResponseSchema: GenMessage<ListUsersResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 1);
+	messageDesc(file_carbonpanel_v1_user, 3);
 
 /**
  * Get user by ID
@@ -79,7 +116,7 @@ export type GetUserRequest = Message<'carbonpanel.v1.GetUserRequest'> & {
  */
 export const GetUserRequestSchema: GenMessage<GetUserRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 2);
+	messageDesc(file_carbonpanel_v1_user, 4);
 
 /**
  * Single user
@@ -99,7 +136,7 @@ export type GetUserResponse = Message<'carbonpanel.v1.GetUserResponse'> & {
  */
 export const GetUserResponseSchema: GenMessage<GetUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 3);
+	messageDesc(file_carbonpanel_v1_user, 5);
 
 /**
  * New user details
@@ -134,7 +171,7 @@ export type CreateUserRequest = Message<'carbonpanel.v1.CreateUserRequest'> & {
  */
 export const CreateUserRequestSchema: GenMessage<CreateUserRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 4);
+	messageDesc(file_carbonpanel_v1_user, 6);
 
 /**
  * Created user
@@ -154,7 +191,7 @@ export type CreateUserResponse = Message<'carbonpanel.v1.CreateUserResponse'> & 
  */
 export const CreateUserResponseSchema: GenMessage<CreateUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 5);
+	messageDesc(file_carbonpanel_v1_user, 7);
 
 /**
  * User fields to update
@@ -189,7 +226,7 @@ export type UpdateUserRequest = Message<'carbonpanel.v1.UpdateUserRequest'> & {
  */
 export const UpdateUserRequestSchema: GenMessage<UpdateUserRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 6);
+	messageDesc(file_carbonpanel_v1_user, 8);
 
 /**
  * Updated user
@@ -209,7 +246,7 @@ export type UpdateUserResponse = Message<'carbonpanel.v1.UpdateUserResponse'> & 
  */
 export const UpdateUserResponseSchema: GenMessage<UpdateUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 7);
+	messageDesc(file_carbonpanel_v1_user, 9);
 
 /**
  * User to delete
@@ -229,7 +266,7 @@ export type DeleteUserRequest = Message<'carbonpanel.v1.DeleteUserRequest'> & {
  */
 export const DeleteUserRequestSchema: GenMessage<DeleteUserRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 8);
+	messageDesc(file_carbonpanel_v1_user, 10);
 
 /**
  * Deletion confirmation
@@ -249,7 +286,7 @@ export type DeleteUserResponse = Message<'carbonpanel.v1.DeleteUserResponse'> & 
  */
 export const DeleteUserResponseSchema: GenMessage<DeleteUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 9);
+	messageDesc(file_carbonpanel_v1_user, 11);
 
 /**
  * User management service (admin only)
@@ -306,5 +343,16 @@ export const UserService: GenService<{
 		methodKind: 'unary';
 		input: typeof DeleteUserRequestSchema;
 		output: typeof DeleteUserResponseSchema;
+	};
+	/**
+	 * Begin explicit local-admin OIDC identity linking. The authenticated local
+	 * admin receives a short-lived single-use link token for the OIDC login URL.
+	 *
+	 * @generated from rpc carbonpanel.v1.UserService.BeginOIDCLink
+	 */
+	beginOIDCLink: {
+		methodKind: 'unary';
+		input: typeof BeginOIDCLinkRequestSchema;
+		output: typeof BeginOIDCLinkResponseSchema;
 	};
 }> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_user, 0);

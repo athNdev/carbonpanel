@@ -550,7 +550,7 @@ var FamilyServerExcludedSurfaces = []FamilyServerExcludedSurface{
 	{Surface: "/healthz, /readyz, /health/detail", Service: "platform", Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:282-284", Equivalent: "none (public probes)", Detail: "Public read-only liveness probes; deliberately no health-endpoint tool."},
 	{Surface: "gRPC reflection v1/v1alpha", Service: "platform", Reason: ExcludePrivateProtocol, Source: "internal/rpc/server.go:252-274", Equivalent: "none (stale catalog source)", Detail: "19-service stale list; the MCP catalog never uses reflection."},
 	{Surface: "CLI maintenance (list/ports/release-port/resolve)", Service: "platform", Reason: ExcludeMaintenance, Source: "cmd/carbon-panel/operations.go:19-30", Equivalent: "resolve_operation (mounted RPC)", Detail: "Operator-only maintenance path; the UI-facing RPC equivalent is listed above."},
-	{Surface: "/api/v1/upload/, /api/v1/download/", Service: "UploadService/FileService", Scope: "uploads/*, files/*", Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:296-300", Equivalent: "none in this family (byte transport primitives owned by other families)", Detail: "Streaming byte transport, out of family scope."},
+	{Surface: "/api/v1/upload/, /api/v1/download/", Service: "UploadService/FileService", Scope: "uploads/*, files/*", Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:291-294", Equivalent: "none in this family (byte transport primitives owned by other families)", Detail: "Streaming byte transport, out of family scope."},
 }
 
 // FamilyServerDescriptor returns the full descriptor for a canonical tool name.

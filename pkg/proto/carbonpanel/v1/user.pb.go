@@ -30,6 +30,90 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Begin an explicit OIDC link for the calling local admin. There are no
+// attacker-supplied identity claims: issuer and subject are proven later by a
+// verified OIDC callback using the returned token.
+type BeginOIDCLinkRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BeginOIDCLinkRequest) Reset() {
+	*x = BeginOIDCLinkRequest{}
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginOIDCLinkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginOIDCLinkRequest) ProtoMessage() {}
+
+func (x *BeginOIDCLinkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginOIDCLinkRequest.ProtoReflect.Descriptor instead.
+func (*BeginOIDCLinkRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{0}
+}
+
+// Short-lived single-use token for /api/v1/auth/oidc/login?link_token=...
+type BeginOIDCLinkResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LinkToken     string                 `protobuf:"bytes,1,opt,name=link_token,json=linkToken,proto3" json:"link_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BeginOIDCLinkResponse) Reset() {
+	*x = BeginOIDCLinkResponse{}
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginOIDCLinkResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginOIDCLinkResponse) ProtoMessage() {}
+
+func (x *BeginOIDCLinkResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginOIDCLinkResponse.ProtoReflect.Descriptor instead.
+func (*BeginOIDCLinkResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *BeginOIDCLinkResponse) GetLinkToken() string {
+	if x != nil {
+		return x.LinkToken
+	}
+	return ""
+}
+
 // Empty user list request
 type ListUsersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -39,7 +123,7 @@ type ListUsersRequest struct {
 
 func (x *ListUsersRequest) Reset() {
 	*x = ListUsersRequest{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[0]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +135,7 @@ func (x *ListUsersRequest) String() string {
 func (*ListUsersRequest) ProtoMessage() {}
 
 func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[0]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +148,7 @@ func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
 func (*ListUsersRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{0}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{2}
 }
 
 // All system users
@@ -77,7 +161,7 @@ type ListUsersResponse struct {
 
 func (x *ListUsersResponse) Reset() {
 	*x = ListUsersResponse{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -89,7 +173,7 @@ func (x *ListUsersResponse) String() string {
 func (*ListUsersResponse) ProtoMessage() {}
 
 func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -102,7 +186,7 @@ func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
 func (*ListUsersResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{1}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListUsersResponse) GetUsers() []*User {
@@ -122,7 +206,7 @@ type GetUserRequest struct {
 
 func (x *GetUserRequest) Reset() {
 	*x = GetUserRequest{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -134,7 +218,7 @@ func (x *GetUserRequest) String() string {
 func (*GetUserRequest) ProtoMessage() {}
 
 func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -147,7 +231,7 @@ func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserRequest.ProtoReflect.Descriptor instead.
 func (*GetUserRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetUserRequest) GetId() string {
@@ -167,7 +251,7 @@ type GetUserResponse struct {
 
 func (x *GetUserResponse) Reset() {
 	*x = GetUserResponse{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +263,7 @@ func (x *GetUserResponse) String() string {
 func (*GetUserResponse) ProtoMessage() {}
 
 func (x *GetUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +276,7 @@ func (x *GetUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserResponse.ProtoReflect.Descriptor instead.
 func (*GetUserResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetUserResponse) GetUser() *User {
@@ -215,7 +299,7 @@ type CreateUserRequest struct {
 
 func (x *CreateUserRequest) Reset() {
 	*x = CreateUserRequest{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -227,7 +311,7 @@ func (x *CreateUserRequest) String() string {
 func (*CreateUserRequest) ProtoMessage() {}
 
 func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -240,7 +324,7 @@ func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateUserRequest.ProtoReflect.Descriptor instead.
 func (*CreateUserRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateUserRequest) GetUsername() string {
@@ -281,7 +365,7 @@ type CreateUserResponse struct {
 
 func (x *CreateUserResponse) Reset() {
 	*x = CreateUserResponse{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +377,7 @@ func (x *CreateUserResponse) String() string {
 func (*CreateUserResponse) ProtoMessage() {}
 
 func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +390,7 @@ func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateUserResponse.ProtoReflect.Descriptor instead.
 func (*CreateUserResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateUserResponse) GetUser() *User {
@@ -329,7 +413,7 @@ type UpdateUserRequest struct {
 
 func (x *UpdateUserRequest) Reset() {
 	*x = UpdateUserRequest{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -341,7 +425,7 @@ func (x *UpdateUserRequest) String() string {
 func (*UpdateUserRequest) ProtoMessage() {}
 
 func (x *UpdateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -354,7 +438,7 @@ func (x *UpdateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserRequest.ProtoReflect.Descriptor instead.
 func (*UpdateUserRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateUserRequest) GetId() string {
@@ -395,7 +479,7 @@ type UpdateUserResponse struct {
 
 func (x *UpdateUserResponse) Reset() {
 	*x = UpdateUserResponse{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +491,7 @@ func (x *UpdateUserResponse) String() string {
 func (*UpdateUserResponse) ProtoMessage() {}
 
 func (x *UpdateUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +504,7 @@ func (x *UpdateUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserResponse.ProtoReflect.Descriptor instead.
 func (*UpdateUserResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateUserResponse) GetUser() *User {
@@ -440,7 +524,7 @@ type DeleteUserRequest struct {
 
 func (x *DeleteUserRequest) Reset() {
 	*x = DeleteUserRequest{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +536,7 @@ func (x *DeleteUserRequest) String() string {
 func (*DeleteUserRequest) ProtoMessage() {}
 
 func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +549,7 @@ func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserRequest.ProtoReflect.Descriptor instead.
 func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteUserRequest) GetId() string {
@@ -485,7 +569,7 @@ type DeleteUserResponse struct {
 
 func (x *DeleteUserResponse) Reset() {
 	*x = DeleteUserResponse{}
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +581,7 @@ func (x *DeleteUserResponse) String() string {
 func (*DeleteUserResponse) ProtoMessage() {}
 
 func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_user_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_user_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +594,7 @@ func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserResponse.ProtoReflect.Descriptor instead.
 func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{9}
+	return file_carbonpanel_v1_user_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeleteUserResponse) GetMessage() string {
@@ -524,7 +608,11 @@ var File_carbonpanel_v1_user_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_user_proto_rawDesc = "" +
 	"\n" +
-	"\x19carbonpanel/v1/user.proto\x12\x0ecarbonpanel.v1\x1a\x1bcarbonpanel/v1/common.proto\"\x12\n" +
+	"\x19carbonpanel/v1/user.proto\x12\x0ecarbonpanel.v1\x1a\x1bcarbonpanel/v1/common.proto\"\x16\n" +
+	"\x14BeginOIDCLinkRequest\"6\n" +
+	"\x15BeginOIDCLinkResponse\x12\x1d\n" +
+	"\n" +
+	"link_token\x18\x01 \x01(\tR\tlinkToken\"\x12\n" +
 	"\x10ListUsersRequest\"?\n" +
 	"\x11ListUsersResponse\x12*\n" +
 	"\x05users\x18\x01 \x03(\v2\x14.carbonpanel.v1.UserR\x05users\" \n" +
@@ -552,7 +640,7 @@ const file_carbonpanel_v1_user_proto_rawDesc = "" +
 	"\x11DeleteUserRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\".\n" +
 	"\x12DeleteUserResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage2\xaa\x03\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage2\x88\x04\n" +
 	"\vUserService\x12P\n" +
 	"\tListUsers\x12 .carbonpanel.v1.ListUsersRequest\x1a!.carbonpanel.v1.ListUsersResponse\x12J\n" +
 	"\aGetUser\x12\x1e.carbonpanel.v1.GetUserRequest\x1a\x1f.carbonpanel.v1.GetUserResponse\x12S\n" +
@@ -561,7 +649,8 @@ const file_carbonpanel_v1_user_proto_rawDesc = "" +
 	"\n" +
 	"UpdateUser\x12!.carbonpanel.v1.UpdateUserRequest\x1a\".carbonpanel.v1.UpdateUserResponse\x12S\n" +
 	"\n" +
-	"DeleteUser\x12!.carbonpanel.v1.DeleteUserRequest\x1a\".carbonpanel.v1.DeleteUserResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"DeleteUser\x12!.carbonpanel.v1.DeleteUserRequest\x1a\".carbonpanel.v1.DeleteUserResponse\x12\\\n" +
+	"\rBeginOIDCLink\x12$.carbonpanel.v1.BeginOIDCLinkRequest\x1a%.carbonpanel.v1.BeginOIDCLinkResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_user_proto_rawDescOnce sync.Once
@@ -575,37 +664,41 @@ func file_carbonpanel_v1_user_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_user_proto_rawDescData
 }
 
-var file_carbonpanel_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_carbonpanel_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_carbonpanel_v1_user_proto_goTypes = []any{
-	(*ListUsersRequest)(nil),   // 0: carbonpanel.v1.ListUsersRequest
-	(*ListUsersResponse)(nil),  // 1: carbonpanel.v1.ListUsersResponse
-	(*GetUserRequest)(nil),     // 2: carbonpanel.v1.GetUserRequest
-	(*GetUserResponse)(nil),    // 3: carbonpanel.v1.GetUserResponse
-	(*CreateUserRequest)(nil),  // 4: carbonpanel.v1.CreateUserRequest
-	(*CreateUserResponse)(nil), // 5: carbonpanel.v1.CreateUserResponse
-	(*UpdateUserRequest)(nil),  // 6: carbonpanel.v1.UpdateUserRequest
-	(*UpdateUserResponse)(nil), // 7: carbonpanel.v1.UpdateUserResponse
-	(*DeleteUserRequest)(nil),  // 8: carbonpanel.v1.DeleteUserRequest
-	(*DeleteUserResponse)(nil), // 9: carbonpanel.v1.DeleteUserResponse
-	(*User)(nil),               // 10: carbonpanel.v1.User
+	(*BeginOIDCLinkRequest)(nil),  // 0: carbonpanel.v1.BeginOIDCLinkRequest
+	(*BeginOIDCLinkResponse)(nil), // 1: carbonpanel.v1.BeginOIDCLinkResponse
+	(*ListUsersRequest)(nil),      // 2: carbonpanel.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),     // 3: carbonpanel.v1.ListUsersResponse
+	(*GetUserRequest)(nil),        // 4: carbonpanel.v1.GetUserRequest
+	(*GetUserResponse)(nil),       // 5: carbonpanel.v1.GetUserResponse
+	(*CreateUserRequest)(nil),     // 6: carbonpanel.v1.CreateUserRequest
+	(*CreateUserResponse)(nil),    // 7: carbonpanel.v1.CreateUserResponse
+	(*UpdateUserRequest)(nil),     // 8: carbonpanel.v1.UpdateUserRequest
+	(*UpdateUserResponse)(nil),    // 9: carbonpanel.v1.UpdateUserResponse
+	(*DeleteUserRequest)(nil),     // 10: carbonpanel.v1.DeleteUserRequest
+	(*DeleteUserResponse)(nil),    // 11: carbonpanel.v1.DeleteUserResponse
+	(*User)(nil),                  // 12: carbonpanel.v1.User
 }
 var file_carbonpanel_v1_user_proto_depIdxs = []int32{
-	10, // 0: carbonpanel.v1.ListUsersResponse.users:type_name -> carbonpanel.v1.User
-	10, // 1: carbonpanel.v1.GetUserResponse.user:type_name -> carbonpanel.v1.User
-	10, // 2: carbonpanel.v1.CreateUserResponse.user:type_name -> carbonpanel.v1.User
-	10, // 3: carbonpanel.v1.UpdateUserResponse.user:type_name -> carbonpanel.v1.User
-	0,  // 4: carbonpanel.v1.UserService.ListUsers:input_type -> carbonpanel.v1.ListUsersRequest
-	2,  // 5: carbonpanel.v1.UserService.GetUser:input_type -> carbonpanel.v1.GetUserRequest
-	4,  // 6: carbonpanel.v1.UserService.CreateUser:input_type -> carbonpanel.v1.CreateUserRequest
-	6,  // 7: carbonpanel.v1.UserService.UpdateUser:input_type -> carbonpanel.v1.UpdateUserRequest
-	8,  // 8: carbonpanel.v1.UserService.DeleteUser:input_type -> carbonpanel.v1.DeleteUserRequest
-	1,  // 9: carbonpanel.v1.UserService.ListUsers:output_type -> carbonpanel.v1.ListUsersResponse
-	3,  // 10: carbonpanel.v1.UserService.GetUser:output_type -> carbonpanel.v1.GetUserResponse
-	5,  // 11: carbonpanel.v1.UserService.CreateUser:output_type -> carbonpanel.v1.CreateUserResponse
-	7,  // 12: carbonpanel.v1.UserService.UpdateUser:output_type -> carbonpanel.v1.UpdateUserResponse
-	9,  // 13: carbonpanel.v1.UserService.DeleteUser:output_type -> carbonpanel.v1.DeleteUserResponse
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
+	12, // 0: carbonpanel.v1.ListUsersResponse.users:type_name -> carbonpanel.v1.User
+	12, // 1: carbonpanel.v1.GetUserResponse.user:type_name -> carbonpanel.v1.User
+	12, // 2: carbonpanel.v1.CreateUserResponse.user:type_name -> carbonpanel.v1.User
+	12, // 3: carbonpanel.v1.UpdateUserResponse.user:type_name -> carbonpanel.v1.User
+	2,  // 4: carbonpanel.v1.UserService.ListUsers:input_type -> carbonpanel.v1.ListUsersRequest
+	4,  // 5: carbonpanel.v1.UserService.GetUser:input_type -> carbonpanel.v1.GetUserRequest
+	6,  // 6: carbonpanel.v1.UserService.CreateUser:input_type -> carbonpanel.v1.CreateUserRequest
+	8,  // 7: carbonpanel.v1.UserService.UpdateUser:input_type -> carbonpanel.v1.UpdateUserRequest
+	10, // 8: carbonpanel.v1.UserService.DeleteUser:input_type -> carbonpanel.v1.DeleteUserRequest
+	0,  // 9: carbonpanel.v1.UserService.BeginOIDCLink:input_type -> carbonpanel.v1.BeginOIDCLinkRequest
+	3,  // 10: carbonpanel.v1.UserService.ListUsers:output_type -> carbonpanel.v1.ListUsersResponse
+	5,  // 11: carbonpanel.v1.UserService.GetUser:output_type -> carbonpanel.v1.GetUserResponse
+	7,  // 12: carbonpanel.v1.UserService.CreateUser:output_type -> carbonpanel.v1.CreateUserResponse
+	9,  // 13: carbonpanel.v1.UserService.UpdateUser:output_type -> carbonpanel.v1.UpdateUserResponse
+	11, // 14: carbonpanel.v1.UserService.DeleteUser:output_type -> carbonpanel.v1.DeleteUserResponse
+	1,  // 15: carbonpanel.v1.UserService.BeginOIDCLink:output_type -> carbonpanel.v1.BeginOIDCLinkResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -617,14 +710,14 @@ func file_carbonpanel_v1_user_proto_init() {
 		return
 	}
 	file_carbonpanel_v1_common_proto_init()
-	file_carbonpanel_v1_user_proto_msgTypes[6].OneofWrappers = []any{}
+	file_carbonpanel_v1_user_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_user_proto_rawDesc), len(file_carbonpanel_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

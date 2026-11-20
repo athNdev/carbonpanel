@@ -95,7 +95,7 @@ const (
 // FamilyStreamAudit is the complete machine-readable inventory.
 var FamilyStreamAudit = []FamilyStreamSurface{
 	{
-		Route: "PUT /api/v1/upload/{sessionId}", Mount: "internal/rpc/server.go:296",
+		Route: "PUT /api/v1/upload/{sessionId}", Mount: "internal/rpc/server.go:291",
 		Decision: FamilyStreamDecisionTransport, ReasonCode: StreamReasonByteTransport,
 		Reason: "Raw request-body byte stream into an opaque upload session. Session id and temp path are secrets, never tool arguments (upload.go:105-111); the typed UploadService/FileService workflow performs the same administration.",
 		ACL:    "uploads/create on global object *", SessionBounded: true,
@@ -105,13 +105,13 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.FileService/SaveUploadedFile",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:296:mux.Handle(\"/api/v1/upload/\"",
+			"internal/rpc/server.go:291:mux.Handle(\"/api/v1/upload/\"",
 			"internal/rpc/handlers/upload.go:70:rbac.ResourceUploads, rbac.ActionCreate",
 			"internal/rpc/handlers/upload.go:124:Deliberately NOT returning the server-local temp path",
 		},
 	},
 	{
-		Route: "GET /api/v1/download/{sessionId}", Mount: "internal/rpc/server.go:299",
+		Route: "GET /api/v1/download/{sessionId}", Mount: "internal/rpc/server.go:294",
 		Decision: FamilyStreamDecisionTransport, ReasonCode: StreamReasonByteTransport,
 		Reason: "Raw file bytes keyed by an opaque download session id. The handler looks the session up first and enforces files/read on the session's owning server (download.go:54-68,100-118); the typed FileService calls produce a bounded session for the agent.",
 		ACL:    "files/read on session.ServerID (or global * for legacy sessions)", SessionBounded: true,
@@ -120,7 +120,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.FileService/InitFileDownload", "/carbonpanel.v1.FileService/GetFile",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:299:mux.Handle(\"/api/v1/download/\"",
+			"internal/rpc/server.go:294:mux.Handle(\"/api/v1/download/\"",
 			"internal/rpc/handlers/download.go:65:authorizeDownload(enforcer, user, session)",
 			"internal/rpc/handlers/download.go:117:rbac.ResourceFiles, rbac.ActionRead",
 		},
@@ -309,15 +309,15 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		},
 	},
 	{
-		Route: "GET|POST /api/v1/auth/oidc/{login,callback,exchange}", Mount: "internal/rpc/server.go:290-292",
+		Route: "GET|POST /api/v1/auth/oidc/{login,callback,exchange}", Mount: "internal/rpc/server.go:285-287",
 		MountCondition: "mounted only when OIDC is enabled",
 		Decision:       FamilyStreamDecisionPrivate, ReasonCode: StreamReasonBrowserHandshake,
-		Reason: "Browser IdP handshake; the exchange redeems a one-time code for a SPA session token with Cache-Control: no-store (oidc.go:596-627). A session token is not an MCP credential and must never be a tool argument or result.",
+		Reason: "Browser IdP handshake; the exchange redeems a one-time code for a SPA session token with Cache-Control: no-store (oidc.go:763-793). A session token is not an MCP credential and must never be a tool argument or result.",
 		ACL:    "none (browser enrollment / session bootstrap)",
 		Sources: []string{
-			"internal/rpc/server.go:292:mux.HandleFunc(\"/api/v1/auth/oidc/exchange\"",
-			"internal/auth/oidc.go:600:Cache-Control\", \"no-store",
-			"internal/auth/oidc.go:618:h.exchangeStore.consume(req.Code, clientIP(r))",
+			"internal/rpc/server.go:287:mux.HandleFunc(\"/api/v1/auth/oidc/exchange\"",
+			"internal/auth/oidc.go:784:h.exchangeStore.consume(req.Code, clientIP(r))",
+			"internal/auth/oidc.go:790:w.Header().Set(\"Content-Type\", \"application/json\")",
 		},
 	},
 	{

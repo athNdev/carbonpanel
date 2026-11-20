@@ -12,10 +12,12 @@ are removed.
 A returning identity resolves only through
 `Store.GetUserByOIDCIssuerAndSubject`. A legacy row with the same subject but an
 empty issuer is never auto-bound from the configured issuer: sign-in returns
-the canonical `link_required` state. Binding is possible only through an
-authenticated local admin-mediated link/recovery, or an explicit migration pin
-whose historical issuer is verified against known deployment configuration.
-Unknown or ambiguous history stays unlinked. Email, name and preferred username
-are display fields and never link accounts. Local break-glass admin and the
-recovery key remain the recoverable bootstrap path; no IdP claim can create an
-admin.
+the canonical `link_required` state. Binding is possible only through the
+explicit local-admin flow in ADR 0051: an authenticated active local admin
+starts a short-lived single-use intent, the OIDC callback proves the issuer and
+subject, and only that verified pair binds to the admin's existing account. An
+explicit migration pin whose historical issuer is verified against known
+deployment configuration remains a separate recovery path. Unknown or ambiguous
+history stays unlinked. Email, name and preferred username are display fields
+and never link accounts. Local break-glass admin and the recovery key remain the
+recoverable bootstrap path; no IdP claim can create an admin.

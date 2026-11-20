@@ -19,7 +19,10 @@ here because it could delete a local or admin grant with the same role name.
 Locally assigned and admin grants are never modified or reattributed. A desired
 privileged role already held from a different source is a provenance conflict:
 no grant is converted, the sign-in is refused and audited, and an administrator
-must review the mapping.
+must review the mapping. The sole exception is ADR 0051's explicitly linked
+local admin: a mapped privileged role already held from `local` is accepted for
+that sign-in but remains local-owned and is excluded from OIDC reconciliation,
+so an absent group claim cannot revoke break-glass access.
 
 Reconciliation precedes session issuance in the same request. If role loss or
 deprovisioning removes a privileged role, every existing session for that user
