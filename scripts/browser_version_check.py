@@ -6,8 +6,9 @@ Drives a real Chromium against the packaged site: direct/deep links, the
 accessible channel dropdown, per-channel base URLs, canonical URLs, immutable
 full-SHA pins, sitemap, search scope and negative cases. A candidate build is
 qualified only at its non-active `/docs/candidate/<sha>/` staging path; canonical
-routes are checked only in a final/default artifact. Set CHROME_PATH to a
-Chromium-family executable. No network, registry or site deployment is used.
+routes are checked only in a final/default artifact. DOM snapshots come from the
+repository-pinned Playwright helper. No network, registry or site deployment is
+performed by this checker.
 """
 import argparse
 import functools
@@ -183,38 +184,40 @@ def main():
     if is_candidate and not staging.startswith("/docs/candidate/"):
         failures.append(f"candidate marker route {staging} is not a non-active staging path")
 
-    # Collect every DOM snapshot in ONE bounded Playwright session before the
-    # assertions run. Repeated route/viewport pairs are cached by the helper.
-    dom_paths = [staging] if is_candidate else list(active_routes) + [
-        "/docs/getting-started/docker-compose/", stable_route]
-    dom_cache.update(collect_dom(origin, dom_paths))
-    # Fail CLOSED before any assertion runs. Every requested route/viewport
-    # must have a well-formed, non-empty HTML response with a 200 status from
-    # the expected origin; otherwise the gate aborts with the real browser
-    # error instead of silently passing or emitting missing-marker noise.
-    for path in dom_paths:
-        for width in BROWSER_WIDTHS:
-            key = f"{path}|{width}"
-            entry = dom_cache.get(key)
-            if not isinstance(entry, dict):
-                browser_errors.append(f"{key}: no browser result collected")
-                continue
-            if entry.get("error"):
-                browser_errors.append(f"{key}: browser error: {entry['error']}")
-                continue
-            html = entry.get("html")
-            if not isinstance(html, str) or not html.strip():
-                browser_errors.append(f"{key}: browser returned empty DOM")
-                continue
-            if entry.get("status") != 200:
-                browser_errors.append(f"{key}: browser HTTP status {entry.get('status')!r}")
-            final_url = str(entry.get("url", ""))
-            if not final_url.startswith(origin + "/"):
-                browser_errors.append(f"{key}: browser landed outside origin: {final_url!r}")
-    if browser_errors:
-        raise ValueError("browser qualification aborted:\n- " + "\n- ".join(browser_errors))
-
     try:
+        # Collect every DOM snapshot in ONE bounded Playwright session before
+        # the DOM assertions run. Repeated route/viewport pairs are cached by
+        # the helper. The local HTTP server stays owned by this try/finally so
+        # collection or validation failures cannot leak it.
+        dom_paths = [staging] if is_candidate else list(active_routes) + [
+            "/docs/getting-started/docker-compose/", stable_route]
+        dom_cache.update(collect_dom(origin, dom_paths))
+        # Fail CLOSED before DOM assertions. Every requested route/viewport
+        # must have a well-formed, non-empty HTML response with 200 status from
+        # the expected origin. Otherwise abort with a browser error or a
+        # validation diagnostic, never a green result or missing-marker noise.
+        for path in dom_paths:
+            for width in BROWSER_WIDTHS:
+                key = f"{path}|{width}"
+                entry = dom_cache.get(key)
+                if not isinstance(entry, dict):
+                    browser_errors.append(f"{key}: no browser result collected")
+                    continue
+                if entry.get("error"):
+                    browser_errors.append(f"{key}: browser error: {entry['error']}")
+                    continue
+                html = entry.get("html")
+                if not isinstance(html, str) or not html.strip():
+                    browser_errors.append(f"{key}: browser returned empty DOM")
+                    continue
+                if entry.get("status") != 200:
+                    browser_errors.append(f"{key}: browser HTTP status {entry.get('status')!r}")
+                final_url = str(entry.get("url", ""))
+                if not final_url.startswith(origin + "/"):
+                    browser_errors.append(f"{key}: browser landed outside origin: {final_url!r}")
+        if browser_errors:
+            raise ValueError("browser qualification aborted:\n- " + "\n- ".join(browser_errors))
+
         if is_candidate:
             # Public candidate probe happens at the staging path only.
             for width in (375, 1440):
@@ -276,6 +279,7 @@ def main():
     finally:
         if server:
             server.shutdown()
+            server.server_close()
 
     if failures:
         raise ValueError("browser version check failed:\n- " + "\n- ".join(sorted(set(failures))))

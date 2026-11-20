@@ -14,10 +14,12 @@ import tempfile
 import unittest
 import urllib.error
 import zipfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from scripts import release
+from scripts import browser_version_check as bvc
 from scripts import docs_publication_gate as gate
+from scripts import version_contract as vc
 
 
 def registry_writes(command):
@@ -3972,6 +3974,105 @@ class BrowserDomGateTests(unittest.TestCase):
         local = next(i for i, s in enumerate(cd_steps)
                      if s.get("name", "").startswith("Browser-qualify Stable/Nightly"))
         self.assertLess(provision, local)
+
+
+class BrowserCollectorFailClosedTests(unittest.TestCase):
+    """A broken nightly snapshot must abort the checker with a real diagnostic."""
+
+    def sample_index(self):
+        digest = "sha256:" + "b" * 64
+        return {
+            "schema_version": 3,
+            "repository": "https://github.com/athNdev/carbonpanel",
+            "channels": {
+                "stable": {
+                    "display": "Stable", "version": "1.0.40", "route": "/docs/",
+                    "commit": "a" * 40,
+                    "image": {"digest": digest,
+                              "docker_hub": "atharvnaphade/carbonpanel:latest",
+                              "ghcr": "ghcr.io/athndev/carbonpanel:latest"},
+                    "promotion": {"state": "published", "promoted": True},
+                },
+                "nightly": {
+                    "display": "Nightly", "route": "/docs/nightly/",
+                    "commit": "c" * 40,
+                    "image": {"digest": digest,
+                              "docker_hub": "atharvnaphade/carbonpanel:nightly",
+                              "ghcr": "ghcr.io/athndev/carbonpanel:nightly"},
+                    "promotion": {"state": "final", "promoted": True},
+                },
+            },
+            "promotion": {"state": "baseline", "promoted": False},
+            "versions": [],
+        }
+
+    def run_check(self, mutate):
+        with tempfile.TemporaryDirectory() as root:
+            site = Path(root)
+            index = self.sample_index()
+            (site / "version-index.json").write_text(json.dumps(index), encoding="utf-8")
+            (site / "channel-marker.json").write_text(
+                json.dumps(vc.channel_marker(index)), encoding="utf-8")
+
+            def collector(origin, paths):
+                snapshot = {}
+                for path in paths:
+                    for width in bvc.BROWSER_WIDTHS:
+                        snapshot[f"{path}|{width}"] = {
+                            "html": "<html><body>packaged site</body></html>",
+                            "status": 200, "url": origin + path,
+                        }
+                outcome = mutate(snapshot)
+                return snapshot if outcome is None else outcome
+
+            with patch.object(bvc, "collect_dom", side_effect=collector), \
+                    patch("sys.argv", ["browser_version_check.py", str(site)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(ValueError) as caught:
+                    bvc.main()
+            return str(caught.exception)
+
+    def test_explicit_browser_error_is_not_a_missing_marker(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|375": {"error": "TimeoutError: page.goto timed out"}}))
+        self.assertIn("browser qualification aborted", message)
+        self.assertIn("TimeoutError: page.goto timed out", message)
+        self.assertNotIn("missing", message)
+
+    def test_empty_missing_and_wrong_origin_abort(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|375": {"html": "", "status": 200,
+                                   "url": "http://127.0.0.1:1/docs/nightly/"}}))
+        self.assertIn("browser returned empty DOM", message)
+        message = self.run_check(lambda snap: snap.pop("/docs/nightly/|375", None))
+        self.assertIn("no browser result collected", message)
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|1440": {"html": "<html>ok</html>", "status": 200,
+                                    "url": "https://elsewhere.invalid/"}}))
+        self.assertIn("outside origin", message)
+
+    def test_local_server_closed_when_collection_raises(self):
+        with tempfile.TemporaryDirectory() as root:
+            site = Path(root)
+            index = self.sample_index()
+            (site / "version-index.json").write_text(json.dumps(index), encoding="utf-8")
+            (site / "channel-marker.json").write_text(
+                json.dumps(vc.channel_marker(index)), encoding="utf-8")
+            server = MagicMock()
+            with patch.object(bvc, "ThreadingHTTPServer", return_value=server), \
+                    patch.object(bvc, "collect_dom", side_effect=RuntimeError("browser boom")), \
+                    patch("sys.argv", ["browser_version_check.py", str(site)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, "browser boom"):
+                    bvc.main()
+            server.shutdown.assert_called_once()
+            server.server_close.assert_called_once()
+
+    def test_non_200_status_aborts(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|1440": {"html": "<html>ok</html>", "status": 404,
+                                    "url": "http://127.0.0.1:1/docs/nightly/"}}))
+        self.assertIn("HTTP status 404", message)
 
 
 if __name__ == "__main__":

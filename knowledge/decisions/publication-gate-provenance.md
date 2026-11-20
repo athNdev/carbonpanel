@@ -41,11 +41,12 @@ sources:
   e2e package, with one bounded browser session, DOMContentLoaded and cached
   route/viewport visits. Privileged Stable provisions that package from the
   trusted checkout and passes the candidate site as data; all route, pin,
-  marker and retired-page assertions remain in the Python caller. Every
-  expected route/viewport response is validated eagerly for presence, non-empty
-  HTML, HTTP 200 and expected origin BEFORE any assertion runs; a missing,
-  errored, empty or wrong-origin response aborts with the real browser error,
-  never a green result or a missing-marker diagnostic.
+  marker and retired-page assertions remain in the Python caller. Each expected
+  route/viewport response is checked for presence, non-empty HTML, HTTP 200 and
+  expected origin before the DOM assertions; a missing, errored, empty or
+  wrong-origin response aborts with a browser error or a validation diagnostic
+  rather than a green result or a missing-marker diagnostic. The channel marker
+  is verified earlier against the version index.
 
 # Read next
 
