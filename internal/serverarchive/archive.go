@@ -169,12 +169,19 @@ func writeFile(
 	ctx context.Context, source nodestorage.Accessor, entry func(string, int64) (io.Writer, error),
 	rel string, remaining int64,
 ) (File, error) {
+	info, err := source.Stat(rel)
+	if err != nil {
+		return File{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return File{}, fmt.Errorf("server data contains a link or special file: %q", rel)
+	}
 	handle, err := source.OpenRead(ctx, rel)
 	if err != nil {
 		return File{}, err
 	}
 	defer handle.Close()
-	size := handle.Size()
+	size := info.Size()
 	var r io.Reader = handle
 	if isManagedSettings(rel) {
 		if size > maxPropertiesBytes {
