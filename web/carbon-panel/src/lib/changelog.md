@@ -5,10 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- Product releases are tagged `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`; the displayed SemVer and immutable image tag stay `MAJOR.MINOR.PATCH`. Historical tags are classified in `docs/release-history.md` and `docs/release-history.json`; plain `v*`, `mod-*` and inherited tags remain separate domains and never start a panel release. The current 1.0 rollback line is `1.0.40`; the planned major upgrade uses the fresh product tag `carbonpanel-v2.0.1` because three operator-facing changes require migration from v1.0.40.
-- One machine-readable version contract (`docs/website-source.json`, generated `docs/version-index.json`) now drives the docs banner, version switcher, direct-route validation and Pages metadata. Published `/docs/` and `/docs/versions/<version>/` pages are built from exact peeled commits for `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39` (source-only, no download). `v3.0.0-beta.4` (upstream name collision) and `v1.0.38` (tag ancestry disagreement) are excluded. Channel and availability come from the classified catalog, never the label prefix.
+- World View opens saved Overworld terrain for supported local Java servers. Pan and zoom with a pointer or keyboard, jump to spawn or coordinates, share a coordinate link, and view saved markers, waypoints and points of interest.
+- Player lookup shows the account's name, UUID and full Minecraft skin when available. Server history follows the account's existing presence permissions.
+
+### Fixed
+
+- World View opens from the server's World tab and recovers when a map session expires. Restoring a world invalidates old terrain sessions. Managed BlueMap works with registered local Docker nodes, and interrupted startup can reuse its container on retry.
+- Responsive settings keep their Save controls visible, tabs have named panels and predictable keyboard focus, and modpack filters have accessible names.
+- Dashboard totals distinguish measured zeroes, configured limits and unavailable or stale observations. The sidebar no longer displays a hard-coded product version.
+- Stable and Nightly documentation show their own changelogs and preserve the current page when switching channels.
+
+## [2.0.1] - 2026-11-20
+
+- The Carbon Panel 2.x release adds the World Library, player management and World View. Review the [2.0.1 release notes](https://github.com/athNdev/carbonpanel/releases/tag/carbonpanel-v2.0.1) before upgrading from 1.0.40.
 
 ## [3.0.0-alpha.1] - 2026-11-13
 
