@@ -39,3 +39,9 @@ sources:
 - A bind request ID identifies one server, level, revision, activation window
   and node generation. A completed replay must still name the binding installed
   by that operation. Legacy journal rows rely on the binding and timestamps.
+
+# Revision archives
+
+- Import records a library-relative archive key. Preview and bind resolve it
+  under the configured World Library root and accept legacy paths within that
+  root. Bind validates the archive path before stopping the running server.

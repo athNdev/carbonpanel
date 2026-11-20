@@ -269,7 +269,11 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	if targetMC == "" {
 		targetMC = revision.MCVersion
 	}
-	report, err := s.compat.Check(ctx, revision.StoragePath, worldlib.Target{
+	archivePath, err := worldlib.ResolveRevisionArchive(s.libraryRoot, revision.StoragePath)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	report, err := s.compat.Check(ctx, archivePath, worldlib.Target{
 		ServerID: msg.GetServerId(), MCVersion: targetMC, Edition: edition,
 		ModLoader: loader, DataVersion: revision.DataVersion,
 	})

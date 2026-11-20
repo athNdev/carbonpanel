@@ -14,7 +14,32 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/pkg/files"
 )
+
+// ResolveRevisionArchive resolves imported library-relative keys and older
+// archives recorded with the library directory already in their path.
+func ResolveRevisionArchive(libraryRoot, storedPath string) (string, error) {
+	if libraryRoot == "" || storedPath == "" {
+		return "", fmt.Errorf("%w: revision archive path is missing", ErrArchiveRejected)
+	}
+	archive := filepath.Clean(filepath.FromSlash(storedPath))
+	if !files.Within(libraryRoot, archive) && filepath.IsLocal(archive) {
+		archive = filepath.Join(libraryRoot, archive)
+	}
+	if !files.WithinReal(libraryRoot, archive) {
+		return "", fmt.Errorf("%w: revision archive is outside the World Library", ErrArchiveRejected)
+	}
+	info, err := os.Stat(archive)
+	if err != nil {
+		return "", fmt.Errorf("%w: locate revision archive: %v", ErrArchiveRejected, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: revision archive is not a regular file", ErrArchiveRejected)
+	}
+	return archive, nil
+}
 
 // Archive hardening limits. These are deliberately stricter than the generic
 // extraction caps because a library revision is retained on the node: a small
