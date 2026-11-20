@@ -374,6 +374,11 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modService.SetStorageResolver(s.storageResolver)
+	// One planner instance serves manual review/apply and automatic or
+	// scheduled policies. A nil scheduler fails closed at the task executor.
+	if s.scheduler != nil {
+		s.scheduler.SetModUpdatePlanner(modService)
+	}
 	// The generated RPC and the legacy JSON adapter share one operation
 	// instance so provider, credential and audit policy cannot diverge.
 	modBrowseService := services.NewModBrowseService(s.store, s.modBrowseManager)

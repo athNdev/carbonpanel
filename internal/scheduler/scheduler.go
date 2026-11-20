@@ -44,6 +44,14 @@ import (
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
 
+// ModUpdatePlanner stages reviewed compatible releases. The concrete owner
+// lives in the RPC service layer; the scheduler keeps only this interface so
+// manual and scheduled updates use one operation without an import cycle or a
+// process-global provider. A nil planner fails closed.
+type ModUpdatePlanner interface {
+	StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (staged int, refused int, err error)
+}
+
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
@@ -100,6 +108,15 @@ type Scheduler struct {
 	// root so scheduled and RPC starts contend on the same node key. Nil fails
 	// closed at the acquire helper.
 	admission *serverruntime.AdmissionCoordinator
+
+	// modUpdatePlanner is injected at composition root. It is the same planner
+	// the manual review-and-apply RPC uses, so a schedule cannot fork policy.
+	modUpdatePlanner ModUpdatePlanner
+}
+
+// SetModUpdatePlanner supplies the shared manual/scheduled mod update planner.
+func (s *Scheduler) SetModUpdatePlanner(planner ModUpdatePlanner) {
+	s.modUpdatePlanner = planner
 }
 
 // Config holds scheduler configuration
@@ -745,6 +762,8 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	case storage.TaskTypeModpackUpdate:
 		return s.executeModpackUpdateTask(ctx, server, task)
+	case storage.TaskTypeModUpdate:
+		return s.executeModUpdateTask(ctx, server, task)
 	case storage.TaskTypeChunkyPregen:
 		return s.executeChunkyPregen(ctx, server, task)
 	default:
@@ -1399,6 +1418,51 @@ func webhookEventName(t v1.TriggeredEventType) string {
 	default:
 		return "manual"
 	}
+}
+
+// ValidateModUpdateConfigJSON rejects a malformed policy before it is stored,
+// so a misconfigured schedule fails at create/update time rather than hours
+// later when the schedule first fires.
+func ValidateModUpdateConfigJSON(raw string) error {
+	var cfg storage.ModUpdateTaskConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return fmt.Errorf("invalid mod update policy: %w", err)
+	}
+	if cfg.MaxUpdatesPerRun < 0 {
+		return errors.New("max_updates_per_run must not be negative")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Window)) {
+	case "", "next_restart", "idle":
+	default:
+		return fmt.Errorf("unknown apply window %q", cfg.Window)
+	}
+	return nil
+}
+
+// executeModUpdateTask runs an opt-in mod update policy through the shared
+// planner. It never publishes bytes itself: the existing journaled batch apply
+// remains the only path that writes the live mods directory.
+func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+	var cfg storage.ModUpdateTaskConfig
+	if task.Config != "" {
+		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+			return "", fmt.Errorf("invalid mod update policy: %w", err)
+		}
+	}
+	if !cfg.Enabled {
+		return "mod update policy is disabled; nothing staged", nil
+	}
+	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
+		return "server is running; mod update policy skipped by running-server policy", nil
+	}
+	if s.modUpdatePlanner == nil {
+		return "", errors.New("mod update planner is not installed")
+	}
+	staged, refused, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", staged, refused), nil
 }
 
 // ModpackUpdateTaskConfig matches the configuration for periodic modpack updates

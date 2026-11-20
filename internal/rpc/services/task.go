@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -67,6 +66,8 @@ func dbTaskTypeToProto(t storage.TaskType) v1.TaskType {
 		return v1.TaskType_TASK_TYPE_MODPACK_UPDATE
 	case storage.TaskTypeChunkyPregen:
 		return v1.TaskType_TASK_TYPE_CHUNKY_PREGEN
+	case storage.TaskTypeModUpdate:
+		return v1.TaskType_TASK_TYPE_MOD_UPDATE
 	default:
 		return v1.TaskType_TASK_TYPE_UNSPECIFIED
 	}
@@ -93,6 +94,8 @@ func protoTaskTypeToDB(t v1.TaskType) storage.TaskType {
 		return storage.TaskTypeModpackUpdate
 	case v1.TaskType_TASK_TYPE_CHUNKY_PREGEN:
 		return storage.TaskTypeChunkyPregen
+	case v1.TaskType_TASK_TYPE_MOD_UPDATE:
+		return storage.TaskTypeModUpdate
 	default:
 		return storage.TaskTypeCommand
 	}
@@ -340,6 +343,11 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
+	if taskType == storage.TaskTypeModUpdate {
+		if err := scheduler.ValidateModUpdateConfigJSON(msg.Config); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
 
 	// Create task
 	task := &storage.ScheduledTask{
@@ -510,6 +518,11 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	// Validate modpack-update task config on update too; see CreateTask.
 	if task.TaskType == storage.TaskTypeModpackUpdate {
 		if err := scheduler.ValidateModpackUpdateConfigJSON(task.Config); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+	if task.TaskType == storage.TaskTypeModUpdate {
+		if err := scheduler.ValidateModUpdateConfigJSON(task.Config); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}

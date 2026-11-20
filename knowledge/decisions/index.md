@@ -56,6 +56,8 @@
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
 - [Runtime artifact format support](runtime-artifact-formats.md) — Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
+- [Reviewed mod update application](mod-update-apply.md) — Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
+- [Runtime artifact format support](runtime-artifact-formats.md) — Publish only disk formats with real clean import/boot evidence; the portable installer is the supported fallback.
 - [Runtime artifact format support — Alternatives + Consequence](runtime-artifact-formats-alternatives.md) — Publishing converted VHDX/VMDK/VDI images from qemu-img output would claim
 - [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Candidate artifact kinds and the evidence required before publication.
 - [Runtime artifact format support — Decision (part 2)](runtime-artifact-formats-decision-2.md) — A filename suffix or byte count is never a deployable-artifact claim.

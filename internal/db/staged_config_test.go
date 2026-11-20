@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -303,4 +304,38 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 
 	_, err = store.StageServerConfigUpdate(ctx, "srv-window", map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 0)
 	require.Error(t, err)
+}
+
+func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-mod-window")
+	config, err := store.StageServerConfigUpdate(ctx, "srv-mod-window", map[string]any{"motd": "soon"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	content, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ID:         uuid.NewString(),
+		ServerID:   "srv-mod-window",
+		Kind:       StagedKindMod,
+		Action:     StagedActionReplace,
+		TargetPath: "mods/mod.jar",
+		StagePath:  ".carbon-panel/staged/mod/mod.jar",
+		FileName:   "mod.jar",
+	})
+	require.NoError(t, err)
+	require.Equal(t, config.BatchID, content.BatchID)
+
+	when := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	require.Equal(t, config.BatchID, batch.ID)
+	require.Equal(t, string(UpdateWindowAtTime), batch.Window)
+	require.NotNil(t, batch.ApplyAt)
+	assert.True(t, batch.ApplyAt.Equal(when))
+
+	rows, err := store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyAtTime, rows[0].ApplyMode)
+	contentRows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, contentRows, 1)
 }

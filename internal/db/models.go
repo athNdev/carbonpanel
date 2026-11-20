@@ -647,8 +647,19 @@ const (
 	TaskTypeScript        TaskType = "script"         // Run a custom script
 	TaskTypeWebhook       TaskType = "webhook"        // Send an HTTP webhook
 	TaskTypeModpackUpdate TaskType = "modpack_update" // Periodically fetch and update modpack from Git/source
+	TaskTypeModUpdate     TaskType = "mod_update"     // Opt-in automatic/scheduled mod updates using the shared planner
 	TaskTypeChunkyPregen  TaskType = "chunky_pregen"  // Automated background Chunky radius pre-generation task runner
 )
+
+// ModUpdateTaskConfig is the JSON payload of a mod_update ScheduledTask. It is
+// an opt-in policy: a task without Enabled never stages anything.
+type ModUpdateTaskConfig struct {
+	Enabled          bool     `json:"enabled"`
+	ExcludedProjects []string `json:"excluded_projects,omitempty"`
+	MaxUpdatesPerRun int      `json:"max_updates_per_run,omitempty"`
+	SkipWhenRunning  bool     `json:"skip_when_running,omitempty"`
+	Window           string   `json:"window,omitempty"`
+}
 
 // TaskStatus defines the status of a scheduled task
 type TaskStatus string

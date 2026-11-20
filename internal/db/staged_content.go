@@ -114,6 +114,37 @@ func (s *Store) SetBatchIdleSince(ctx context.Context, id string, since *time.Ti
 	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).Where("id = ?", id).Update("idle_since", since).Error
 }
 
+// SetOpenBatchWindow updates the apply window of a server's open batch and
+// keeps the staged config rows in that batch on the same window. A mod-only
+// batch has no config rows, but a mixed batch must publish once, together.
+// The batch is created when a mod update is the first thing staged.
+func (s *Store) SetOpenBatchWindow(ctx context.Context, serverID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) (*ServerUpdateBatch, error) {
+	mode, err := modeForWindow(window, applyAt, idleMinutes)
+	if err != nil {
+		return nil, err
+	}
+	batch, err := s.ensureOpenBatch(ctx, serverID, string(window))
+	if err != nil {
+		return nil, err
+	}
+	batch.Window = string(window)
+	batch.ApplyAt = applyAt
+	batch.IdleMinutes = idleMinutes
+	if err := s.db.WithContext(ctx).Save(batch).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Model(&StagedConfigChange{}).
+		Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
+		Updates(map[string]any{
+			"apply_mode":   string(mode),
+			"apply_at":     applyAt,
+			"idle_minutes": idleMinutes,
+		}).Error; err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
 // CloseUpdateBatch finishes the open batch so another one can be recorded.
 func (s *Store) CloseUpdateBatch(ctx context.Context, id, status string) error {
 	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).Where("id = ? AND status = ?", id, UpdateBatchOpen).Updates(map[string]any{

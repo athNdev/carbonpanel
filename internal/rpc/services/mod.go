@@ -42,11 +42,19 @@ var _ carbonpanelv1connect.ModServiceHandler = (*ModService)(nil)
 
 // ModService implements the Mod service
 type ModService struct {
-	store           *storage.Store
-	docker          *docker.Client
-	log             *logger.Logger
-	uploadManager   *upload.Manager
-	storageResolver *nodestorage.Resolver
+	store            *storage.Store
+	docker           *docker.Client
+	log              *logger.Logger
+	uploadManager    *upload.Manager
+	storageResolver  *nodestorage.Resolver
+	candidateFetcher modCandidateFetcher
+	updateLookup     modUpdateLookup
+}
+
+// SetModUpdateLookup replaces the provider lookup used by scheduled policies.
+// Manual preview still uses the configured global provider adapter.
+func (s *ModService) SetModUpdateLookup(lookup modUpdateLookup) {
+	s.updateLookup = lookup
 }
 
 // SetStorageResolver supplies the instance-owned node storage resolver.
@@ -470,6 +478,41 @@ func (s *ModService) stageUploadedMod(ctx context.Context, msg *v1.ImportUploade
 func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.UpdateModRequest]) (*connect.Response[v1.UpdateModResponse], error) {
 	msg := req.Msg
 	peerIP := req.Peer().Addr
+
+	// OSS-424 manual apply. The same procedure and mods/update[server_id] scope
+	// handles a reviewed provider update. Staging re-verifies installed bytes
+	// and the provider release; the live mods directory is not written here.
+	if len(msg.GetUpdateSelections()) > 0 {
+		results, batch, err := s.stageReviewedModUpdates(ctx, msg.ServerId,
+			msg.GetUpdateSelections(), msg.GetUpdateWindow(),
+			msg.GetUpdateApplyAtUnix(), msg.GetUpdateIdleMinutes())
+		if err != nil {
+			code := connect.CodeInternal
+			if strings.Contains(err.Error(), "server not found") || strings.Contains(err.Error(), "no mod updates") {
+				code = connect.CodeInvalidArgument
+			}
+			return nil, connect.NewError(code, err)
+		}
+		response := &v1.UpdateModResponse{}
+		if batch != nil {
+			response.UpdateBatchId = batch.ID
+		}
+		for _, result := range results {
+			response.StagedUpdates = append(response.StagedUpdates, &v1.StagedModUpdate{
+				ModId:    result.ModID,
+				FileName: result.FileName,
+				StagedId: result.StagedID,
+				Outcome:  result.Outcome,
+				Reason:   result.Reason,
+			})
+		}
+		s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{
+			"operation": "stage_reviewed_updates",
+			"batch_id":  response.UpdateBatchId,
+			"results":   results,
+		})
+		return connect.NewResponse(response), nil
+	}
 
 	// Get server to find mod path
 	server, err := s.store.GetServer(ctx, msg.ServerId)
