@@ -101,7 +101,7 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 	if err != nil {
 		return nil, storageError(err)
 	}
-	defer tree.Close()
+	defer func() { _ = tree.Close() }()
 
 	tempDir := s.archiveDownloads.TempDir()
 	if !nodestorage.RequiresRemoteTransport(info) && files.WithinReal(root, tempDir) {

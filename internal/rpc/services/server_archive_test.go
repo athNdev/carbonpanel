@@ -199,8 +199,8 @@ func (a *archiveFixtureTransport) open(ctx context.Context, root string) (*stora
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		defer worker.Close()
-		defer local.Close()
+		defer func() { _ = worker.Close() }()
+		defer func() { _ = local.Close() }()
 		_ = storageworker.ServeAccessor(worker, worker, archiveFixtureFS{AllocationRoot: local.(nodestorage.AllocationRoot), transport: a})
 	}()
 	closeWorker := func() error {

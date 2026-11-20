@@ -40,7 +40,7 @@ func (s *ServerService) PreviewServerArchive(ctx context.Context, req *connect.R
 	if err != nil {
 		return nil, err
 	}
-	defer imported.file.Close()
+	defer func() { _ = imported.file.Close() }()
 
 	manifest := imported.verified.Manifest
 	var format v1.ServerArchiveFormat
@@ -171,7 +171,7 @@ func (s *ServerService) archiveAvailableSpace(ctx context.Context, nodeID string
 	if err != nil {
 		return 0, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	return root.FreeBytes()
 }
 
@@ -284,7 +284,7 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("destination node storage is unavailable"))
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	free, err := root.FreeBytes()
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("could not verify free space on the destination node"))
@@ -305,7 +305,7 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 		defer cancel()
 		cleanup, err := s.storageResolver.ForAllocation(ctx, info, parent)
 		if err == nil {
-			defer cleanup.Close()
+			defer func() { _ = cleanup.Close() }()
 			err = cleanup.RemoveAll(child)
 		}
 		if err != nil {
