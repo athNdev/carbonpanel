@@ -578,7 +578,10 @@ a second Stable version to `docs/dockerhub-description.json`. Production
 generation reads the **live published** version index and fails closed if it is
 unavailable or older than the checked-in baseline: a temporary docs outage or a
 pre-promotion identity can never put an obsolete Stable on the public page.
-Offline fixtures may opt into the baseline explicitly. A main-head guard
+Offline fixtures may opt into the baseline explicitly. Before advertising a
+Stable, the generator also requires a non-draft Stable release manifest and the
+verified `:latest` digest/revision in both registries; a partial promotion or an
+unavailable provider leaves the last published body untouched. A main-head guard
 prevents an in-flight scheduled run from reverting a newly promoted Stable, and
 CD/release no longer write the description. Both the README and the derived Hub
 body describe the two channels: `:latest` follows controlled, tested Stable
