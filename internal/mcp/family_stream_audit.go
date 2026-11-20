@@ -185,7 +185,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "ANY /api/v1/packwiz/packs/*", Mount: "internal/rpc/server.go:320",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonStudioAuthoring,
-		Reason: "Modpack Studio authoring and deployment uses global modpacks grants. The generated PackwizService shares the migrated JSON operations, while multipart import, export archives, raw assets and other adapter-only operations stay on HTTP.",
+		Reason: "Packwiz inventory reads have typed packwiz_list_packs and packwiz_get_pack tools. This mixed Studio route also serves update checks, mutations, multipart imports, exports and raw assets outside that bounded read contract.",
 		ACL:    "modpacks/read or modpacks/create on global object *",
 		Sources: []string{
 			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",
@@ -220,7 +220,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v1/staged-config/{serverID}/staged", Mount: "internal/rpc/server.go:323",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonOperatorMaintenance,
-		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. Use the panel staged changes workflow.",
+		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. MCP exposes bounded rollout metadata through list_staged_config_changes.",
 		ACL:    "server_config/read on serverID",
 		Sources: []string{
 			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
@@ -262,7 +262,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v2/metrics/servers/{id}", Mount: "internal/rpc/server.go:331",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonTelemetry,
-		Reason: "Per-server Prometheus exposition for monitoring. GetServer provides server status and metadata.",
+		Reason: "Per-server Prometheus exposition for monitoring. GetServer includes the latest cached operational metrics for a scoped server.",
 		ACL:    "servers/read on id",
 		Sources: []string{
 			"internal/rpc/server.go:331:mux.Handle(\"/api/v2/metrics/\"",

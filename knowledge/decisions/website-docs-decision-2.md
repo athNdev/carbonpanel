@@ -28,6 +28,11 @@ sources:
   page that is missing metadata, points at a relative or missing image, or lets
   a prominent route fall back to the shared card. Keep preview copy free of em
   dashes.
+- Authored cross-page links must resolve under the pinned route. Site-root paths
+  (for example `/getting-started/docker-compose/`) are rebased by the renderer;
+  a lone `../` on a nested page resolves inside its own directory and fails.
+  `scripts/check_website.py` resolves every internal link in the rendered
+  artifact, including non-canonical candidate recovery builds.
 - The combined Pages artifact generates its root `sitemap.xml` from every
   indexable published HTML route except the synthetic 404 page, with the
   deployment date as `lastmod`; utility pages with `noindex` are excluded.

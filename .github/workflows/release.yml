@@ -21,6 +21,9 @@ on:
       - '.github/workflows/release.yml'
       - 'scripts/release.py'
       - 'scripts/test_release.py'
+      - 'scripts/stable_recovery.py'
+      - 'scripts/test_stable_recovery.py'
+      - '.github/workflows/stable-recover.yml'
       - 'scripts/openapi_version.py'
       - 'scripts/test_openapi_version.py'
       - 'web/carbon-panel/vite.config.ts'
@@ -49,8 +52,12 @@ on:
         description: 'EXPLICIT PUBLICATION OPT-IN: off (default) builds and verifies only'
         default: false
         type: boolean
+      staged_run:
+        description: 'Successful main build-only release run supplying the qualified Stable downloads and OCI archive'
+        required: false
+        type: string
       expected_digest:
-        description: 'Optional verified sha256 digest to resume an identical immutable version; blank publishes new'
+        description: 'Required for Stable: exact qualified OCI digest reported by the staged run'
         required: false
         type: string
 
@@ -58,17 +65,17 @@ permissions:
   contents: read
   actions: read
 
-# ONE workflow-level concurrency group for the ENTIRE explicit product
+# ONE shared pages-deploy concurrency group for the ENTIRE explicit product
 # publication: every phase (immutable image -> GitHub release -> moving aliases)
-# holds the same lock, so a different version cannot interleave phases or strand
-# a run after immutable publication. cancel-in-progress:false protects the
-# RUNNING run; with default queue:single only one pending run is retained and a
-# later request REPLACES it. This lane is SINGLE-OPERATOR DISPATCH: do not
-# assume every queued publisher waits; verify the resulting run before retry.
-# Build-only rehearsals, tag pushes, PRs and automatic main events get a per-run
-# key instead, so ordinary CI is not serialized.
+# holds the SAME lock as the CD channel transaction and the docs-only publisher.
+# A stable/latest alias can never move while a Pages or Nightly writer is active.
+# cancel-in-progress:false protects the RUNNING run; with default queue:single only
+# one pending run is retained and a later request REPLACES it. This lane is
+# SINGLE-OPERATOR DISPATCH: do not assume every queued publisher waits; verify
+# the resulting run before retry. Build-only rehearsals, tag pushes, PRs and
+# automatic main events get a per-run key instead, so ordinary CI is not serialized.
 concurrency:
-  group: ${{ inputs.publish == true && 'carbonpanel-product-publish' || format('carbonpanel-stage-{0}', github.run_id) }}
+  group: ${{ inputs.publish == true && 'pages-deploy' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -87,14 +94,32 @@ jobs:
       prerelease: ${{ steps.plan.outputs.prerelease }}
       channel: ${{ steps.plan.outputs.channel }}
       publish: ${{ steps.plan.outputs.publish }}
+      ci_verified: ${{ steps.trusted.outputs.ci_verified }}
       publication_reason: ${{ steps.plan.outputs.publication_reason }}
+      artifact_run: ${{ steps.stage_source.outputs.run || github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.revision || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.publish
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .trusted-release
+      - name: Verify trusted ref and exact main CI for an explicit publication
+        id: trusted
+        if: inputs.publish
+        working-directory: .trusted-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          RELEASE_COMMIT=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)
+          python3 scripts/release.py verify-publication-ref --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
       - name: Check release tooling
-        run: python3 -m unittest scripts.test_release scripts.test_openapi_version
+        run: python3 -m unittest scripts.test_release scripts.test_openapi_version scripts.test_stable_recovery
       - name: Check the checked-in release history catalog
         run: python3 scripts/release.py verify-release-history
       - name: Validate source and version
@@ -106,25 +131,31 @@ jobs:
           RELEASE_PUBLISH: ${{ inputs.publish }}
         # The Python gate is authoritative: automatic events and rehearsals can
         # only ever produce publish=false here, regardless of workflow inputs.
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
         run: |
           python3 scripts/release.py plan --version "$RELEASE_VERSION" \
-            --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH"
-      - name: Verify trusted ref and exact main CI for an explicit publication
-        if: inputs.publish
+            --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH" --resume-digest "$EXPECTED_DIGEST"
+      - name: Bind Stable publication to its successful read-only stage run
+        id: stage_source
+        if: steps.plan.outputs.publish == 'true' && steps.plan.outputs.channel == 'stable'
         env:
           GH_TOKEN: ${{ github.token }}
+          STAGED_RUN: ${{ inputs.staged_run }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          RELEASE_VERSION: ${{ steps.plan.outputs.version }}
           RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
-          RELEASE_REF: ${{ github.ref }}
-        # A checkbox is never CI evidence. verify-publication-ref requires the
-        # trusted refs/heads/main dispatch ref and a successful completed push
-        # CI run for the exact checked-out SHA, including ancestry of main.
         run: |
-          python3 scripts/release.py verify-publication-ref \
-            --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
+          [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGED_RUN" > "$RUNNER_TEMP/run.json"
+          gh run download "$STAGED_RUN" --name qualified-stable-stage --dir "$RUNNER_TEMP/stage"
+          python3 -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
+            --journal "$RUNNER_TEMP/stage/stage.json"
+          echo "run=$STAGED_RUN" >> "$GITHUB_OUTPUT"
 
   frontend:
     name: Build versioned UI and API schema
     needs: plan
+    if: needs.plan.outputs.publish != 'true' || needs.plan.outputs.channel != 'stable'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -271,6 +302,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      distribution_digest: ${{ steps.distribution.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -298,6 +331,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           outputs: type=oci,dest=dist/image.oci.tar
+          tags: carbonpanel-release:candidate
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
@@ -309,6 +343,32 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
+      - name: Verify the exact local OCI candidate (build evidence only)
+        id: local_oci
+        env:
+          PINNED_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          # No registry write: digest the already exported LOCAL OCI layout and
+          # bind it to the exact tested commit. Build evidence only. Promotion
+          # still needs an independently verified public pair in BOTH registries.
+          python3 scripts/release.py local-oci-candidate \
+            --archive dist/image.oci.tar --commit "$PINNED_COMMIT" > dist/local-oci.json
+          cat dist/local-oci.json >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=$(jq -r .digest dist/local-oci.json)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(jq -r .revision dist/local-oci.json)" >> "$GITHUB_OUTPUT"
+      - name: Rehearse copying the exact OCI archive without public registry access
+        id: distribution
+        run: |
+          command -v skopeo >/dev/null || { sudo apt-get update && sudo apt-get install -y skopeo; }
+          SOURCE="oci-archive:dist/image.oci.tar"
+          skopeo inspect --raw "$SOURCE" > dist/distribution-index.json
+          jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64","arm64"]' dist/distribution-index.json
+          EXPECTED="sha256:$(sha256sum dist/distribution-index.json | cut -d' ' -f1)"
+          skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/copied-digest" \
+            "$SOURCE" "oci:$RUNNER_TEMP/verified-layout:candidate"
+          test "$(cat "$RUNNER_TEMP/copied-digest")" = "$EXPECTED"
+          echo "$EXPECTED" > dist/distribution-digest.txt
+          echo "digest=$EXPECTED" >> "$GITHUB_OUTPUT"
       - name: Check final download checksums (digest added after immutable publication)
         run: python3 scripts/release.py finalize --output dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -319,17 +379,80 @@ jobs:
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-image-context
-          path: dist/image
-          include-hidden-files: true
+          name: verified-release-oci
+          path: |
+            dist/image.oci.tar
+            dist/distribution-digest.txt
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
 
   # IMMUTABLE VERSION PUBLICATION ONLY. No moving alias is written here.
+  rehearse-stable-docs:
+    name: Render the staged Stable release and qualify both channels
+    needs: [plan, image]
+    if: needs.plan.outputs.publish != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CARBONPANEL_STABLE_REVISION: ${{ needs.plan.outputs.commit }}
+      CARBONPANEL_STABLE_DIGEST: ${{ needs.image.outputs.distribution_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          version: '1.50.0'
+          github_token: ${{ github.token }}
+      - name: Qualify both rendered channels at the commit and staged OCI digest
+        env:
+          PLANNED_VERSION: ${{ needs.plan.outputs.version }}
+          PLANNED_CHANNEL: ${{ needs.plan.outputs.channel }}
+        run: |
+          if [ "$PLANNED_CHANNEL" = stable ]; then
+            export CARBONPANEL_STABLE_TAG="$PLANNED_VERSION"
+          else
+            export CARBONPANEL_STABLE_TAG="$(jq -er '.next_stable.git_tag' docs/release-history.json)"
+          fi
+          python3 scripts/build_website.py
+          python3 scripts/check_website.py
+          python3 scripts/release.py verify-stable-release-site --site .website-build/site \
+            --commit "$CARBONPANEL_STABLE_REVISION" --digest "$CARBONPANEL_STABLE_DIGEST" \
+            --version "$CARBONPANEL_STABLE_TAG" --repository "https://github.com/$GITHUB_REPOSITORY"
+          python3 scripts/browser_version_check.py
+
+      - name: Record the tested artifact identity for Stable publication
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.channel == 'stable'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          jq -n --arg run "$GITHUB_RUN_ID" --arg repo "$GITHUB_REPOSITORY" --arg head "$GITHUB_SHA" \
+            --arg tag "$RELEASE_VERSION" --arg sha "$CARBONPANEL_STABLE_REVISION" --arg digest "$CARBONPANEL_STABLE_DIGEST" \
+            '{run:$run,repo:$repo,workflow_sha:$head,tag:$tag,commit:$sha,digest:$digest}' > stage.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.channel == 'stable'
+        with:
+          name: qualified-stable-stage
+          path: stage.json
+          if-no-files-found: error
+          retention-days: 14
+
   publish-immutable:
     name: Publish immutable version tag after fail-closed preflight
     needs: [plan, image]
-    if: needs.plan.outputs.publish == 'true'
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true' &&
+      ((needs.plan.outputs.channel == 'stable' && needs.plan.outputs.artifact_run == inputs.staged_run) ||
+       (needs.plan.outputs.channel != 'stable' && needs.image.result == 'success'))
     runs-on: ubuntu-24.04
     # The workflow-level publish lock covers this phase; no per-job group.
     permissions:
@@ -348,10 +471,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-image-context
-          path: .
+          name: verified-release-oci
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
+          path: dist/verified-oci
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Fail closed without registry credentials
         env:
@@ -370,6 +496,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Provision the OCI copy tool
+        run: command -v skopeo >/dev/null || { sudo apt-get update && sudo apt-get install -y skopeo; }
       - name: Preflight exact immutable version in every registry
         id: preflight
         env:
@@ -383,73 +511,492 @@ jobs:
         run: |
           python3 scripts/release.py preflight-immutable \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --expected-digest "$EXPECTED_DIGEST"
-      - name: Resolve the sole immutable tag reference
-        id: immutable_tag
-        env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-        run: |
-          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
-          {
-            echo 'tags<<EOF'
-            echo "$DOCKER_HUB_IMAGE:$TAG"
-            echo "${GHCR_IMAGE,,}:$TAG"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-      - name: Push the immutable version tag only
+            --expected-digest "$EXPECTED_DIGEST" --staged-archive dist/verified-oci/image.oci.tar
+      - name: Copy the tested OCI bytes to both immutable version tags
         id: push
         if: steps.preflight.outputs.action == 'publish'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: dist/image
-          file: docker/Dockerfile.release
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.immutable_tag.outputs.tags }}
-          labels: |
-            org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
-            org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
-            org.opencontainers.image.url=https://carbonpanel.dev/
-            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
-            org.opencontainers.image.licenses=MPL-2.0
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
-          cache-from: type=gha,scope=release-image
-          cache-to: type=gha,mode=max,scope=release-image
-      - name: Resolve the verified digest (resume uses the operator-supplied digest)
+        env:
+          TARGETS: ${{ steps.preflight.outputs.targets }}
+        run: |
+          SOURCE="oci-archive:dist/verified-oci/image.oci.tar"
+          EXPECTED=$(cat dist/verified-oci/distribution-digest.txt)
+          test "sha256:$(skopeo inspect --raw "$SOURCE" | sha256sum | cut -d' ' -f1)" = "$EXPECTED"
+          while IFS= read -r ref; do
+            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/copied-digest" \
+              "$SOURCE" "docker://$ref"
+            test "$(cat "$RUNNER_TEMP/copied-digest")" = "$EXPECTED"
+          done < <(jq -er '.[]' <<< "$TARGETS")
+          echo "digest=$EXPECTED" >> "$GITHUB_OUTPUT"
+      - name: Resolve the digest of the qualified staged distribution
         id: resolved
         env:
-          PREFLIGHT_ACTION: ${{ steps.preflight.outputs.action }}
-          PUSH_DIGEST: ${{ steps.push.outputs.digest }}
-          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          DIGEST: ${{ steps.preflight.outputs.digest }}
         run: |
-          if [ "$PREFLIGHT_ACTION" = "resume" ]; then
-            echo "digest=$EXPECTED_DIGEST" >> "$GITHUB_OUTPUT"
-          else
-            echo "digest=$PUSH_DIGEST" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Verify tag→digest and both architectures in both registries
+          test "$(cat dist/verified-oci/distribution-digest.txt)" = "$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Verify tag to digest and both architectures in both registries
         id: verify
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
         run: python3 scripts/release.py verify-immutable --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
-      - name: Sync Docker Hub repository description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. A release must not write a
+      # raw or older README over the derived, byte-bounded public body.
+
+
+  # OSS-413 stable channel transaction. The EXACT target version, both immutable
+  # registry digests and the DEPLOYED public docs marker are bound together.
+  # GitHub release creation is gated on this job's synchronized output; no
+  # moving alias is written until the marker is verified over HTTPS.
+  prepare-draft:
+    name: Prepare and verify the private release downloads before channel writes
+    needs: [plan, publish-immutable]
+    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      release_id: ${{ steps.identity.outputs.release_id }}
+    # GitHub latest is selected here under product-only verified stable ordering,
+    # inside the workflow-level publish lock (never concurrently).
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release-downloads
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
+          path: dist/release
+      - name: Record the verified image digest and final checksums
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
+      - name: Decide whether this digest already has a published record
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py release-record --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST"
+      - name: Verify the private GitHub draft matches the tested release files
+        if: steps.record.outputs.action == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          python3 scripts/release.py publish --draft-only --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --output dist/release
+
+      - name: Preflight the Stable minor compatibility tag before public channel changes
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          SEMVER: ${{ needs.plan.outputs.semver }}
+        run: |
+          python3 scripts/release.py promote-alias --check-only --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --alias "${SEMVER%.*}" --digest "$IMAGE_DIGEST"
+      - name: Capture the prepared release identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from scripts import release
+          tag = os.environ["RELEASE_VERSION"]
+          record = release.get_release(tag)
+          if record.get("tag_name") != tag or not record.get("id"):
+              raise ValueError("Prepared release record identity is unknown")
+          release.write_output({"release_id": str(record["id"])})
+          PY
+
+  stable-channel-transaction:
+    name: Qualified stable channel transaction (docs marker bound)
+    needs: [plan, publish-immutable, prepare-draft]
+    if: >-
+      needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      needs.plan.outputs.channel == 'stable'
+    env:
+      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
+      CARBONPANEL_STABLE_TAG: ${{ needs.plan.outputs.version }}
+      CARBONPANEL_STABLE_REVISION: ${{ needs.plan.outputs.commit }}
+      CARBONPANEL_STABLE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+      deployments: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    outputs:
+      action: ${{ steps.transaction.outputs.action }}
+      receipt: ${{ steps.transaction.outputs.receipt }}
+      prior_receipt: ${{ steps.prior.outputs.prior_receipt }}
+      prior_hash: ${{ steps.prior.outputs.hash }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - name: Refuse an older target that lacks the trusted gate script
+        run: python3 scripts/release.py verify-gate-script --path scripts/release.py
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Observe the exact immutable version in both registries
+        id: immutable
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          OBS=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
+          printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - name: Verify the OBSERVED digests, not a hardcoded literal
+        id: parity
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          OBS: ${{ steps.immutable.outputs.observations }}
+        run: |
+          python3 scripts/release.py verify-channel-parity \
+            --observations "$OBS" --digest "$IMAGE_DIGEST" --commit "$RELEASE_COMMIT"
+          HUB=$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')
+          GHCR=$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')
+          test "$HUB" = "$IMAGE_DIGEST"
+          test "$GHCR" = "$IMAGE_DIGEST"
+          printf 'observed=%s\n' "$(jq -nc --arg h "$HUB" --arg g "$GHCR" \
+            '{docker_hub:$h,ghcr:$g}')" >> "$GITHUB_OUTPUT"
+      - name: Decide first publication or promotion from ACTUAL alias observations
+        id: stable_aliases
+        run: |
+          STABLE=$(python3 scripts/release.py channel-observe --reference stable | jq -c .observations)
+          LATEST=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          python3 scripts/release.py stable-alias-decision \
+            --stable "$STABLE" --latest "$LATEST"
+      - name: Capture the verified prior receipt and exact prior docs bytes
+        id: prior
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
+          PRIOR_COMMIT=$(printf '%s' "$LIVE" | jq -r '.commit // empty')
+          PRIOR_DIGEST=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')
+          printf 'live_commit=%s\n' "$PRIOR_COMMIT" >> "$GITHUB_OUTPUT"
+          printf 'live_digest=%s\n' "$PRIOR_DIGEST" >> "$GITHUB_OUTPUT"
+          RECEIPT=$(python3 scripts/release.py channel-active-receipt \
+            --channel stable --aliases "$ALIASES" \
+            --docs-commit "$PRIOR_COMMIT" --docs-digest "$PRIOR_DIGEST")
+          test "$(jq -r '.receipt.verified' <<< "$RECEIPT")" = true
+          printf 'prior_receipt=%s\n' "$(printf '%s' "$RECEIPT" | jq -c .receipt)" >> "$GITHUB_OUTPUT"
+          # Rollback bytes come from the ACTUAL live deployment, resolved by
+          # the shared docs gate - never from this freshly rebuilt site.
+          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
+            --repository "$GITHUB_REPOSITORY")
+          test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
+          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
+            --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
+            --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
+          test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
+          echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
+          echo "prior_artifact=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
+      - name: Keep the exact prior docs bytes for alias-write compensation
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-prior-stable
+          retention-days: 30
+          path: .website-build/prior-site
+      - name: Render both channels from the release and the verified live Nightly
+        id: contract
+        env:
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          PRIOR=.website-build/prior-site/version-index.json
+          NIGHTLY_COMMIT=$(jq -er '.channels.nightly.commit' "$PRIOR")
+          NIGHTLY_DIGEST=$(jq -er '.channels.nightly.image.digest' "$PRIOR")
+          NIGHTLY=$(python3 scripts/release.py channel-observe --reference nightly | jq -ce .observations)
+          python3 scripts/release.py verify-channel-parity --observations "$NIGHTLY" \
+            --commit "$NIGHTLY_COMMIT" --digest "$NIGHTLY_DIGEST"
+          case "$(jq -er '.channels.nightly.promotion.state' "$PRIOR")" in
+            final)
+              RECEIPT=$(jq -er '.channels.nightly.promotion.receipt | strings | select(length > 0)' "$PRIOR")
+              python3 scripts/build_website.py --nightly-revision "$NIGHTLY_COMMIT" \
+                --nightly-digest "$NIGHTLY_DIGEST" --promotion-state final --promotion-receipt "$RECEIPT"
+              python3 scripts/check_website.py --expect-nightly-revision "$NIGHTLY_COMMIT" \
+                --expect-nightly-digest "$NIGHTLY_DIGEST" --expect-promotion-state final \
+                --expect-promotion-receipt "$RECEIPT" ;;
+            baseline)
+              python3 scripts/build_website.py
+              python3 scripts/check_website.py ;;
+            *) echo "::error::Unsupported live Nightly promotion state"; exit 1 ;;
+          esac
+          diff <(jq -S .channels.nightly "$PRIOR") \
+            <(jq -S .channels.nightly .website-build/site/version-index.json)
+          python3 scripts/release.py validate-channel-contract \
+            --path .website-build/site/version-index.json \
+            --stable-commit "$RELEASE_COMMIT" --stable-digest "$IMAGE_DIGEST"
+      - name: Qualify rendered Stable HTML, version stamp, pins and both index routes
+        id: rendered
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py verify-stable-release-site \
+            --site .website-build/site --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST" --version "$RELEASE_VERSION" \
+            --repository "https://github.com/$GITHUB_REPOSITORY"
+      - name: Bind the maintained guide receipt to the rendered publication
+        run: |
+          GATE=scripts/docs_publication_gate.py
+          SITE=.website-build/site
+          INDEX=$SITE/version-index.json
+          python3 "$GATE" guide-fingerprint --declaration docs/maintained-guides.json --root . \
+            --revision "$CARBONPANEL_STABLE_REVISION" > .website-build/guides.json
+          python3 "$GATE" stamp-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
+            --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
+          python3 "$GATE" verify-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
+            --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          retention-days: 30
+          path: .website-build/site
+      - name: Provision Chromium and pin expectations for stable live browser QA
+        id: stable_chromium
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
+          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          INDEX="$GITHUB_WORKSPACE/.website-build/site/version-index.json"
+          echo "CARBONPANEL_EXPECT_NIGHTLY_REVISION=$(jq -r '.channels.nightly.commit' "$INDEX")" >> "$GITHUB_ENV"
+          echo "CARBONPANEL_EXPECT_NIGHTLY_DIGEST=$(jq -r '.channels.nightly.image.digest' "$INDEX")" >> "$GITHUB_ENV"
+          echo "CARBONPANEL_EXPECT_PROMOTION_STATE=$(jq -r '.promotion.state' "$INDEX")" >> "$GITHUB_ENV"
+      - name: Check the packaged candidate in Chromium before publication
+        id: local_browser
+        run: python3 scripts/browser_version_check.py
+      - name: Qualify the candidate before the first external channel change
+        id: stage_decision
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          OBSERVED: ${{ steps.parity.outputs.observed }}
+          CI_VERIFIED: ${{ needs.plan.outputs.ci_verified }}
+          IMMUTABLE_OK: ${{ steps.parity.outcome == 'success' }}
+          CONTRACT_OK: ${{ steps.contract.outcome == 'success' }}
+          SITE_OK: ${{ steps.rendered.outcome == 'success' && steps.local_browser.outcome == 'success' }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          LIVE_COMMIT: ${{ steps.prior.outputs.live_commit }}
+          LIVE_DIGEST: ${{ steps.prior.outputs.live_digest }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          PREV_JSON=$(jq -ce 'select(.verified == true)' <<< "$PRIOR")
+          python3 scripts/release.py verify-stable-order --prior-tag "$(jq -er .channels.stable.tag .website-build/prior-site/version-index.json)" \
+            --candidate-tag "$RELEASE_VERSION" --prior-receipt "$PREV_JSON" --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST"
+          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
+          CANDIDATE=$(jq -nc \
+            --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
+            --arg tag "$RELEASE_VERSION" --argjson seq "$((SEQ + 1))" --arg ref "refs/heads/main" \
+            --argjson registries "$OBSERVED" --arg run_id "$RUN_ID" \
+            --arg ci "$CI_VERIFIED" --argjson immutable_ok "$IMMUTABLE_OK" \
+            --argjson contract_ok "$CONTRACT_OK" --argjson site_ok "$SITE_OK" \
+            '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
+              source_ref:$ref,ci_verified:$ci,immutable_ok:$immutable_ok,contract_valid:$contract_ok,
+              site_validated:$site_ok,docs_commit:$commit,docs_digest:$digest,
+              registries:$registries,
+              candidate_marker_verified:false,canonical_marker_verified:false,
+              run_ids:{release:$run_id}}')
+          LIVE=$(jq -c '{registries:.registries, docs_commit, docs_digest}' <<< "$PREV_JSON")
+          echo "candidate=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          python3 scripts/release.py channel-transaction --phase stage \
+            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
+            --event release
+
+      - name: Journal the qualified release and exact baseline before changing channels
+        env:
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          CANDIDATE: ${{ steps.stage_decision.outputs.candidate }}
+          PRIOR_DEPLOYMENT: ${{ steps.prior.outputs.deployment_id }}
+          PRIOR_ARTIFACT: ${{ steps.prior.outputs.prior_artifact }}
+          RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+        run: |
+          python3 -m scripts.stable_recovery journal --prior .website-build/prior-site \
+            --candidate .website-build/site --journal .website-build/transaction.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stable-transaction-plan
+          path: .website-build/transaction.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Sign in to Docker Hub for first-time Stable alias setup
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ env.DOCKER_HUB_IMAGE }}
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
+      - name: Sign in to GHCR for first-time Stable alias setup
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Establish any missing Stable alias at the verified already-public release
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+        run: |
+          PRIOR_TAG=$(jq -er '.channels.stable.tag' .website-build/prior-site/version-index.json)
+          python3 scripts/release.py verify-release-record --version "$PRIOR_TAG" \
+            --commit "$(jq -er .revision <<< "$PRIOR")" --digest "$(jq -er .digest <<< "$PRIOR")"
+          python3 scripts/release.py establish-stable-baseline --receipt "$PRIOR"
+      - name: Stage the candidate probe alongside the exact prior canonical site
+        run: |
+          cp -a .website-build/prior-site .website-build/probe-site
+          python3 scripts/release.py stage-channel-marker --site .website-build/probe-site \
+            --channel stable --commit "$CARBONPANEL_STABLE_REVISION" --digest "$CARBONPANEL_STABLE_DIGEST"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-stable-probe
+          path: .website-build/probe-site
+      - name: Deploy the off-path Stable candidate probe
+        id: deploy_probe
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-stable-probe
+      - name: Observe the candidate marker publicly before changing the canonical docs
+        id: probe
+        run: |
+          URL="https://carbonpanel.dev/docs/candidate/$CARBONPANEL_STABLE_REVISION/marker.json"
+          curl -fsSL "$URL" | jq -e --arg revision "$CARBONPANEL_STABLE_REVISION" \
+            --arg digest "$CARBONPANEL_STABLE_DIGEST" \
+            '.channel == "stable" and .canonical == false and .candidate_commit == $revision and .candidate_digest == $digest'
+      - name: Deploy the synchronized stable docs marker once
+        id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Verify the deployed public stable marker matches the exact revision
+        id: marker
+        env:
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
+          test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$RELEASE_COMMIT"
+          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$IMAGE_DIGEST"
+          python3 scripts/docs_publication_gate.py verify-publication-receipt --base-url https://carbonpanel.dev \
+            --candidate .website-build/guides.json --live .website-build/site/version-index.json \
+            --revision "$RELEASE_COMMIT"
+          VERSION=$(jq -er .channels.stable.version .website-build/site/version-index.json)
+          for asset in version-index.json docs/version-index.json channel-marker.json \
+                      docs/source.json docs/schemav1.yaml "docs/versions/$VERSION/schemav1.yaml" \
+                      docs/nightly/source.json docs/nightly/schemav1.yaml; do
+            curl --retry 3 -fsSL "https://carbonpanel.dev/$asset" -o "$RUNNER_TEMP/public-asset"
+            cmp ".website-build/site/$asset" "$RUNNER_TEMP/public-asset"
+          done
+      - name: Live browser QA of public Stable/Nightly channels after docs deploy
+        id: stable_live_browser
+        if: steps.deploy.outcome == 'success'
+        run: python3 scripts/browser_version_check.py --base-url https://carbonpanel.dev
+      - name: Decide the qualified stable transaction before any alias move
+        id: transaction
+        env:
+          STAGED: ${{ steps.stage_decision.outputs.candidate }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          PROBE_OK: ${{ steps.probe.outcome == 'success' }}
+          CANONICAL_OK: ${{ steps.marker.outcome == 'success' && steps.stable_live_browser.outcome == 'success' }}
+        run: |
+          CANDIDATE=$(jq -ce --argjson probe "$PROBE_OK" --argjson canonical "$CANONICAL_OK" \
+            '.candidate_marker_verified=$probe | .canonical_marker_verified=$canonical' <<< "$STAGED")
+          LIVE=$(jq -c '{registries:.registries,docs_commit,docs_digest}' <<< "$PRIOR")
+          python3 scripts/release.py channel-transaction --phase commit \
+            --candidate "$CANDIDATE" --previous "$PRIOR" --live "$LIVE" --event release
+
+      # If the new stable marker was deployed but qualification/decision did not
+      # authorize alias promotion, restore the exact prior docs bytes so the
+      # public marker cannot stay ahead of unchanged aliases.
+      - name: Restore prior stable docs after a failed synchronized transaction
+        id: docs_compensate
+        if: >-
+          always() && (steps.deploy_probe.outcome == 'success' || steps.deploy.outcome == 'success') &&
+          (steps.marker.outcome != 'success' || steps.transaction.outcome != 'success' ||
+           steps.transaction.outputs.action == 'refuse' ||
+           steps.transaction.outputs.action == 'rollback' ||
+           steps.transaction.outputs.action == '')
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-prior-stable
+      - name: Verify the restored prior stable docs marker
+        if: always() && steps.docs_compensate.outcome == 'success'
+        env:
+          PRIOR_HASH: ${{ steps.prior.outputs.hash }}
+          PRIOR_COMMIT: ${{ steps.prior.outputs.live_commit }}
+          PRIOR_DIGEST: ${{ steps.prior.outputs.live_digest }}
+        run: |
+          curl -fsSL https://carbonpanel.dev/version-index.json -o "$RUNNER_TEMP/restored-index.json"
+          test "sha256:$(sha256sum "$RUNNER_TEMP/restored-index.json" | cut -d' ' -f1)" = "$PRIOR_HASH"
+          LIVE=$(cat "$RUNNER_TEMP/restored-index.json")
+          if [ -n "$PRIOR_COMMIT" ]; then
+            test "$(printf '%s' "$LIVE" | jq -r '.channels.stable.commit')" = "$PRIOR_COMMIT"
+          fi
+          if [ -n "$PRIOR_DIGEST" ]; then
+            test "$(printf '%s' "$LIVE" | jq -r '.channels.stable.image.digest')" = "$PRIOR_DIGEST"
+          fi
+      - name: Fail the run when stable docs compensation was required
+        if: always() && steps.docs_compensate.outcome == 'success'
+        run: |
+          echo "::error::stable docs marker was deployed without a qualified alias promotion and was restored"
+          exit 1
 
   # DURABLE RELEASE RECORD. This completes BEFORE any moving alias is promoted,
   # so an interruption cannot leave a newer alias with no recorded provenance.
+  # The GitHub release goes public only AFTER aliases are verified (stable).
+  # never before a write that may still be compensated and rolled back.
   publish:
     name: Publish complete GitHub release
-    needs: [plan, publish-immutable]
-    if: needs.plan.outputs.publish == 'true'
+    needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction, promote-aliases]
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
+      needs.plan.outputs.publish == 'true' &&
+      needs.promote-aliases.result == 'success' &&
+      (needs.plan.outputs.channel != 'stable' ||
+       (needs.stable-channel-transaction.result == 'success' &&
+        needs.stable-channel-transaction.outputs.action != '' &&
+        needs.stable-channel-transaction.outputs.action != 'refuse' &&
+        needs.stable-channel-transaction.outputs.action != 'rollback' &&
+        needs.promote-aliases.outputs.aliases_verified == 'true'))
     runs-on: ubuntu-24.04
     # GitHub latest is selected here under product-only verified stable ordering,
     # inside the workflow-level publish lock (never concurrently).
@@ -464,6 +1011,8 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release-downloads
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
           path: dist/release
       - name: Record the verified image digest and final checksums
         env:
@@ -476,20 +1025,35 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        # A matching published release means retry only needs alias promotion;
+        # A matching published release is read-only;
         # an absent record is published here. Any conflict or unknown state
         # refuses, so no asset is re-uploaded or overwritten.
         run: |
           python3 scripts/release.py release-record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
-      - name: Upload assets to a draft, then publish
+      - name: Re-observe both active aliases and the served release immediately before exposure
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          for alias in latest stable; do
+            OBS=$(python3 scripts/release.py channel-observe --reference "$alias" | jq -ce .observations)
+            python3 scripts/release.py verify-channel-parity --observations "$OBS" \
+              --digest "$IMAGE_DIGEST" --commit "$RELEASE_COMMIT"
+          done
+          curl -fsSL https://carbonpanel.dev/docs/version-index.json -o "$RUNNER_TEMP/public-index.json"
+          jq -e --arg tag "$RELEASE_VERSION" --arg sha "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
+            '.channels.stable | .tag==$tag and .commit==$sha and .image.digest==$digest' "$RUNNER_TEMP/public-index.json"
+      - name: Verify and expose the prepared private downloads
         if: steps.record.outputs.action == 'publish'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-        run: python3 scripts/release.py publish --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
+        run: python3 scripts/release.py publish --expose-prepared --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
       - name: Verify an existing durable record (alias-only retry)
         if: steps.record.outputs.action == 'verified'
         env:
@@ -502,22 +1066,182 @@ jobs:
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
 
-  # ALIAS PROMOTION LAST. Each alias is re-verified against the durable record
-  # and the actual registry alias digest before any move.
+      - name: Download and hash every public release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: python3 scripts/release.py verify-public-downloads --version "$RELEASE_VERSION" --output dist/release
+
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. A release must not write a
+      # raw or older README over the derived, byte-bounded public body.
+      - name: Verify the published Stable download and README entry points
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_VERSION"
+          curl -fsSL https://hub.docker.com/v2/repositories/atharvnaphade/carbonpanel/ -o "$RUNNER_TEMP/hub-repository.json"
+          jq -e '.full_description | contains("https://carbonpanel.dev/docs/") and contains("github.com/athNdev/carbonpanel/releases")' "$RUNNER_TEMP/hub-repository.json"
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$RELEASE_VERSION/README.md" -o "$RUNNER_TEMP/release-readme"
+          cmp README.md "$RUNNER_TEMP/release-readme"
+
+  # ALIAS PROMOTION BEFORE THE PUBLIC RELEASE. Every alias is re-verified against
+  # the actual registry state before the GitHub release becomes public, so a
+  # failed alias write can never leave a published release contradicting aliases.
   promote-aliases:
     name: Promote moving aliases from the verified digest
-    needs: [plan, publish-immutable, publish]
-    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction]
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
+      needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      (needs.plan.outputs.channel != 'stable' ||
+       (needs.stable-channel-transaction.result == 'success' &&
+        needs.stable-channel-transaction.outputs.action != '' &&
+        needs.stable-channel-transaction.outputs.action != 'refuse' &&
+        needs.stable-channel-transaction.outputs.action != 'rollback'))
     runs-on: ubuntu-24.04
-    # Alias decisions are recomputed with LIVE preflight inside the
-    # workflow-level publish lock, so no stale ordering can be applied.
+    # Alias decisions are recomputed with LIVE preflight inside the ONE shared
+    # pages-deploy lock inherited from the workflow level: the same lock held
+    # by cd.yml and the docs-only publisher, so Pages and aliases move serially.
     permissions:
       contents: read
       packages: write
+      pages: write
+      id-token: write
       actions: read
+    environment:
+      name: github-pages
+    outputs:
+      aliases_verified: ${{ steps.alias_verify.outputs.verified }}
     env:
       DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
       GHCR_IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - name: Refuse an older target that lacks the trusted gate script
+        run: python3 scripts/release.py verify-gate-script --path scripts/release.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Sign in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to the linked GitHub container registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Decide which aliases may advance
+        id: promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        # An undeterminable channel promotes nothing and records why, rather
+        # than guessing or silently moving a mutable alias.
+        run: |
+          python3 scripts/release.py alias-promotion \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST"
+      # OSS-413: the former independent stable-alias and bare latest-alias write
+      # steps were REMOVED. Both aliases now move
+      # together only through the qualified stable transaction, whose deployed
+      # public docs marker was verified above with the exact target revision.
+      - name: Promote stable and latest together from the synced transaction
+        id: stable_aliases
+        if: >-
+          needs.plan.outputs.channel == 'stable' &&
+          needs.stable-channel-transaction.outputs.action != '' &&
+          needs.stable-channel-transaction.outputs.action != 'refuse' &&
+          needs.stable-channel-transaction.outputs.action != 'rollback'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+          CI_VERIFIED: ${{ needs.plan.outputs.ci_verified }}
+        run: |
+          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          IMMUTABLE=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
+          ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          python3 scripts/release.py channel-promote \
+            --channel stable --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST" \
+            --release-tag "$RELEASE_VERSION" --ci-verified "$CI_VERIFIED" \
+            --previous-commit "$(jq -er .revision <<< "$PRIOR")" \
+            --previous-digest "$(jq -er .digest <<< "$PRIOR")" \
+            --previous-binding "$(jq -er .verified <<< "$PRIOR")" \
+            --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
+
+      # The GitHub release is exposed only AFTER this observation succeeds.
+      - name: Verify promoted aliases by live observation before publication
+        id: alias_verify
+        if: >-
+          always() && needs.plan.outputs.channel == 'stable' &&
+          steps.stable_aliases.outcome == 'success'
+        env:
+          CHANNEL_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          for ref in latest stable; do
+            OBS=$(python3 scripts/release.py channel-observe --reference "$ref" | jq -c .observations)
+            test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
+            test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
+          done
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+
+      # Compensation for a failed dual-registry stable alias write: restore
+      # BOTH aliases and the EXACT prior docs bytes, then fail the run.
+      - name: Restore prior stable aliases after a failed dual-registry write
+        id: stable_compensate
+        if: always() && needs.plan.outputs.channel == 'stable' && (steps.stable_aliases.outcome != 'success' || steps.alias_verify.outcome != 'success')
+        env:
+          PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+          CANDIDATE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          test -n "$PRIOR" || { echo "::error::no prior stable receipt to restore"; exit 1; }
+          python3 scripts/release.py channel-rollback --receipt "$PRIOR" --candidate-digest "$CANDIDATE_DIGEST" --apply
+      - name: Deploy the exact prior stable docs bytes
+        id: stable_compensate_docs
+        if: always() && steps.stable_compensate.outcome == 'success'
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-prior-stable
+      - name: Verify the compensated stable aliases and docs marker
+        if: always() && steps.stable_compensate_docs.outcome == 'success'
+        env:
+          PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+          PRIOR_HASH: ${{ needs.stable-channel-transaction.outputs.prior_hash }}
+        run: |
+          PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
+          for ref in latest stable; do
+            OBS=$(python3 scripts/release.py channel-observe --reference "$ref" | jq -c .observations)
+            test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$PRIOR_DIGEST"
+            test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$PRIOR_DIGEST"
+          done
+          LIVE_HASH=$(curl -fsSL https://carbonpanel.dev/version-index.json | sha256sum | cut -d' ' -f1)
+          test "sha256:$LIVE_HASH" = "$PRIOR_HASH"
+      - name: Fail the run when stable compensation was required
+        if: always() && steps.stable_compensate.outcome == 'success'
+        run: |
+          echo "::error::stable alias write failed and was compensated; no success reported"
+          exit 1
+
+  publish-minor:
+    name: Promote the compatibility tag for the published Stable release
+    needs: [plan, publish-immutable, publish]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -534,47 +1258,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Re-verify the durable release record before any alias move
+      - name: Promote minor compatibility alias after public download verification
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        run: |
-          python3 scripts/release.py verify-release-record \
-            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --digest "$IMAGE_DIGEST"
-      - name: Decide which aliases may advance
-        id: promotion
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        # An undeterminable channel promotes nothing and records why, rather
-        # than guessing or silently moving a mutable alias.
-        run: |
-          python3 scripts/release.py alias-promotion \
-            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --digest "$IMAGE_DIGEST"
-      - name: Promote minor channel alias
-        if: steps.promotion.outputs.minor != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-          ALIAS: ${{ steps.promotion.outputs.minor }}
+          SEMVER: ${{ needs.plan.outputs.semver }}
         run: |
           python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
-            --commit "$RELEASE_COMMIT" --alias "$ALIAS" --digest "$IMAGE_DIGEST"
-      - name: Promote latest channel alias
-        if: steps.promotion.outputs.latest == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        run: |
-          python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
-            --commit "$RELEASE_COMMIT" --alias latest --digest "$IMAGE_DIGEST"
+            --commit "$RELEASE_COMMIT" --alias "${SEMVER%.*}" --digest "$IMAGE_DIGEST"

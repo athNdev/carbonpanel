@@ -68,6 +68,18 @@ jobs:
             --mock-tag carbonpanel-mcp-mock:packaged-smoke \
             --evidence "$RUNNER_TEMP/mcp-packaged-smoke.json" \
             --fixture-log "$RUNNER_TEMP/mcp-packaged-fixture.log"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Exercise packaged streams with controller authorization
+        run: |
+          set -euo pipefail
+          CARBONPANEL_MCP_SMOKE_IMAGE_ID=$(jq -er '.image_id' "$RUNNER_TEMP/mcp-packaged-smoke.json")
+          export CARBONPANEL_MCP_SMOKE_IMAGE_ID
+          go test -v -count=1 -timeout=3m ./internal/mcp \
+            -run '^TestIntegrationControllerStream(EntryPoint|Refusals|SizeContract)$' \
+            | tee "$RUNNER_TEMP/mcp-packaged-stream.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -77,3 +89,4 @@ jobs:
             ${{ runner.temp }}/mcp-binary-version.txt
             ${{ runner.temp }}/mcp-packaged-smoke.json
             ${{ runner.temp }}/mcp-packaged-fixture.log
+            ${{ runner.temp }}/mcp-packaged-stream.log

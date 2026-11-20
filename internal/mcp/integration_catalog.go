@@ -133,6 +133,7 @@ var exposedTools = []ToolSpec{
 	{Name: "list_server_executions", Procedure: "/carbonpanel.v1.TaskService/ListServerExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions for one server with a bounded limit.", Source: "server"},
 	{Name: "list_server_players", Procedure: "/carbonpanel.v1.ServerService/ListServerPlayers", Class: Class("safe"), Confirm: false, Description: "Read the live online player list for one server. Read-only metrics; no health endpoint.", Source: "server"},
 	{Name: "list_servers", Procedure: "/carbonpanel.v1.ServerService/ListServers", Class: Class("safe"), Confirm: false, Description: "List Minecraft servers visible to this token. Read-only.", Source: "first_slice"},
+	{Name: "list_staged_config_changes", Procedure: "/carbonpanel.v1.StagedConfigService/ListStagedChanges", Class: Class("safe"), Confirm: false, Description: "List recent staged configuration changes for one server. Returns rollout metadata and status. Read-only.", Source: "integration"},
 	{Name: "list_subusers", Procedure: "/carbonpanel.v1.SubuserService/ListSubusers", Class: Class("safe"), Confirm: false, Description: "List per-server subuser grants. Read-only; the server_id is the RBAC object.", Source: "admin"},
 	{Name: "list_task_executions", Procedure: "/carbonpanel.v1.TaskService/ListTaskExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions of one task with a bounded limit.", Source: "server"},
 	{Name: "list_tasks", Procedure: "/carbonpanel.v1.TaskService/ListTasks", Class: Class("safe"), Confirm: false, Description: "List scheduled tasks for one server. Task config is redacted.", Source: "server"},
@@ -144,6 +145,8 @@ var exposedTools = []ToolSpec{
 	{Name: "list_world_view_targets", Procedure: "/carbonpanel.v1.WorldViewService/ListWorldViewTargets", Class: Class("safe"), Confirm: false, Description: "List world-view targets visible to this token. No renderer URLs.", Source: "first_slice"},
 	{Name: "migrate_server", Procedure: "/carbonpanel.v1.ServerService/MigrateServer", Class: Class("review"), Confirm: true, Description: "Move one server to a known configured node. Requires confirm=true, a request_id and an exact node id; no discovery fallback.", Source: "server"},
 	{Name: "move_file", Procedure: "/carbonpanel.v1.FileService/MoveFile", Class: Class("review"), Confirm: true, Description: "Move one server-relative file or directory. Requires confirm=true.", Source: "content"},
+	{Name: "packwiz_get_pack", Procedure: "/carbonpanel.v1.PackwizService/GetPack", Class: Class("safe"), Confirm: false, Description: "Read Packwiz pack metadata and a page of content across mods, datapacks, resource packs and shaders. Requires global modpacks/read. Omits download URLs, paths and raw options.", Source: "content"},
+	{Name: "packwiz_list_packs", Procedure: "/carbonpanel.v1.PackwizService/ListPacks", Class: Class("safe"), Confirm: false, Description: "List Packwiz Studio packs. Requires global modpacks/read. Use next_offset to page through pack summaries.", Source: "content"},
 	{Name: "ping_node", Procedure: "/carbonpanel.v1.NodeService/PingNode", Class: Class("safe"), Confirm: false, Description: "Ping one configured node by exact id for status and latency. No discovery, no TLS material.", Source: "server"},
 	{Name: "player_service_ban_player", Procedure: "/carbonpanel.v1.PlayerService/BanPlayer", Class: Class("review"), Confirm: true, Description: "Ban one player on one server by exact identity key. Requires confirm=true and a bounded reason.", Source: "integration"},
 	{Name: "player_service_bulk_player_action", Procedure: "/carbonpanel.v1.PlayerService/BulkPlayerAction", Class: Class("review"), Confirm: true, Description: "Apply one bounded typed action to a small list of exact identity keys. Requires confirm=true.", Source: "integration"},
@@ -221,7 +224,7 @@ var exposedTools = []ToolSpec{
 const (
 	IntegrationDeclaredRPCs = 250
 	IntegrationMountedRPCs = 240
-	IntegrationExcludedOps = 78
-	IntegrationSupportedOps = 200
-	IntegrationCombinedTools = 211
+	IntegrationExcludedOps = 75
+	IntegrationSupportedOps = 203
+	IntegrationCombinedTools = 214
 )

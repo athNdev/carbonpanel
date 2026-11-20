@@ -6,6 +6,10 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - docker-compose.yml
+  - .github/workflows/compose-release-qualification.yml
+  - scripts/qualify-compose-artifacts.sh
+  - scripts/qualify-compose-release.sh
+  - scripts/qualify-compose-game.mjs
   - scripts/compose-upgrade.sh
   - scripts/compose-upgrade-rollback.sh
   - scripts/snapshot-panel-db.sh
@@ -37,8 +41,10 @@ that names Helm, Terraform or a deployment mode.
   `carbon-panel.db`. That is copy-back, not a prune. World bind mounts stay.
 - Helm, Terraform and Kubernetes manifests are **not shipped**. Do not add an
   upgrade procedure for them until the artifact exists in the tree.
-- A CI parse of the compose file is not a live create→join after upgrade.
-  That still needs a disposable host.
+- Use the hosted Compose qualification workflow for host and bridge game
+  joins, isolated snapshot faults, upgrade and copy-back. Identify candidate
+  runs by exact staged product SHA, Actions archive hashes and tested image
+  digest. Rerun against the final product SHA for release qualification.
 
 # Read next
 

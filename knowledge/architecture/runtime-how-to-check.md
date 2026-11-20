@@ -8,8 +8,18 @@ code_refs: [cmd/carbon-panel, internal/rpc, internal/proxy, internal/db, interna
 sources:
   - title: Parent concept
     resource: runtime.md
+  - title: Server troubleshooting
+    resource: ../../docs/carbon-panel/src/content/docs/troubleshooting.md
 ---
 # How to check
+
+Reconciliation reads timestamped logs from the current boot for fatal loader
+diagnostics, including after the container exits during boot. Operator
+shutdown and Docker's OOM classification take precedence.
+Optional dependency recommendations remain console warnings.
+Server reads retain a recorded error when Docker reports a stopped
+container. A recorded stop or a healthy running container clears the error
+display.
 
 ```sh
 go build ./...

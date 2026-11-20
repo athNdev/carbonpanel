@@ -45,6 +45,7 @@ type SearchResult struct {
 
 // Modpack represents a modpack from any indexer
 type Modpack struct {
+	ServerSide    string    `json:"server_side"` // Project-level server support declared by the indexer.
 	ID            string    `json:"id"`
 	IndexerID     string    `json:"indexer_id"` // Original ID from the indexer
 	Indexer       string    `json:"indexer"`    // Which indexer this came from

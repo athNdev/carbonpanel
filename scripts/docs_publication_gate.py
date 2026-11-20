@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MPL-2.0
 """Read-only gates for the docs-only maintained-guide publication lane.
 
-This module is deliberately independent of the OCI/channel-promotion tooling.
 It qualifies the LIVE two-channel docs receipt before a build, proves that a
 rebuilt site reproduces that receipt exactly, verifies the real rendered guide
 content, and resolves the exact prior Pages deployment artifact for rollback.
@@ -26,6 +25,10 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts import release
+
 SCHEMA_VERSION = 3
 CHANNELS = ("stable", "nightly")
 SELECTOR_LABELS = {"stable": "Stable", "nightly": "Nightly"}
@@ -76,7 +79,13 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def validate_channel_contract(document):
+def stable_identity(document):
+    stable = document["channels"]["stable"]
+    return {"tag": stable.get("tag"), "version": stable.get("version"),
+            "commit": stable.get("commit"), "digest": (stable.get("image") or {}).get("digest")}
+
+
+def validate_channel_contract(document, stable_source=None):
     """Fail-closed validation of the schema 3 two-channel contract.
 
     Accepts either the tracked source contract (which names a catalog) or the
@@ -127,9 +136,11 @@ def validate_channel_contract(document):
     simage = stable.get("image", {}) if isinstance(stable, dict) else {}
     if simage.get("tag") != "latest" or simage.get("stable_alias") != "stable":
         problems.append("stable must pin latest and the stable alias")
-    if stable.get("commit") != STABLE_BASELINE["commit"] \
-            or simage.get("digest") != STABLE_BASELINE["digest"]:
-        problems.append("stable must stay on the verified stable baseline")
+    expected = stable_identity(stable_source) if stable_source is not None else STABLE_BASELINE
+    actual = {"tag": stable.get("tag"), "version": stable.get("version"),
+              "commit": stable.get("commit"), "digest": simage.get("digest")}
+    if any(actual[field] != value for field, value in expected.items()):
+        problems.append("stable must stay on the verified stable identity")
     nightly = channels["nightly"]
     nimage = nightly.get("image", {}) if isinstance(nightly, dict) else {}
     if nightly.get("tag") is not None or nimage.get("tag") != "nightly":
@@ -137,14 +148,14 @@ def validate_channel_contract(document):
     return (not problems), problems
 
 
-def resolve_live_docs_state(document):
+def resolve_live_docs_state(document, stable_source=None):
     """Classify the live state and return the exact render inputs.
 
     final -> render with the OBSERVED promoted revision/digest/receipt.
     baseline -> render the explicitly unpromoted matched baseline.
     Candidate, unknown, mismatched or invalid states fail closed.
     """
-    ok, problems = validate_channel_contract(document)
+    ok, problems = validate_channel_contract(document, stable_source)
     if not ok:
         return None, "invalid live channel contract: " + "; ".join(problems)
     nightly = (document.get("channels") or {}).get("nightly") or {}
@@ -174,6 +185,54 @@ def resolve_live_docs_state(document):
         return {"state": "baseline", "revision": commit, "digest": digest,
                 "receipt": ""}, ""
     return None, f"unsupported live nightly promotion state {state!r}"
+
+
+def qualify_public_stable(document, repository):
+    """Bind the public Stable marker to the published release and both registries."""
+    ok, problems = validate_channel_contract(document, stable_source=document)
+    if not ok:
+        raise ValueError("Invalid public channel contract: " + "; ".join(problems))
+    stable = stable_identity(document)
+    tag, commit, digest = stable["tag"], stable["commit"], stable["digest"]
+    product = release.product_release_or_none(tag)
+    legacy = tag == release.LEGACY_STABLE_TAG and stable["version"] == tag[1:]
+    if not legacy and not (product and not product["prerelease"]
+                           and stable["version"] == product["semver"]):
+        raise ValueError("Public Stable marker needs a recognized stable release tag and version")
+    if document["channels"]["stable"].get("promotion") != {"state": "published", "promoted": True}:
+        raise ValueError("Stable docs do not describe a published release")
+    read, endpoint = github_api(repository)
+    latest = json.loads(read(f"{endpoint}/releases/latest"))
+    if (latest.get("tag_name") != tag or latest.get("draft") is not False
+            or latest.get("prerelease") is not False or not latest.get("published_at")):
+        raise ValueError("The published GitHub Latest release disagrees with Stable docs")
+    if json.loads(read(f"{endpoint}/commits/{tag}")).get("sha") != commit:
+        raise ValueError("The GitHub release tag does not peel to the Stable revision")
+    verified, reason, _ = release.release_provenance(f"v{stable['version']}", commit, digest,
+                                                       [[latest]], git_tag=tag)
+    if not verified:
+        raise ValueError("Stable release provenance failed: " + reason)
+    for reference in ("latest", "stable", stable["version"]):
+        observations = release.channel_observe(reference)
+        if legacy and reference == "stable" and all(
+                observations.get(registry, [None])[0] == "absent"
+                for registry in release.CHANNEL_REGISTRIES):
+            continue
+        verified, reason = release.channel_oci_parity(observations, digest, commit)
+        if not verified:
+            raise ValueError(f"Stable {reference!r} registry evidence failed: {reason}")
+    return stable
+
+
+def stable_render_inputs(stable, root=ROOT):
+    """Pass the verified product pins, preserving only an exact tracked legacy identity."""
+    if stable["tag"] == release.LEGACY_STABLE_TAG:
+        tracked = stable_identity(load_json(Path(root) / "docs/website-source.json"))
+        if tracked != stable:
+            raise ValueError("The verified legacy Stable identity differs from the tracked renderer source")
+        return {"stable_tag": "", "stable_revision": "", "stable_digest": ""}
+    return {"stable_tag": stable["tag"], "stable_revision": stable["commit"],
+            "stable_digest": stable["digest"]}
 
 
 def verify_docs_receipt(built, live):
@@ -268,11 +327,7 @@ def verify_channel_docs(index, channel, commit, digest, page_texts=(),
             if needle in text:
                 problems.append(f"{channel} page still contains forbidden content {needle!r}")
     if stable_source is not None:
-        before = (stable_source.get("channels", {}).get("stable", {}))
-        after = channels.get("stable", {})
-        if (after.get("commit") != before.get("commit")
-                or (after.get("image") or {}).get("digest")
-                != (before.get("image") or {}).get("digest")):
+        if stable_identity(index) != stable_identity(stable_source):
             problems.append("stable identity no longer matches the live receipt")
     return (not problems), problems
 
@@ -904,7 +959,7 @@ def _page_bytes(data):
 
 
 def recover_prior_pages(destination, base_url, deployment_sha, root,
-                        trusted_declaration=""):
+                        trusted_declaration="", stable_source=None):
     """Rebuild ONLY from a deployment SHA confirmed on origin/main.
 
     The result is a RECONSTRUCTED baseline, never claimed as the exact artifact.
@@ -921,7 +976,7 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
                       cwd=root).returncode != 0:
         raise ValueError("deployment SHA is not on origin/main")
     live = json.loads(_http_get(base_url)("/version-index.json").decode("utf-8"))
-    resolved, reason = resolve_live_docs_state(live)
+    resolved, reason = resolve_live_docs_state(live, stable_source)
     if not resolved:
         raise ValueError("live channel state is not qualified for recovery: " + reason)
     argv = [sys.executable, str(Path(root) / "scripts/build_website.py")]
@@ -930,7 +985,12 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
                  "--nightly-digest", resolved["digest"],
                  "--promotion-state", "final",
                  "--promotion-receipt", resolved["receipt"]]
-    subprocess.check_call(argv, cwd=root)
+    if stable_source is None:
+        subprocess.check_call(argv, cwd=root)
+    else:
+        inputs = stable_render_inputs(stable_identity(stable_source), root)
+        env = {**os.environ, **{f"CARBONPANEL_{key.upper()}": value for key, value in inputs.items()}}
+        subprocess.check_call(argv, cwd=root, env=env)
     site = Path(root) / ".website-build/site"
     get_bytes = _http_get(base_url)
     receipt_bytes = live_bytes(get_bytes, ["/publication-receipt.json"])[
@@ -992,8 +1052,13 @@ def build_parser():
     commands = parser.add_subparsers(dest="command", required=True)
     contract = commands.add_parser("validate-channel-contract")
     contract.add_argument("--path", required=True)
+    contract.add_argument("--stable-source", help="already-qualified live version index")
     state = commands.add_parser("resolve-live-docs-state")
     state.add_argument("--path", required=True)
+    state.add_argument("--verify-stable", action="store_true")
+    state.add_argument("--require-nightly-parity", action="store_true")
+    state.add_argument("--repository",
+                       default=os.environ.get("GITHUB_REPOSITORY", "athNdev/carbonpanel"))
     receipt = commands.add_parser("verify-docs-receipt")
     receipt.add_argument("--built", required=True)
     receipt.add_argument("--live", required=True)
@@ -1040,6 +1105,7 @@ def build_parser():
     recover.add_argument("--root", required=True)
     recover.add_argument("--deployment-sha", required=True)
     recover.add_argument("--trusted-declaration", default="")
+    recover.add_argument("--stable-source", help="already-qualified live version index")
     docs = commands.add_parser("verify-channel-docs")
     docs.add_argument("--site", default="")
     docs.add_argument("--base-url", default="")
@@ -1067,15 +1133,25 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
     if args.command == "validate-channel-contract":
-        ok, problems = validate_channel_contract(load_json(args.path))
+        stable_source = load_json(args.stable_source) if args.stable_source else None
+        ok, problems = validate_channel_contract(load_json(args.path), stable_source)
         emit({"verified": ok, "problems": problems})
         if not ok:
             raise ValueError("Channel contract validation failed: " + "; ".join(problems))
     elif args.command == "resolve-live-docs-state":
-        resolved, reason = resolve_live_docs_state(load_json(args.path))
-        emit({**(resolved or {}), "verified": bool(resolved), "reason": reason})
+        live = load_json(args.path)
+        stable = qualify_public_stable(live, args.repository) if args.verify_stable else None
+        resolved, reason = resolve_live_docs_state(live, live if args.verify_stable else None)
         if not resolved:
+            emit({"verified": False, "reason": reason})
             raise ValueError("Live docs state resolution failed: " + reason)
+        if args.require_nightly_parity:
+            ok, reason = release.channel_oci_parity(
+                release.channel_observe("nightly"), resolved["digest"], resolved["revision"])
+            if not ok:
+                raise ValueError("Public Nightly is not qualified for a site-only deployment: " + reason)
+        stable_inputs = stable_render_inputs(stable) if stable else {}
+        emit({**resolved, **stable_inputs, "verified": True, "reason": ""})
     elif args.command == "verify-docs-receipt":
         ok, problems = verify_docs_receipt(load_json(args.built), load_json(args.live))
         emit({"verified": ok, "problems": problems})
@@ -1148,8 +1224,9 @@ def main():
         if not ok:
             raise ValueError("Prior bytes differ from live: " + "; ".join(problems))
     elif args.command == "recover-prior-pages":
+        stable_source = load_json(args.stable_source) if args.stable_source else None
         result = recover_prior_pages(args.site, args.base_url, args.deployment_sha,
-                                     args.root, args.trusted_declaration)
+                                     args.root, args.trusted_declaration, stable_source)
         emit(result)
     elif args.command == "verify-channel-docs":
         if bool(args.site) == bool(args.base_url):

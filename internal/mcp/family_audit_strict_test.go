@@ -93,6 +93,8 @@ func TestFamilyAuditFullCoverage(t *testing.T) {
 	t.Run("DownloadScope", TestDownloadToolsResourceScopeDenial)
 	t.Run("UploadBytes", TestUploadFamilyComposedStreamCommit)
 	t.Run("UploadScope", TestUploadFamilyFreshCreateAtCommit)
+	t.Run("ScopedReads", TestScopedReadOperationalTools)
+	t.Run("PackwizReadScope", TestPackwizReadsGlobalScope)
 
 	matrix := FamilyAudit()
 	result := evaluateFullCoverage(matrix, liveListedProcedures(), liveReachableTools(), liveFixtureProcedures(t))

@@ -43,11 +43,11 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 240 {
 		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 240", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
 	}
-	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 78 {
-		t.Fatalf("excluded ops: matrix=%d generated=%d want 78", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
+	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 75 {
+		t.Fatalf("excluded ops: matrix=%d generated=%d want 75", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
 	}
-	if IntegrationSupportedOps != 200 {
-		t.Fatalf("supported ops: got %d want 200", IntegrationSupportedOps)
+	if IntegrationSupportedOps != 203 {
+		t.Fatalf("supported ops: got %d want 203", IntegrationSupportedOps)
 	}
 	if len(exposedTools) != IntegrationCombinedTools {
 		t.Fatalf("generated tool count: got %d want %d", len(exposedTools), IntegrationCombinedTools)
@@ -104,9 +104,9 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 			t.Errorf("%s: live coverage incomplete: %+v", op.ID, cov)
 		}
 	}
-	if listedN != 200 || reachableN != 200 || verifiedN != 200 {
-		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want 200/200/200 (PENDING inventory empty)",
-			listedN, reachableN, verifiedN)
+	if listedN != IntegrationSupportedOps || reachableN != IntegrationSupportedOps || verifiedN != IntegrationSupportedOps {
+		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want all %d supported operations verified",
+			listedN, reachableN, verifiedN, IntegrationSupportedOps)
 	}
 
 	// Every audited exclusion stays out of the combined tool set, with its

@@ -56,15 +56,7 @@ export const VIEW_STATE_LABEL: Record<ViewState, string> = {
 };
 
 export type StateTone =
-	| 'blue'
-	| 'green'
-	| 'red'
-	| 'yellow'
-	| 'gray'
-	| 'purple'
-	| 'cyan'
-	| 'teal'
-	| 'warm-gray';
+	'blue' | 'green' | 'red' | 'yellow' | 'gray' | 'purple' | 'cyan' | 'teal' | 'warm-gray';
 
 /** Color is supplemental; every tag also carries the text label above. */
 export const VIEW_STATE_TONE: Record<ViewState, StateTone> = {

@@ -21,6 +21,25 @@ class VersionContractTests(unittest.TestCase):
     def setUp(self):
         self.contract, self.catalog = vc.load(ROOT)
 
+    def test_exact_stable_render_input_sets_version_source_download_and_schema(self):
+        env = {"CARBONPANEL_STABLE_TAG": "carbonpanel-v2.0.1",
+               "CARBONPANEL_STABLE_REVISION": NIGHTLY_SHA,
+               "CARBONPANEL_STABLE_DIGEST": "sha256:" + "1" * 64}
+        qualified = vc.release_build_contract(self.contract, env)
+        index = vc.version_index(qualified, self.catalog)
+        stable = index["versions"][0]
+        self.assertEqual(stable["schema_version_label"], "2.0.1")
+        self.assertEqual(stable["immutable_route"], "/docs/versions/2.0.1/")
+        self.assertEqual(stable["commit"], NIGHTLY_SHA)
+        self.assertTrue(stable["download_url"].endswith("/tag/carbonpanel-v2.0.1"))
+        self.assertEqual(index["channels"]["nightly"], self.contract["channels"]["nightly"])
+        self.assertEqual(self.contract["channels"]["stable"]["commit"], STABLE_SHA)
+        for invalid in ({"CARBONPANEL_STABLE_TAG": "carbonpanel-v2.0.0"},
+                        {"CARBONPANEL_STABLE_TAG": "carbonpanel-v2.0.1-beta.1"},
+                        {"CARBONPANEL_STABLE_DIGEST": ""}):
+            with self.assertRaises(ValueError):
+                vc.release_build_contract(self.contract, {**env, **invalid})
+
     def test_contract_publishes_exactly_two_channels(self):
         vc.validate(self.contract, self.catalog, ROOT)
         index = vc.version_index(self.contract, self.catalog, ROOT)

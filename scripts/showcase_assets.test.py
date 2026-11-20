@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -333,8 +334,9 @@ class ShowcaseAssetsTest(unittest.TestCase):
 class ShowcasePipelineTest(unittest.TestCase):
     """The routine main-refresh workflow must never drop the proven map image."""
 
-    def test_every_feature_gate_is_on_for_main_push(self) -> None:
+    def test_canonical_features_are_enabled_on_push_schedule_and_default_dispatch(self) -> None:
         workflow = workflow_text()
+        self.assertRegex(workflow, r"  schedule:\n(?:    #[^\n]*\n)?    - cron:")
         # playerdetail is intentionally manual-only: its skin preview depends
         # on an external provider and is not part of the canonical set.
         for feature in ("players", "worlds", "worldtab", "library"):
@@ -343,20 +345,22 @@ class ShowcasePipelineTest(unittest.TestCase):
             )
             matches = pattern.findall(workflow)
             self.assertGreaterEqual(len(matches), 1, f"no gate for {feature}")
-            for expression in matches:
-                self.assertIn(
-                    "github.event_name == 'push' || inputs." + feature,
-                    expression,
-                    f"{feature} can be dropped on a routine main push",
-                )
+            self.assertEqual(
+                [f" github.event_name != 'workflow_dispatch' || inputs.{feature} "],
+                matches,
+            )
+            self.assertRegex(
+                workflow,
+                rf"      {feature}:\n        description: [^\n]+\n"
+                r"        required: false\n        default: true",
+            )
         detail = re.findall(r"FEATURES_PLAYERDETAIL: \$?\{\{([^\n]*)\}\}", workflow)
         self.assertTrue(detail, "playerdetail gate is missing")
-        for expression in detail:
-            self.assertNotIn(
-                "github.event_name == 'push'",
-                expression,
-                "playerdetail must stay manual-only (external skin provider)",
-            )
+        self.assertEqual([" inputs.playerdetail "], detail)
+        self.assertIn(
+            "&& needs.capture.outputs.canonical == 'true'",
+            workflow.split("  publish:", 1)[1],
+        )
 
     def test_publish_requires_the_real_world_view_asset(self) -> None:
         workflow = workflow_text()
@@ -371,8 +375,84 @@ class ShowcasePipelineTest(unittest.TestCase):
         ):
             self.assertIn(name, section, f"canonical publish set may drop {name}")
 
+    def test_server_players_capture_requires_a_scoped_observation(self) -> None:
+        plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        steps = json.loads(plan.read_text(encoding="utf-8"))["steps"]
+        capture = next(i for i, step in enumerate(steps) if step.get("screenshot") == "showcase-player-allowlist")
+        self.assertEqual("#server-detail-tabs-panel-players", steps[capture]["element"])
+        self.assertEqual("players", steps[capture - 1]["feature"])
+        self.assertIn(
+            '#server-detail-tabs-panel-players [data-player-row]:has-text("ReviewGuest")',
+            steps[capture - 1]["waitFor"],
+        )
+
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
+
+    @unittest.skipUnless(os.name == "posix", "GitHub runs the publish guard in Bash on Linux")
+    def test_publish_guard_orders_validated_main_captures(self) -> None:
+        workflow = workflow_text()
+        section = workflow.split("      - name: Guard provenance monotonicity", 1)[1]
+        section = section.split("      - name:", 1)[0]
+        guard = "\n".join(line[10:] for line in section.split("        run: |\n", 1)[1].splitlines())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream = root / "upstream"
+            upstream.mkdir()
+
+            def git(*args: str) -> str:
+                return subprocess.check_output(
+                    ["git", "-C", str(upstream), *args],
+                    text=True,
+                    stderr=subprocess.PIPE,
+                ).strip()
+
+            git("init", "--initial-branch=main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.org")
+
+            def commit(message: str) -> str:
+                git("commit", "--allow-empty", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            oldest = commit("previous publication")
+            capture = commit("validated capture")
+            live_main = commit("concurrent main merge")
+            git("switch", "--create", "outside-main")
+            outside_main = commit("non-main capture")
+
+            subprocess.run(
+                ["git", "clone", "--quiet", str(upstream), str(root / "trusted-source")],
+                check=True,
+            )
+            manifest = root / "assets" / "showcase" / "manifest.json"
+            manifest.parent.mkdir(parents=True)
+            output = root / "output"
+            summary = root / "summary"
+            cases = (
+                (oldest, capture, 0, ""),
+                (capture, capture, 0, "already-current=true"),
+                (live_main, capture, 0, "already-current=true"),
+                (oldest, outside_main, 1, ""),
+                (outside_main, capture, 1, ""),
+            )
+            for last, source, code, expected in cases:
+                with self.subTest(last=last, source=source):
+                    manifest.write_text(json.dumps({"source": {"sha": last}}), encoding="utf-8")
+                    output.write_text("", encoding="utf-8")
+                    result = subprocess.run(
+                        ["bash", "-c", guard],
+                        cwd=root,
+                        env=os.environ | {
+                            "SOURCE_SHA": source,
+                            "GITHUB_OUTPUT": str(output),
+                            "GITHUB_STEP_SUMMARY": str(summary),
+                        },
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(code, result.returncode, result.stderr)
+                    self.assertEqual(expected, output.read_text(encoding="utf-8").strip())
 
     def test_outside_region_entries_cannot_qualify_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -413,7 +493,7 @@ class ShowcasePipelineTest(unittest.TestCase):
         # The seed must be pinned only for a fresh fixture config; an existing
         # review config (and any running container) is never modified.
         self.assertIn('if [ ! -f "${DATA}/config/config.yaml" ]; then', devstack)
-        self.assertIn("JSON.stringify({minecraft:{global_config:{seed:", devstack)
+        self.assertIn("minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}", devstack)
         self.assertNotIn("ConfigService/UpdateServerConfig", devstack)
         # Region readiness must use the shared GetServer.dataPath resolver and
         # real .mca header coverage, never a guessed slug+ID path.

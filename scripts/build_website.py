@@ -401,6 +401,7 @@ def build(root, base, site, promotion=None):
     contract, catalog = version_contract.load(root)
     contract = version_contract.apply_promotion(contract, promotion)
     version_contract.validate(contract, catalog, root)
+    contract = version_contract.release_build_contract(contract)
     index = version_contract.version_index(contract, catalog, root)
     guides = maintained_guides.load(root)
     guide_revision, guide_revision_origin = maintained_guides.derive_revision(root)

@@ -315,7 +315,7 @@ def check_channels(index, errors, expect=None):
         errors.append("published index must contain exactly stable and nightly channels")
         return
     source, _ = vc.load(vc.ROOT)
-    source_channels = source.get("channels", {})
+    source_channels = vc.release_build_contract(source)["channels"]
     for name in vc.CHANNEL_NAMES:
         channel = channels[name]
         expected = source_channels.get(name, {})

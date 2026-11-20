@@ -10,6 +10,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { page } from '$app/state';
+	import { displayPreferences } from '$lib/display-preferences.svelte';
+	import { ChevronDown } from '@lucide/svelte';
+	const { metricsExpanded } = displayPreferences;
 	import { onMount, untrack } from 'svelte';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
@@ -366,8 +369,21 @@ one at https://mozilla.org/MPL/2.0/.
 			{/snippet}
 		</CarbonPageHeader>
 
-		<!-- Carbon Metric Tiles (ZERO rounded corners) -->
+		<div>
+			<button
+				type="button"
+				class="focus-ring inline-flex min-h-8 items-center gap-2 text-sm font-semibold text-foreground hover:text-accent-text"
+				aria-expanded={$metricsExpanded}
+				aria-controls="server-runtime-metrics"
+				onclick={() => displayPreferences.setMetricsExpanded(!$metricsExpanded)}
+			>
+				<ChevronDown aria-hidden="true" class={`h-4 w-4 ${$metricsExpanded ? '' : '-rotate-90'}`} />
+				Runtime metrics
+			</button>
+		</div>
 		<div
+			id="server-runtime-metrics"
+			hidden={!$metricsExpanded}
 			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-runtime-tiles"
 		>
@@ -652,7 +668,8 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Carbon Tabs for Sub-Views with bottom blue line indicator (Requirement 4) -->
-		<div class="flex min-h-0 flex-1 flex-col gap-4">
+		<!-- Keep a usable tab viewport when stacked runtime cards fill the screen. -->
+		<div class="flex min-h-[28rem] flex-1 flex-col gap-4">
 			<!-- Tab Bar -->
 			<CarbonTabs
 				tabs={subViewTabs}

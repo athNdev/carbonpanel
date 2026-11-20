@@ -10,9 +10,12 @@
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
+- [Channel promotion gates](channel-promotion.md) — Exact-revision, dual-registry and qualified-stage gates for docs and OCI channel moves.
+- [Channel promotion recovery and serialization](channel-promotion-recovery.md) — Prior-receipt rollback, exact docs restore, shared lock and target guard for channel promotion.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
+- [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
 - [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
 - [Geyser safe bind default](geyser-safe-bind.md) — A standalone Geyser entrypoint defaults to a loopback Bedrock bind; an explicit BEDROCK_ADDRESS is the opt-in to wider exposure.
@@ -27,11 +30,13 @@
 - [MCP controller stream session semantics](mcp-controller-stream-sessions.md) — Bounded controller-owned stream sessions use service-owned deadlines, exact server binding, idempotent frames and terminal partial reads to avoid lost bytes and leaked handles.
 - [MCP controller stream session semantics — Choice](mcp-controller-stream-sessions-choice.md) — The MCP gateway never opens panel/node storage. Bounded OpenStream,
 - [MCP controller stream session semantics — Verification + Read next](mcp-controller-stream-sessions-verification.md) — Service fixtures prove exact server binding with no state change on refusal,
+- [MCP Packwiz inventory reads](mcp-packwiz-read-boundary.md) — Typed MCP Packwiz reads page allowlisted Studio metadata under the existing global modpacks/read grant.
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
+- [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module form conversions — Choice](module-form-codecs-choice.md) — Environment keys, metadata keys and volume paths trim whitespace; blank keys
 - [Module form conversions — Choice (part 2)](module-form-codecs-choice-2.md) — Malformed persisted JSON is now reported explicitly rather than silently
@@ -39,6 +44,8 @@
 - [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
+- [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
+- [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
@@ -47,14 +54,15 @@
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
-- [Runtime artifact format support](runtime-artifact-formats.md) — Publish only disk formats with real clean import/boot evidence; the portable installer is the supported fallback.
+- [Runtime artifact format support](runtime-artifact-formats.md) — Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
 - [Runtime artifact format support — Alternatives + Consequence](runtime-artifact-formats-alternatives.md) — Publishing converted VHDX/VMDK/VDI images from qemu-img output would claim
-- [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Only QCOW2, unprivileged LXC rootfs and the portable Linux installer are
+- [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Candidate artifact kinds and the evidence required before publication.
 - [Runtime artifact format support — Decision (part 2)](runtime-artifact-formats-decision-2.md) — A filename suffix or byte count is never a deployable-artifact claim.
 - [Scoped local dev-nightly updater](dev-nightly-local-updater.md) — Digest identity, scope and rollback rules for the local WSL Compose updater.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Shared lazy editor runtime](editor-runtime.md) — Both Monaco views share a cached lazy bootstrap while owning their editor models and pending-load lifetime.
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.
+- [Split Nightly recovery](nightly-recovery.md) — Recover a Hub-only Nightly alias and separate docs baseline with digest-bound compensation and durable phase replay.
 - [Staged proto generation](proto-generation.md) — Generate and format proto outputs before replacing owned trees, and keep dependency installation frozen.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
 - [Website and documentation publication — Decision](website-docs-decision.md) — The homepage and documentation share one artifact. Only the website deployment

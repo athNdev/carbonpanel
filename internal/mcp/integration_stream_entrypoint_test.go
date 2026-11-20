@@ -19,7 +19,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,11 +102,9 @@ func newControllerStreamFixture(t *testing.T, extra ...connect.Interceptor) *con
 	chain = append(chain, extra...)
 	interceptors := connect.WithInterceptors(chain...)
 	mux := http.NewServeMux()
-	mux.Handle("/carbonpanel.v1.AuthService/GetAuthStatus", connect.NewUnaryHandler(
-		"/carbonpanel.v1.AuthService/GetAuthStatus",
-		func(context.Context, *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error) {
-			return connect.NewResponse(&v1.GetAuthStatusResponse{LocalAuthEnabled: true}), nil
-		}, interceptors))
+	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(
+		services.NewAuthService(store, authManager, enforcer, nil, log), interceptors)
+	mux.Handle(authPath, authHandler)
 	filePath, fileHandler := carbonpanelv1connect.NewFileServiceHandler(fileService, interceptors)
 	mux.Handle(filePath, fileHandler)
 	uploadPath, uploadHandler := carbonpanelv1connect.NewUploadServiceHandler(uploadService, interceptors)
@@ -123,11 +124,43 @@ func newControllerStreamFixture(t *testing.T, extra ...connect.Interceptor) *con
 func (f *controllerStreamFixture) session(t *testing.T, userID, role string, perms ...rbac.Permission) *sdkmcp.ClientSession {
 	t.Helper()
 	token := seedToken(t, f.store, f.enforcer, userID, role, perms)
+	if imageID := os.Getenv("CARBONPANEL_MCP_SMOKE_IMAGE_ID"); imageID != "" {
+		return f.packagedSession(t, token, imageID)
+	}
 	clients, err := NewClients(f.ts.Client(), f.ts.URL, token)
 	if err != nil {
 		t.Fatalf("NewClients: %v", err)
 	}
 	return connectStdioSession(t, NewServer(clients), context.Background())
+}
+
+func (f *controllerStreamFixture) packagedSession(t *testing.T, token, imageID string) *sdkmcp.ClientSession {
+	t.Helper()
+	digest, prefixed := strings.CutPrefix(imageID, "sha256:")
+	if _, err := hex.DecodeString(digest); !prefixed || len(digest) != sha256.Size*2 || err != nil {
+		t.Fatal("CARBONPANEL_MCP_SMOKE_IMAGE_ID requires an immutable local Docker image ID")
+	}
+	if runtime.GOOS != "linux" {
+		t.Fatal("packaged stream smoke requires Linux Docker host networking for the loopback fixture")
+	}
+	cmd := exec.Command("docker", "run", "--rm", "-i", "--pull", "never",
+		"--network", "host", "-e", "CARBONPANEL_URL", "-e", "CARBONPANEL_TOKEN", imageID)
+	cmd.Env = append(os.Environ(), "CARBONPANEL_URL="+f.ts.URL, "CARBONPANEL_TOKEN="+token)
+	cmd.Stderr = os.Stderr
+	transport := &sdkmcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "packaged-stream-smoke", Version: "v0"}, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		t.Fatalf("connect packaged stream client: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close packaged stream client: %v", err)
+		}
+	})
+	return session
 }
 
 func resultString(out ToolOutput, key string) string {
@@ -167,7 +200,10 @@ func TestIntegrationControllerStreamEntryPoint(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	session := f.session(t, "u-stream", "admin")
+	session := f.session(t, "u-stream", "stream-writer",
+		rbac.Permission{Resource: "files", Action: "read", ObjectID: "srv-1"},
+		rbac.Permission{Resource: "files", Action: "create", ObjectID: "srv-1"},
+		rbac.Permission{Resource: "uploads", Action: "create", ObjectID: "*"})
 	invocationRecorder.enable()
 	defer invocationRecorder.disable()
 	before := len(invocationRecorder.snapshot())
