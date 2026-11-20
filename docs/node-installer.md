@@ -105,6 +105,37 @@ then signs the exact ADR context with the approved key and writes a
 the one-time rule. `S` is stored/replayed as a UTF-8 string so the proto `string`
 field stays valid; the digest is computed over those same bytes.
 
+### Connect the managed agent
+
+After the private daemon starts and the operator registers the generated
+enrollment bundle, run the agent with the installer's state directory and the
+controller's managed-node HTTPS origin. The controller must support the
+ADR 0019 node-control service on that origin. Configure the controller
+serving trust chain and the CA that issues node certificates out of band.
+
+```sh
+carbon-node run \
+  --state-dir "$NODE_STATE_DIR" \
+  --facts "$QUALIFIED_HOST_FACTS" \
+  --controller "$NODE_CONTROL_HTTPS_ORIGIN" \
+  --controller-ca "$CONTROLLER_CA_PEM" \
+  --enrollment-ca "$NODE_ISSUER_CA_PEM" \
+  --enrollment-id "$APPROVED_ENROLLMENT_ID"
+```
+
+The agent verifies the local daemon ID and data root through the configured
+private Unix socket before the first claim. It binds the challenge and claim
+to one TLS 1.3 connection, then checks the returned public certificate against
+the configured issuer and the node's existing Ed25519 key. The installer state
+records the public certificate, controller origin and daemon ID. A restart
+uses the saved credential and pin. It can omit `--enrollment-id`.
+
+An uncertain claim outcome requires operator recovery because the local
+claim reservation prevents automatic resubmission. A daemon ID change reports
+the enrolled daemon as unavailable and requires operator-approved
+reenrollment. The node sends preflight and periodic health with its own scoped
+client certificate and uses the controller-issued session timing.
+
 ### Private daemon rendering (one source of options)
 
 The installer can render a **disposable** daemon unit and `daemon.json` from a
