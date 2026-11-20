@@ -11,6 +11,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { timestampDate, type Timestamp } from '@bufbuild/protobuf/wkt';
 	import { ArrowUpRight, Copy, Search, UserRound } from '@lucide/svelte';
 	import { onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { CarbonButton, CarbonTag, CarbonTextInput } from '$lib/components/carbon';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { formatRpcError } from '$lib/api/rpc-error';
@@ -120,7 +121,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		servers: { id: string; name: string }[],
 		signal: AbortSignal
 	) {
-		const permitted = new Set(
+		const permitted = new SvelteSet(
 			servers
 				.filter(({ id }) => authStore.hasPermission('players', 'presence', id))
 				.map(({ id }) => id)
