@@ -23,8 +23,10 @@ server when the active level is unknown. The scoped fallback uses
 GetWorldViewStatus with the concrete server; the all-server catalogue
 requires a global read grant. World View uses names from the authorized
 server inventory. Setup and unavailable states do not mount a map.
-A failed refresh keeps a valid last-known map and reports the error.
-Read denials and scope changes clear the current map session.
+A failed refresh keeps a valid last-known map and reports the error. The page
+renews both built-in and renderer sessions before their deadline, hides expired
+maps and retries temporary failures while the scope remains authorized. Read
+denials and scope changes clear the current map session.
 
 The native viewport reads saved Overworld terrain through its map session.
 It bounds visible tile requests and aborts work outside the current session

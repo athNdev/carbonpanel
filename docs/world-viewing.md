@@ -8,9 +8,13 @@ modifies or teleports anything. The governing decisions are in
 
 Open **World View** to browse maps, or use **Open map** in a server’s
 **World** tab. If the active level is still unknown, Carbon Panel checks for
-the active map using that server’s World View read permission. The map page
-offers **Install BlueMap** when the account and node support it and explains
-when a remote node needs an explicit endpoint.
+the active map using that server’s World View read permission. A [built-in
+terrain map](world-terrain.md) opens supported local Java saves without a
+module. For worlds that need an external renderer, the page offers **Install
+BlueMap** when the account and node support it.
+
+Map sessions renew automatically. During a temporary connection failure the
+page keeps an authorized map available until its session expires, then retries.
 
 ## 1. Renderer lifecycle
 

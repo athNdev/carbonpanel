@@ -137,6 +137,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let session = $state<GetWorldViewSessionResponse | undefined>(undefined);
 	let sessionError = $state<unknown>(null);
+	let sessionExpired = $state(false);
 	let sessionOwner = $state('');
 	let scopeVersion = 0;
 	let sessionAttempt = 0;
@@ -217,6 +218,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		sessionAttempt++;
 		sessionOwner = '';
 		session = undefined;
+		sessionExpired = false;
 	}
 
 	function handleError(error: unknown) {
@@ -233,17 +235,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		try {
 			const response = await rpcClient.worldView.getWorldViewSession(
 				create(GetWorldViewSessionRequestSchema, { serverId, worldRef }),
-				silentCallOptions
+				{ ...silentCallOptions, timeoutMs: 10_000 }
 			);
 			if (!current() || attempt !== sessionAttempt || denied) return;
 			sessionOwner = key;
 			session = response;
+			sessionExpired = false;
 			sessionError = null;
 		} catch (error) {
 			if (!current() || attempt !== sessionAttempt) return;
 			handleError(error);
-			const expiry = timestampToMs(session?.expiresAt);
-			if (expiry !== null && expiry <= Date.now()) clearSession();
 			sessionError = error;
 		}
 	}
@@ -344,23 +345,39 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (!canRead || denied || view !== 'saved' || sessionOwner !== statusKey) return;
-		const expiresAt = timestampToMs(session?.expiresAt);
+		if (!canRead || denied || sessionOwner !== statusKey || !session?.proxyPath) return;
+		const expiresAt = timestampToMs(session.expiresAt);
 		if (expiresAt === null) return;
-		const refresh = setTimeout(
-			() => void loadSession(),
-			Math.max(1_000, expiresAt - Date.now() - 20_000)
+
+		// Retry transient renewal failures, but stop serving the old session at its deadline.
+		let canceled = false;
+		const expire = setTimeout(
+			() => {
+				sessionExpired = true;
+			},
+			Math.max(0, expiresAt - Date.now())
 		);
-		return () => clearTimeout(refresh);
+		async function renew() {
+			await loadSession();
+			if (!canceled) refresh = setTimeout(() => void renew(), 5_000);
+		}
+		let refresh = setTimeout(() => void renew(), Math.max(1_000, expiresAt - Date.now() - 20_000));
+		return () => {
+			canceled = true;
+			clearTimeout(refresh);
+			clearTimeout(expire);
+		};
 	});
 
 	let embed = $derived(
-		evaluateSession(
-			!denied &&
-				sessionOwner === statusKey &&
-				(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
-			session
-		)
+		sessionExpired
+			? { src: null, reason: 'The map session expired. Reconnecting…' }
+			: evaluateSession(
+					!denied &&
+						sessionOwner === statusKey &&
+						(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
+					session
+				)
 	);
 	let visibleOverlays = $derived(
 		!statusError && liveOverlaysEnabled(view)

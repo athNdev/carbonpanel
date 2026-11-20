@@ -38,6 +38,8 @@ let scopedPermission = false;
 let fleetCalls = 0;
 let scopedCalls = 0;
 let sessionKey = "fixture-key";
+let sessionExpiresAt;
+let sessionUnavailable = false;
 let holdSession;
 let holdStatus;
 
@@ -187,9 +189,11 @@ try {
         await pending;
         return reply({ code: "unavailable", message: "Late session failure" }, 503);
       }
+      if (sessionUnavailable) return reply({ code: "unavailable", message: "Renewal unavailable" }, 503);
       return reply({
         state: "RENDERER_STATE_READY",
         proxyPath: "/api/v1/worldview/map/" + sessionKey + "/",
+        expiresAt: sessionExpiresAt,
       });
     }
     return reply({});
@@ -432,6 +436,27 @@ try {
     readDenied = false;
   });
   results.push("transient status refresh preserves the last-good frame; a late same-world session failure is ignored and a read denial clears it");
+
+  await dumpOnFailure("expired-session-recovery", async () => {
+    sessionExpiresAt = new Date(Date.now() + 4_000).toISOString();
+    try {
+      await load();
+      const oldFrame = page.locator('iframe[src$="/fixture-key/"]');
+      sessionUnavailable = true;
+      await page.getByText("Could not refresh the map. Showing the last known state.", { exact: true }).waitFor();
+      assert.equal(await oldFrame.count(), 1, "transient renewal retains a usable session");
+      await oldFrame.waitFor({ state: "detached" });
+      sessionExpiresAt = new Date(Date.now() + 300_000).toISOString();
+      sessionKey = "renewed-key";
+      sessionUnavailable = false;
+      await page.locator('iframe[src$="/renewed-key/"]').waitFor();
+    } finally {
+      sessionUnavailable = false;
+      sessionExpiresAt = undefined;
+      sessionKey = "fixture-key";
+    }
+  });
+  results.push("transient renewal retains the map until expiry and recovers without a manual refresh");
 
   await dumpOnFailure("previous-world-denial", async () => {
     await load();
