@@ -1019,6 +1019,14 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	}), nil
 }
 
+// validateModpackServerSupport checks the provider declaration before a deployment changes server resources.
+func validateModpackServerSupport(pack *storage.IndexedModpack) error {
+	if pack != nil && pack.Indexer == "modrinth" && pack.ServerSide == "unsupported" {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot deploy %q: Modrinth lists this project as unsupported on dedicated servers. Choose a pack that supports server installation", pack.Name))
+	}
+	return nil
+}
+
 // CreateServer creates a new server
 func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
 	msg := req.Msg
@@ -1040,6 +1048,10 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		modpack, err := s.store.GetIndexedModpack(ctx, msg.ModpackId)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid modpack"))
+		}
+
+		if err := validateModpackServerSupport(modpack); err != nil {
+			return nil, err
 		}
 
 		// Set the modpack URL
@@ -1642,6 +1654,14 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
+	var modpack *storage.IndexedModpack
+	if msg.ModpackId != "" {
+		modpack, _ = s.store.GetIndexedModpack(ctx, msg.ModpackId)
+		if err := validateModpackServerSupport(modpack); err != nil {
+			return nil, err
+		}
+	}
+
 	// Check if container recreation is needed
 	needsRecreation := false
 	originalMemory := server.Memory
@@ -1864,50 +1884,47 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	// Handle modpack version update
-	if msg.ModpackId != "" {
+	if modpack != nil {
 		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
 		if err != nil {
 			s.log.Error("Failed to get server config: %v", err)
 			serverConfig = s.store.CreateDefaultServerConfig(server.ID)
 		}
 
-		modpack, err := s.store.GetIndexedModpack(ctx, msg.ModpackId)
-		if err == nil {
-			modpackURL := modpack.WebsiteURL
+		modpackURL := modpack.WebsiteURL
 
-			switch modpack.Indexer {
-			case "fuego", "manual":
-				server.ModLoader = storage.ModLoaderAutoCurseForge
-				needsRecreation = true
+		switch modpack.Indexer {
+		case "fuego", "manual":
+			server.ModLoader = storage.ModLoaderAutoCurseForge
+			needsRecreation = true
 
-				if msg.ModpackVersionId != "" {
-					versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, msg.ModpackVersionId)
-					serverConfig.CFPageURL = &versionedURL
-				} else {
-					serverConfig.CFPageURL = &modpackURL
-				}
-			case "modrinth":
-				server.ModLoader = storage.ModLoaderModrinth
-				needsRecreation = true
-
-				configureModrinthModpack(serverConfig, modpack.IndexerID, msg.ModpackVersionId)
+			if msg.ModpackVersionId != "" {
+				versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, msg.ModpackVersionId)
+				serverConfig.CFPageURL = &versionedURL
+			} else {
+				serverConfig.CFPageURL = &modpackURL
 			}
+		case "modrinth":
+			server.ModLoader = storage.ModLoaderModrinth
+			needsRecreation = true
 
-			// A re-attached pack replaces the previous display loader; an
-			// unresolvable pack falls back to showing the platform.
-			server.ModpackLoader = ""
-			if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
-				if loader := resolveModpackGameLoader(modpack, files, msg.ModpackVersionId); loader != "" {
-					server.ModpackLoader = loader
-				}
-			} else if loader := resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId); loader != "" {
+			configureModrinthModpack(serverConfig, modpack.IndexerID, msg.ModpackVersionId)
+		}
+
+		// A re-attached pack replaces the previous display loader; an
+		// unresolvable pack falls back to showing the platform.
+		server.ModpackLoader = ""
+		if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
+			if loader := resolveModpackGameLoader(modpack, files, msg.ModpackVersionId); loader != "" {
 				server.ModpackLoader = loader
 			}
+		} else if loader := resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId); loader != "" {
+			server.ModpackLoader = loader
+		}
 
-			if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
-				s.log.Error("Failed to update server config with modpack settings: %v", err)
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save modpack configuration: %w", err))
-			}
+		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+			s.log.Error("Failed to update server config with modpack settings: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save modpack configuration: %w", err))
 		}
 	}
 
