@@ -8,6 +8,7 @@ package worldview
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -158,10 +159,13 @@ func (d *discoveredRenderer) probe(ctx context.Context) (*Health, error) {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "detected",
 			"BlueMap is installed but does not serve a configured map for this server's world; configure the target world to finish setup"), nil
 	}
+	if !blueMapAssetsReady(ctx, d.facts.BaseURL, ids, d.hc) {
+		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "unknown", blueMapNoAssetsDetail), nil
+	}
 
 	h := discoveredHealth(v1.RendererState_RENDERER_STATE_READY, "detected",
 		"BlueMap renderer answered the configured private health probe for this world")
-	parseHealthBody(resp.Body, h)
+	parseHealthBody(io.LimitReader(resp.Body, 64<<10), h)
 	if f := d.facts.Version; f != "" && h.Version == "" {
 		h.Version = f
 	}
