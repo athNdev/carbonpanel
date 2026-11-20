@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
@@ -178,6 +179,19 @@ class CopyablePromptTests(unittest.TestCase):
             index = config["args"].index(variable)
             self.assertEqual(config["args"][index - 1], "-e")
         self.assertNotIn(config["env"]["CARBONPANEL_TOKEN"], config["args"])
+
+    def test_guide_links_resolve_inside_each_docs_route(self):
+        guide = GUIDE.read_text(encoding="utf-8")
+        for label, destination in (
+            ("Docker Compose", "getting-started/docker-compose/"),
+            ("Prebuilt binaries", "getting-started/prebuilt-binaries/"),
+            ("Documentation version", "versions/"),
+        ):
+            link = re.search(rf"\[{label}\]\(([^)]+)\)", guide)
+            self.assertIsNotNone(link, f"{label} link is missing")
+            for root in ("/docs/", "/docs/versions/1.0.40/", "/docs/nightly/"):
+                with self.subTest(label=label, root=root):
+                    self.assertEqual(urljoin(f"{root}guides/mcp-server/", link[1]), root + destination)
 
     def test_disposable_mock_panel_fixture(self):
         with MockPanel() as panel:
