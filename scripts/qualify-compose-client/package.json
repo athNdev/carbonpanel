@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "minecraft-protocol": "1.65.0"
+    "minecraft-protocol": "1.68.0"
   }
 }
