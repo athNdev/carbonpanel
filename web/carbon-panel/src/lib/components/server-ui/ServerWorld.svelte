@@ -507,8 +507,11 @@ SPDX-License-Identifier: MPL-2.0
 		}
 	}
 
-	function worldViewHref(): string | null {
-		if (!canView || !description.levelName) return null;
+	let mapHref = $derived.by(() => {
+		if (!canView) return null;
+		if (!description.levelName) {
+			return resolve('/worlds') + '?' + new URLSearchParams({ server: server.id });
+		}
 		const ref = description.binding
 			? create(WorldRefSchema, {
 					kind: WorldRef_Kind.LIBRARY_BINDING,
@@ -522,7 +525,7 @@ SPDX-License-Identifier: MPL-2.0
 					levelName: description.levelName
 				});
 		return resolve('/worlds/[server]/[world]', { server: server.id, world: encodeWorldKey(ref) });
-	}
+	});
 
 	function libraryHref(): string {
 		const revisionId = description.binding?.revisionId;
@@ -548,6 +551,12 @@ SPDX-License-Identifier: MPL-2.0
 		</CarbonTag>
 	{/snippet}
 	{#snippet actions()}
+		{#if mapHref}
+			<CarbonButton kind="secondary" size="sm" href={mapHref} class="justify-center gap-2">
+				<MapIcon class="h-3.5 w-3.5" aria-hidden="true" />
+				Open map
+			</CarbonButton>
+		{/if}
 		<CarbonButton
 			kind="secondary"
 			size="sm"
@@ -812,26 +821,6 @@ SPDX-License-Identifier: MPL-2.0
 
 			<!-- Deep links -->
 			<div class="flex flex-wrap gap-2">
-				{#if worldViewHref()}
-					<CarbonButton
-						kind="tertiary"
-						size="sm"
-						href={worldViewHref()!}
-						class="justify-center gap-2"
-					>
-						<MapIcon class="h-3.5 w-3.5" />
-						Open World View
-						<ExternalLink class="h-3 w-3" />
-					</CarbonButton>
-				{:else}
-					<span class="text-xs text-muted-foreground">
-						{#if !canView}
-							World View needs world_view/read on this server.
-						{:else}
-							World View is unavailable until a level is known.
-						{/if}
-					</span>
-				{/if}
 				<CarbonButton kind="tertiary" size="sm" href={libraryHref()} class="justify-center gap-2">
 					<BookOpen class="h-3.5 w-3.5" />
 					Open World Library

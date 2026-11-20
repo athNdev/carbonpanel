@@ -20,7 +20,7 @@ export const CAP = {
 
 export type CapabilityName = (typeof CAP)[keyof typeof CAP];
 
-export function rendererName(type: RendererType | undefined): string {
+export function rendererName(type: RendererType | undefined, fallback = 'this renderer'): string {
 	switch (type) {
 		case RendererType.BLUEMAP:
 			return 'BlueMap';
@@ -31,7 +31,7 @@ export function rendererName(type: RendererType | undefined): string {
 		case RendererType.STATIC:
 			return 'static tiles';
 		default:
-			return 'this renderer';
+			return fallback;
 	}
 }
 

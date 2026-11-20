@@ -107,6 +107,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let snapshot = $derived($store);
 	let statusTarget = $derived(snapshot.statuses[statusKey]);
 	let view = $derived(deriveViewState(statusTarget));
+	let statusError = $derived(snapshot.statusErrors[statusKey]);
+	let statusUnavailable = $derived(
+		Boolean(statusError) || (!statusTarget && snapshot.statusLoading[statusKey] === false)
+	);
+	let rendererControlsAvailable = $derived(
+		!statusUnavailable && (view === 'ready' || view === 'stale')
+	);
 
 	let canRead = $derived(checkPermission(auth.permissions, 'world_view', 'read', serverId));
 	let canObserve = $derived(
@@ -115,6 +122,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let canUpdate = $derived(checkPermission(auth.permissions, 'world_view', 'update', serverId));
 	let canCommand = $derived(checkPermission(auth.permissions, 'servers', 'command', serverId));
 	let denied = $state(false);
+	let worldTitle = $derived(
+		canRead && !denied ? statusTarget?.name || worldRef?.levelName || 'World map' : 'World map'
+	);
 
 	let session = $state<GetWorldViewSessionResponse | undefined>(undefined);
 	let sessionError = $state<unknown>(null);
@@ -179,14 +189,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	async function loadSession() {
 		if (!worldRef) return;
+		const key = statusKey;
 		try {
 			const response = await rpcClient.worldView.getWorldViewSession(
 				create(GetWorldViewSessionRequestSchema, { serverId, worldRef }),
 				silentCallOptions
 			);
+			if (key !== statusKey) return;
 			session = response;
 			sessionError = null;
 		} catch (error) {
+			if (key !== statusKey) return;
 			handleError(error);
 			session = undefined;
 			sessionError = error;
@@ -226,12 +239,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		sessionError = null;
 		overlaysError = null;
 		if (!worldRef) return;
+		const wasAvailable = rendererControlsAvailable;
+		const key = statusKey;
 		await Promise.allSettled([
-			store.loadStatus(statusKey, serverId, worldRef),
+			store.loadStatus(key, serverId, worldRef).catch(handleError),
 			loadCapabilities(),
-			loadOverlays(),
-			loadSession()
+			loadOverlays()
 		]);
+		if (key === statusKey && !denied && wasAvailable && rendererControlsAvailable) {
+			await loadSession();
+		}
 	}
 
 	// Status polling is owned by this page and refcounted in the store.
@@ -253,9 +270,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (!canRead || !worldRef) return;
-		if (view === 'ready' || view === 'stale') void loadSession();
-		else session = undefined;
+		session = undefined;
+		sessionError = null;
+		if (canRead && worldRef && !statusUnavailable && (view === 'ready' || view === 'stale')) {
+			void loadSession();
+		}
 	});
 
 	let embed = $derived(evaluateSession(canMountEmbed(view, session?.proxyPath), session));
@@ -270,7 +289,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// Announce state transitions only. Freezing the age out of the live region
 	// avoids repeating a changing staleness string on each 5-second poll.
 	let announcement = $derived(
-		!worldRef ? 'This world link is invalid.' : `Map state: ${VIEW_STATE_LABEL[view]}`
+		!worldRef
+			? 'This world link is invalid.'
+			: statusUnavailable
+				? 'Map status unavailable.'
+				: 'Map state: ' + VIEW_STATE_LABEL[view]
 	);
 
 	function handleMapKeydown(event: KeyboardEvent) {
@@ -415,28 +438,30 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	data-testid="showcase-world-map-content"
 >
 	<CarbonBreadcrumbs
-		items={[
-			{ label: 'Worlds', href: resolve('/worlds') },
-			{ label: statusTarget?.name || worldRef?.levelName || 'World map' }
-		]}
+		items={[{ label: 'World View', href: resolve('/worlds') }, { label: worldTitle }]}
 	/>
 
-	<CarbonPageHeader
-		title={statusTarget?.name || worldRef?.levelName || 'World map'}
-		description="Observation-only map view. Administrative actions are kept separate below."
-	>
+	<CarbonPageHeader title={worldTitle}>
 		{#snippet tag()}
-			<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
+			{#if canRead && !denied && worldRef}
+				{#if statusUnavailable}
+					<CarbonTag type="red" size="sm">STATUS UNAVAILABLE</CarbonTag>
+				{:else}
+					<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
+				{/if}
+			{/if}
 		{/snippet}
 		{#snippet actions()}
 			<CarbonButton kind="tertiary" size="sm" href={resolve('/worlds')}>
 				<ArrowLeft class="h-3.5 w-3.5" />
 				<span>All worlds</span>
 			</CarbonButton>
-			<CarbonButton kind="secondary" size="sm" onclick={retry}>
-				<RefreshCw class="h-3.5 w-3.5" />
-				<span>Retry</span>
-			</CarbonButton>
+			{#if canRead && !denied && worldRef && !statusUnavailable}
+				<CarbonButton kind="secondary" size="sm" onclick={retry}>
+					<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
+					<span>Refresh</span>
+				</CarbonButton>
+			{/if}
 		{/snippet}
 	</CarbonPageHeader>
 
@@ -466,33 +491,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<div class="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2">
 					<span class="mono-label">WORLD</span>
 					<span class="text-xs break-all text-muted-foreground">{worldChip}</span>
-					{#if worldRef.kind === WorldRef_Kind.SERVER_LOCAL}
-						<span class="text-xs text-muted-foreground">
-							Import to World Library is not available in this build.
-						</span>
-					{:else if worldRef.kind === WorldRef_Kind.LIBRARY_BINDING}
-						<span class="text-xs text-muted-foreground">
-							Library navigation is not available in this build.
-						</span>
-					{/if}
 				</div>
 
-				{#if view === 'loading'}
+				{#if statusUnavailable || view === 'unknown'}
+					<CarbonErrorState
+						title="Map status unavailable"
+						message={statusError
+							? formatRpcError(statusError, 'Could not check the map status.')
+							: 'Carbon Panel received no map status for this world.'}
+						onretry={retry}
+					/>
+				{:else if view === 'loading'}
 					<div class="border border-border bg-card p-8" role="status">
 						<CarbonInlineLoading description="Checking renderer state…" />
 					</div>
 				{:else if view === 'onboarding'}
-					<div class="space-y-3 border border-border bg-card p-8">
-						<h2 class="text-base font-semibold">No map renderer installed</h2>
+					<div class="space-y-3 border border-border bg-card p-4 sm:p-6">
+						<h2 class="text-base font-semibold">Set up a map</h2>
 						<p class="max-w-xl text-sm text-muted-foreground">
-							This world has no renderer yet. BlueMap is the recommended built-in renderer. Install
-							a renderer module for this server to see a map here.
+							Connect a renderer to see this world in Carbon Panel.
 						</p>
-						<div class="flex flex-wrap gap-2">
-							<CarbonButton kind="primary" size="sm" href={resolve('/modules')}>
-								Open modules
-							</CarbonButton>
-						</div>
 						<BlueMapInstall
 							{serverId}
 							target={statusTarget}
@@ -555,9 +573,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<h2 class="text-base font-semibold">Renderer stopped</h2>
 						</div>
 						<p class="text-sm text-muted-foreground">
-							Live tiles are unavailable. Last observed
-							{formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}. No live
-							overlay is active.
+							Live tiles and overlays are unavailable. Last observation:
+							{formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}.
 						</p>
 					</div>
 				{:else if view === 'stale' || view === 'ready'}
@@ -568,7 +585,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<AlertTriangle class="h-4 w-4 shrink-0 text-warning" />
 							<span class="font-semibold text-warning">LAST-KNOWN TILES</span>
 							<span class="text-foreground">
-								Observed {formatAge(
+								Last observation: {formatAge(
 									statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender
 								)}. Live overlays are disabled.
 							</span>
@@ -606,51 +623,56 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</section>
 
 			<aside class="min-w-0 space-y-3">
-				<p class="text-xs text-muted-foreground">
-					Pan, zoom and coordinate search are provided by the renderer's own map controls.
-					Coordinates in the link are intent for player/admin actions, not a simulated camera.
-				</p>
+				{#if rendererControlsAvailable}
+					<p class="text-xs text-muted-foreground">
+						Use the controls inside the map to pan, zoom, or search for coordinates.
+					</p>
+				{/if}
 
 				<CarbonAccordion>
-					<CarbonAccordionItem title="View controls" bind:open={controlsOpen}>
-						<div class="space-y-3">
-							<CarbonSelect
-								label="Overlay dimension"
-								value={dimension}
-								disabled={!matrix.dimensions().supported}
-								onchange={(event) =>
-									writeQuery({ dimension: (event.currentTarget as HTMLSelectElement).value })}
-								helperText={matrix.dimensions().supported
-									? 'Filters panel-owned overlays only.'
-									: matrix.dimensions().reason}
-							>
-								<option value="overworld">Overworld</option>
-								<option value="nether">Nether</option>
-								<option value="end">End</option>
-							</CarbonSelect>
-							<div class="space-y-1">
-								<span class="text-xs text-foreground">View mode</span>
-								{#each matrix.viewModes() as mode (mode.id)}
-									<div class="flex items-center justify-between gap-2 text-xs">
-										<span class={mode.supported ? 'text-foreground' : 'text-muted-foreground'}
-											>{mode.label}</span
-										>
-										<span class={mode.supported ? 'text-success-text' : 'text-muted-foreground'}>
-											{mode.supported ? 'Available' : mode.reason}
-										</span>
-									</div>
-								{/each}
+					{#if rendererControlsAvailable}
+						<CarbonAccordionItem title="View controls" bind:open={controlsOpen}>
+							<div class="space-y-3">
+								<CarbonSelect
+									label="Overlay dimension"
+									value={dimension}
+									disabled={!matrix.dimensions().supported}
+									onchange={(event) =>
+										writeQuery({ dimension: (event.currentTarget as HTMLSelectElement).value })}
+									helperText={matrix.dimensions().supported
+										? 'Filters panel-owned overlays only.'
+										: matrix.dimensions().reason}
+								>
+									<option value="overworld">Overworld</option>
+									<option value="nether">Nether</option>
+									<option value="end">End</option>
+								</CarbonSelect>
+								<div class="space-y-1">
+									<span class="text-xs text-foreground">View mode</span>
+									{#each matrix.viewModes() as mode (mode.id)}
+										<div class="flex items-center justify-between gap-2 text-xs">
+											<span class={mode.supported ? 'text-foreground' : 'text-muted-foreground'}
+												>{mode.label}</span
+											>
+											<span class={mode.supported ? 'text-success-text' : 'text-muted-foreground'}>
+												{mode.supported ? 'Available' : mode.reason}
+											</span>
+										</div>
+									{/each}
+								</div>
+								{#if matrix.timeWeather().supported}
+									<p class="text-xs text-muted-foreground">
+										Time and weather controls are available in the renderer.
+									</p>
+								{/if}
+								{#if matrix.telemetry().supported}
+									<p class="text-xs text-muted-foreground">
+										Telemetry is available in the renderer.
+									</p>
+								{/if}
 							</div>
-							{#if matrix.timeWeather().supported}
-								<p class="text-xs text-muted-foreground">
-									Time and weather controls are available in the renderer.
-								</p>
-							{/if}
-							{#if matrix.telemetry().supported}
-								<p class="text-xs text-muted-foreground">Telemetry is available in the renderer.</p>
-							{/if}
-						</div>
-					</CarbonAccordionItem>
+						</CarbonAccordionItem>
+					{/if}
 
 					<CarbonAccordionItem title="Overlays" bind:open={overlayControlsOpen}>
 						<div class="space-y-3">

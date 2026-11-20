@@ -12,6 +12,7 @@
  */
 
 import { create } from '@bufbuild/protobuf';
+import type { CallOptions } from '@connectrpc/connect';
 import {
 	CreateModuleRequestSchema,
 	ListModulesRequestSchema,
@@ -44,23 +45,29 @@ export interface BlueMapInstallRpc {
  * and makes the in-view install fail before any RPC is sent (OSS-388). */
 export interface GroupedBlueMapRpc {
 	module: {
-		listModules(request: ListModulesRequest): Promise<ListModulesResponse>;
-		createModule(request: CreateModuleRequest): Promise<CreateModuleResponse>;
+		listModules(request: ListModulesRequest, options?: CallOptions): Promise<ListModulesResponse>;
+		createModule(
+			request: CreateModuleRequest,
+			options?: CallOptions
+		): Promise<CreateModuleResponse>;
 	};
 	node: {
-		listNodes(request: ListNodesRequest): Promise<ListNodesResponse>;
+		listNodes(request: ListNodesRequest, options?: CallOptions): Promise<ListNodesResponse>;
 	};
 }
 
-export function adaptBlueMapRpc(grouped: GroupedBlueMapRpc): BlueMapInstallRpc {
+export function adaptBlueMapRpc(
+	grouped: GroupedBlueMapRpc,
+	options?: CallOptions
+): BlueMapInstallRpc {
 	return {
-		listModules: (request) => grouped.module.listModules(request),
+		listModules: (request) => grouped.module.listModules(request, options),
 		createModule: async (request) => {
-			const response = await grouped.module.createModule(request);
+			const response = await grouped.module.createModule(request, options);
 			if (!response.module) throw new Error('CreateModule returned no module');
 			return { module: response.module };
 		},
-		listNodes: (request) => grouped.node.listNodes(request)
+		listNodes: (request) => grouped.node.listNodes(request, options)
 	};
 }
 
