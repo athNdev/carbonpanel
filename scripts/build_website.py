@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from scripts import maintained_guides, openapi_version, version_contract
+from scripts import changelog_page, maintained_guides, openapi_version, version_contract
 
 ROOT = _ROOT
 SCHEMA_CACHE = ROOT / ".website-build/schema-cache"
@@ -249,6 +249,20 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     (generated / "version-index.json").write_text(shared, encoding="utf-8")
     (project / "src/content/docs/versions.mdx").write_text(
         render_versions_page(index, current, site), encoding="utf-8")
+    # The changelog is channel presentation generated from the SAME contract,
+    # never the stale working-tree prose exported with the pinned snapshot.
+    # Replace the pinned page so Starlight never sees two changelog entries.
+    # Constants already carry the docs-content prefix; do not prefix twice.
+    pinned_changelog = project / changelog_page.PINNED_PAGE
+    if pinned_changelog.is_file():
+        pinned_changelog.unlink()
+    declaration = changelog_page.load_source(root)
+    notes = changelog_page.load_notes(root, declaration)
+    (project / changelog_page.GENERATED_PAGE).write_text(
+        changelog_page.render(index, current, declaration, notes, site), encoding="utf-8")
+    (project / "public/presentation.json").write_text(
+        json.dumps(changelog_page.presentation_fingerprint(root), indent=2) + "\n",
+        encoding="utf-8")
     channel = index["channels"][current["channel"]]
     source = {
         "revision": current["commit"],
@@ -283,7 +297,8 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     for page in (project / "src/content/docs").rglob("*"):
         # versions.mdx is generated from absolute contract routes; rebasing it
         # again would double-prefix every link.
-        if page.suffix in (".md", ".mdx") and page.name != "versions.mdx":
+        if page.suffix in (".md", ".mdx") and page.name not in (
+                "versions.mdx", "changelog.mdx"):
             revision = guide_revisions.get(page.relative_to(project).as_posix(), current["commit"])
             text = scoped_links(page.read_text(encoding="utf-8"), base, revision)
             page.write_text(normalize_mdx(text), encoding="utf-8")

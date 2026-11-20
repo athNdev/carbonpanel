@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "repository": "athNdev/carbonpanel",
+  "release_notes": {
+    "carbonpanel-v2.0.1": {
+      "path": "docs/release-notes/carbonpanel-v2.0.1.md",
+      "sha256": "db9924ef9594081cc699ef18becd3c75164298fb6986954899c5026f6200b43a"
+    }
+  },
+  "upgrade_links": {
+    "carbonpanel-v2.0.1": {
+      "guide": "docs/releases.md",
+      "anchor": "upgrade-notes-from-v1040"
+    }
+  },
+  "nightly_compare": "stable"
+}

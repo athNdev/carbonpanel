@@ -335,7 +335,7 @@ def verify_channel_docs(index, channel, commit, digest, page_texts=(),
 GUIDE_PATH_PREFIX = "docs/carbon-panel/src/content/docs/"
 
 
-def guide_fingerprint(declaration, revision, blobs):
+def guide_fingerprint(declaration, revision, blobs, presentation=None):
     """Fingerprint the declaration plus the exact maintained source blobs.
 
     This is release-independent liveness: a later unrelated merge, a cancelled
@@ -371,22 +371,30 @@ def guide_fingerprint(declaration, revision, blobs):
                 "guides": records}
     payload = {"declaration_sha256": declaration_hash,
                "revision": revision, "guides": records}
+    presentation_hash = ""
+    if presentation is not None:
+        presentation_hash = str(presentation.get("fingerprint", "")) \
+            if isinstance(presentation, dict) else str(presentation)
+        if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
+            raise ValueError("presentation fingerprint must be a SHA-256")
+        payload["presentation_fingerprint"] = presentation_hash
     return {"fingerprint": hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
         "revision": revision, "declaration_sha256": declaration_hash,
+        "presentation_fingerprint": presentation_hash,
         "manifest_identity": identity,
         "manifest_identity_hash": manifest_identity_hash(identity),
         "guides": records}
 
 
-def candidate_guide_fingerprint(declaration_path, revision, root):
+def candidate_guide_fingerprint(declaration_path, revision, root, presentation=None):
     declaration = load_json(declaration_path)
     blobs = {}
     for guide in declaration.get("guides") or []:
         path = guide.get("source_path")
         blobs[path] = subprocess.check_output(
             ["git", "show", f"{revision}:{path}"], cwd=root)
-    return guide_fingerprint(declaration, revision, blobs)
+    return guide_fingerprint(declaration, revision, blobs, presentation=presentation)
 
 
 PUBLISHED_INDEX_ROUTES = ("/version-index.json", "/docs/version-index.json")
@@ -425,6 +433,14 @@ def fetch_live_guide_evidence(get_bytes):
             if isinstance(error, urllib.error.HTTPError) and error.code != 404:
                 raise
             evidence[channel] = None
+        if isinstance(evidence[channel], dict):
+            presentation_path = "/" + CHANNEL_ROUTES[channel].strip("/") + "/presentation.json"
+            try:
+                evidence[channel]["presentation"] = json.loads(get_bytes(presentation_path).decode("utf-8"))
+            except (urllib.error.HTTPError, FileNotFoundError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code != 404:
+                    raise
+                evidence[channel]["presentation"] = None
     route_state = published_route_liveness(get_bytes)
     evidence["published_routes"] = route_state["routes"]
     evidence["published_route_problems"] = route_state["problems"]
@@ -478,6 +494,14 @@ def guide_change_decision(candidate, live_evidence):
         # invisible; source HEAD movement with identical inputs stays a no-op.
         if manifest.get("declaration_sha256") != declaration_hash:
             problems.append(f"{channel} live maintained declaration hash is stale")
+        # Changelog/banner presentation is a SEPARATE channel input, never a
+        # release-independent maintained guide. A version-banner-only fix must
+        # still reconcile Pages: its fingerprint is stamped into the built
+        # presentation.json and compared here, not folded into the guide receipt.
+        wanted_presentation = candidate.get("presentation_fingerprint", "")
+        live_presentation = (manifest.get("presentation") or {}).get("fingerprint")
+        if wanted_presentation and live_presentation != wanted_presentation:
+            problems.append(f"{channel} live channel presentation is stale")
     problems.extend((live_evidence or {}).get("published_route_problems") or [])
     return {"publish": bool(problems),
             "reason": ("live maintained guide receipt is missing or stale"
@@ -744,6 +768,7 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
                "nightly_promotion_receipt": (nightly.get("promotion") or {}).get("receipt", ""),
                "declaration_sha256": candidate.get("declaration_sha256", ""),
                "guide_fingerprint": candidate.get("fingerprint", ""),
+               "presentation_fingerprint": candidate.get("presentation_fingerprint", ""),
                "manifest_identity_hash": candidate.get("manifest_identity_hash", ""),
                "channels": channels, "page_hashes": page_hashes,
                "baseline_mode": "exact-artifact"}
@@ -761,6 +786,12 @@ def verify_publication_receipt(receipt, candidate, live_index, source_revision,
         field = {"guide_fingerprint": "fingerprint"}.get(key, key)
         if receipt.get(key) != candidate.get(field):
             problems.append(f"publication receipt {key} does not match the candidate")
+    # Legacy receipts predate channel presentation; accept their absence, but
+    # never accept a persisted presentation hash that disagrees with the
+    # candidate. A VersionBanner-only change must therefore reconcile Pages.
+    if "presentation_fingerprint" in receipt \
+            and receipt["presentation_fingerprint"] != candidate.get("presentation_fingerprint", ""):
+        problems.append("publication receipt presentation fingerprint does not match the candidate")
     if receipt.get("source_revision") != source_revision:
         problems.append("publication receipt source revision is not the tested commit")
     for name in CHANNELS:
@@ -1018,9 +1049,14 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
         mode = "legacy-reconstructed"
     else:
         # The workflow stamps receipts separately, so reconstruct it from the
-        # exact declaration and blobs at the deployment SHA.
+        # exact declaration and blobs at the deployment SHA, PLUS the channel
+        # presentation fingerprint persisted by the trusted build. A legacy
+        # artifact without presentation.json stays compatible (no field).
+        presentation_path = site / CHANNEL_ROUTES["stable"].strip("/") / "presentation.json"
+        presentation = load_json(presentation_path) if presentation_path.is_file() else None
         candidate = candidate_guide_fingerprint(
-            Path(root) / "docs/maintained-guides.json", deployment_sha, root)
+            Path(root) / "docs/maintained-guides.json", deployment_sha, root,
+            presentation=presentation)
         stamp_publication_receipt(site, candidate, live, deployment_sha)
         ok, problems = verify_rendered_guide_links(_local_get(site), live, root)
         if not ok:
@@ -1070,6 +1106,8 @@ def build_parser():
     fingerprint.add_argument("--declaration", required=True)
     fingerprint.add_argument("--revision", required=True)
     fingerprint.add_argument("--root", default=str(ROOT))
+    fingerprint.add_argument("--presentation", default="",
+                             help="path to the generated presentation fingerprint JSON")
     evidence = commands.add_parser("guide-evidence")
     evidence.add_argument("--base-url", default="https://carbonpanel.dev")
     decision = commands.add_parser("guide-change-decision")
@@ -1171,8 +1209,10 @@ def main():
         if not ok:
             raise ValueError("Maintained guide provenance failed: " + "; ".join(problems))
     elif args.command == "guide-fingerprint":
+        presentation = load_json(args.presentation) if args.presentation else None
         emit({"verified": True,
-              **candidate_guide_fingerprint(args.declaration, args.revision, args.root)})
+              **candidate_guide_fingerprint(args.declaration, args.revision, args.root,
+                                            presentation=presentation)})
     elif args.command == "guide-evidence":
         evidence = _public_evidence(args.base_url)
         emit({"verified": True, **evidence})

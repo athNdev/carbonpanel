@@ -853,5 +853,60 @@ class PublishedRouteLivenessTests(unittest.TestCase):
             gate.published_route_liveness(broken)
 
 
+class ChannelPresentationReceiptTests(unittest.TestCase):
+    """Presentation is a separate channel input, with legacy compatibility."""
+
+    HASH = "a" * 64
+
+    def base_candidate(self, presentation="", **overrides):
+        value = {"fingerprint": "b" * 64, "declaration_sha256": "c" * 64,
+                 "manifest_identity_hash": "d" * 64,
+                 "presentation_fingerprint": presentation}
+        value.update(overrides)
+        return value
+
+    def receipt(self, presentation=True):
+        value = {"declaration_sha256": "c" * 64, "guide_fingerprint": "b" * 64,
+                 "manifest_identity_hash": "d" * 64, "source_revision": "e" * 40,
+                 "channels": {}, "page_hashes": {}}
+        if presentation:
+            value["presentation_fingerprint"] = self.HASH
+        return value
+
+    def test_legacy_receipt_without_presentation_is_accepted(self):
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(presentation=False), self.base_candidate(),
+            {"channels": {}}, "e" * 40)
+        self.assertTrue(ok, problems)
+
+    def test_exact_presentation_hash_required_when_persisted(self):
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(), self.base_candidate(presentation=self.HASH),
+            {"channels": {}}, "e" * 40)
+        self.assertTrue(ok, problems)
+        ok, problems = gate.verify_publication_receipt(
+            self.receipt(), self.base_candidate(presentation="f" * 64),
+            {"channels": {}}, "e" * 40)
+        self.assertFalse(ok)
+        self.assertTrue(any("presentation fingerprint" in p for p in problems))
+
+    def test_guide_change_decision_notices_presentation_only_change(self):
+        candidate = self.base_candidate(presentation=self.HASH)
+        candidate["guides"] = []
+        live = {}
+        for channel in gate.CHANNELS:
+            live[channel] = {"channels": [], "declaration_sha256": "c" * 64,
+                             "presentation": {"fingerprint": "f" * 64}}
+        live["published_routes"] = {}
+        live["published_route_problems"] = []
+        decision = gate.guide_change_decision(candidate, live)
+        self.assertTrue(decision["publish"])
+        self.assertTrue(any("presentation" in p for p in decision["problems"]))
+        for channel in gate.CHANNELS:
+            live[channel]["presentation"] = {"fingerprint": self.HASH}
+        decision = gate.guide_change_decision(candidate, live)
+        self.assertFalse(decision["publish"], decision)
+
+
 if __name__ == "__main__":
     unittest.main()

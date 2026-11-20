@@ -38,6 +38,12 @@ const options = index.versions.map((item) => {
     current: item.channel === current.channel,
   };
 });
+// Show the ACTUAL release/version on canonical and immutable archive routes,
+// not a repeated "Stable / Published-Release" label. Nightly has no product
+// tag, so its exact qualified revision is the honest identity.
+const releaseLabel = current.tag
+  ? current.tag
+  : `rolling ${current.commit.slice(0, 12)}`;
 const dev = import.meta.env.DEV;
 ---
 <div class="version-banner" data-pagefind-ignore
@@ -45,8 +51,8 @@ const dev = import.meta.env.DEV;
      data-channel-digest={channel.image.digest}
      data-channel-promotion={channel.promotion.state}
      data-channel-promoted={String(channel.promotion.promoted)}>
-  <span class="version-label">{dev ? index.development.label : current.channel_display}</span>
-  <span class="version-channel">{dev ? 'development preview' : current.channel + ' / ' + current.availability}</span>
+  <span class="version-label">{dev ? index.development.label : current.display}</span>
+  <span class="version-channel">{dev ? 'development preview' : current.channel + ' · ' + releaseLabel}</span>
   <a class="version-pin" href={pinnedHref}>Pinned to {current.commit.slice(0, 7)} <span aria-hidden="true">↗</span></a>
   <div class="version-select-wrap">
     <label for="version-channel-select">Documentation version</label>
