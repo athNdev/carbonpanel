@@ -20,10 +20,11 @@ early testing and never move a stable alias.
 
 Use [Stable](https://carbonpanel.dev/docs/) for regular installations and
 [Nightly](https://carbonpanel.dev/docs/nightly/) to try qualified builds from
-`main`. Stable's `latest` and `stable` aliases converge on the same tested
-image digest. Use a full version tag to select a release or a digest to pin
-its exact image. Nightly can advance between Stable releases. Its docs follow
-the exact commit and digest that passed promotion.
+`main`. Use `latest` for Stable, including the legacy `1.0.40` publication.
+The product release workflow also publishes `stable` at the same tested image
+digest. Use a full version tag to select a release or a digest to pin its exact
+image. Nightly can advance between Stable releases. Its docs follow the exact
+commit and digest that passed promotion.
 
 Maintain the current Stable minor line. Keep earlier releases available for
 pinned installs and documented rollback. A previous line gets a maintenance
@@ -226,7 +227,8 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0.1-alpha.1` | An exact future prerelease; never moves a stable alias |
 | `2.0.1` | An exact stable release, immutable |
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
-| `latest`, `stable` | Moving aliases for the same qualified Stable release |
+| `latest` | Moving alias for the qualified Stable release, including legacy `1.0.40` |
+| `stable` | Additional moving alias published by the product release workflow |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
 | `nightly` | Development channel for qualified main builds on both registries at one verified multi-architecture digest |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
