@@ -70,8 +70,7 @@ Byte verification of an archive is still not guest-boot evidence. Synthetic
 values exist only in the explicitly marked
 [`provenance.fixture.json`](../packaging/node-lxc/config/provenance.fixture.json),
 which artifact builds refuse. Live import/boot evidence (milestone M5) is still
-required before any format is advertised, and is
-[externally blocked here](#real-blocker--guest-boot-not-qualified).
+required before any format is advertised, and requires an [authorized disposable fixture](#disposable-proxmox-qualification).
 
 ## Shared control contract — no fork
 
@@ -120,28 +119,27 @@ staged slots and only activates a slot after the candidate passes full
 verification; an invalid or unsigned candidate is refused before any state
 change, and rollback switches only to a verified previous slot.
 
-## Real blocker — guest boot not qualified
+## Disposable Proxmox qualification
 
-The host available to this lane has **no `/dev/kvm`** and **no LXC tooling**
-(`lxc`, `lxc-create`, `lxc-copy`, `pct`, `systemd-nspawn`), without privileged
-access to install them. The task-owned WSL 2 Ubuntu distribution similarly has
-no `/dev/kvm` and no LXC tools; installing them would require elevation and
-host/WSL configuration changes, which are out of scope. A real Ubuntu 24.04 LXC
-rootfs therefore cannot be imported and booted here. This is an external
-qualification blocker, not a code defect and not a pass. No live import/boot, no
-nested daemon start inside a real guest, no effective kernel-enforcement
-observation and no gameplay evidence is claimed. Verifying the signed archive
-bytes does not remove this blocker.
+The managed-node LXC rootfs remains a shared-kernel preview. Use
+`packaging/node-lxc/node_lxc_artifact.py boot-qualify` to verify the pinned
+upstream archive in a caller-owned work directory and record read-only Proxmox
+prerequisite checks. The manual `.github/workflows/lxc-boot-qualification.yml`
+runs the same probe and uploads the JSON report. The command returns
+`BOOT_QUALIFICATION_BLOCKED` after successful archive verification. Finding
+Proxmox tools on the machine establishes availability only.
 
-`packaging/node-lxc/node_lxc_artifact.py boot-qualify` and the manual workflow
-`.github/workflows/lxc-boot-qualification.yml` provide a fail-closed
-import/boot verification path: they verify real signed upstream archive bytes in
-an owned disposable path, probe or attempt unprivileged LXC import and boot on
-the runner, and emit/upload an evidence report. Qualification is reported only
-on actual evidenced import and boot; blocked or failed runs remain refused with
-explicit blockers. The capability gate and fixtures prove refusals and state
-transitions only. See
-[qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md).
+Fixture qualification requires a separately authorized disposable Proxmox
+target with isolated guest storage and networking. The fixture must bind the
+imported managed-node artifact to its verified digest, confirm an unprivileged
+guest with effective kernel confinement, and collect first and second boot
+evidence. The guest must retain its identity across boots, enroll through the
+shared controller boundary, and run a workload through its private nested
+daemon. Record guest teardown and retain the evidence with the source commit
+and platform. Accept only evidence observed at each boundary.
+
+See [qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md)
+for the readiness command and the available evidence.
 
 ## Verification evidence and limits
 
