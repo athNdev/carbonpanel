@@ -4,7 +4,7 @@
 
 package mcp
 
-const descriptorFingerprint = "23f8ad12ff9aa4539c621959f3e4b2720a3c9cf71aceb2e721d625c0e2542a40"
+const descriptorFingerprint = "eaf0c82fb53743679343bc46d79557f7fb9e75163b3b4d93b35dc52c7b0340b2"
 
 var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ActivityService/ListActivityLogs", Service: "carbonpanel.v1.ActivityService", Method: "ListActivityLogs", Client: "NewActivityServiceClient", Scope: "activity/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
@@ -217,6 +217,7 @@ var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.UploadService/GetUploadStatus", Service: "carbonpanel.v1.UploadService", Method: "GetUploadStatus", Client: "NewUploadServiceClient", Scope: "uploads/read", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.UploadService/InitUpload", Service: "carbonpanel.v1.UploadService", Method: "InitUpload", Client: "NewUploadServiceClient", Scope: "uploads/create", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.UploadService/UploadChunk", Service: "carbonpanel.v1.UploadService", Method: "UploadChunk", Client: "NewUploadServiceClient", Scope: "uploads/create", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.UserService/BeginOIDCLink", Service: "carbonpanel.v1.UserService", Method: "BeginOIDCLink", Client: "NewUserServiceClient", Scope: "users/update", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.UserService/CreateUser", Service: "carbonpanel.v1.UserService", Method: "CreateUser", Client: "NewUserServiceClient", Scope: "users/create", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.UserService/DeleteUser", Service: "carbonpanel.v1.UserService", Method: "DeleteUser", Client: "NewUserServiceClient", Scope: "users/delete", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.UserService/GetUser", Service: "carbonpanel.v1.UserService", Method: "GetUser", Client: "NewUserServiceClient", Scope: "users/read", Class: ClassExclude, Build: PanelBuildStableV140},

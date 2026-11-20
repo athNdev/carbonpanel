@@ -6,20 +6,23 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 var _ carbonpanelv1connect.UserServiceHandler = (*UserService)(nil)
@@ -28,6 +31,8 @@ type UserService struct {
 	store       *storage.Store
 	authManager *auth.Manager
 	log         *logger.Logger
+	oidcHandler *auth.OIDCHandler
+	enforcer    *rbac.Enforcer
 }
 
 func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger.Logger) *UserService {
@@ -36,6 +41,39 @@ func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger
 		authManager: authManager,
 		log:         log,
 	}
+}
+
+func (s *UserService) SetEnforcer(enforcer *rbac.Enforcer) {
+	s.enforcer = enforcer
+}
+
+func (s *UserService) SetOIDCHandler(handler *auth.OIDCHandler) {
+	s.oidcHandler = handler
+}
+
+// BeginOIDCLink records an authenticated local admin's intent to bind their
+// own OIDC identity on the next verified callback. The response token names no
+// issuer, subject or email and is never logged.
+func (s *UserService) BeginOIDCLink(ctx context.Context, _ *connect.Request[v1.BeginOIDCLinkRequest]) (*connect.Response[v1.BeginOIDCLinkResponse], error) {
+	caller := auth.GetUserFromContext(ctx)
+	if caller == nil || caller.ID == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("local admin sign-in required"))
+	}
+	if s.oidcHandler == nil || !s.oidcHandler.IsEnabled() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("OIDC linking is unavailable"))
+	}
+	token, cookie, err := s.oidcHandler.BeginLink(ctx, caller)
+	if errors.Is(err, auth.ErrOIDCLinkIneligible) {
+		return nil, connect.NewError(connect.CodePermissionDenied, err)
+	}
+	if err != nil {
+		s.log.Error("OIDC link intent rejected: %v", err)
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("unable to start OIDC link"))
+	}
+	resp := connect.NewResponse(&v1.BeginOIDCLinkResponse{LinkToken: token})
+	resp.Header().Set("Cache-Control", "no-store")
+	resp.Header().Set("Set-Cookie", cookie.String())
+	return resp, nil
 }
 
 func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error) {
@@ -47,8 +85,11 @@ func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.Lis
 
 	protoUsers := make([]*v1.User, 0, len(users))
 	for _, user := range users {
-		roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-		protoUsers = append(protoUsers, dbUserToProto(user, roles))
+		item, err := s.userWithRoleSources(ctx, user)
+		if err != nil {
+			return nil, err
+		}
+		protoUsers = append(protoUsers, item)
 	}
 
 	return connect.NewResponse(&v1.ListUsersResponse{
@@ -67,11 +108,11 @@ func (s *UserService) GetUser(ctx context.Context, req *connect.Request[v1.GetUs
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
 	}
 
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-
-	return connect.NewResponse(&v1.GetUserResponse{
-		User: dbUserToProto(user, roles),
-	}), nil
+	item, err := s.userWithRoleSources(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&v1.GetUserResponse{User: item}), nil
 }
 
 func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error) {
@@ -79,6 +120,11 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 
 	if msg.Username == "" || msg.Password == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("username and password are required"))
+	}
+
+	if slices.ContainsFunc(msg.Roles, func(role string) bool { return strings.EqualFold(role, "admin") }) &&
+		!canManageWildcards(ctx, s.enforcer) {
+		return nil, connect.NewError(connect.CodePermissionDenied, storage.ErrLocalAdminGrantForbidden)
 	}
 
 	user, err := s.authManager.CreateLocalUser(ctx, msg.Username, msg.Email, msg.Password)
@@ -105,11 +151,11 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 		}
 	}
 
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-
-	return connect.NewResponse(&v1.CreateUserResponse{
-		User: dbUserToProto(user, roles),
-	}), nil
+	item, err := s.userWithRoleSources(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&v1.CreateUserResponse{User: item}), nil
 }
 
 func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error) {
@@ -119,58 +165,57 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
 	}
 
+	roles := msg.GetLocalRolesUpdate()
+	var roleUpdate *storage.LocalRoleUpdate
+	switch {
+	case roles != nil && len(msg.Roles) != 0:
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("provide only one role selection"))
+	case roles != nil || len(msg.Roles) != 0:
+		desired := msg.Roles
+		if roles != nil {
+			desired = roles.Roles
+		}
+		roleUpdate = &storage.LocalRoleUpdate{
+			Roles: desired, LegacyEffectiveNames: roles == nil, AllowAdminGrant: canManageWildcards(ctx, s.enforcer),
+		}
+	}
+	err := s.store.UpdateUserProfileAndRoles(ctx, msg.Id, msg.Email, msg.IsActive, roleUpdate)
+	if errors.Is(err, storage.ErrLocalAdminGrantForbidden) {
+		return nil, connect.NewError(connect.CodePermissionDenied, err)
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
+	}
+	if err != nil {
+		s.log.Error("Failed to update user: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update user"))
+	}
 	user, err := s.store.GetUser(ctx, msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
 	}
-
-	if msg.Email != nil {
-		user.Email = msg.Email
+	item, err := s.userWithRoleSources(ctx, user)
+	if err != nil {
+		return nil, err
 	}
-	if msg.IsActive != nil {
-		user.IsActive = *msg.IsActive
+	return connect.NewResponse(&v1.UpdateUserResponse{User: item}), nil
+}
+
+func (s *UserService) userWithRoleSources(ctx context.Context, user *storage.User) (*v1.User, error) {
+	roles, err := s.store.GetUserRoleNames(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get user roles"))
 	}
-
-	if err := s.store.UpdateUser(ctx, user); err != nil {
-		s.log.Error("Failed to update user: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update user"))
+	item := dbUserToProto(user, roles)
+	item.LocalRoles, err = s.store.GetUserLocalRoleNames(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get local roles"))
 	}
-
-	// Update roles if provided
-	if len(msg.Roles) > 0 {
-		// Get current roles
-		currentRoles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-
-		// Build sets for comparison
-		currentSet := make(map[string]bool)
-		for _, r := range currentRoles {
-			currentSet[r] = true
-		}
-		desiredSet := make(map[string]bool)
-		for _, r := range msg.Roles {
-			desiredSet[r] = true
-		}
-
-		// Remove roles not in desired set
-		for _, r := range currentRoles {
-			if !desiredSet[r] {
-				_ = s.store.UnassignRole(ctx, user.ID, r)
-			}
-		}
-
-		// Add roles not in current set
-		for _, r := range msg.Roles {
-			if !currentSet[r] {
-				_ = s.store.AssignRole(ctx, user.ID, r, "local")
-			}
-		}
+	item.OidcRoles, err = s.store.GetUserRoleNamesBySource(ctx, user.ID, "oidc")
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get OIDC roles"))
 	}
-
-	roles, _ := s.store.GetUserRoleNames(ctx, user.ID)
-
-	return connect.NewResponse(&v1.UpdateUserResponse{
-		User: dbUserToProto(user, roles),
-	}), nil
+	return item, nil
 }
 
 func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {

@@ -200,7 +200,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const request = create(UpdateUserRequestSchema, {
 				id: editingUser.id,
 				email: editUserForm.email || undefined,
-				roles: editUserForm.roles,
+				localRolesUpdate: { roles: editUserForm.roles },
 				isActive: editUserForm.isActive
 			});
 			await rpcClient.user.updateUser(request);
@@ -296,7 +296,7 @@ one at https://mozilla.org/MPL/2.0/.
 		editingUser = user;
 		editUserForm = {
 			email: user.email || '',
-			roles: [...(user.roles || [])],
+			roles: [...user.localRoles],
 			isActive: user.isActive
 		};
 		showEditDialog = true;
@@ -453,6 +453,7 @@ one at https://mozilla.org/MPL/2.0/.
 													<CarbonButton
 														size="sm"
 														kind="tertiary"
+														aria-label={`Edit ${user.username}`}
 														onclick={() => openEditDialog(user)}
 													>
 														<Edit class="h-4 w-4" />
@@ -834,13 +835,14 @@ one at https://mozilla.org/MPL/2.0/.
 							<div class="space-y-2">
 								<div class="flex items-center gap-2">
 									<Shield class="h-4 w-4 text-muted-foreground" />
-									<Label>Roles</Label>
+									<p class="text-sm font-medium">Local roles</p>
 								</div>
-								<div class="flex flex-wrap gap-2">
+								<div class="flex flex-wrap gap-2" role="group" aria-label="Local roles">
 									{#each availableRoles as role (role.id)}
 										<CarbonButton
 											size="sm"
 											kind={editUserForm.roles.includes(role.name) ? 'primary' : 'tertiary'}
+											aria-pressed={editUserForm.roles.includes(role.name)}
 											onclick={() => toggleRole(editUserForm, role.name)}
 										>
 											{#if editUserForm.roles.includes(role.name)}
@@ -851,6 +853,20 @@ one at https://mozilla.org/MPL/2.0/.
 									{/each}
 								</div>
 							</div>
+							{#if editingUser.oidcRoles.length}
+								<div class="space-y-2" role="group" aria-labelledby="edit-user-oidc-roles">
+									<p id="edit-user-oidc-roles" class="text-sm font-medium">
+										Identity provider roles
+									</p>
+									<div class="flex flex-wrap gap-1">
+										{#each editingUser.oidcRoles as role (role)}
+											<Badge variant={getRoleBadgeVariant(role)} class="whitespace-nowrap">
+												{role}
+											</Badge>
+										{/each}
+									</div>
+								</div>
+							{/if}
 							<div class="flex items-center justify-between rounded-lg border p-4">
 								<div class="space-y-0.5">
 									<Label for="edit-active">Account active</Label>

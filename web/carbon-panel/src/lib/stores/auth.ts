@@ -29,6 +29,7 @@ interface AuthState {
 	isLoading: boolean;
 	localAuthEnabled: boolean;
 	oidcEnabled: boolean;
+	canLinkOidc: boolean;
 	firstUserSetup: boolean;
 	allowRegistration: boolean;
 	anonymousAccessEnabled: boolean;
@@ -59,6 +60,7 @@ function createAuthStore() {
 		isLoading: true,
 		localAuthEnabled: true,
 		oidcEnabled: false,
+		canLinkOidc: false,
 		firstUserSetup: false,
 		allowRegistration: false,
 		anonymousAccessEnabled: false
@@ -141,6 +143,7 @@ function createAuthStore() {
 					user: response.user || null,
 					token: response.token,
 					isAuthenticated: true,
+					canLinkOidc: false,
 					isLoading: false
 				}));
 
@@ -181,6 +184,7 @@ function createAuthStore() {
 				isLoading: false,
 				localAuthEnabled: currentState.localAuthEnabled,
 				oidcEnabled: currentState.oidcEnabled,
+				canLinkOidc: false,
 				firstUserSetup: currentState.firstUserSetup,
 				allowRegistration: currentState.allowRegistration,
 				anonymousAccessEnabled: currentState.anonymousAccessEnabled
@@ -217,7 +221,7 @@ function createAuthStore() {
 			if (browser) {
 				localStorage.setItem('auth_token', token);
 			}
-			update((state) => ({ ...state, token }));
+			update((state) => ({ ...state, token, canLinkOidc: false }));
 		},
 
 		async changePassword(oldPassword: string, newPassword: string) {
@@ -249,6 +253,7 @@ function createAuthStore() {
 				isLoading: false,
 				localAuthEnabled: true,
 				oidcEnabled: false,
+				canLinkOidc: false,
 				firstUserSetup: true,
 				allowRegistration: false,
 				anonymousAccessEnabled: false
@@ -265,7 +270,7 @@ function createAuthStore() {
 			});
 
 			if (!currentToken) {
-				update((state) => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false, canLinkOidc: false }));
 				return false;
 			}
 
@@ -279,6 +284,7 @@ function createAuthStore() {
 						user: response.user || null,
 						permissions: response.permissions || [],
 						isAuthenticated: true,
+						canLinkOidc: response.canLinkOidc,
 						isLoading: false
 					}));
 					return true;
@@ -294,13 +300,14 @@ function createAuthStore() {
 						token: null,
 						permissions: [],
 						isAuthenticated: false,
+						canLinkOidc: false,
 						isLoading: false
 					}));
 					return false;
 				}
 			} catch {
 				if (generation !== sessionRevision) return false;
-				update((state) => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false, canLinkOidc: false }));
 				return false;
 			}
 		},

@@ -72,6 +72,7 @@ export default defineConfig({
 						{
 							label: 'OIDC',
 							items: [
+								{ label: 'Link a local admin', slug: 'guides/oidc/admin-linking' },
 								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },
 								{ label: 'Authelia', slug: 'guides/oidc/authelia' },
 								{ label: 'Okta', slug: 'guides/oidc/okta' },
