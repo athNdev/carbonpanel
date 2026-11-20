@@ -386,6 +386,17 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
+      # Compatibility contract for the Compose release qualification harness
+      # (scripts/qualify-compose-artifacts.sh). #613 replaced this context with
+      # the OCI archive above; the harness still needs the raw build context to
+      # build the candidate image and compare its binaries with the bundle.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image-context
+          path: dist/image
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   # IMMUTABLE VERSION PUBLICATION ONLY. No moving alias is written here.
   rehearse-stable-docs:
