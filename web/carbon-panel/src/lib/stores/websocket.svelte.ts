@@ -29,7 +29,11 @@ import { authStore } from '$lib/stores/auth';
 // credentials. It must not be rendered as a reconnect spinner or followed by
 // background retries; a new login creates a new client connection.
 export type ConnectionState =
-	'disconnected' | 'connecting' | 'connected' | 'authenticated' | 'signed-out';
+	| 'disconnected'
+	| 'connecting'
+	| 'connected'
+	| 'authenticated'
+	| 'signed-out';
 
 export interface WebSocketState {
 	connectionState: ConnectionState;

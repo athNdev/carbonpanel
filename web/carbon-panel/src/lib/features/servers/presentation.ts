@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 import { ServerStatus } from '../../proto/carbonpanel/v1/common_pb';
 export type ServerStatusTone =
-	'green' | 'gray' | 'blue' | 'red' | 'yellow' | 'warm-gray' | 'purple';
+	| 'green'
+	| 'gray'
+	| 'blue'
+	| 'red'
+	| 'yellow'
+	| 'warm-gray'
+	| 'purple';
 const presentation: Partial<Record<ServerStatus, { label: string; tone: ServerStatusTone }>> = {
 	[ServerStatus.RUNNING]: { label: 'RUNNING', tone: 'green' },
 	[ServerStatus.STOPPED]: { label: 'STOPPED', tone: 'gray' },

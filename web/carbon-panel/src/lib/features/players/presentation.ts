@@ -464,7 +464,13 @@ export function projectServerOptions(
 // ---------------------------------------------------------------------------
 
 export type PlayerActionKind =
-	'kick' | 'ban' | 'pardon' | 'op' | 'deop' | 'whitelist_add' | 'whitelist_remove';
+	| 'kick'
+	| 'ban'
+	| 'pardon'
+	| 'op'
+	| 'deop'
+	| 'whitelist_add'
+	| 'whitelist_remove';
 
 /** Bulk RPC kinds are a smaller set than the single-target actions. */
 const BULK_KINDS: Partial<Record<PlayerActionKind, string>> = {

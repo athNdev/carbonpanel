@@ -6,7 +6,15 @@ import { ModLoader } from '../../proto/carbonpanel/v1/common_pb';
  * tone in the views: colour is never the only explanation of a state.
  */
 export type WorldTagTone =
-	'blue' | 'green' | 'red' | 'yellow' | 'gray' | 'warm-gray' | 'purple' | 'cyan' | 'teal';
+	| 'blue'
+	| 'green'
+	| 'red'
+	| 'yellow'
+	| 'gray'
+	| 'warm-gray'
+	| 'purple'
+	| 'cyan'
+	| 'teal';
 
 export interface WorldPresentation {
 	label: string;
@@ -140,7 +148,12 @@ export function operationOutcomePresentation(outcome: string | undefined): World
 }
 
 export type BindingOutcomeDisposition =
-	'applied' | 'uncertain' | 'in_progress' | 'failed' | 'not_applied' | 'unknown';
+	| 'applied'
+	| 'uncertain'
+	| 'in_progress'
+	| 'failed'
+	| 'not_applied'
+	| 'unknown';
 
 /** How the UI may react to a reported bind outcome. Never auto-retries. */
 export function bindingOutcomeDisposition(outcome: string | undefined): BindingOutcomeDisposition {
