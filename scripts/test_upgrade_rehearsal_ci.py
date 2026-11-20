@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
 """Offline fail-closed tests for the CI upgrade rehearsal helpers."""
 import json
+import shutil
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts import upgrade_rehearsal_ci as rehearsal
 
@@ -120,6 +124,70 @@ class RehearsalHelperTests(unittest.TestCase):
             connection.close()
             self.assertEqual(rehearsal.integrity(destination), "ok")
             self.assertEqual(rehearsal.row_counts(destination, ["servers"])["servers"], 1)
+
+    def test_current_rollback_uses_observed_table_delta(self):
+        # Current Stable already includes the historical migration tables.
+        retained = "world_entries"
+        candidate_only = "future_model"
+        stable_tables = rehearsal.EXPECTED_CANDIDATE_MODEL_TABLES | {"servers"}
+        copyfile = shutil.copyfile
+
+        cases = ((False, None), (True, None), (True, "app"), (True, "copyback"))
+        for grow, corrupt in cases:
+            with self.subTest(grow=grow, corrupt=corrupt):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+
+                    def run_service(binary, workdir):
+                        db = workdir / "panel.db"
+                        if binary == "stable":
+                            with closing(sqlite3.connect(db)) as conn, conn:
+                                for name in stable_tables:
+                                    conn.execute(f"CREATE TABLE {name} (id INTEGER)")
+                                conn.execute("INSERT INTO servers VALUES (1)")
+                        else:
+                            rehearsal.back_up_database(db, workdir / "panel.db.pre-migrate.bak")
+                            if grow:
+                                with closing(sqlite3.connect(db)) as conn, conn:
+                                    conn.execute(f"CREATE TABLE {candidate_only} (id INTEGER)")
+                        return db
+
+                    def run_restore(binary, workdir, snapshot):
+                        if not snapshot.is_file():
+                            return SimpleNamespace(returncode=1)
+                        db = workdir / "panel.db"
+                        copyfile(snapshot, db)
+                        if corrupt == "app":
+                            with closing(sqlite3.connect(db)) as conn, conn:
+                                conn.execute(f"ALTER TABLE {retained} RENAME TO {candidate_only}")
+                        return SimpleNamespace(returncode=0)
+
+                    def copy_snapshot(source, destination, *args, **kwargs):
+                        result = copyfile(source, destination, *args, **kwargs)
+                        if corrupt == "copyback" and Path(destination).parent.name == "current-copyback-run":
+                            with closing(sqlite3.connect(destination)) as conn, conn:
+                                # Keep the count unchanged while leaking a candidate table.
+                                conn.execute(f"ALTER TABLE {retained} RENAME TO {candidate_only}")
+                        return result
+
+                    with patch.object(rehearsal, "run_service_any", side_effect=run_service), \
+                         patch.object(rehearsal, "run_restore", side_effect=run_restore), \
+                         patch.object(rehearsal.shutil, "copyfile", side_effect=copy_snapshot):
+                        checks, evidence = rehearsal.run_case(
+                            root, "current", "stable", "candidate", None, None,
+                            18090, 18091, 18092)
+
+                    self.assertEqual(evidence["candidate_tables"], len(stable_tables) + grow)
+                    self.assertEqual(evidence["candidate_only_tables"], [candidate_only] if grow else [])
+                    failures = {
+                        "app": {"current_app_level_restore_returns_stable_tables"},
+                        "copyback": {
+                            "current_copyback_returns_stable_tables",
+                            "current_copyback_removes_new_models",
+                        },
+                    }
+                    self.assertEqual({name for name, ok in checks.items() if not ok},
+                                     failures.get(corrupt, set()))
 
     def test_seeded_file_hashes_are_content_sensitive_and_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
