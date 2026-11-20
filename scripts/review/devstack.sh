@@ -199,6 +199,7 @@ seed() {
 	seed_showcase_pack "${token}"
 	seed_showcase_world_library "${token}" "${server_id}"
 	if wait_for_server_running "${token}"; then
+		seed_showcase_terrain "${token}" "${server_id}"
 		seed_showcase_player "${token}" "${server_id}"
 	else
 		echo "review server did not reach RUNNING; skipping player allowlist fixture" >&2
@@ -335,6 +336,27 @@ seed_showcase_pack() {
 	create_extra_pack 'Vanilla Tweaks' '3.0.2' '1.21.1' 'fabric'
 	create_extra_pack 'NeoForge Basics' '1.1.0' '1.21.1' 'neoforge'
 	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
+}
+
+# Guarantee real terrain under the fixed initial camera. A fresh Minecraft
+# world has a random seed, so relying on whatever chunks happen to exist at
+# origin makes the map capture intermittently black. Force-load a small grid
+# around spawn through the panel's own console RPC, let it generate, and flush
+# saves before the renderer reads the world. This only generates disposable
+# fixture terrain; no external world or live server is touched.
+seed_showcase_terrain() {
+	local token="$1" server_id="$2" response success
+	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add -4 -4 4 4",silent:true}))')"
+	response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
+		echo "review terrain pre-generation was refused; map capture may be empty" >&2
+		return 0
+	}
+	success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
+	echo "review deterministic spawn chunk grid: success=${success}" >&2
+	[ "${success}" = "true" ] || return 0
+	sleep 45
+	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
+	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
 }
 
 # A real BlueMap renderer for the gated World View capture. Managed install is
