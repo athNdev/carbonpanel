@@ -173,6 +173,7 @@ func newContentFixture(t *testing.T, olderMode string, authEnabled bool) *conten
 	mux := http.NewServeMux()
 	registerAuthHandlers(mux, interceptor, authEnabled)
 	registerAllContentHandlers(mux, interceptor, olderMode)
+	registerPackwizReadFixture(t, mux, interceptor, olderMode)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 
@@ -210,6 +211,8 @@ func contentValidArgs() map[string]map[string]any {
 	const sha = "0000000000000000000000000000000000000000000000000000000000000000"
 	b64 := "aGVsbG8="
 	return map[string]map[string]any{
+		packwizListTool: {},
+		packwizGetTool:  {"pack_id": packwizFixtureID},
 		// ModService.
 		"list_mods":                         {"server_id": "srv-1"},
 		"get_mod":                           {"server_id": "srv-1", "id": "mod-1"},
@@ -303,20 +306,20 @@ func contentMutationTools() []string {
 // every descriptor's factual tuple matches the generated catalog.
 func TestContentDescriptorCoverage(t *testing.T) {
 	counts := CoverageCounts()
-	if counts.ListedDescriptors != 76 {
-		t.Fatalf("listed descriptors = %d, want 76 (69 RPC + 4 REST + 3 controller-stream transport primitives)", counts.ListedDescriptors)
+	if counts.ListedDescriptors != 78 {
+		t.Fatalf("listed descriptors = %d, want 78 (71 RPC + 4 REST + 3 controller-stream transport primitives)", counts.ListedDescriptors)
 	}
-	if counts.ListedRPCs != 69 || counts.ListedREST != 7 {
-		t.Fatalf("listed RPC/REST = %d/%d, want 69/7 (the 3 extra non-RPC descriptors are controller-stream primitives)", counts.ListedRPCs, counts.ListedREST)
+	if counts.ListedRPCs != 71 || counts.ListedREST != 7 {
+		t.Fatalf("listed RPC/REST = %d/%d, want 71/7 (the 3 extra non-RPC descriptors are controller-stream primitives)", counts.ListedRPCs, counts.ListedREST)
 	}
-	if counts.NewContentTools != 67 || counts.FirstSliceTools != 2 {
-		t.Fatalf("new/first-slice tools = %d/%d, want 67/2", counts.NewContentTools, counts.FirstSliceTools)
+	if counts.NewContentTools != 69 || counts.FirstSliceTools != 2 {
+		t.Fatalf("new/first-slice tools = %d/%d, want 69/2", counts.NewContentTools, counts.FirstSliceTools)
 	}
-	if counts.ReachableRPCs != 69 {
-		t.Fatalf("reachable RPCs = %d, want 69", counts.ReachableRPCs)
+	if counts.ReachableRPCs != 71 {
+		t.Fatalf("reachable RPCs = %d, want 71", counts.ReachableRPCs)
 	}
-	if ContentToolCount() != 67 {
-		t.Fatalf("ContentToolCount = %d, want 67", ContentToolCount())
+	if ContentToolCount() != 69 {
+		t.Fatalf("ContentToolCount = %d, want 69", ContentToolCount())
 	}
 
 	base := make(map[string]CatalogEntry, len(rawCatalogEntries))
@@ -385,8 +388,8 @@ func TestContentToolFullCoverageSuccess(t *testing.T) {
 			assertSuccess(t, out, d.Tool)
 		})
 	}
-	if registered != 67 {
-		t.Fatalf("verified %d tools, want 67", registered)
+	if registered != 69 {
+		t.Fatalf("verified %d tools, want 69", registered)
 	}
 }
 

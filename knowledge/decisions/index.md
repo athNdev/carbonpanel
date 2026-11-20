@@ -27,6 +27,7 @@
 - [MCP controller stream session semantics](mcp-controller-stream-sessions.md) — Bounded controller-owned stream sessions use service-owned deadlines, exact server binding, idempotent frames and terminal partial reads to avoid lost bytes and leaked handles.
 - [MCP controller stream session semantics — Choice](mcp-controller-stream-sessions-choice.md) — The MCP gateway never opens panel/node storage. Bounded OpenStream,
 - [MCP controller stream session semantics — Verification + Read next](mcp-controller-stream-sessions-verification.md) — Service fixtures prove exact server binding with no state change on refusal,
+- [MCP Packwiz inventory reads](mcp-packwiz-read-boundary.md) — Typed MCP Packwiz reads page allowlisted Studio metadata under the existing global modpacks/read grant.
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
