@@ -110,6 +110,7 @@ jobs:
           bash -n scripts/qualify-compose-release.sh
           node --check scripts/qualify-compose-game.mjs
           node --check scripts/qualify-world-swap.mjs
+          node scripts/test-qualify-world-swap.mjs
 
       - name: Run the shipped install, upgrade and rollback entry points
         env:

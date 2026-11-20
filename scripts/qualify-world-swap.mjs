@@ -9,20 +9,40 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
-const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
-const { createClient } = require("minecraft-protocol");
+// Connect JSON (protojson) serializes int64 as a decimal string. Normalize
+// both wire forms before comparing with a Node Buffer length.
+export function normalizeWireInt(value, label) {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  if (typeof value === "string" && /^-?\d+$/.test(value)) return BigInt(value);
+  throw new Error(label + ": unexpected int64 wire value " + typeof value + " " + String(value));
+}
+
 const base = "http://127.0.0.1:18080";
 const player = "CarbonQual";
 const version = "1.21.1";
-const stateFile = process.env.QUALIFY_STATE;
-const dataDir = resolve(process.env.QUALIFY_DATA_DIR);
-const work = resolve(process.env.QUALIFY_WORK);
-const state = JSON.parse(readFileSync(stateFile));
-const evidence = resolve(work, "evidence", "world-swap.json");
-mkdirSync(resolve(work, "evidence"), { recursive: true });
-const report = { stagedRun: process.env.QUALIFY_STAGED_RUN, stagedSha: process.env.QUALIFY_STAGED_SHA, checks: [] };
+let state;
+let dataDir;
+let work;
+let evidence;
+let report;
 let token;
+
+function loadContext() {
+  state = JSON.parse(readFileSync(process.env.QUALIFY_STATE));
+  dataDir = resolve(process.env.QUALIFY_DATA_DIR);
+  work = resolve(process.env.QUALIFY_WORK);
+  evidence = resolve(work, "evidence", "world-swap.json");
+  mkdirSync(resolve(work, "evidence"), { recursive: true });
+  report = { stagedRun: process.env.QUALIFY_STAGED_RUN, stagedSha: process.env.QUALIFY_STAGED_SHA, checks: [] };
+}
+
+function minecraftClient() {
+  const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
+  return require("minecraft-protocol").createClient;
+}
 
 function check(name, detail) {
   report.checks.push({ name, detail });
@@ -31,6 +51,12 @@ function check(name, detail) {
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function containerStart(containerId) {
+  return execFileSync("docker", ["inspect", "--format", "{{.State.StartedAt}}", containerId], {
+    encoding: "utf8",
+  }).trim();
 }
 
 async function rpc(service, method, body = {}) {
@@ -82,7 +108,7 @@ async function waitRunning(id, seconds = 240) {
 
 function connectPlayer(port) {
   return new Promise((resolve, reject) => {
-    const client = createClient({ host: "127.0.0.1", port, version, username: player, auth: "offline" });
+    const client = minecraftClient()({ host: "127.0.0.1", port, version, username: player, auth: "offline" });
     const timeout = setTimeout(() => fail(new Error("client never reached Play state")), 15000);
     function fail(reason) {
       clearTimeout(timeout);
@@ -129,7 +155,7 @@ async function uploadArchive(filePath, label) {
     assert.ok(current.completed, "upload not complete");
     return current;
   });
-  assert.equal(status.bytesReceived, bytes.length);
+  assert.equal(normalizeWireInt(status.bytesReceived, "bytesReceived"), BigInt(bytes.length));
   return sessionId;
 }
 
@@ -161,6 +187,7 @@ async function activityEntries() {
 }
 
 async function main() {
+  loadContext();
   await waitFor("Panel health", 90, async () => {
     const response = await fetch(base + "/healthz", { signal: AbortSignal.timeout(5000) });
     assert.ok(response.ok, "/healthz " + response.status);
@@ -239,11 +266,18 @@ async function main() {
   assert.ok(compatibility, "compatibility preview missing");
   check("compatibility preview completed without mutation");
 
-  // Re-hash immediately before the bind: Minecraft rewrites level.dat on
-  // autosave, so the baseline hash would be stale by the time the binder
-  // retains the retired world family.
-  const preservedSha = sha256(originalLevel);
-  report.preservedLevelSha256AtBind = preservedSha;
+  // Supported pre-swap recovery point. The binder retires its internal
+  // temporary old-world tree after the journal commits, so durable data
+  // preservation is proven through the operator backup, not an internal path.
+  const preBackup = (await rpc("BackupService", "CreateBackup", {
+    server_id: state.id, backup_name: "world-swap-pre-" + randomBytes(6).toString("hex"),
+    stop_for_backup: false,
+  })).backup;
+  assert.ok(preBackup && preBackup.sha256, "pre-swap backup was not recorded");
+  report.preSwapBackup = { id: preBackup.id, sha256: preBackup.sha256, sizeBytes: preBackup.sizeBytes };
+  check("supported pre-swap backup created", "backup=" + preBackup.id);
+
+  const startedBefore = containerStart(baselineServer.containerId);
   const bindKey = "world-swap-bind-" + randomBytes(8).toString("hex");
   const bind = await rpc("WorldService", "BindWorld", {
     server_id: state.id, level_name: "world", revision_id: revisionA,
@@ -262,20 +296,28 @@ async function main() {
   check("binding points to the imported revision", "revision=" + binding.revisionId);
 
   const afterServer = await waitRunning(state.id, 300);
-  assert.notEqual(afterServer.containerId, baselineServer.containerId,
-    "running container was not replaced by the bind transaction");
+  // The binder stops and restarts the existing owned container; it does not
+  // create a new container. Prove the restart with Docker's start time.
+  assert.equal(afterServer.containerId, baselineServer.containerId,
+    "bind unexpectedly replaced the owned container");
+  assert.notEqual(containerStart(afterServer.containerId), startedBefore,
+    "owned container was not restarted by the bind transaction");
   await assertJoin(state.id, state.port);
   assert.match(await command(state.id, "gamerule doFireTick"), /doFireTick.*false/i,
     "new world marker absent after rejoin");
   check("actual JVM rejoined with the new world marker", "container=" + afterServer.containerId);
 
-  const retainedLevels = execFileSync("find", [resolve(dataDir, "servers", state.id), "-name", "level.dat", "-type", "f"], {
-    encoding: "utf8",
-  }).trim().split(/\r?\n/).filter(Boolean);
-  const preserved = retainedLevels.filter(candidate => sha256(candidate) === preservedSha);
-  assert.ok(preserved.length >= 1, "original level.dat bytes were not retained");
-  report.retainedLevelDat = preserved;
-  check("original world bytes preserved after swap", "copies=" + preserved.length);
+  // The retired temporary tree is removed after the journal commits and the
+  // live JVM may rewrite level.dat. Data preservation is proven through the
+  // supported pre-swap backup record, which must survive unchanged.
+  const backups = (await rpc("BackupService", "ListBackups", { server_id: state.id, limit: 50 })).backups || [];
+  const retainedBackup = backups.find(item => item.id === preBackup.id);
+  assert.ok(retainedBackup, "pre-swap backup disappeared after the swap");
+  assert.equal(normalizeWireInt(retainedBackup.sizeBytes, "backup sizeBytes"),
+    normalizeWireInt(preBackup.sizeBytes, "backup sizeBytes"));
+  assert.equal(retainedBackup.sha256, preBackup.sha256, "pre-swap backup bytes changed");
+  report.retainedBackup = retainedBackup;
+  check("original data remains recoverable through the pre-swap backup", "sha256=" + retainedBackup.sha256);
 
   const events = await waitFor("one world.bind success event", 120, async () => {
     // auditWorldOperation emits EventWorldBind only for a successful outcome;
@@ -313,4 +355,6 @@ async function main() {
   console.log("PASS: final-candidate JVM World Library swap, rejoin and preserved-data proof");
 }
 
-await main();
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  await main();
+}

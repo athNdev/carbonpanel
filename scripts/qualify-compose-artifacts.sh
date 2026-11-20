@@ -65,7 +65,10 @@ else
   oci_tar=$(find "$work/verified-release-oci" -maxdepth 1 -name 'image.oci.tar' -type f | head -n1)
   [[ -n "$oci_tar" ]]
   tar -tf "$oci_tar" | grep -qx "blobs/sha256/${stage_digest#sha256:}"
-  printf 'stage_commit=%s\nstage_digest=%s\noci_index_blob_verified=true\n' \
+  # A matching blob name in the archive is provenance evidence only. The
+  # Compose leg below builds from the verified Linux bundle, so do not claim
+  # that it ran the staged OCI image digest.
+  printf 'stage_commit=%s\nstage_digest=%s\noci_index_blob_present=true\n' \
     "$stage_sha" "$stage_digest" | tee -a "$evidence"
   # The shipped Dockerfile only needs the exact Linux binaries and the sample
   # config; reconstruct the context from the verified bundle rather than
@@ -114,5 +117,16 @@ docker push "$tag"
 candidate=$(docker image inspect "$tag" --format '{{json .RepoDigests}}' |
   jq -er '.[] | select(test("^127\\.0\\.0\\.1:5000/carbonpanel@sha256:[0-9a-f]{64}$"))')
 printf 'candidate_image=%s\n' "$candidate" | tee -a "$evidence"
+# The matrix image is rebuilt by the shipped Dockerfile from verified release
+# binaries. This qualifies the exact packaged binaries and operator scripts;
+# it is not an assertion that Compose ran the staged OCI image digest. That
+# digest needs its own exact-image evidence and is recorded separately by the
+# release qualification ledger.
+if artifact_present release-image-context; then
+  printf 'candidate_image_provenance=local-build-from-release-image-context\n' | tee -a "$evidence"
+else
+  printf 'candidate_image_provenance=local-build-from-verified-linux-bundle\n' | tee -a "$evidence"
+fi
+printf 'staged_oci_image_digest_exercised_by_compose=false\n' | tee -a "$evidence"
 printf 'baseline_image=%s\nbaseline_commit=%s\ncandidate_image=%s\ncandidate_version=%s\n' \
   "$baseline" "$baseline_commit" "$candidate" "$candidate_version" >> "$GITHUB_OUTPUT"
