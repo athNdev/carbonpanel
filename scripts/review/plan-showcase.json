@@ -6,7 +6,7 @@
     "height": 1000
   },
   "deviceScaleFactor": 2,
-  "docs": "Capture the real packaged application from a disposable seeded stack. Core images (dashboard, console, Studio, modpacks) are always captured. Feature-tagged images require an explicit --features selection; the same selection gates the published manifest. World View is gated off by default: managed BlueMap discovery requires a legacy-local node and a genuinely rendered tile set, which the devstack node cannot provide (see docs/adr/0040). No repainted UI, mockups or invented metrics. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
+  "docs": "Capture the real packaged application from a disposable seeded stack. Core images (dashboard, console, Studio, modpacks) are always captured. Feature-tagged images require an explicit --features selection; the same selection gates the published manifest. The embedded World View requires the seeded BlueMap terrain fixture. No repainted UI, mockups or invented metrics. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
   "bootstrap": {
     "path": "/login",
     "detectSelector": "input[placeholder=\"Enter your username\"]",
@@ -108,8 +108,14 @@
     },
     {
       "fill": "input[placeholder=\"Filter logs...\"]",
-      "value": "Server thread",
-      "name": "focus actual startup logs",
+      "value": "Starting",
+      "name": "filter live logs to startup messages",
+      "required": true
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-console .log-line:has-text(\"Starting minecraft server version\")",
+      "timeout": 30000,
+      "name": "verify the Minecraft startup line is in the filtered console",
       "required": true
     },
     {
@@ -117,9 +123,13 @@
       "element": "#server-detail-tabs-panel-console",
       "scroll": false,
       "name": "live console feature crop",
-      "alt": "Running server console with its native log filter set to Server thread",
+      "alt": "Running server console with filtered Minecraft startup messages and command input",
       "focus": "Live console, filtered startup logs and command controls",
       "required": true
+    },
+    {
+      "setViewport": { "width": 1540, "height": 1000 },
+      "name": "fit the Studio workspace tabs and settings"
     },
     {
       "goto": "/modpacks/studio",
@@ -138,18 +148,28 @@
       "required": true
     },
     {
-      "wait": 2000,
-      "name": "let studio settle",
+      "waitFor": "[data-testid=\"showcase-mods-table\"] tbody tr:has(button[aria-label*=\"pin version for\" i])",
+      "name": "seeded mod row and its version pin control appear",
+      "required": true
+    },
+    {
+      "waitFor": "[data-testid=\"showcase-studio-workspace\"] button[title^=\"Export .mrpack\"]",
+      "name": "pack export control is available",
       "required": true
     },
     {
       "screenshot": "showcase-studio",
-      "element": "[data-testid=\"showcase-studio-workspace\"] .lg\\:col-span-3",
+      "element": "[data-testid=\"showcase-studio-workspace\"]",
+      "maxHeight": 690,
       "scroll": false,
-      "name": "studio content tabs and mod controls",
-      "alt": "Modpack Studio content tabs and a real mod table with sides and pinned versions",
-      "focus": "Studio content tabs, real mod entries and export controls",
+      "name": "Studio workspace with pack identity, settings and mod controls",
+      "alt": "Showcase Pack in Modpack Studio with pack settings, installed mod versions and sides, and export controls",
+      "focus": "Pack settings, installed mods, side and pin controls, and export",
       "required": true
+    },
+    {
+      "setViewport": { "width": 1440, "height": 1000 },
+      "name": "restore the standard desktop viewport"
     },
     {
       "goto": "/modpacks",
@@ -229,6 +249,11 @@
       "focus": "Observed identity, aliases and the honest unavailable skin state"
     },
     {
+      "setViewport": { "width": 960, "height": 1450 },
+      "feature": "players",
+      "name": "fit the server allowlist form and its roster"
+    },
+    {
       "goto": "/servers",
       "feature": "players",
       "name": "open servers for the allowlist capture"
@@ -254,19 +279,33 @@
       "name": "server players panel renders"
     },
     {
-      "assertVisible": "section[aria-label=\"Add allowlist entry\"]",
+      "waitFor": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] input",
       "feature": "players",
-      "name": "real allowlist form renders"
+      "name": "allowlist identity field renders"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] button:has-text(\"Add to allowlist\")",
+      "feature": "players",
+      "name": "allowlist submit control renders"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-players [data-player-row]:has-text(\"ReviewFixture\"):has-text(\"Allowlisted\")",
+      "feature": "players",
+      "name": "seeded identity shows its server-scoped allowlist state"
     },
     {
       "screenshot": "showcase-player-allowlist",
       "element": "#server-detail-tabs-panel-players",
-      "maxHeight": 1700,
       "scroll": false,
       "feature": "players",
       "name": "server allowlist form and scoped roster",
       "alt": "Server Players tab with the real allowlist form and the seeded identity's scoped access state",
       "focus": "Allowlist form, scoped roster and moderation controls"
+    },
+    {
+      "setViewport": { "width": 960, "height": 900 },
+      "feature": "players",
+      "name": "restore the compact player capture viewport"
     },
     {
       "goto": "/players",
@@ -458,7 +497,17 @@
       "focus": "Renderer state and target row"
     },
     {
-      "click": "a[href^=\"/worlds/\"]",
+      "goto": "/worlds",
+      "feature": "worlds",
+      "name": "open the World View list for the renderer capture"
+    },
+    {
+      "waitFor": "a[href^=\"/worlds/\"]:has-text(\"review-vanilla\")",
+      "feature": "worlds",
+      "name": "wait for the seeded vanilla world target"
+    },
+    {
+      "click": "a[href^=\"/worlds/\"]:has-text(\"review-vanilla\")",
       "feature": "worlds",
       "name": "open the rendered world map"
     },
