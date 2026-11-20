@@ -17,6 +17,7 @@
 //   REVIEW_CHROME may point at an explicit owned Chromium executable.
 //   The packaged-route half requires `bun run build` in web/carbon-panel first.
 
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -261,6 +262,27 @@ function matches(actual, expected) {
 	return expected instanceof RegExp ? expected.test(actual) : actual === expected;
 }
 
+const SETTINGS_NODE = 'west-coast-minecraft-replica-primary-maintenance-target';
+const SETTINGS_CATEGORIES = [
+	{
+		name: 'Game',
+		properties: [
+			{ key: 'motd', label: 'Message of the day', value: 'Welcome', type: 'text' },
+			{
+				key: 'difficulty',
+				label: 'Difficulty',
+				value: 'normal',
+				type: 'select',
+				options: ['easy', 'normal', 'hard']
+			}
+		]
+	},
+	{
+		name: 'Networking',
+		properties: [{ key: 'port', label: 'Game port', value: '25565', type: 'number' }]
+	}
+];
+
 async function seedPackagedRoutes(page, state, authMode) {
 	await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
 		const method = new URL(route.request().url()).pathname.split('/').at(-1);
@@ -301,7 +323,39 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'GetServer') {
 			if (state.detail === 'error') return fail('Fixture server unavailable');
-			return reply({ server: FLEET.find((server) => server.id === 'srv-1') });
+			const server = FLEET.find((server) => server.id === 'srv-1');
+			return reply({
+				server: state.narrowSettings
+					? { ...server, nodeId: 'local', containerId: 'fixture-container', mcVersion: '1.21.1' }
+					: server
+			});
+		}
+		if (state.narrowSettings) {
+			if (method === 'ListNodes')
+				return reply({
+					nodes: [
+						{ id: 'local', name: 'Local Controller', isLocal: true, enabled: true, status: 1 },
+						{ id: 'target', name: SETTINGS_NODE, enabled: true, status: 1, availableMemoryMb: '8192' }
+					]
+				});
+			if (method === 'GetGlobalSettings') return reply({ categories: SETTINGS_CATEGORIES });
+			if (method === 'UpdateGlobalSettings') {
+				const { updates } = route.request().postDataJSON();
+				state.savedMotd = updates?.motd;
+				const categories = SETTINGS_CATEGORIES.map((category) => ({
+					...category,
+					properties: category.properties.map((field) => ({
+						...field,
+						value: updates[field.key] ?? field.value
+					}))
+				}));
+				return reply({ categories });
+			}
+			if (method === 'GetAuthConfig')
+				return reply({ localAuthEnabled: true, sessionTimeout: 86400, oidcEnabled: false });
+			if (method === 'GetMinecraftVersions')
+				return reply({ versions: [{ id: '1.21.1', type: 'release' }], latest: '1.21.1' });
+			if (method === 'GetModLoaders') return reply({ modloaders: [] });
 		}
 		if (method === 'ListNodes') return reply({ nodes: [] });
 		if (method === 'ListPlayers') {
@@ -1204,6 +1258,164 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 // Cross-engine smoke: a deliberately small slice of the packaged-route journey
 // (the three high-value routes, both themes, two widths) run in Firefox or
 // WebKit when CI has installed those browsers into the owned cache.
+// Check nested clipping directly. A whole-page scrollWidth check can pass
+// because an ancestor silently clips a settings control or part of its label.
+async function assertHorizontallyVisible(locator) {
+	await locator.waitFor();
+	const clipped = await locator.evaluate((element) => {
+		let left = 0;
+		let right = document.documentElement.clientWidth;
+		const clips = (container) =>
+			['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(container).overflowX);
+		const intersect = (container) => {
+			const clientLeft = container.getBoundingClientRect().left + container.clientLeft;
+			left = Math.max(left, clientLeft);
+			right = Math.min(right, clientLeft + container.clientWidth);
+		};
+		const outside = (bounds) => bounds.width && (bounds.left < left - 1 || bounds.right > right + 1);
+
+		for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+			if (clips(parent)) intersect(parent);
+		}
+		const box = element.getBoundingClientRect();
+		if (outside(box)) return box.toJSON();
+
+		// Own overflow can clip content even when the entire element box is visible.
+		if (clips(element)) intersect(element);
+		const text = document.createRange();
+		text.selectNodeContents(element);
+		return [...text.getClientRects()].find(outside)?.toJSON();
+	});
+	if (clipped) throw new Error(String(locator) + ' is clipped: ' + JSON.stringify(clipped));
+}
+
+async function runClippingProbe(browser) {
+	await check('visibility probe detects self-clipped text inside a wider parent', async () => {
+		const context = await browser.newContext();
+		try {
+			const page = await context.newPage();
+			await page.setContent(
+				'<div style="width:480px;overflow:hidden">' +
+					'<button style="width:180px;overflow:hidden;border:4px solid">Save settings</button>' +
+					'<p style="width:80px;overflow:hidden;white-space:nowrap">A much longer settings label</p>' +
+				'</div>'
+			);
+			await assertHorizontallyVisible(page.getByRole('button', { name: 'Save settings' }));
+			await assert.rejects(
+				() => assertHorizontallyVisible(page.getByText('A much longer settings label')),
+				/is clipped:/
+			);
+		} finally {
+			await context.close();
+		}
+	});
+}
+
+async function runNarrowSettingsJourney(browser, base) {
+	const root = base.replace(/\/$/, '');
+	for (const theme of ['light', 'dark']) {
+		for (const density of ['comfortable', 'compact']) {
+			const context = await browser.newContext({ reducedMotion: 'reduce' });
+			await context.addInitScript(({ theme, density }) => {
+				localStorage.setItem('carbon-theme', theme);
+				localStorage.setItem('mode-watcher-mode', theme);
+				localStorage.setItem('carbon-density', density);
+			}, { theme, density });
+			try {
+				const page = await context.newPage();
+				const state = { servers: 'populated', detail: 'populated', narrowSettings: true };
+				await seedPackagedRoutes(page, state, 'anonymous');
+				for (const width of [360, 1440]) {
+					await page.setViewportSize({ width, height: 900 });
+					const capture = async (screen) => {
+						if (process.env.UI_PASS_SHOTS)
+							await page.screenshot({
+								path: `${process.env.UI_PASS_SHOTS}/settings-${screen}-${width}-${theme}-${density}.png`,
+								animations: 'disabled'
+							});
+					};
+					const label = `@${width} ${theme} ${density}`;
+					await check(`settings defaults ${label}: labelled fields and enabled actions fit`, async () => {
+						await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
+						const motd = page.getByRole('textbox', { name: 'Message of the day' });
+						await motd.waitFor();
+						const preferences = await page.locator('html').evaluate((element) => [
+							element.getAttribute('data-carbon-theme'), element.getAttribute('data-carbon-density')
+						]);
+						if (preferences.join('/') !== `${theme}/${density}`)
+							throw new Error(`Unexpected theme or density: ${preferences}`);
+						const actions = page.locator('.server-tab-actions');
+						const save = actions.getByRole('button', { name: 'Save', exact: true });
+						if (width === 360) {
+							const chooser = page.getByRole('combobox', { name: 'Configuration category' });
+							await chooser.selectOption('networking');
+							await page.getByRole('spinbutton', { name: 'Game port' }).waitFor();
+							await chooser.selectOption('game');
+						}
+						if ((await page.locator('#motd').count()) !== 1 || (await motd.getAttribute('id')) === 'motd')
+							throw new Error('The MOTD link and form control need distinct IDs');
+						await assertHorizontallyVisible(motd);
+						await assertHorizontallyVisible(page.getByRole('combobox', { name: 'Difficulty' }));
+						await motd.fill('Ready to save');
+						if (!(await save.isEnabled())) throw new Error('Save did not enable after editing MOTD');
+						for (const button of await actions.getByRole('button').all())
+							await assertHorizontallyVisible(button);
+						await capture('defaults');
+						const navigation = page.locator('button[aria-controls="carbon-sidenav"]');
+						await navigation.press('Enter');
+						const toggled = await navigation.getAttribute('aria-expanded');
+						if (toggled !== (width === 360 ? 'true' : 'false'))
+							throw new Error('Keyboard navigation toggle did not change state');
+						if (width === 360) await page.keyboard.press('Escape');
+						await assertHorizontallyVisible(save);
+						state.savedMotd = undefined;
+						await save.press('Enter');
+						await page.getByText('Global settings saved successfully', { exact: true }).waitFor();
+						if (state.savedMotd !== 'Ready to save') throw new Error('Keyboard Save did not submit MOTD');
+					});
+					await check(`settings auth ${label}: OIDC names wrap inside their panel`, async () => {
+						await page.goto(root + '/settings?tab=auth', { waitUntil: 'domcontentloaded' });
+						await page.getByRole('button', { name: 'Environment Variables' }).press('Enter');
+						const names = page.locator('main code').filter({ hasText: /^CARBONPANEL_AUTH_OIDC_/ });
+						await names.last().waitFor();
+						if ((await names.count()) !== 7) throw new Error('Expected all seven OIDC variable names');
+						for (const name of await names.all()) await assertHorizontallyVisible(name);
+						await names.last().scrollIntoViewIfNeeded();
+						await capture('oidc');
+					});
+					await check(`server settings ${label}: migration keyboard selection and memory advisory fit`, async () => {
+						await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+						const target = page.getByRole('combobox', { name: 'Migrate to Target Node' });
+						await target.press('Enter');
+						const option = page.getByRole('option', { name: new RegExp(SETTINGS_NODE) });
+						await assertHorizontallyVisible(option);
+						await capture('migration-options');
+						await page.keyboard.press('End');
+						await page.keyboard.press('Enter');
+						await target.getByText(SETTINGS_NODE, { exact: true }).waitFor();
+						await assertHorizontallyVisible(target);
+						const migrate = page.getByRole('button', { name: 'Migrate Node', exact: true });
+						if (!(await migrate.isEnabled())) throw new Error('Migration did not enable after selecting target');
+						await assertHorizontallyVisible(migrate);
+						await capture('migration');
+						await page.getByRole('button', { name: /Docker Overrides/ }).press('Enter');
+						const memory = page.getByRole('spinbutton', { name: 'Memory request (MB)' });
+						await assertHorizontallyVisible(memory);
+						const advisory = page.locator('#memory-limit-advisory');
+						if ((await memory.getAttribute('aria-describedby')) !== 'memory-limit-advisory')
+							throw new Error('Memory field has no advisory description');
+						await assertHorizontallyVisible(advisory);
+						await advisory.scrollIntoViewIfNeeded();
+						await capture('memory');
+					});
+				}
+			} finally {
+				await context.close();
+			}
+		}
+	}
+}
+
 async function runCrossEngineSmoke(browser, base, engine) {
 	const root = base.replace(/\/$/, '');
 	const highValue = PACKAGED_ROUTES.filter((route) =>
@@ -1275,6 +1487,8 @@ try {
 		await runModpacksJourney(browser, packagedBase, 'light');
 		await runModpacksJourney(browser, packagedBase, 'dark');
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
+		await runClippingProbe(browser);
+		await runNarrowSettingsJourney(browser, packagedBase);
 		await check('route themes: light and dark paint different backgrounds', async () => {
 			if (!themeBackgrounds.light || !themeBackgrounds.dark) {
 				throw new Error('theme backgrounds were not captured');

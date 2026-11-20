@@ -477,7 +477,8 @@ one at https://mozilla.org/MPL/2.0/.
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
-		flex-shrink: 0;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	.server-tab-toolbar {

@@ -705,9 +705,7 @@ one at https://mozilla.org/MPL/2.0/.
 								description="Modify runtime container settings and server parameters"
 								mode="form"
 							>
-								<div class="p-4 sm:p-6">
-									<ServerSettings {server} onUpdate={loadServer} />
-								</div>
+								<ServerSettings {server} onUpdate={loadServer} />
 							</ServerTabPanel>
 						{:else if activeTab === 'console'}
 							<ServerConsole {server} active={activeTab === 'console'} />
