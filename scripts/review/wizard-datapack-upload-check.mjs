@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: MPL-2.0
+// Seeded Chromium fixture for the create-server wizard datapack upload slice.
+// Drives the real /servers/new page through the normal UI seam with only the
+// transport and chunked-upload modules replaced by deterministic fixtures.
+// No live panel, credentials, worlds, daemon or external infrastructure.
+//
+//   REVIEW_CHROME=/path/to/chrome.exe \
+//     node scripts/review/wizard-datapack-upload-check.mjs
+
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { launchReviewBrowser } from './browser.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const project = path.resolve(here, '../../web/carbon-panel');
+const fixture = path.join(project, 'e2e', 'wizard-datapack-upload');
+const requireFrontend = createRequire(path.join(project, 'package.json'));
+const { createServer } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
+const { svelte } = await import(
+	pathToFileURL(requireFrontend.resolve('@sveltejs/vite-plugin-svelte')).href
+);
+const { default: tailwind } = await import(
+	pathToFileURL(requireFrontend.resolve('@tailwindcss/vite')).href
+);
+
+const cache = await fs.mkdtemp(path.join(os.tmpdir(), 'carbon-wizard-datapack-'));
+let server;
+let browser;
+
+async function waitForFixtureReady(page) {
+	let lastError;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			await page.waitForFunction(() => Boolean(globalThis.__wizardCalls), null, {
+				timeout: 25_000
+			});
+			await page.getByRole('button', { name: 'Next Step' }).waitFor({ timeout: 10_000 });
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt < 2) await page.reload();
+		}
+	}
+	throw lastError;
+}
+
+async function goToDatapackStep(page) {
+	await page.getByPlaceholder('survival-smp-01').fill('wizard-datapack-fixture');
+	for (let step = 0; step < 4; step++) {
+		await page.getByRole('button', { name: 'Next Step' }).click();
+	}
+	await page.getByText('Upload local datapack', { exact: true }).waitFor();
+}
+
+async function uploadFixtureArchive(page) {
+	await page.locator('input[type="file"]').setInputFiles({
+		name: 'fixture-pack.zip',
+		mimeType: 'application/zip',
+		buffer: Buffer.from('PK\x03\x04fixture')
+	});
+}
+
+const summaries = [];
+
+try {
+	server = await createServer({
+		configFile: false,
+		root: project,
+		cacheDir: cache,
+		publicDir: path.join(project, 'static'),
+		resolve: {
+			dedupe: ['svelte'],
+			alias: [
+				{
+					find: /^@bufbuild\/protobuf$/,
+					replacement: path.join(
+						project,
+						'node_modules/@bufbuild/protobuf/dist/esm/index.js'
+					)
+				},
+				{ find: '$app/state', replacement: path.join(fixture, 'state.js') },
+				{
+					find: '$app/navigation',
+					replacement: path.join(project, 'e2e/oss-245-diagnostics-reconnect/navigation.js')
+				},
+				{
+					find: '$app/paths',
+					replacement: path.join(project, 'e2e/oss-245-diagnostics-reconnect/paths.js')
+				},
+				{
+					find: '$app/env',
+					replacement: path.join(project, 'e2e/oss-245-diagnostics-reconnect/environment.js')
+				},
+				{ find: '$lib/api/rpc-client', replacement: path.join(fixture, 'rpc-stub.js') },
+				{
+					find: '$lib/utils/chunked-upload',
+					replacement: path.join(fixture, 'chunked-upload-stub.js')
+				},
+				{
+					find: /^\$lib\/components\/carbon$/,
+					replacement: path.join(fixture, 'carbon.js')
+				},
+				{ find: '$lib', replacement: path.join(project, 'src/lib') }
+			]
+		},
+		plugins: [
+			svelte({ configFile: path.join(project, 'sveltekit.config.js') }),
+			tailwind(),
+			{
+				name: 'wizard-datapack-upload',
+				configureServer(vite) {
+					vite.middlewares.use(async (req, res, next) => {
+						if (req.url === '/favicon.ico') {
+							res.statusCode = 204;
+							res.end();
+							return;
+						}
+						if (req.url !== '/wizard.html') return next();
+						try {
+							const entry =
+								'/@fs/' + path.join(fixture, 'main.js').replaceAll('\\', '/');
+							res.setHeader('Content-Type', 'text/html');
+							res.end(
+								await vite.transformIndexHtml(
+									'/wizard.html',
+									`<html><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`
+								)
+							);
+						} catch (error) {
+							next(error);
+						}
+					});
+				}
+			}
+		],
+		optimizeDeps: {
+			noDiscovery: true,
+			include: [
+				'svelte',
+				'svelte/store',
+				'@bufbuild/protobuf',
+				'@bufbuild/protobuf/codegenv2',
+				'@bufbuild/protobuf/wkt',
+				'@lucide/svelte',
+				'bits-ui',
+				'paneforge',
+				'svelte-sonner',
+				'tailwind-merge',
+				'tailwind-variants'
+			]
+		},
+		server: {
+			host: '127.0.0.1',
+			port: 0,
+			hmr: false,
+			fs: { allow: [project, fixture, cache] }
+		}
+	});
+	await server.listen();
+	const base = `http://127.0.0.1:${server.httpServer.address().port}/wizard.html`;
+	const launched = await launchReviewBrowser({ headless: true });
+	browser = launched.browser;
+	const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+	const errors = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+
+	// Scenario 1: a successful local upload is queued and installed post-create.
+	await page.goto(base);
+	await waitForFixtureReady(page);
+	await page.evaluate(() => {
+		globalThis.__wizardUploadMode = 'success';
+		globalThis.__wizardReset();
+	});
+	await goToDatapackStep(page);
+	await uploadFixtureArchive(page);
+	await page.getByText('fixture-pack', { exact: true }).waitFor();
+	await page.getByText('Local upload', { exact: true }).waitFor();
+	assert.equal(
+		(await page.evaluate(() => globalThis.__wizardUploadCalls)).length,
+		1,
+		'the wizard must call the uploadFile seam once'
+	);
+	await page.getByRole('button', { name: 'Create Server', exact: true }).click();
+	await page.waitForFunction(
+		() => globalThis.__wizardCalls.some((call) => call.method === 'uploadDatapack'),
+		null,
+		{ timeout: 15_000 }
+	);
+	let calls = await page.evaluate(() => globalThis.__wizardCalls);
+	const createCall = calls.find((call) => call.method === 'createServer');
+	const uploadCall = calls.find((call) => call.method === 'uploadDatapack');
+	assert.ok(createCall, 'createServer must be called');
+	assert.deepEqual(
+		{
+			serverId: uploadCall.payload.serverId,
+			uploadSessionId: uploadCall.payload.uploadSessionId,
+			fileName: uploadCall.payload.fileName
+		},
+		{
+			serverId: 'wizard-server',
+			uploadSessionId: 'seeded-session',
+			fileName: 'fixture-pack.zip'
+		},
+		'queued local archive must be installed with the upload session after create'
+	);
+	assert.equal(
+		calls.some((call) => call.method === 'installDatapack'),
+		false,
+		'a local-only queue must not call the indexed install path'
+	);
+	summaries.push({
+		scenario: 'success',
+		calls: calls.map((call) => ({ method: call.method, payload: call.payload })),
+		uploadCalls: await page.evaluate(() => globalThis.__wizardUploadCalls.slice())
+	});
+
+	// Scenario 2: a failed upload surfaces an error and is never queued/installed.
+	await page.reload();
+	await waitForFixtureReady(page);
+	await page.evaluate(() => {
+		globalThis.__wizardUploadMode = 'fail';
+		globalThis.__wizardReset();
+	});
+	await goToDatapackStep(page);
+	await uploadFixtureArchive(page);
+	await page.getByText('seeded upload failure', { exact: true }).waitFor({ timeout: 10_000 });
+	assert.equal(
+		await page.getByText('fixture-pack.zip', { exact: true }).count(),
+		0,
+		'a failed upload must not enter the queued selection list'
+	);
+	await page.getByRole('button', { name: 'Create Server', exact: true }).click();
+	await page.waitForFunction(
+		() => globalThis.__wizardCalls.some((call) => call.method === 'createServer'),
+		null,
+		{ timeout: 15_000 }
+	);
+	calls = await page.evaluate(() => globalThis.__wizardCalls);
+	assert.equal(
+		calls.some((call) => call.method === 'uploadDatapack'),
+		false,
+		'a failed upload must not be installed after server creation'
+	);
+	summaries.push({
+		scenario: 'failure',
+		calls: calls.map((call) => ({ method: call.method, payload: call.payload })),
+		uploadCalls: await page.evaluate(() => globalThis.__wizardUploadCalls.slice())
+	});
+	assert.deepEqual(errors, [], 'the fixture page must not throw');
+	const out = path.join(here, '../../tmp/review-output/wizard-datapack-upload');
+	await fs.mkdir(out, { recursive: true });
+	await page.screenshot({ path: path.join(out, 'result.png') });
+	await fs.writeFile(
+		path.join(out, 'results.json'),
+		JSON.stringify(
+			{
+				scenarios: [
+					'queued local datapack upload is installed after server creation',
+					'failed upload is reported and never queued or installed'
+				],
+				summaries,
+				errors,
+				browser: launched.metadata
+			},
+			null,
+			2
+		)
+	);
+	console.log(
+		'PASS: create wizard queues and installs a local datapack, and refuses a failed upload'
+	);
+} finally {
+	await browser?.close();
+	await server?.close();
+	await fs.rm(cache, { recursive: true, force: true });
+}
