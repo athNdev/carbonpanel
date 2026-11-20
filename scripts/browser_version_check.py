@@ -124,17 +124,9 @@ def main():
 
 
     def dom(path, width=1440):
-        key = f"{path}|{width}"
-        entry = dom_cache.get(key)
-        if entry is None:
-            browser_errors.append(f"{path} ({width}px): no browser result collected")
-            return ""
-        if entry.get("error"):
-            message = f"{path} ({width}px): browser error: {entry['error']}"
-            if message not in browser_errors:
-                browser_errors.append(message)
-            return ""
-        return entry.get("html", "")
+        # All entries were validated eagerly above; no lazy failure reporting.
+        entry = dom_cache.get(f"{path}|{width}")
+        return entry.get("html", "") if isinstance(entry, dict) else ""
 
     def expect(path, needles, width=1440):
         page = dom(path, width)
@@ -196,6 +188,29 @@ def main():
     dom_paths = [staging] if is_candidate else list(active_routes) + [
         "/docs/getting-started/docker-compose/", stable_route]
     dom_cache.update(collect_dom(origin, dom_paths))
+    # Fail CLOSED before any assertion runs. Every requested route/viewport
+    # must have a well-formed, non-empty HTML response with a 200 status from
+    # the expected origin; otherwise the gate aborts with the real browser
+    # error instead of silently passing or emitting missing-marker noise.
+    for path in dom_paths:
+        for width in BROWSER_WIDTHS:
+            key = f"{path}|{width}"
+            entry = dom_cache.get(key)
+            if not isinstance(entry, dict):
+                browser_errors.append(f"{key}: no browser result collected")
+                continue
+            if entry.get("error"):
+                browser_errors.append(f"{key}: browser error: {entry['error']}")
+                continue
+            html = entry.get("html")
+            if not isinstance(html, str) or not html.strip():
+                browser_errors.append(f"{key}: browser returned empty DOM")
+                continue
+            if entry.get("status") != 200:
+                browser_errors.append(f"{key}: browser HTTP status {entry.get('status')!r}")
+            final_url = str(entry.get("url", ""))
+            if not final_url.startswith(origin + "/"):
+                browser_errors.append(f"{key}: browser landed outside origin: {final_url!r}")
     if browser_errors:
         raise ValueError("browser qualification aborted:\n- " + "\n- ".join(browser_errors))
 

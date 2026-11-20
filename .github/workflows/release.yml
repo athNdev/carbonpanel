@@ -839,9 +839,8 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          # Use the exact browser installed by the pinned Playwright package;
+          # do not override it with an arbitrary cached binary.
           INDEX="$GITHUB_WORKSPACE/.website-build/site/version-index.json"
           echo "CARBONPANEL_EXPECT_NIGHTLY_REVISION=$(jq -r '.channels.nightly.commit' "$INDEX")" >> "$GITHUB_ENV"
           echo "CARBONPANEL_EXPECT_NIGHTLY_DIGEST=$(jq -r '.channels.nightly.image.digest' "$INDEX")" >> "$GITHUB_ENV"

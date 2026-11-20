@@ -845,9 +845,8 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          # Use the exact browser installed by the pinned Playwright package;
+          # do not override it with an arbitrary cached binary.
       - name: Browser-qualify Stable/Nightly channels on the final artifact
         id: browser_ui
         if: steps.final_artifact.outcome == 'success'
