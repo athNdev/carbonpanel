@@ -235,32 +235,8 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	// Compare the complete window before any persistent write or provider
 	// work. A different at_time or idle interval must not retarget an existing
 	// reviewed batch, even when every selection turns out to be a duplicate.
-	existing, err := s.store.OpenUpdateBatch(ctx, server.ID)
-	if err != nil {
+	if err := s.store.CheckReviewedContentWindow(ctx, server.ID, windowName, applyAt, idle); err != nil {
 		return nil, nil, nil, err
-	}
-	if existing != nil {
-		scheduled, err := batchHasScheduledConfig(ctx, s.store, existing.ID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if scheduled {
-			return nil, nil, nil, fmt.Errorf(
-				"open batch %s has an independently scheduled config row; stage mod updates in a separate batch",
-				existing.ID)
-		}
-	}
-	if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
-		reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if reviewed {
-			return nil, nil, nil, fmt.Errorf(
-				"open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
-				existing.ID, existing.Window, existing.ApplyAt, existing.IdleMinutes,
-				windowName, applyAt, idle)
-		}
 	}
 
 	// Rebuild the server-owned preview for exactly the reviewed files. The
@@ -369,34 +345,9 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 
 	var batch *storage.ServerUpdateBatch
 	if err := operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
-		existing, err := s.store.OpenUpdateBatch(ctx, server.ID)
-		if err != nil {
-			return err
-		}
-		if existing != nil {
-			scheduled, err := batchHasScheduledConfig(ctx, s.store, existing.ID)
-			if err != nil {
-				return err
-			}
-			if scheduled {
-				return fmt.Errorf(
-					"open batch %s has an independently scheduled config row; stage mod updates in a separate batch",
-					existing.ID)
-			}
-		}
-		if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
-			reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
-			if err != nil {
-				return err
-			}
-			if reviewed {
-				return fmt.Errorf("open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
-					existing.ID, existing.Window, existing.ApplyAt, existing.IdleMinutes,
-					windowName, applyAt, idle)
-			}
-		}
 		// Commit the window before the first staged byte becomes visible.
-		batch, err = s.store.SetOpenBatchWindow(ctx, server.ID, windowName, applyAt, idle)
+		var err error
+		batch, err = s.store.PrepareReviewedContentBatch(ctx, server.ID, windowName, applyAt, idle)
 		if err != nil {
 			return fmt.Errorf("failed to set the apply window: %w", err)
 		}
@@ -421,6 +372,9 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			row, err := stageModContentToBatch(ctx, s.store, server, s.storageResolver,
 				batch.ID, windowName, applyAt, idle,
 				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash)
+			if errors.Is(err, storage.ErrUpdateBatchConflict) {
+				return err
+			}
 			if err != nil {
 				outcome.Outcome, outcome.Reason = "error", err.Error()
 				continue
@@ -453,54 +407,6 @@ func installedModLocation(root *os.Root, base, fileName string) (string, bool, e
 		return "", false, err
 	}
 	return disabled, false, nil
-}
-
-// batchHasWindowBoundRows reports whether an open batch already carries work
-// whose schedule would change if its window were retargeted. Independently
-// scheduled config rows (cron) are not window-bound and must be preserved.
-func batchHasWindowBoundRows(ctx context.Context, store *storage.Store, batchID string) (bool, error) {
-	content, err := store.ListBatchContent(ctx, batchID)
-	if err != nil {
-		return false, err
-	}
-	if len(content) > 0 {
-		return true, nil
-	}
-	configs, err := store.ListBatchConfig(ctx, batchID)
-	if err != nil {
-		return false, err
-	}
-	for _, config := range configs {
-		if config.ApplyMode != storage.StagedApplyScheduled {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// batchWindowEquals compares the complete window tuple, not just the enum, so
-// a second update cannot silently move a reviewed batch's at_time or interval.
-func batchHasScheduledConfig(ctx context.Context, store *storage.Store, batchID string) (bool, error) {
-	configs, err := store.ListBatchConfig(ctx, batchID)
-	if err != nil {
-		return false, err
-	}
-	for _, config := range configs {
-		if config.ApplyMode == storage.StagedApplyScheduled {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func batchWindowEquals(batch *storage.ServerUpdateBatch, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int) bool {
-	if batch.Window != string(window) || batch.IdleMinutes != idleMinutes {
-		return false
-	}
-	if batch.ApplyAt == nil || applyAt == nil {
-		return batch.ApplyAt == nil && applyAt == nil
-	}
-	return batch.ApplyAt.Equal(*applyAt)
 }
 
 func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) (storage.UpdateWindow, *time.Time, int) {

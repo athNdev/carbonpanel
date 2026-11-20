@@ -89,12 +89,15 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	live := filepath.Join(data, "mods", "mod.jar")
 	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
 	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
-	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
+	err = store.DB().WithContext(ctx).Create(&storage.StagedContentChange{
 		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
+		BatchID: cron.BatchID, Status: storage.StagedStatusStaged,
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
 		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
 		ExpectedLiveSha512: digest512("installed"),
-	})
+	}).Error
+	require.NoError(t, err)
+	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
 	acc, err := nodestorage.NewLocal(data)
 	require.NoError(t, err)
@@ -113,6 +116,7 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 
 	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
+	require.Equal(t, cron, staged)
 	require.Equal(t, storage.StagedStatusStaged, staged.Status, "cron item must not be applied early")
 	require.Equal(t, storage.StagedApplyScheduled, staged.ApplyMode)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
@@ -150,6 +154,16 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
 	require.NoError(t, err)
 
+	rolledBackCron, err := store.StageConfigChange(ctx, server.ID,
+		map[string]any{"difficulty": "hard"}, storage.StagedApplyScheduled, "30 3 * * *")
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, rolledBackCron.ID)
+	require.NoError(t, err)
+	rolledBackCron, err = store.RollbackStagedConfigChange(ctx, rolledBackCron.ID)
+	require.NoError(t, err)
+	rolledBackCron, err = store.GetStagedConfigChange(ctx, rolledBackCron.ID)
+	require.NoError(t, err)
+
 	// The live base moved after the cron row was staged: its base is stale.
 	cfg, err = store.GetServerConfig(ctx, server.ID)
 	require.NoError(t, err)
@@ -163,12 +177,15 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 	live := filepath.Join(data, "mods", "mod.jar")
 	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
 	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
-	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
+	err = store.DB().WithContext(ctx).Create(&storage.StagedContentChange{
 		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
+		BatchID: cron.BatchID, Status: storage.StagedStatusStaged,
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
 		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
 		ExpectedLiveSha512: digest512("installed"),
-	})
+	}).Error
+	require.NoError(t, err)
+	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
 	acc, err := nodestorage.NewLocal(data)
 	require.NoError(t, err)
@@ -183,7 +200,12 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 	require.Equal(t, "candidate", string(published), "a stale cron base must not block the due mod batch")
 	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
+	require.Equal(t, cron, staged)
 	require.Equal(t, storage.StagedStatusStaged, staged.Status)
+	stillRolledBack, err := store.GetStagedConfigChange(ctx, rolledBackCron.ID)
+	require.NoError(t, err)
+	require.Equal(t, rolledBackCron, stillRolledBack)
+
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, batch)

@@ -57,23 +57,23 @@ request.
    and total candidate bytes are bounded so repeated or large requests cannot
    exhaust controller memory. The batch-plus-config window transition is one
    transaction and an unchanged window is not rewritten.
-9. The full window tuple is also rechecked inside the per-server operation, so
-   two same-mode requests with different times cannot both pass preflight and
-   reschedule a reviewed batch. Staged rows name the reviewed batch and window
-   and are inserted conditionally; discard shares the same operation ownership.
-   Cron-scheduled config rows keep their own schedule when a mod update joins a
-   batch. Every transferred byte is charged to the budget, including rejected
-   downloads. A batch carrying an independently scheduled (cron) config row is
-   refused by both mod-staging entry points, because the shared batch publisher
-   applies every staged config when the window becomes due; the cron row keeps
-   its own batch and trigger. The inverse arrival is guarded too: a cron
-   config cannot join an open batch that already holds staged content. For
-   legacy mixed data, `ApplyBatch` excludes scheduled config rows from timed
-   publication, parks the batch on next restart and keeps the cron row on its
-   staged with its own cron mode and batch; no new cron poller is wired here.
-   Applying it later stays with the existing staged-config application path.
-   Discard serialization preserves typed Connect refusals and
-   records the discard operation under its own name.
+9. Reviewed content checks the full window tuple again when preparing its
+   batch and when committing a staged row. An independent cron config and
+   staged content cannot share a new batch admission in either arrival order.
+   Each producer checks for the counterpart in the SQLite write transaction
+   that creates its row. Config staging also compares the complete window of
+   an open batch with content or an independent cron row, and refuses a
+   mismatching request. Legacy config-only batches with no timed window
+   still admit next-restart config alongside an independent cron row.
+   On a config-only batch with no cron, an explicit
+   retarget changes the window and inserts the config in one transaction.
+   An open legacy batch can keep its pending cron rows while publishing due
+   mod content: the publisher excludes cron config from base checks, rollback
+   reconciliation and publication, then parks the remaining batch on next
+   restart. Cron rows keep their own trigger and batch; this adds no cron
+   executor. Every transferred byte is charged to the budget, including
+   rejected downloads. Discard shares operation ownership, preserves typed
+   Connect refusals and records the discard operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused and the task is disabled so
    it cannot run on every tick. The planner is installed before the scheduler

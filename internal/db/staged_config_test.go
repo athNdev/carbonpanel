@@ -307,6 +307,49 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStageConfigRetargetRollsBackOnInsertFailure(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-config-retarget"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "soon"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	rows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+
+	require.NoError(t, store.DB().Exec(`CREATE TRIGGER fail_second_config BEFORE INSERT ON staged_config_changes
+		BEGIN SELECT RAISE(ABORT, 'fixture rejected config insert'); END`).Error)
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"difficulty": "hard"}, UpdateWindowIdle, nil, 10)
+	require.ErrorContains(t, err, "fixture rejected config insert")
+	after, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, batch, after)
+	afterRows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, rows, afterRows)
+}
+
+func TestConfigRequiresMatchingIdleIntervalForReviewedContent(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-config-idle-review"
+	store := newStagedTestStore(t, serverID)
+	batch, err := store.PrepareReviewedContentBatch(ctx, serverID, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	content := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete,
+		TargetPath: "mods/a.jar",
+	}
+	require.NoError(t, store.AddStagedContentToBatch(ctx, content, batch.ID, UpdateWindowIdle, nil, 5))
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 12)
+	require.ErrorIs(t, err, ErrUpdateBatchConflict)
+	config, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	require.Equal(t, batch.ID, config.BatchID)
+	require.Equal(t, 5, config.IdleMinutes)
+	require.Equal(t, StagedApplyIdle, config.ApplyMode)
+}
+
 func TestConcurrentCronAdmissionCannotJoinTimedModBatch(t *testing.T) {
 	ctx := context.Background()
 	store := newStagedTestStore(t, "srv-cron-race")
@@ -334,7 +377,7 @@ func TestConcurrentCronAdmissionCannotJoinTimedModBatch(t *testing.T) {
 	}
 	wg.Wait()
 	for _, err := range errs {
-		require.Error(t, err, "every concurrent cron admission must be refused")
+		require.ErrorIs(t, err, ErrUpdateBatchConflict, "every concurrent cron admission must be refused")
 	}
 	configs, err := store.ListBatchConfig(ctx, batch.ID)
 	require.NoError(t, err)

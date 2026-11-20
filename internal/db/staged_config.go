@@ -246,56 +246,16 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		return nil, err
 	}
 
-	window := string(opts.Window)
+	window := opts.Window
 	if window == "" {
-		window = string(mode)
-	}
-	batch, err := s.ensureOpenBatch(ctx, serverID, window)
-	if err != nil {
-		return nil, err
-	}
-	// A reviewed mod batch has a committed window and may also carry an
-	// independent cron row. A normal ConfigService save must not retarget it
-	// or rewrite those modes.
-	preserveWindow := false
-	content, err := s.ListBatchContent(ctx, batch.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(content) > 0 {
-		preserveWindow = true
-	}
-	batchConfigs, err := s.ListBatchConfig(ctx, batch.ID)
-	if err != nil {
-		return nil, err
-	}
-	for _, config := range batchConfigs {
-		if config.ApplyMode == StagedApplyScheduled {
-			preserveWindow = true
+		window = UpdateWindowNextRestart
+		if mode == StagedApplyScheduled {
+			window = UpdateWindow(mode)
 		}
 	}
-	if opts.SetBatchWindow && !preserveWindow {
-		batch.Window = string(opts.Window)
-		batch.ApplyAt = opts.ApplyAt
-		batch.IdleMinutes = opts.IdleMinutes
-		if err := s.db.WithContext(ctx).Save(batch).Error; err != nil {
-			return nil, err
-		}
-		if err := s.db.WithContext(ctx).Model(&StagedConfigChange{}).
-			Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
-			Updates(map[string]any{
-				"apply_mode":   string(mode),
-				"apply_at":     opts.ApplyAt,
-				"idle_minutes": opts.IdleMinutes,
-			}).Error; err != nil {
-			return nil, err
-		}
-	}
-
 	staged := &StagedConfigChange{
 		ID:          uuid.New().String(),
 		ServerID:    serverID,
-		BatchID:     batch.ID,
 		Payload:     string(payload),
 		BasePayload: string(basePayload),
 		ApplyMode:   mode,
@@ -304,66 +264,39 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		IdleMinutes: opts.IdleMinutes,
 		Status:      StagedStatusStaged,
 	}
-	if mode == StagedApplyScheduled {
-		if err := s.createScheduledConfigAtomic(ctx, serverID, batch.ID, staged); err != nil {
-			return nil, err
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batch, err := ensureOpenBatch(tx, serverID, window)
+		if err != nil {
+			return err
 		}
-	} else if err := s.db.WithContext(ctx).Create(staged).Error; err != nil {
+		content, err := hasBatchContent(tx, batch.ID)
+		if err != nil {
+			return err
+		}
+		if mode == StagedApplyScheduled {
+			if content {
+				return fmt.Errorf("%w: open batch %s has staged content; schedule config changes in a separate batch", ErrUpdateBatchConflict, batch.ID)
+			}
+		} else {
+			cron, err := hasBatchCronConfig(tx, batch.ID)
+			if err != nil {
+				return err
+			}
+			if content || cron || !opts.SetBatchWindow {
+				if !batchWindowMatches(batch, window, opts.ApplyAt, opts.IdleMinutes) {
+					return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
+				}
+			} else if err := setBatchWindow(tx, batch, window, mode, opts.ApplyAt, opts.IdleMinutes); err != nil {
+				return err
+			}
+		}
+		staged.BatchID = batch.ID
+		return tx.Create(staged).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	return staged, nil
-}
-
-// createScheduledConfigAtomic performs the counterpart admission and insert in
-// one write transaction, so two racing config requests cannot both observe an
-// empty mod batch and commit a cron row into a timed batch.
-func (s *Store) createScheduledConfigAtomic(ctx context.Context, serverID, batchID string, staged *StagedConfigChange) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var batch ServerUpdateBatch
-		if err := tx.Where("id = ? AND status = ?", batchID, UpdateBatchOpen).First(&batch).Error; err != nil {
-			return err
-		}
-		var content int64
-		if err := tx.Model(&StagedContentChange{}).
-			Where("batch_id = ? AND status = ?", batchID, StagedStatusStaged).Count(&content).Error; err != nil {
-			return err
-		}
-		if content > 0 {
-			return fmt.Errorf("open batch %s has staged content; schedule config changes in a separate batch", batchID)
-		}
-		staged.BatchID = batchID
-		staged.ServerID = serverID
-		return tx.Create(staged).Error
-	})
-}
-
-func (s *Store) ensureOpenBatch(ctx context.Context, serverID, window string) (*ServerUpdateBatch, error) {
-	var batch ServerUpdateBatch
-	err := s.db.WithContext(ctx).Where("open_key = ?", serverID).First(&batch).Error
-	if err == nil {
-		return &batch, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	key := serverID
-	batch = ServerUpdateBatch{
-		ID:       uuid.New().String(),
-		ServerID: serverID,
-		OpenKey:  &key,
-		Window:   window,
-		Status:   UpdateBatchOpen,
-	}
-	if err := s.db.WithContext(ctx).Create(&batch).Error; err != nil {
-		if isUniqueViolation(err) {
-			if err := s.db.WithContext(ctx).Where("open_key = ?", serverID).First(&batch).Error; err != nil {
-				return nil, err
-			}
-			return &batch, nil
-		}
-		return nil, err
-	}
-	return &batch, nil
 }
 
 // ListStagedConfigChanges returns staged records for a server, newest first.
@@ -699,7 +632,7 @@ func (s *Store) RevertStagedConfigApplyToStaged(ctx context.Context, id string) 
 
 // RestageOpenBatchRolledBackConfigs reconciles existing open batches whose config rows
 // were left rolled_back by a failed publication attempt, making them retryable again.
-// It does not touch configs outside open batches.
+// It leaves independently scheduled rows and configs outside open batches alone.
 func (s *Store) RestageOpenBatchRolledBackConfigs(ctx context.Context, batchID string) error {
 	if batchID == "" {
 		return nil
@@ -713,7 +646,7 @@ func (s *Store) RestageOpenBatchRolledBackConfigs(ctx context.Context, batchID s
 	}
 	var rows []StagedConfigChange
 	if err := s.db.WithContext(ctx).
-		Where("batch_id = ? AND status = ?", batchID, StagedStatusRolledBack).
+		Where("batch_id = ? AND status = ? AND apply_mode <> ?", batchID, StagedStatusRolledBack, StagedApplyScheduled).
 		Find(&rows).Error; err != nil {
 		return err
 	}

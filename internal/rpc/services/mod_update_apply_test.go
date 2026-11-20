@@ -16,9 +16,11 @@ import (
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
+	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type modUpdateFetchFixture struct {
@@ -381,6 +383,77 @@ func TestStagingRefusesBatchWithIndependentCronConfig(t *testing.T) {
 	require.Equal(t, "installed", string(live))
 }
 
+func TestConfigCommitsAfterModPreparationBeforeContentInsert(t *testing.T) {
+	for _, change := range []string{"cron", "retarget"} {
+		t.Run(change, func(t *testing.T) {
+			testConfigCommitBeforeModInsert(t, change)
+		})
+	}
+}
+
+func testConfigCommitBeforeModInsert(t *testing.T, change string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, server, um := newContentStageFixture(t, "config-before-mod-insert", storage.StatusStopped)
+	live := filepath.Join(server.DataPath, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
+	modSvc := NewModService(store, nil, um, logger.New())
+	modSvc.SetModUpdateLookup(newPreviewFixture())
+	modSvc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+	cronSvc := NewStagedConfigService(store, handlers.NewStagedConfigOperations(store), nil)
+	cfgSvc := NewConfigService(store, nil, nil, nil, logger.New())
+	when := time.Now().Add(time.Hour).Unix()
+
+	// Pause the real content producer immediately before its SQLite write.
+	// The mod has already checked its batch twice and written staged bytes.
+	var batchID string
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register("fixture:stage_config_before_mod_insert", func(tx *gorm.DB) {
+		row, ok := tx.Statement.Dest.(*storage.StagedContentChange)
+		if !ok {
+			return
+		}
+		require.FileExists(t, filepath.Join(server.DataPath, filepath.FromSlash(row.StagePath)))
+		batchID = row.BatchID
+		if change == "retarget" {
+			_, err := cfgSvc.UpdateServerConfig(ctx, connect.NewRequest(&v1.UpdateServerConfigRequest{
+				ServerId: server.ID, Updates: map[string]string{"difficulty": "hard"}, Stage: true,
+				Window: v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME, ApplyAtUnix: when,
+			}))
+			require.NoError(t, err)
+			return
+		}
+		_, err := cronSvc.StageConfigChange(ctx, connect.NewRequest(&v1.StageConfigChangeRequest{
+			ServerId: server.ID, Changes: `{"motd":"nightly"}`, ApplyMode: "scheduled", CronExpr: "0 3 * * *",
+		}))
+		require.NoError(t, err)
+	}))
+	req := modUpdateRequest(server.ID, installedModDigest("installed"))
+	_, err := modSvc.UpdateMod(ctx, connect.NewRequest(req))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	configs, readErr := store.ListBatchConfig(ctx, batchID)
+	require.NoError(t, readErr)
+	require.Len(t, configs, 1)
+	require.Equal(t, storage.StagedStatusStaged, configs[0].Status)
+	if change == "cron" {
+		require.ErrorContains(t, err, "independently scheduled config row")
+		require.Equal(t, storage.StagedApplyScheduled, configs[0].ApplyMode)
+		require.Equal(t, "0 3 * * *", configs[0].CronExpr)
+	} else {
+		require.ErrorContains(t, err, "changed window before staging")
+		require.Equal(t, storage.StagedApplyAtTime, configs[0].ApplyMode)
+		require.Equal(t, when, configs[0].ApplyAt.Unix())
+	}
+	rows, err := store.ListBatchContent(ctx, batchID)
+	require.NoError(t, err)
+	require.Empty(t, rows, "the refused insert must roll back")
+	require.Empty(t, stagedFiles(t, server.DataPath), "the refused payload must be removed")
+	data, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(data))
+}
+
 func TestCronCannotJoinAnExistingTimedModBatch(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "cron-inverse", storage.StatusStopped)
@@ -397,9 +470,11 @@ func TestCronCannotJoinAnExistingTimedModBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
 
-	_, err = store.StageConfigChange(ctx, server.ID,
-		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
-	require.Error(t, err)
+	cfgSvc := NewStagedConfigService(store, handlers.NewStagedConfigOperations(store), nil)
+	_, err = cfgSvc.StageConfigChange(ctx, connect.NewRequest(&v1.StageConfigChangeRequest{
+		ServerId: server.ID, Changes: `{"motd":"nightly"}`, ApplyMode: "scheduled", CronExpr: "0 3 * * *",
+	}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 	require.Contains(t, err.Error(), "has staged content")
 
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
@@ -413,65 +488,94 @@ func TestCronCannotJoinAnExistingTimedModBatch(t *testing.T) {
 	require.Len(t, rows, 1)
 }
 
-func TestConfigServiceSavesPreserveReviewedModWindowAndCronMode(t *testing.T) {
+func TestConfigServiceRequiresReviewedBatchWindow(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "config-service-order", storage.StatusStopped)
-	modsDir := filepath.Join(server.DataPath, "mods")
-	require.NoError(t, os.MkdirAll(modsDir, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(modsDir, "mod.jar"), []byte("installed"), 0o600))
+	live := filepath.Join(server.DataPath, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
 	cfgSvc := NewConfigService(store, nil, nil, nil, logger.New())
 	modSvc := NewModService(store, nil, um, logger.New())
 	modSvc.SetModUpdateLookup(newPreviewFixture())
 	modSvc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
 
-	// Order 1: reviewed mod batch first, then a normal staged config save.
 	when := time.Now().Add(2 * time.Hour).Unix()
-	res, err := modSvc.UpdateMod(ctx, connect.NewRequest(func() *v1.UpdateModRequest {
-		req := modUpdateRequest(server.ID, installedModDigest("installed"))
-		req.UpdateWindow = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME
-		req.UpdateApplyAtUnix = when
-		return req
-	}()))
+	req := modUpdateRequest(server.ID, installedModDigest("installed"))
+	req.UpdateWindow = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME
+	req.UpdateApplyAtUnix = when
+	res, err := modSvc.UpdateMod(ctx, connect.NewRequest(req))
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
-
-	_, err = cfgSvc.UpdateServerConfig(ctx, connect.NewRequest(&v1.UpdateServerConfigRequest{
-		ServerId: server.ID, Updates: map[string]string{"difficulty": "hard"},
-		Stage: true, Window: v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART,
-	}))
+	before, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
-	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	content, err := store.ListBatchContent(ctx, before.ID)
 	require.NoError(t, err)
-	require.Equal(t, string(storage.UpdateWindowAtTime), batch.Window)
-	require.True(t, batch.ApplyAt.Equal(time.Unix(when, 0).UTC()))
+	require.Len(t, content, 1)
+	config, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
 
-	// Order 2: a cron config first, then a normal staged config save.
-	cronData := t.TempDir()
-	cronServer := &storage.Server{ID: "config-service-cron", Name: "config-service-cron", DataPath: cronData, Status: storage.StatusStopped}
+	stage := func(serverID string, window v1.ConfigApplyWindow, at int64) error {
+		_, err := cfgSvc.UpdateServerConfig(ctx, connect.NewRequest(&v1.UpdateServerConfigRequest{
+			ServerId: serverID, Updates: map[string]string{"difficulty": "hard"},
+			Stage: true, Window: window, ApplyAtUnix: at,
+		}))
+		return err
+	}
+	atTime := v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME
+	nextRestart := v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART
+	for _, err := range []error{stage(server.ID, atTime, when+3600), stage(server.ID, nextRestart, 0)} {
+		require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	}
+	after, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	configs, err := store.ListBatchConfig(ctx, before.ID)
+	require.NoError(t, err)
+	require.Empty(t, configs)
+	current, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, config, current)
+	afterContent, err := store.ListBatchContent(ctx, before.ID)
+	require.NoError(t, err)
+	require.Equal(t, content, afterContent)
+	data, err := os.ReadFile(filepath.Join(server.DataPath, filepath.FromSlash(content[0].StagePath)))
+	require.NoError(t, err)
+	require.Equal(t, "next", string(data))
+	data, err = os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(data))
+
+	require.NoError(t, stage(server.ID, atTime, when))
+	configs, err = store.ListBatchConfig(ctx, before.ID)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	require.Equal(t, storage.StagedApplyAtTime, configs[0].ApplyMode)
+	require.True(t, configs[0].ApplyAt.Equal(*before.ApplyAt))
+
+	// A legacy batch shaped by an independent cron row also refuses a
+	// timed window. It still accepts the historical next-restart config
+	// while keeping the independent cron row byte-for-byte.
+	cronServer := &storage.Server{ID: "config-service-cron", Name: "config-service-cron", DataPath: t.TempDir(), Status: storage.StatusStopped}
 	require.NoError(t, store.CreateServer(ctx, cronServer))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(cronServer.ID)))
 	cron, err := store.StageConfigChange(ctx, cronServer.ID,
 		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
 	require.NoError(t, err)
-	_, err = cfgSvc.UpdateServerConfig(ctx, connect.NewRequest(&v1.UpdateServerConfigRequest{
-		ServerId: cronServer.ID, Updates: map[string]string{"difficulty": "normal"},
-		Stage: true, Window: v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE, IdleMinutes: 5,
-	}))
+	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
-	rows, err := store.ListBatchConfig(ctx, cron.BatchID)
-	require.NoError(t, err)
-	require.Len(t, rows, 2)
-	foundCron := false
-	for _, row := range rows {
-		if row.ID == cron.ID {
-			foundCron = true
-			require.Equal(t, storage.StagedApplyScheduled, row.ApplyMode)
-		}
-	}
-	require.True(t, foundCron, "the cron row must keep its own mode")
 	cronBatch, err := store.OpenUpdateBatch(ctx, cronServer.ID)
 	require.NoError(t, err)
-	require.NotEqual(t, "idle", cronBatch.Window, "a normal config save must not retarget the existing batch")
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(stage(cronServer.ID, atTime, when)))
+	after, err = store.OpenUpdateBatch(ctx, cronServer.ID)
+	require.NoError(t, err)
+	require.Equal(t, cronBatch, after)
+	configs, err = store.ListBatchConfig(ctx, cron.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, []*storage.StagedConfigChange{cron}, configs)
+	require.NoError(t, stage(cronServer.ID, nextRestart, 0))
+	still, err := store.GetStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	require.Equal(t, cron, still)
 }
 
 func TestDiscardUpdateBatchPreservesTypedRefusals(t *testing.T) {

@@ -377,6 +377,9 @@ func (s *ConfigService) stageServerConfig(ctx context.Context, config *storage.S
 }
 
 func stageErrorCode(err error) connect.Code {
+	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+		return connect.CodeFailedPrecondition
+	}
 	if strings.Contains(err.Error(), "server not found") {
 		return connect.CodeNotFound
 	}

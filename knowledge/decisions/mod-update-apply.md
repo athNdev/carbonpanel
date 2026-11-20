@@ -10,6 +10,7 @@ code_refs:
   - internal/rpc/services/mod.go
   - internal/scheduler/scheduler.go
   - internal/db/staged_content.go
+  - internal/db/staged_config.go
   - internal/db/models.go
   - proto/carbonpanel/v1/mod.proto
   - proto/carbonpanel/v1/task.proto
@@ -42,17 +43,17 @@ The scheduler invokes the same planner through an injected interface.
   stage a duplicate or an unchecked jar.
 - Apply revalidates the server-owned preview and the live digest; publish
   refuses a delayed-drift row and keeps staged bytes for recovery.
-- Window, staged rows and target uniqueness are journaled together; unrelated
-  reviewed batches are not retargeted. The whole window tuple is compared
-  before work, duplicate targets and cumulative bytes are bounded, and the
-  batch/config window transition is transactional. The full tuple is rechecked
-  under the operation, inserts name the still-open chosen batch, discard shares
-  the lock, cron config rows keep their schedule, and rejected transfers still
-  consume the byte budget. A batch with a cron config row is refused by both
-  mod-staging entry points, preserving that row's batch and trigger; a cron
-   row cannot join a timed mod batch via transactional admission; legacy mixed
-   data is isolated by the publisher (cron stays staged; no new poller). Discard
-   keeps typed Connect refusals and its own operation name. The guarded World
-   Library client is reused and transient provider failures stay retryable.
+- Reviewed content checks the complete window before work, at batch
+  preparation, and at row insertion. Config targeting an open batch with
+  content or an independent cron row must match its complete window. A
+  config-only retarget and its new row commit together. The SQLite write
+  transactions reject pending cron config and content symmetrically.
+- Due publication of legacy mixed data excludes cron config from base checks,
+  rollback reconciliation and publication. The remaining cron row and its
+  trigger stay intact. Discard shares the operation lock, keeps its typed
+  Connect refusals and records its own operation name.
+- Duplicate targets and cumulative download bytes are bounded, including
+  rejected transfers. The guarded World Library client is reused and
+  transient provider failures stay retryable.
 - The scheduler installs the planner before starting, applies timezone only to
   cron, and refuses to dispatch a task whose next run cannot be advanced.
