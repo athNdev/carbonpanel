@@ -308,7 +308,9 @@ class ShowcasePipelineTest(unittest.TestCase):
 
     def test_every_feature_gate_is_on_for_main_push(self) -> None:
         workflow = workflow_text()
-        for feature in ("players", "playerdetail", "worlds", "worldtab", "library"):
+        # playerdetail is intentionally manual-only: its skin preview depends
+        # on an external provider and is not part of the canonical set.
+        for feature in ("players", "worlds", "worldtab", "library"):
             pattern = re.compile(
                 r"FEATURES_" + feature.upper() + r": \$?\{\{([^\n]*)\}\}"
             )
@@ -320,6 +322,14 @@ class ShowcasePipelineTest(unittest.TestCase):
                     expression,
                     f"{feature} can be dropped on a routine main push",
                 )
+        detail = re.findall(r"FEATURES_PLAYERDETAIL: \$?\{\{([^\n]*)\}\}", workflow)
+        self.assertTrue(detail, "playerdetail gate is missing")
+        for expression in detail:
+            self.assertNotIn(
+                "github.event_name == 'push'",
+                expression,
+                "playerdetail must stay manual-only (external skin provider)",
+            )
 
     def test_publish_requires_the_real_world_view_asset(self) -> None:
         workflow = workflow_text()
