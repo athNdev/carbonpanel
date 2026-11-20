@@ -17,6 +17,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ErrInProgress is returned when the same request id is already running.
@@ -112,7 +113,7 @@ type JournalOutcome struct {
 // active server lock and records an explicit operator-resolution note. It does
 // not advance to failed, so the UI cannot offer a blind retry. A completion or
 // a definite failure follows the same path as RunJournaled.
-func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger, server *db.Server, kind, requestID string, mutate func() (uncertain bool, err error)) (JournalOutcome, error) {
+func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger, server *db.Server, kind, requestID string, mutate func(context.Context) (uncertain bool, err error)) (JournalOutcome, error) {
 	if err := ValidateRequestID(requestID); err != nil {
 		return JournalOutcome{}, err
 	}
@@ -143,7 +144,7 @@ func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger,
 		return JournalOutcome{OperationID: op.ID}, fmt.Errorf("record %s attempt: %w", kind, err)
 	}
 
-	uncertain, mutateErr := mutate()
+	uncertain, mutateErr := mutate(context.WithValue(ctx, journalOwnerKey{}, op.ID))
 	if mutateErr == nil {
 		if err := finishMutation(ctx, store, log, op.ID, kind, func() error { return nil }); err != nil {
 			return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeSuccess)}, err
@@ -160,6 +161,38 @@ func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger,
 		return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeUnknown)}, mutateErr
 	}
 	return JournalOutcome{OperationID: op.ID}, finishMutation(ctx, store, log, op.ID, kind, func() error { return mutateErr })
+}
+
+type journalOwnerKey struct{}
+
+// AssertWorldBindOwner validates the live journal capability carried only
+// inside a running mutation callback. An RPC request ID confers no ownership.
+func AssertWorldBindOwner(ctx context.Context, store *db.Store, server *db.Server) error {
+	id, _ := ctx.Value(journalOwnerKey{}).(string)
+	if id == "" {
+		return errors.New("world lifecycle requires the active bind owner")
+	}
+	op, err := store.GetServerOperation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if op.Kind != "world-bind" || op.Phase != db.ServerOperationExecuting ||
+		op.ActiveServer == nil || *op.ActiveServer != server.ID || op.ServerID != server.ID ||
+		op.NodeID != server.NodeID || op.ContainerID != server.ContainerID {
+		return errors.New("world bind no longer owns this container")
+	}
+	node, err := store.GetNode(ctx, server.NodeID)
+	if errors.Is(err, gorm.ErrRecordNotFound) && op.EndpointGeneration == 0 && op.DaemonID == "" {
+		return nil // Legacy local nodes may have no persisted identity.
+	}
+	if err != nil {
+		return err
+	}
+	if node.EndpointGeneration != op.EndpointGeneration ||
+		(op.DaemonID != "" && node.DaemonID != op.DaemonID) {
+		return errors.New("world bind no longer owns this node endpoint")
+	}
+	return nil
 }
 
 func finishMutation(ctx context.Context, store Journal, log *logger.Logger, id, kind string, mutate func() error) error {

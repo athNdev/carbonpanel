@@ -11,6 +11,8 @@ code_refs:
 sources:
   - title: MCP stable build compatibility
     resource: https://carbonpanel.atlassian.net/browse/OSS-353
+  - title: MCP operator guide
+    resource: ../../docs/carbon-panel/src/content/docs/guides/mcp-server.mdx
 ---
 
 # Choice
@@ -26,8 +28,9 @@ read-only RPCs present in v1.0.40.
 Only an `Unimplemented` response (including Connect's HTTP 404 to Unimplemented
 mapping) or a `NotFound` whose message explicitly identifies a transport-level
 missing procedure is a capability gap. The tool then returns `IsError` with a
-structured `capability_unavailable` payload naming the tool, the exact
-procedure, the Connect code and the minimum build. A domain `NotFound` (a
+structured `error.kind = capability_unavailable` payload naming the tool, the
+exact procedure, the Connect code and the minimum build. Record the installed
+controller build separately. A domain `NotFound` (a
 missing server, file or world record) instead returns a `not_found` error and
 never claims an upgrade is required. Permission and authentication denials use
 their own stable error kinds. This never reports false success, never hides a
@@ -40,8 +43,9 @@ assert that a post-stable tool returns the structured capability error for
 `Unimplemented` and a transport-level `NotFound`. A separate fixture asserts a
 domain `NotFound` is reported as `not_found`, a no-auth panel is refused even
 with a well-formed token, and a hung backend fails within the bounded timeout.
-They also assert that `tools/list` is identical on old and new panels and that
-all 30 first-slice tools remain visible.
+They also assert that `tools/list` is identical on old and new panels. The
+public package, packaged stdio workflow and controller compatibility require
+separate evidence. API tokens inherit the owning account's grants.
 
 # Read next
 
