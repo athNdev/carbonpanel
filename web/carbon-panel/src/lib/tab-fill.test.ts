@@ -41,13 +41,14 @@ test('tab-fill is a flex fill, not a viewport-minus-chrome height', () => {
 test('server-tab-header is one shared height, type, padding and divider', () => {
 	const header = cssRule('.server-tab-header');
 	assert.match(header, /min-height:\s*4\.5rem/);
-	assert.match(header, /padding:\s*0\.75rem 1\.25rem/);
+	assert.match(header, /padding:\s*1rem 1\.25rem/);
+	assert.match(header, /background:\s*var\(--secondary\)/);
 	// The divider follows the theme through the border role; a literal here
 	// would keep the dark rule under the light palette.
 	assert.match(header, /border-bottom:\s*1px solid var\(--border\)/);
 	const title = cssRule('.server-tab-title');
-	assert.match(title, /font-size:\s*1\.125rem/);
-	assert.match(title, /font-weight:\s*300/);
+	assert.match(title, /font-size:\s*clamp\(1\.1875rem,/);
+	assert.match(title, /font-weight:\s*600/);
 	assert.match(title, /color:\s*var\(--foreground\)/);
 	assert.match(panel, /class="server-tab-header"/);
 	assert.match(panel, /class="server-tab-body server-tab-body--\{mode\}"/);

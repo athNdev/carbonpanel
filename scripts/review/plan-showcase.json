@@ -464,6 +464,21 @@
       "name": "server World tab renders"
     },
     {
+      "waitFor": "[data-testid=\"server-world-map-card\"]",
+      "feature": "worldtab",
+      "name": "the server's World View card loads"
+    },
+    {
+      "screenshot": "showcase-worlds-list",
+      "element": "[data-testid=\"showcase-runtime-tiles\"]",
+      "maxHeight": 720,
+      "scroll": false,
+      "feature": "worldtab",
+      "name": "world map card in the server view",
+      "alt": "Server runtime cards including the map preview and its expand control",
+      "focus": "The world map card and observed renderer state"
+    },
+    {
       "click": "#server-detail-tabs-tab-world",
       "feature": "worldtab",
       "name": "open the server World tab"
@@ -484,40 +499,19 @@
       "focus": "Active world, binding and revision for the seeded vanilla server"
     },
     {
-      "goto": "/worlds",
-      "waitFor": "[data-testid=\"showcase-worlds-content\"]",
-      "feature": "worldtab",
-      "name": "world view list loads"
-    },
-    {
-      "assertVisible": "a[href^=\"/worlds/\"]",
-      "feature": "worldtab",
-      "name": "a viewable world target exists"
-    },
-    {
-      "screenshot": "showcase-worlds-list",
-      "element": "[data-testid=\"showcase-worlds-content\"]",
-      "maxHeight": 720,
-      "scroll": false,
-      "feature": "worldtab",
-      "name": "world list renderer state",
-      "alt": "World View list showing the observed renderer state for the seeded world",
-      "focus": "Renderer state and target row"
-    },
-    {
-      "goto": "/worlds",
+      "goto": "/servers",
       "feature": "worlds",
-      "name": "open the World View list for the renderer capture"
+      "name": "open the server list for the renderer capture"
     },
     {
-      "waitFor": "a[href^=\"/worlds/\"]:has-text(\"review-vanilla\")",
+      "click": "a[href^=\"/servers/\"]:has-text(\"review-vanilla\")",
       "feature": "worlds",
-      "name": "wait for the seeded vanilla world target"
+      "name": "open the seeded vanilla server"
     },
     {
-      "click": "a[href^=\"/worlds/\"]:has-text(\"review-vanilla\")",
+      "click": "[data-testid=\"server-world-map-card\"] button[aria-label=\"Expand world map\"]",
       "feature": "worlds",
-      "name": "open the rendered world map"
+      "name": "expand the server's rendered world map"
     },
     {
       "waitFor": "iframe[title^=\"World map for\"]",

@@ -14,6 +14,10 @@ sources:
 All `PlayerService` procedures are mapped to `players:*` permissions and
 server-scoped procedures use `server_id` so subuser grants apply. Moderation
 uses a request id, a journal row and an `ActivityLog` entry with subject type
-`player`. Undo exists only where a prior value was recorded; kick is explicitly
-not undoable. The legacy `SendCommand` string path remains `servers:command`
+`player` and an independent server ID. The server audit query includes only
+explicitly scoped player events. Historical player events with no server ID
+remain available through the global audit API; identity and request IDs do
+not establish the server. Applied actions keep an audit record if the client
+disconnects while the request finishes. Undo exists only for recorded prior
+values. The legacy `SendCommand` string path remains `servers:command`
 and is not a moderation boundary.

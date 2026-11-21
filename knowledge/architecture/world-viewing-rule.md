@@ -4,7 +4,7 @@ title: "Map viewing — Rule"
 description: "WorldViewService observes worlds; it does not own them. A WorldRef"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds, web/carbon-panel/src/lib/components/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md
@@ -20,11 +20,11 @@ visibility flag are the only mutations, and both are audited. Teleport and
 world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
-The server World tab links to the active map, or to World View scoped to that
-server when the active level is unknown. The scoped fallback uses
-GetWorldViewStatus with the concrete server; the all-server catalogue
-requires a global read grant. World View uses names from the authorized
-server inventory. Setup and unavailable states do not mount a map.
+The server preview and World tab open the same map dialog. Loading labels
+show the renderer phase. With no explicit level the viewer resolves the active
+map through scoped GetWorldViewStatus. Standalone links still check only map
+access. The catalogue requires a global read grant. Setup and unavailable
+states do not mount an iframe.
 A failed refresh keeps a valid last-known map and reports the error. The page
 renews both built-in and renderer sessions before their deadline, hides expired
 maps and retries temporary failures while the scope remains authorized. Read
@@ -32,6 +32,8 @@ denials and scope changes clear the current map session. Renderer changes
 acquire a matching session before mounting the replacement map.
 
 The native viewport reads saved Overworld terrain through a scoped session.
+Renderer readiness does not imply live players. The native map also offers
+managed BlueMap setup with the existing authorization and consent checks.
 Format checks and tiles share bounded workers. Deferred inventory checks keep
 world links visible. Active lifecycle operations temporarily refuse reads.
 The viewport bounds tile requests and aborts work outside the current view or
@@ -40,11 +42,11 @@ and require the recipient’s scoped read permission. The readonly map shows
 non-sensitive markers, waypoints and points of interest from scoped
 ListMapOverlays results. The marker list centers offscreen points.
 
-Renderer traffic stays same-origin using opaque, short-lived keys. Every
-request authenticates and enforces the concrete server’s map-read permission.
-Missing endpoints, remote limitations, unsupported capabilities and stale
-tiles have distinct states. Renderer endpoints stay private and scoped to
-their own node.
+Renderer traffic stays same-origin with short-lived keys and an AuthStore session
+cookie renewed before each map session. Each asset read rechecks the server’s
+map-read permission. Renderer endpoints stay private. Endpoint and renderer
+failures have distinct states. Authorized commands remain available on saved
+terrain or when the renderer is unavailable.
 
 Managed BlueMap install and private discovery share one node eligibility
 check. It accepts legacy controller aliases and enabled registered nodes

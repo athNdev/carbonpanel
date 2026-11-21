@@ -33,7 +33,7 @@ one at https://mozilla.org/MPL/2.0/.
 		Search
 	} from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
-	import { authStore } from '$lib/stores/auth';
+	import { triggerStreamDownload } from '$lib/api/stream-download';
 	import { toast } from 'svelte-sonner';
 	import { CarbonConfirm } from '$lib/components/carbon';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -474,18 +474,6 @@ one at https://mozilla.org/MPL/2.0/.
 			paths
 		});
 		triggerStreamDownload(response.sessionId, response.filename);
-	}
-
-	function triggerStreamDownload(sessionId: string, filename: string) {
-		const token = authStore.getToken();
-		if (token) {
-			document.cookie = `cp_session=${encodeURIComponent(token)}; Path=/; SameSite=Strict`;
-		}
-		const url = `/api/v1/download/${sessionId}`;
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
 	}
 
 	let pendingDelete = $state<FileInfo | null>(null);

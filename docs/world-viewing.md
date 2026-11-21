@@ -6,12 +6,18 @@ modifies or teleports anything. The governing decisions are in
 [ADR 0015](adr/0015-world-viewing-renderer-proxy.md) and the durable rule is in
 `knowledge/architecture/world-viewing.md`.
 
-Open **World View** to browse maps, or use **Open map** in a server’s
-**World** tab. If the active level is still unknown, Carbon Panel checks for
+Open a server and expand its **World View** card to explore the map. The
+server’s **World** tab opens the same viewer through **Open map**. The card
+shows either a renderer preview or sampled saved terrain. Previously shared
+map links continue to open a standalone viewer for recipients with map access.
+If the active level is still unknown, Carbon Panel checks for
 the active map using that server’s World View read permission. A [built-in
 terrain map](world-terrain.md) opens supported local Java saves without a
-module. For worlds that need an external renderer, the page offers **Install
-BlueMap** when the account and node support it.
+module. Choose **Set up a 3D map with BlueMap** from a built-in map, or
+**Install BlueMap** from the renderer setup screen, when the account and node
+support it. The managed sidecar renders textured buildings after Minecraft
+saves them and BlueMap processes the changed chunks. It has no player-location
+feed. **Map ready** means the renderer can serve a map.
 
 Map sessions renew automatically. During a temporary connection failure the
 page keeps an authorized map available until its session expires, then retries.

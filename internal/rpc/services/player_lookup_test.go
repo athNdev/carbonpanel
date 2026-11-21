@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -406,12 +407,20 @@ func TestSetWhitelistManualAddFailureKeepsJournalFailed(t *testing.T) {
 	if row.Phase != storage.PlayerActionFailed {
 		t.Fatalf("journal phase = %q, want failed", row.Phase)
 	}
-	var audit []storage.ActivityLog
-	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventPlayerWhitelistAdd, "wl-manual-fail-1").Find(&audit).Error; err != nil {
-		t.Fatalf("audit query: %v", err)
+	audit, err := activity.List(store.DB(), "srv-1", "", time.Time{}, 10)
+	if err != nil || len(audit) != 1 {
+		t.Fatalf("expected one scoped audit record for the failed attempt: %+v, %v", audit, err)
 	}
-	if len(audit) != 0 {
-		t.Fatalf("failed action wrote %d success audit rows", len(audit))
+	var details struct {
+		Outcome string `json:"outcome"`
+		Target  string `json:"target_name"`
+	}
+	if err := json.Unmarshal([]byte(audit[0].Properties), &details); err != nil {
+		t.Fatal(err)
+	}
+	if audit[0].Event != activity.EventPlayerWhitelistAdd || audit[0].RequestID != "wl-manual-fail-1" ||
+		details.Outcome != "failed" || details.Target != "FailName" {
+		t.Fatalf("incorrect failed-action audit record: %+v", audit[0])
 	}
 }
 

@@ -64,7 +64,7 @@ on:
         default: false
         type: boolean
       worldtab:
-        description: 'Capture the per-server World tab and Worlds list (independent of BlueMap)'
+        description: 'Capture the server World tab and map preview (independent of BlueMap)'
         required: false
         default: true
         type: boolean

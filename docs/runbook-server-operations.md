@@ -9,6 +9,14 @@ not run that mutation twice. A new attempt after a failure uses a new
 `request_id`. The same id is stored on the matching activity-feed row so the
 journal and the audit trail join.
 
+Open the server’s **Activity** tab to see both sources. **Lifecycle operations**
+shows operation outcomes and recovery steps. **Audit log** shows recorded
+actions, actors and any explicit outcomes. Expand **Details** to see the
+request ID when present. An entry labeled **Recorded** carries no explicit
+result. The log includes server-scoped player activity written after the
+server ID was added to those audit records. Older player audit entries with
+no server ID remain in the global audit API.
+
 ## When a server stays locked
 
 If the panel restarts while a mutation is in progress, startup reads the

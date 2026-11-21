@@ -379,12 +379,27 @@ class ShowcasePipelineTest(unittest.TestCase):
         plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
         steps = json.loads(plan.read_text(encoding="utf-8"))["steps"]
         capture = next(i for i, step in enumerate(steps) if step.get("screenshot") == "showcase-player-allowlist")
-        self.assertEqual("#server-detail-tabs-panel-players", steps[capture]["element"])
-        self.assertEqual("players", steps[capture - 1]["feature"])
-        self.assertIn(
-            '#server-detail-tabs-panel-players [data-player-row]:has-text("ReviewGuest")',
-            steps[capture - 1]["waitFor"],
+        self.assertEqual(
+            '[role="dialog"]:has(section[aria-label="Add allowlist entry"])',
+            steps[capture]["element"],
         )
+        observation = next(
+            index for index, step in enumerate(steps)
+            if step.get("feature") == "players" and step.get("waitFor") ==
+            '#server-detail-tabs-panel-players [data-player-row]:has-text("ReviewGuest")'
+        )
+        self.assertLess(observation, capture)
+
+    def test_rendered_world_capture_uses_the_server_map_card(self) -> None:
+        plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        steps = [step for step in json.loads(plan.read_text(encoding="utf-8"))["steps"]
+                 if step.get("feature") == "worlds"]
+        self.assertEqual("/servers", steps[0]["goto"])
+        expand = next(index for index, step in enumerate(steps)
+                      if 'aria-label="Expand world map"' in step.get("click", ""))
+        canvas = next(index for index, step in enumerate(steps)
+                      if step.get("assertFrameVisible") == "canvas")
+        self.assertLess(expand, canvas)
 
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])

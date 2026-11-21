@@ -46,7 +46,7 @@ let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
 const survivalMapLink = { name: "Open map for Fixture Overworld on Fixture Survival Server", exact: true };
-const creativeMapLink = { name: "Open map for Fixture Creative on Fixture Creative Server", exact: true };
+const creativeMapLink = { name: "Set up map for Fixture Creative on Fixture Creative Server", exact: true };
 const target = {
   serverId: "srv-1",
   worldRef,
@@ -88,9 +88,14 @@ try {
   base = base.replace(/\/$/, "");
   ({ browser } = await launchReviewBrowser());
 
+  const fixtureSession = "fixture-worldview-session";
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     reducedMotion: "reduce",
+    storageState: {
+      cookies: [],
+      origins: [{ origin: new URL(base).origin, localStorage: [{ name: "auth_token", value: fixtureSession }] }],
+    },
   });
   const page = await context.newPage();
   const errors = [];
@@ -112,7 +117,7 @@ try {
       reply({ code: "permission_denied", message: "insufficient scope for this write" }, 403);
 
     if (method === "GetAuthStatus")
-      return reply({ localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false });
+      return reply({ localAuthEnabled: true, oidcEnabled: false, anonymousAccessEnabled: false });
     if (method === "GetCurrentUser")
       return reply({
         user: { id: "fixture", username: "Fixture" },
@@ -207,13 +212,14 @@ try {
     return reply({});
   });
   // Same-origin map assets: harmless document so the sandbox iframe has no live dependency.
-  await page.route("**/api/v1/**", (route) =>
-    route.fulfill({
-      status: 200,
+  await page.route("**/api/v1/worldview/map/**", async (route) => {
+    const cookie = (await route.request().headerValue("cookie")) ?? "";
+    return route.fulfill({
+      status: cookie.split(/;\s*/).includes(`cp_session=${fixtureSession}`) ? 200 : 401,
       contentType: "text/html",
       body: "<!doctype html><html><body>fixture map</body></html>",
-    }),
-  );
+    });
+  });
 
   // encodeWorldKey packs [kind, serverId, levelName, bindingId, snapshotId];
   // KIND_SERVER_LOCAL = 2 (worldview_pb.ts).
@@ -224,6 +230,9 @@ try {
   // Warm route dependencies; Vite's initial optimization reloads the page.
   await page.goto(base);
   await page.waitForLoadState("networkidle");
+  const cookie = (await context.cookies(base)).find((entry) => entry.name === "cp_session");
+  assert.equal(cookie?.value, fixtureSession, "restored auth must set the cookie before the viewer loads");
+  assert.equal(cookie?.sameSite, "Strict");
 
   async function load() {
     await page.goto(url);
@@ -353,9 +362,10 @@ try {
       const content = page.getByTestId("showcase-worlds-content");
       const mapLink = content.getByRole("link", survivalMapLink);
       await mapLink.waitFor();
-      await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not reported", { exact: true }).filter({ visible: true }).first().waitFor();
+      await mapLink.getByText(/Fixture Survival Server · overworld/).waitFor();
+      const setupLink = content.getByRole("link", creativeMapLink);
+      await setupLink.getByText("SETUP NEEDED", { exact: true }).waitFor();
+      assert.doesNotMatch(await setupLink.innerText(), /Checked |Rendered /);
       assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
       const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
       assert.equal(overflow, false, "World View fits at width " + width);

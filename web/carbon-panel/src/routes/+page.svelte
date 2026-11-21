@@ -46,6 +46,7 @@ one at https://mozilla.org/MPL/2.0/.
 		sortServersByActivity
 	} from '$lib/stores/servers';
 	import { summarizeNodes } from '$lib/utils/node-status';
+	import { formatTimestamp } from '$lib/utils/format-time';
 	import { summarizeDashboardTelemetry } from '$lib/features/servers/dashboard-telemetry';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
@@ -54,7 +55,6 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonErrorState,
 		CarbonPageHeader
 	} from '$lib/components/carbon';
-	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
 	// Dashboard data
 	let dashboardServers = $derived($serversStore);
@@ -64,7 +64,6 @@ one at https://mozilla.org/MPL/2.0/.
 	let isLoading = $state(true);
 	let loadError = $state<string | null>(null);
 	let isRefreshing = $state(false);
-	let currentTime = $state(new Date());
 
 	// Load dashboard data with full stats, plus node inventory fail-open.
 	// NodeService.listNodes runs in parallel with listServers so a node
@@ -134,21 +133,15 @@ one at https://mozilla.org/MPL/2.0/.
 			: 0
 	});
 
-	let recentActivity = $derived(
+	let recentStarts = $derived(
 		dashboardServers
-			.filter((s) => s.lastStarted)
+			.filter((server) => server.lastStarted && server.lastStarted.seconds > 0n)
 			.sort(
 				(a, b) =>
-					new Date(Number(b.lastStarted!.seconds) * 1000).getTime() -
-					new Date(Number(a.lastStarted!.seconds) * 1000).getTime()
+					Number(b.lastStarted!.seconds - a.lastStarted!.seconds) ||
+					b.lastStarted!.nanos - a.lastStarted!.nanos
 			)
 			.slice(0, 5)
-			.map((s) => ({
-				server: s.name,
-				action: s.status === ServerStatus.RUNNING ? 'Started' : 'Activity',
-				time: s.lastStarted,
-				status: s.status
-			}))
 	);
 
 	let serversByStatus = $derived({
@@ -207,13 +200,9 @@ one at https://mozilla.org/MPL/2.0/.
 			isLoading = false;
 		});
 
-		const interval = setInterval(() => {
-			currentTime = new Date();
-		}, 1000);
 		return () => {
 			mounted = false;
 			++dashboardLoadGeneration;
-			clearInterval(interval);
 		};
 	});
 
@@ -229,19 +218,6 @@ one at https://mozilla.org/MPL/2.0/.
 		blue: 'bg-primary',
 		gray: 'bg-muted-foreground',
 		'warm-gray': 'bg-muted-foreground'
-	};
-
-	const formatUptime = (lastStarted?: Timestamp) => {
-		if (!lastStarted) return 'Never';
-		const start = new Date(Number(lastStarted.seconds) * 1000);
-		const diff = currentTime.getTime() - start.getTime();
-		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-		if (days > 0) return `${days}d ${hours}h`;
-		if (hours > 0) return `${hours}h ${minutes}m`;
-		return `${minutes}m`;
 	};
 
 	const getTpsColor = (tps: number | undefined) => {
@@ -836,38 +812,35 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 
-			<!-- Carbon Structured List: Recent Activity (3 cols on lg) -->
+			<!-- Recent server starts -->
 			<div class="flex flex-col rounded-none border border-border bg-card 2xl:col-span-3">
 				<!-- Header -->
 				<div class="flex items-center justify-between border-b border-border bg-card p-4">
 					<div>
-						<h2 class="font-sans text-base font-semibold text-foreground">Recent Activity</h2>
-						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
-							Latest lifecycle and cluster events
-						</p>
+						<h2 class="font-sans text-base font-semibold text-foreground">Recent server starts</h2>
 					</div>
 					<Clock class="h-4 w-4 text-muted-foreground" />
 				</div>
 
 				<!-- Content -->
-				{#if recentActivity.length === 0}
+				{#if recentStarts.length === 0}
 					<div
 						class="flex flex-1 flex-col items-center justify-center p-8 text-center text-muted-foreground"
 					>
 						<Clock class="mb-2 h-8 w-8 text-muted-foreground" />
-						<p class="mono-label">No recent events recorded</p>
+						<p class="text-sm">No server starts recorded</p>
 					</div>
 				{:else}
 					<!-- Structured List Header -->
 					<div
 						class="flex items-center justify-between border-b border-border bg-secondary px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 					>
-						<span>Event / Instance</span>
-						<span>Timestamp</span>
+						<span>Server</span>
+						<span>Last started</span>
 					</div>
 					<!-- Structured List Rows -->
 					<div class="motion-stagger flex-1 divide-y divide-border bg-card">
-						{#each recentActivity as activity (activity.server + (activity.time?.seconds ?? ''))}
+						{#each recentStarts as server (server.id)}
 							<div
 								class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
 							>
@@ -875,22 +848,21 @@ one at https://mozilla.org/MPL/2.0/.
 									<!-- Sharp status pip -->
 									<div
 										role="img"
-										aria-label={serverStatusLabel(activity.status)}
-										title={serverStatusLabel(activity.status)}
+										aria-label={serverStatusLabel(server.status)}
+										title={serverStatusLabel(server.status)}
 										class="h-2 w-2 shrink-0 {statusPipColor[
-											getStatusTagType(activity.status)
-										]} {activity.status === ServerStatus.ERROR ||
-										activity.status === ServerStatus.UNHEALTHY
+											getStatusTagType(server.status)
+										]} {server.status === ServerStatus.ERROR ||
+										server.status === ServerStatus.UNHEALTHY
 											? 'motion-pulse'
 											: ''}"
 									></div>
 									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-foreground">{activity.server}</p>
-										<p class="font-mono text-xs text-muted-foreground">{activity.action}</p>
+										<p class="truncate text-sm font-medium text-foreground">{server.name}</p>
 									</div>
 								</div>
 								<div class="shrink-0 pl-3 font-mono text-xs text-muted-foreground">
-									{formatUptime(activity.time)} ago
+									{formatTimestamp(server.lastStarted)}
 								</div>
 							</div>
 						{/each}
