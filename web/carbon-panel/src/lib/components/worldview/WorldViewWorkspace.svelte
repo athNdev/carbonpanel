@@ -633,7 +633,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 {#if preview}
 	<section
-		class="relative isolate flex min-h-48 flex-col overflow-hidden border border-border bg-card"
+		class="relative isolate flex min-h-64 flex-col overflow-hidden border border-border bg-card lg:min-h-72"
 		aria-label="World View preview"
 		data-testid="server-world-map-card"
 	>
@@ -657,11 +657,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 		{#if previewImage || previewFrame}
 			<div
-				class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/65 via-black/5 to-black/70"
+				class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/75"
 			></div>
 		{/if}
 		<div
-			class="relative flex flex-1 flex-col justify-between gap-4 p-3.5 sm:p-4"
+			class="relative flex flex-1 flex-col justify-between gap-4 p-4 sm:p-5"
 			class:text-white={Boolean(previewImage || previewFrame)}
 		>
 			<div class="flex items-start justify-between gap-2">
@@ -681,12 +681,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CarbonButton
 							kind="secondary"
 							size="sm"
-							iconOnly
+							class="gap-2"
 							aria-label="Expand world map"
 							title="Expand world map"
 							onclick={onexpand}
 						>
 							<Maximize class="h-4 w-4" aria-hidden="true" />
+							<span>Expand</span>
 						</CarbonButton>
 					</div>
 				{/if}
@@ -708,11 +709,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 			{/if}
 			{#if canRead && !denied && statusTarget}
-				<div class="flex flex-wrap items-center gap-2">
+				<div class="flex flex-wrap items-end justify-between gap-2">
+					{#if statusTarget.name}<p class="min-w-0 text-base font-semibold break-words">
+							{statusTarget.name}
+						</p>{/if}
 					<CarbonTag type={VIEW_STATE_TONE[view]} size="sm"
 						>{view === 'saved' ? 'SAVED TERRAIN' : VIEW_STATE_LABEL[view]}</CarbonTag
 					>
-					{#if statusTarget.name}<span class="text-xs font-medium">{statusTarget.name}</span>{/if}
 				</div>
 			{/if}
 		</div>

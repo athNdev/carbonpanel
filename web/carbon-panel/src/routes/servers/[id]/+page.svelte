@@ -418,13 +418,13 @@ one at https://mozilla.org/MPL/2.0/.
 		<div
 			id="server-runtime-metrics"
 			hidden={!$metricsExpanded}
-			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
+			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] [&>*]:min-w-0"
 			data-testid="showcase-runtime-tiles"
 		>
 			<!-- Runtime state -->
 			<div
 				data-testid="showcase-runtime-tile"
-				class="flex min-h-48 flex-col justify-between gap-3 border border-border bg-card p-4"
+				class="flex min-h-48 flex-col justify-between gap-3 border border-border bg-card p-4 sm:p-5"
 			>
 				<div class="flex items-center justify-between">
 					<h2 class="text-sm font-semibold">Runtime status</h2>
@@ -485,13 +485,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 3: Engine Details -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors hover:border-foreground/30"
+				class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5"
 			>
 				<div class="flex items-center justify-between">
-					<span
-						class="font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-						>Engine Specs</span
-					>
+					<h2 class="text-sm font-semibold">Engine specs</h2>
 					<Info class="h-4 w-4 text-[var(--chart-4)]" />
 				</div>
 				<div class="mt-3 space-y-2 font-mono text-xs">
@@ -528,13 +525,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 4: Hardware Quotas -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors hover:border-foreground/30"
+				class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5"
 			>
 				<div class="flex items-center justify-between">
-					<span
-						class="font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-						>Resource Telemetry</span
-					>
+					<h2 class="text-sm font-semibold">Resource telemetry</h2>
 					<Cpu class="h-4 w-4 text-destructive-text" />
 				</div>
 				<div class="mt-3 space-y-2.5">
@@ -879,8 +873,8 @@ one at https://mozilla.org/MPL/2.0/.
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.25rem;
-		min-height: 3.75rem;
+		gap: 0.375rem;
+		min-height: 4.5rem;
 		color: var(--signal-ink, var(--muted-foreground));
 		background:
 			linear-gradient(
@@ -898,8 +892,8 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	.signal-block {
-		width: 0.375rem;
-		height: 1.5rem;
+		width: 0.5rem;
+		height: 2rem;
 		background: currentColor;
 		transform: scaleY(var(--rest));
 		opacity: 0.55;
