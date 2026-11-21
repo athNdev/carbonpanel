@@ -26,7 +26,13 @@ sources:
   multiarch digest with both Linux architectures in BOTH maintained registries
   (Docker Hub `atharvnaphade/carbonpanel` and GHCR `ghcr.io/athndev/carbonpanel`),
   with matching OCI revision in each digest-addressed child config. A missing,
-  unknown, single-arch or mismatched registry is a zero-write refusal.
+  unknown, single-arch or mismatched registry is a zero-write refusal. An
+  authorized Nightly (explicit trusted `nightly=true` manual dispatch on
+  `refs/heads/main` with exact main CI and no recovery, or trusted opt-in
+  schedule) may mirror a verified Hub sha index to GHCR by digest-preserving
+  copy after proving Hub index/labels with existing helpers; conflicting/unknown
+  GHCR sha states refuse, identical verified GHCR sha is reused, and
+  unauthorized/default verification writes nothing.
 - Docs qualification requires a schema_version 3 two-channel contract (`Stable`
   and `Nightly` only, no legacy doc snapshots, full-SHA pinned links) from the
   built site and exact site build validation. Stale docs never mask a candidate.
