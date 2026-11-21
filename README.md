@@ -57,6 +57,8 @@ Give each server its own Docker container. Keep the console, live logs, files,
 backups and settings within reach. Run on a machine at home, a dedicated host,
 or compatible remote Docker nodes, all through one panel.
 
+[![Server overview in dark mode with the running status, rendered World View, resource telemetry and server tabs](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-worlds-list.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-worlds-list.png)
+
 [![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-server-detail.png)
 
 ### Worlds, kept as revisions.

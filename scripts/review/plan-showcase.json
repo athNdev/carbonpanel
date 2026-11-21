@@ -463,20 +463,18 @@
       "name": "server World tab renders"
     },
     {
-      "waitFor": "[data-testid=\"server-world-map-card\"]",
+      "assertMapPreviewLoaded": "[data-testid=\"server-world-map-card\"]",
+      "timeout": 30000,
       "feature": "worldtab",
-      "name": "the server's World View card loads"
+      "name": "the server's World View card has decoded terrain or loaded renderer tiles"
     },
     {
       "screenshot": "showcase-worlds-list",
-      "element": "[data-testid=\"showcase-runtime-tiles\"]",
-      "maxHeight": 720,
-      "scroll": false,
+      "fullPage": true,
       "feature": "worldtab",
-      "name": "world map card in the server view",
-      "alt": "Server runtime cards including the map preview and its expand control",
-      "focus": "The world map card and observed renderer state",
-      "padding": 24
+      "name": "complete dark server overview with the rendered map and runtime cards",
+      "alt": "Server overview in dark mode with the running status, rendered World View, resource telemetry and server tabs",
+      "focus": "Server identity, runtime, rendered map preview, resource readings and navigation"
     },
     {
       "click": "#server-detail-tabs-tab-world",

@@ -234,8 +234,14 @@ def resolve_main_sha(repository, event_name, event_sha, opener=None, timeout=30)
         raise DescriptionError("invalid GitHub repository for main resolution: " + str(repository))
     opener = opener or urllib.request.urlopen
     url = "https://api.github.com/repos/{}/git/ref/heads/main".format(repository)
+    request = urllib.request.Request(url)
+    token = os.environ.get("GH_TOKEN")
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+        request.add_header("Accept", "application/vnd.github+json")
+        request.add_header("X-GitHub-Api-Version", "2022-11-28")
     try:
-        with opener(url, timeout=timeout) as response:
+        with opener(request, timeout=timeout) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:
         raise DescriptionError("GitHub refs API returned HTTP " + str(error.code)

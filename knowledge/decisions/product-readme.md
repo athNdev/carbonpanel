@@ -36,7 +36,8 @@ Do not repaint labels, invent activity or hide a missing reading behind a plausi
 metric. Capture provenance records the application revision, date, data origin and
 framing. Review exports at README display size and refresh them when that UI changes.
 The README leads with the full dark dashboard and links to the full light
-alternate. Capture verifies the app's active theme at each screenshot.
+alternate. The server overview requires decoded terrain in its map preview.
+Capture verifies the app's active theme at each screenshot.
 
 The review stack uses its own fixtures and preserves data on shutdown. The
 Players capture requires a scoped observation from a headless game client
