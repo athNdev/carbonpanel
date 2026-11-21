@@ -721,7 +721,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				class="absolute inset-0 h-full w-full object-cover [image-rendering:pixelated]"
 			/>
 		{:else if previewFrame}
-			<div inert aria-hidden="true" class="pointer-events-none absolute inset-0 overflow-hidden">
+			<!-- Crop the renderer's toolbar from the passive preview. The dialog uses its full viewport. -->
+			<div inert aria-hidden="true" class="pointer-events-none absolute -inset-16">
 				<iframe
 					src={previewFrame}
 					title="World renderer preview"
