@@ -479,11 +479,23 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'GetServer') {
 			if (state.detail === 'error') return fail('Fixture server unavailable');
+			// A held refresh lets a check deliver a fresh Server object for the
+			// same id at a deterministic point (the real inventory polls every
+			// 5s). The spread always returns a new object, like the live store.
+			const control = state.detailRefresh;
+			if (control?.hold) {
+				control.count = (control.count ?? 0) + 1;
+				control.arrived?.();
+				await control.release;
+			}
 			const server = FLEET.find((server) => server.id === 'srv-1');
 			return reply({
-				server: state.narrowSettings
-					? { ...server, nodeId: 'local', containerId: 'fixture-container', mcVersion: '1.21.1' }
-					: server
+				server: {
+					...server,
+					...(state.narrowSettings
+						? { nodeId: 'local', containerId: 'fixture-container', mcVersion: '1.21.1' }
+						: {})
+				}
 			});
 		}
 		if (state.narrowSettings) {
@@ -1387,6 +1399,56 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await dialog.waitFor({ state: 'hidden' });
 				return 'roster remains visible, and closing the scoped dialog preserves its undo action';
 			});
+
+			if (width === 1024 && theme === 'dark') {
+				await check('server players @1024: allowlist dialog survives a held telemetry refresh', async () => {
+					let markArrived;
+					const refreshArrived = new Promise((resolve) => { markArrived = resolve; });
+					let releaseRefresh;
+					const refreshReleased = new Promise((resolve) => { releaseRefresh = resolve; });
+					const control = { hold: true, count: 0, arrived: markArrived, release: refreshReleased };
+					state.detailRefresh = control;
+					try {
+						const trigger = page.getByRole('button', { name: 'Add player to allowlist' });
+						await trigger.click();
+						const dialog = page.getByRole('dialog', { name: 'Add player to allowlist' });
+						const field = dialog.getByRole('textbox', { name: 'Exact UUID or username' });
+						await field.waitFor();
+
+						// Hold the refresh at the RPC boundary until the operator has
+						// typed, then deliver a fresh object with the same server id.
+						await Promise.race([
+							refreshArrived,
+							new Promise((_, reject) =>
+								setTimeout(() => reject(new Error('no telemetry refresh arrived within 10s')), 10000)
+							)
+						]);
+						await field.fill('TypedDuringRefresh');
+						assert.equal(await field.inputValue(), 'TypedDuringRefresh');
+						assert(await dialog.isVisible(), 'dialog must stay open while the refresh is held');
+
+						releaseRefresh();
+						await page.waitForTimeout(400);
+						assert(control.count >= 1, 'a real GetServer refresh must have been delivered');
+						assert(await dialog.isVisible(), 'dialog must stay open after a same-identity refresh');
+						assert.equal(
+							await field.inputValue(),
+							'TypedDuringRefresh',
+							'typed text must survive the refresh'
+						);
+
+						// The modal traps pointer events, so leave the tab the way a
+						// keyboard user would: focus the tablist and arrow away.
+						await page.locator('#server-detail-tabs-tab-players').focus();
+						await page.keyboard.press('ArrowRight');
+						await dialog.waitFor({ state: 'hidden' });
+						return `dialog survived ${control.count} same-identity refresh(es) and closed on tab exit`;
+					} finally {
+						control.hold = false;
+						delete state.detailRefresh;
+					}
+				});
+			}
 
 			await check(`cross-server roster @${width} ${theme}: an empty server filter remains reversible`, async () => {
 				await page.goto(root + '/players', { waitUntil: 'domcontentloaded' });

@@ -40,7 +40,6 @@ redirects are refused. The same bounded provider transport resolves an exact
 UUID (session-server profile) or current username (Minecraft Services name
 lookup). `LookupPlayer` is read-only: its ephemeral result never persists an
 identity, session, access row, roster entry, presence claim or audit row.
-See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins.
 Authoritative negatives are `NOT_FOUND`, outages are `UNAVAILABLE` and
 unpinnable queries are `AMBIGUOUS`. See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins. The server Players tab keeps roster filters
 visible after a zero-match search and opens a scoped allowlist dialog.
