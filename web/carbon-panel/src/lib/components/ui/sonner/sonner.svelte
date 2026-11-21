@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { Toaster as Sonner } from 'svelte-sonner';
+	import { Toaster as Sonner, type ToasterProps as SonnerProps } from 'svelte-sonner';
 	import { CircleCheck, CircleX, Info, TriangleAlert, X } from '@lucide/svelte';
 	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
 
+	let { ...restProps }: SonnerProps = $props();
 	let theme = $derived<'light' | 'dark'>($preferenceTheme === 'light' ? 'light' : 'dark');
 </script>
 
@@ -20,6 +21,7 @@
 		left: 'max(var(--carbon-space-3), env(safe-area-inset-left))',
 		bottom: 'max(var(--carbon-space-3), env(safe-area-inset-bottom))'
 	}}
+	{...restProps}
 >
 	{#snippet successIcon()}<CircleCheck aria-hidden="true" />{/snippet}
 	{#snippet errorIcon()}<CircleX aria-hidden="true" />{/snippet}
