@@ -79,7 +79,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		overlayDisplay,
 		overlayKindLabel
 	} from '$lib/features/worldview/overlays';
-	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
+	import {
+		adminActions,
+		buildAdminRequest,
+		type AdminAction,
+		type AdminRequest
+	} from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
 	import WorldMapLoading from '$lib/components/worldview/WorldMapLoading.svelte';
@@ -172,11 +177,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let sessionAttempt = 0;
 	let refreshAttempt = 0;
 	let overlaysAttempt = 0;
+	let capabilitiesAttempt = 0;
 	let refreshWarning = $derived(
 		Boolean(statusTarget && (statusError || (session && sessionError)))
 	);
-	let capabilities = $state<Capability[]>([]);
 	let capabilitiesRenderer = $derived(statusTarget?.renderer?.type ?? statusTarget?.rendererType);
+	let capabilitiesScope = $derived(
+		statusTarget && effectiveWorldKey
+			? JSON.stringify([
+					statusKey,
+					effectiveWorldKey,
+					capabilitiesRenderer,
+					statusTarget.renderer?.version
+				])
+			: ''
+	);
+	let capabilityResult = $state<{ key: string; items: Capability[]; error?: unknown }>();
+	let capabilities = $derived(
+		capabilityResult?.key === capabilitiesScope ? capabilityResult.items : []
+	);
+	let capabilitiesError = $derived(
+		capabilityResult?.key === capabilitiesScope ? capabilityResult.error : undefined
+	);
 	let sessionMode = $derived(
 		view === 'saved' ? 'native' : rendererControlsAvailable ? 'embedded' : null
 	);
@@ -206,8 +228,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 	let overlayDimension = $derived(view === 'saved' ? 'overworld' : dimension);
 	let nativeMarkers = $derived(nativeMapMarkers(overlays));
-	let x = $derived(parseNumber(page.url.searchParams.get('x')) ?? 0);
-	let z = $derived(parseNumber(page.url.searchParams.get('z')) ?? 0);
+	let x = $derived(parseNumber(page.url.searchParams.get('x')));
+	let z = $derived(parseNumber(page.url.searchParams.get('z')));
 	let layer = $derived(page.url.searchParams.get('layer') || 'all');
 	let nativeLocation = $derived.by(() => {
 		const x = parseNativeCoordinate(page.url.searchParams.get('x') ?? '');
@@ -305,17 +327,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function loadCapabilities() {
+		const key = capabilitiesScope;
+		if (!key) return;
 		const current = scopeGuard();
+		const attempt = ++capabilitiesAttempt;
+		const stillCurrent = () =>
+			current() && key === capabilitiesScope && attempt === capabilitiesAttempt;
 		try {
 			const response = await rpcClient.worldView.listCapabilities(
 				create(ListCapabilitiesRequestSchema, { serverId }),
 				silentCallOptions
 			);
-			if (current()) capabilities = response.capabilities;
+			if (stillCurrent()) capabilityResult = { key, items: response.capabilities };
 		} catch (error) {
-			if (!current()) return;
+			if (!stillCurrent()) return;
 			handleError(error);
-			capabilities = [];
+			capabilityResult = { key, items: isReadDenied(error) ? [] : capabilities, error };
 		}
 	}
 
@@ -372,7 +399,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			deniedByRead = false;
 			clearSession();
 			sessionError = null;
-			capabilities = [];
+			capabilityResult = undefined;
 			overlays = [];
 			overlaysError = null;
 			playerVisible = false;
@@ -381,7 +408,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (preview || !canRead || !worldRef) return;
+		if (preview || !canRead || !capabilitiesScope) return;
 		void loadCapabilities();
 	});
 
@@ -522,13 +549,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	// Opt-in player visibility is audited by the backend and hidden by default.
 	async function togglePlayers() {
-		if (!worldRef || !matrix.players(canObserve).supported) return;
 		const next = !playerVisible;
+		if (!worldRef || !canObserve || (next && !matrix.players(canObserve).supported)) return;
+		const current = scopeGuard();
 		try {
 			const response = await rpcClient.worldView.setPlayerVisibility(
 				create(SetPlayerVisibilityRequestSchema, { serverId, worldRef, visible: next }),
 				silentCallOptions
 			);
+			if (!current()) return;
 			playerVisible = response.visible;
 			visibilityNote = next
 				? 'Player visibility was enabled for this session. The disclosure was recorded in the activity log.'
@@ -536,7 +565,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			await loadOverlays();
 		} catch (error) {
 			// Action-scoped denial must not revoke an otherwise readable world view.
-			toast.error(formatRpcError(error, 'Could not change player visibility.'));
+			if (current()) toast.error(formatRpcError(error, 'Could not change player visibility.'));
 		}
 	}
 
@@ -547,21 +576,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let formX = $state('');
 	let formZ = $state('');
 	let formKind = $state('waypoint');
+	let overlayDraftDimension = '';
+	let overlayScope: (() => boolean) | undefined;
 
 	function openOverlayForm(overlay: MapOverlay | null) {
+		overlayScope = scopeGuard();
+		overlayDraftDimension = overlay?.dimension || overlayDimension;
 		editingOverlay = overlay;
 		formLabel = overlay?.label ?? '';
-		formX = overlay ? String(overlay.x) : String(x);
-		formZ = overlay ? String(overlay.z) : String(z);
+		formX = String(overlay?.x ?? x ?? '');
+		formZ = String(overlay?.z ?? z ?? '');
 		formKind = overlay?.kind ?? 'waypoint';
 		overlayModalOpen = true;
 	}
 
 	async function saveOverlay() {
-		if (!worldRef) return;
-		const px = Number(formX);
-		const pz = Number(formZ);
-		if (!Number.isFinite(px) || !Number.isFinite(pz)) {
+		const current = overlayScope;
+		if (!worldRef || !current?.() || !matrix.overlayEditing(canUpdate).supported) return;
+		const px = parseNumber(formX);
+		const pz = parseNumber(formZ);
+		if (px === null || pz === null) {
 			toast.error('Enter numeric X and Z coordinates.');
 			return;
 		}
@@ -573,7 +607,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						id: editingOverlay?.id ?? crypto.randomUUID(),
 						serverId,
 						worldRef,
-						dimension,
+						dimension: overlayDraftDimension,
 						kind: formKind,
 						x: px,
 						z: pz,
@@ -583,37 +617,46 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				}),
 				silentCallOptions
 			);
+			if (!current()) return;
 			overlayModalOpen = false;
 			await loadOverlays();
 			toast.success(editingOverlay ? 'Overlay updated.' : 'Overlay added.');
 		} catch (error) {
 			// Action-scoped denial must not revoke an otherwise readable world view.
-			toast.error(formatRpcError(error, 'Could not save the overlay.'));
+			if (current()) toast.error(formatRpcError(error, 'Could not save the overlay.'));
 		}
 	}
 
 	// Administration is separated from viewing and uses the existing command RPC.
 	let adminActionList = $derived(adminActions(canCommand));
 	let confirmAdminOpen = $state(false);
-	let pendingAdmin = $state<AdminAction | null>(null);
+	let pendingAdmin = $state<{
+		action: AdminAction;
+		request: AdminRequest;
+		position: MapPoint | null;
+	} | null>(null);
+	let adminScope: (() => boolean) | undefined;
 	let adminBusy = $state(false);
 	let adminError = $state('');
 
 	function requestAdmin(action: AdminAction) {
 		if (!action.allowed) return;
-		pendingAdmin = action;
+		const position = x === null || z === null ? null : { x, z };
+		const request = buildAdminRequest(action, serverId, position);
+		if (!request) {
+			adminError = 'Set both map coordinates before teleporting.';
+			return;
+		}
+		adminScope = scopeGuard();
+		pendingAdmin = { action, request, position: action.id === 'teleport' ? position : null };
 		adminError = '';
 		confirmAdminOpen = true;
 	}
 
 	async function confirmAdmin() {
-		const action = pendingAdmin;
-		if (!action || !canCommand) return;
-		const request = buildAdminRequest(action, serverId, { x, z });
-		if (!request) {
-			adminError = 'That command needs a valid X/Z position. Set map coordinates first.';
-			return;
-		}
+		const current = adminScope;
+		if (!pendingAdmin || !canCommand || !current?.()) return;
+		const { action, request } = pendingAdmin;
 		adminBusy = true;
 		adminError = '';
 		try {
@@ -621,6 +664,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				create(ServerSendCommandRequestSchema, { id: request.serverId, command: request.command }),
 				silentCallOptions
 			);
+			if (!current()) return;
 			if (!response.success) {
 				adminError = response.error || response.output || 'The server rejected the command.';
 				return;
@@ -628,6 +672,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			confirmAdminOpen = false;
 			toast.success(`${action.label} was sent to the server.`);
 		} catch (error) {
+			if (!current()) return;
 			// servers/command denial is separate from world_view/read; keep the map usable.
 			adminError = isPermissionDenied(error)
 				? 'Permission denied: your account cannot run commands on this server. A map session cannot grant this.'
@@ -636,6 +681,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			adminBusy = false;
 		}
 	}
+
+	$effect(() => {
+		if (!effectiveWorldKey) return;
+		return () => {
+			overlayModalOpen = false;
+			confirmAdminOpen = false;
+			pendingAdmin = null;
+			adminError = '';
+			playerVisible = false;
+			visibilityNote = '';
+		};
+	});
 
 	let worldChip = $derived.by(() => {
 		if (!worldRef) return '';
@@ -728,13 +785,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 			{/if}
 			{#if canRead && !denied && statusTarget}
+				{@const connecting = view === 'ready' && Boolean(mapLoadingLabel)}
+				{@const lastKnown = refreshWarning && Boolean(previewImage || previewFrame)}
 				<div class="flex flex-wrap items-end justify-between gap-2">
 					{#if statusTarget.name}<p class="min-w-0 text-base font-semibold break-words">
 							{statusTarget.name}
 						</p>{/if}
-					<CarbonTag type={VIEW_STATE_TONE[view]} size="sm"
-						>{view === 'saved' ? 'SAVED TERRAIN' : VIEW_STATE_LABEL[view]}</CarbonTag
+					<CarbonTag
+						type={lastKnown ? 'yellow' : connecting ? 'blue' : VIEW_STATE_TONE[view]}
+						size="sm"
 					>
+						{lastKnown
+							? 'LAST KNOWN'
+							: connecting
+								? 'CONNECTING'
+								: view === 'saved'
+									? 'SAVED TERRAIN'
+									: VIEW_STATE_LABEL[view]}
+					</CarbonTag>
 				</div>
 			{/if}
 		</div>
@@ -1006,6 +1074,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					class="min-w-0 space-y-3"
 					class:hidden={!rendererControlsAvailable || view === 'saved'}
 				>
+					{#if capabilitiesError}
+						<p class="border-l-4 border-warning bg-warning/10 p-2 text-xs" role="alert">
+							Could not check map controls. Use Refresh to retry.
+						</p>
+					{/if}
 					{#if rendererControlsAvailable}
 						<p class="text-xs text-muted-foreground">
 							Use the controls inside the map to pan, zoom, or search for coordinates.
@@ -1067,7 +1140,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											<Users class="h-3.5 w-3.5" />
 											<span>Show player markers</span>
 										</CarbonButton>
-									{:else if playerVisible}
+									{:else if playerVisible && canObserve}
 										<CarbonButton kind="tertiary" size="sm" onclick={togglePlayers}>
 											<span>Hide player markers</span>
 										</CarbonButton>
@@ -1203,10 +1276,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	<CarbonConfirm
 		bind:open={confirmAdminOpen}
-		title={pendingAdmin?.label ?? 'Run command'}
-		message={pendingAdmin?.consequence ?? ''}
+		title={pendingAdmin?.action.label ?? 'Run command'}
+		message={(pendingAdmin?.action.consequence ?? '') +
+			(pendingAdmin?.position
+				? ` X ${pendingAdmin.position.x}, Z ${pendingAdmin.position.z}.`
+				: '')}
 		confirmLabel="Run command"
-		danger={pendingAdmin?.id === 'pause-autosave'}
+		danger={pendingAdmin?.action.id === 'pause-autosave'}
 		confirming={adminBusy}
 		onconfirm={confirmAdmin}
 		onclose={() => {

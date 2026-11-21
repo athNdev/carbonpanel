@@ -484,9 +484,7 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 
 			<!-- Tile 3: Engine Details -->
-			<div
-				class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5"
-			>
+			<div class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5">
 				<div class="flex items-center justify-between">
 					<h2 class="text-sm font-semibold">Engine specs</h2>
 					<Info class="h-4 w-4 text-[var(--chart-4)]" />
@@ -524,9 +522,7 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<!-- Tile 4: Hardware Quotas -->
-			<div
-				class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5"
-			>
+			<div class="flex flex-col justify-between border border-border bg-card p-4 sm:p-5">
 				<div class="flex items-center justify-between">
 					<h2 class="text-sm font-semibold">Resource telemetry</h2>
 					<Cpu class="h-4 w-4 text-destructive-text" />
@@ -861,7 +857,7 @@ one at https://mozilla.org/MPL/2.0/.
 		onclose={closeMap}
 	>
 		{#if requestedMap !== null}
-			{#key serverId}
+			{#key JSON.stringify([serverId, requestedMap])}
 				<WorldViewWorkspace {serverId} worldKey={requestedMap || undefined} presentation="dialog" />
 			{/key}
 		{/if}

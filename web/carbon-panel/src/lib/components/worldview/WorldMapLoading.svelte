@@ -43,7 +43,7 @@
 	}
 
 	.compact .tiles {
-		--tile-size: 0.875rem;
+		--tile-size: 1rem;
 	}
 
 	.tile {

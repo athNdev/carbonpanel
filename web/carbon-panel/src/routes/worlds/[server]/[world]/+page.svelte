@@ -4,4 +4,6 @@
 	import WorldViewWorkspace from '$lib/components/worldview/WorldViewWorkspace.svelte';
 </script>
 
-<WorldViewWorkspace serverId={page.params.server ?? ''} worldKey={page.params.world ?? ''} />
+{#key JSON.stringify([page.params.server, page.params.world])}
+	<WorldViewWorkspace serverId={page.params.server ?? ''} worldKey={page.params.world ?? ''} />
+{/key}

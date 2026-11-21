@@ -8,6 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script module lang="ts">
 	let scrollLocks = 0;
 	let previousOverflow = '';
+	const activeDialogs = new Set<HTMLDivElement>();
 
 	function lockBackgroundScroll() {
 		if (scrollLocks++ === 0) {
@@ -154,9 +155,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function isTopDialog() {
-		const dialogs = document.querySelectorAll('[data-carbon-active-modal]');
-		return modalElement === dialogs[dialogs.length - 1];
+		return modalElement === [...activeDialogs].at(-1);
 	}
+
+	$effect(() => {
+		if (!open || !modalElement) return;
+		const dialog = modalElement;
+		activeDialogs.add(dialog);
+		return () => {
+			activeDialogs.delete(dialog);
+		};
+	});
 
 	$effect(() => {
 		// Lock background scrolling while the dialog owns the viewport.
@@ -217,7 +226,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div
 			bind:this={modalElement}
 			role="dialog"
-			data-carbon-active-modal={open ? '' : undefined}
 			aria-modal="true"
 			aria-labelledby={title ? titleId : undefined}
 			aria-describedby={description ? descId : undefined}
