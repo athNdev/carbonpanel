@@ -144,7 +144,7 @@ one at https://mozilla.org/MPL/2.0/.
 	for its subtree.
 -->
 <Tooltip.Provider>
-	<Toaster position="bottom-center" expand={true} richColors />
+	<Toaster />
 	<GlobalLoading />
 
 	{#if page.url.pathname === '/login'}

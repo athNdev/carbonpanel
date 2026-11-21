@@ -151,6 +151,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let canCommand = $derived(checkPermission(auth.permissions, 'servers', 'command', serverId));
 	const canManageModules = (resource: string, action: string) =>
 		checkPermission(auth.permissions, resource, action, serverId);
+	let modulesHref = $derived(resolve('/servers/[id]', { id: serverId }) + '?tab=modules');
 	let blueMapSetupKey = $state('');
 	let deniedByRead = $state(false);
 	let denied = $derived(deniedByRead || isReadDenied(statusError));
@@ -934,6 +935,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									can={canManageModules}
 									oncomplete={() => void retry()}
 								/>
+							{:else if canManageModules('modules', 'read')}
+								<CarbonButton kind="secondary" size="sm" href={modulesHref}
+									>Open Modules</CarbonButton
+								>
 							{/if}
 						</div>
 					{:else if view === 'error'}
@@ -966,6 +971,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<p class="text-sm text-muted-foreground">
 								{statusTarget?.freshness?.note || 'The renderer has stopped serving tiles.'}
 							</p>
+							{#if statusTarget?.freshness?.source === 'worldview.discovered.bluemap' && canManageModules('modules', 'read')}
+								<CarbonButton kind="secondary" size="sm" href={modulesHref}
+									>Open Modules</CarbonButton
+								>
+							{/if}
 						</div>
 					{:else if view === 'saved'}
 						<div class="space-y-2 border border-border bg-card px-4 py-3 text-sm">
@@ -975,6 +985,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</p>
 							{#if statusTarget?.error}
 								<p class="text-muted-foreground">{statusTarget.error}</p>
+								{#if canManageModules('modules', 'read')}
+									<CarbonButton kind="tertiary" size="sm" href={modulesHref}
+										>Open Modules</CarbonButton
+									>
+								{/if}
 							{:else if canManageModules('modules', 'create') && canManageModules('modules', 'start')}
 								{#key statusKey}
 									<details

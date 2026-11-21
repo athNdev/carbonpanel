@@ -28,6 +28,8 @@ import (
 const (
 	blueMapTemplateID       = worldview.BuiltinBlueMapTemplateID
 	blueMapConsentSignalKey = "bluemap_consent_accepted"
+	blueMapReuseSignalKey   = "bluemap_reuse_config"
+	blueMapSetupHeader      = "Carbonpanel-Bluemap-Setup"
 	// blueMapManagedSignalKey isolates the World View managed action. Existing
 	// operators creating a module from the Modules page do not need the new
 	// consent metadata and keep the legacy generic path; they are not broken.
@@ -36,6 +38,25 @@ const (
 	// The lease covers the entire worker, including a cold image pull.
 	defaultBlueMapStartupTimeout = 2 * time.Minute
 )
+
+func blueMapConfigPrecondition(cause error) *connect.Error {
+	var reason, message string
+	switch {
+	case errors.Is(cause, bluemapdiscovery.ErrManagedConfigExists):
+		reason, message = "retained-config", "BlueMap configuration was found. Reuse it to install the renderer with your settings."
+	case errors.Is(cause, bluemapdiscovery.ErrReuseConfigMissing):
+		reason, message = "config-missing", cause.Error()
+	case errors.Is(cause, bluemapdiscovery.ErrReuseDownloadConsent):
+		reason, message = "download-consent", cause.Error()
+	case errors.Is(cause, bluemapdiscovery.ErrReuseWorldConfig):
+		reason, message = "world-config", cause.Error()
+	default:
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("prepare BlueMap configuration: %w", cause))
+	}
+	err := connect.NewError(connect.CodeFailedPrecondition, errors.New(message))
+	err.Meta().Set(blueMapSetupHeader, reason)
+	return err
+}
 
 // prepareBuiltinBlueMap apply the OSS-388 server-side rules to a CreateModule
 // request for the built-in renderer. It runs inside ModuleService under the
@@ -221,13 +242,17 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	// world (including custom level folder, _nether/_end and custom dimensions).
 	// It is STAGED now and committed only after the module row persists; an
 	// existing operator config is preserved, never overwritten.
-	stager, stageErr := bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, node, server, world)
-	if stageErr != nil {
-		if errors.Is(stageErr, bluemapdiscovery.ErrManagedConfigExists) {
-			return fail(connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("existing BlueMap config is preserved; adopt it manually instead: %w", stageErr)))
+	var stager *bluemapdiscovery.ManagedConfigStager
+	if msg.Metadata[blueMapReuseSignalKey] == "true" {
+		if err := bluemapdiscovery.CheckRetainedConfig(ctx, s.storageResolver, node, server); err != nil {
+			return fail(blueMapConfigPrecondition(err))
 		}
-		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("stage managed BlueMap config: %w", stageErr)))
+	} else {
+		var stageErr error
+		stager, stageErr = bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, node, server, world)
+		if stageErr != nil {
+			return fail(blueMapConfigPrecondition(stageErr))
+		}
 	}
 
 	if msg.Metadata == nil {
@@ -255,7 +280,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	serverID, startImmediately := server.ID, msg.StartImmediately
 	fin := func(ok bool, moduleID string) error {
 		once.Do(func() {
-			if ok {
+			if ok && stager != nil {
 				commitErr = stager.Commit()
 			}
 			if !ok || commitErr != nil {
@@ -301,6 +326,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 func blueMapModuleMetadata(requested map[string]string, managed bool) map[string]string {
 	metadata := maps.Clone(requested)
 	delete(metadata, blueMapManagedSignalKey)
+	delete(metadata, blueMapReuseSignalKey)
 	if managed {
 		if metadata == nil {
 			metadata = make(map[string]string)

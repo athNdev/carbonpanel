@@ -50,4 +50,7 @@ Native text-entry controls and select triggers share the panel field rule in `ap
 
 Server Configuration and global Server Defaults share the category/search editor. Filtering preserves edits across categories. Copied setting links include the owning tab and property-key fragment so a fresh visit reveals the field.
 
+The root Sonner wrapper gives notifications one bottom-right stack with
+theme tokens, status icons, safe-area insets, and a keyboard-reachable dismiss control.
+
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).

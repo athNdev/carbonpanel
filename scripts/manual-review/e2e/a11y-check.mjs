@@ -1067,13 +1067,35 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
 				if (route.path === '/servers/srv-1') {
-					await check(`server actions @${width} ${theme}: Copy Address is reachable by keyboard`, async () => {
+					await check(`server actions @${width} ${theme}: Copy Address announces a dismissible bottom-right toast`, async () => {
 						const trigger = page.getByRole('button', { name: 'More server actions', exact: true });
 						await trigger.press('Enter');
 						const copyAddress = page.getByRole('menuitem', { name: 'Copy Address', exact: true });
 						await copyAddress.waitFor();
-						await page.keyboard.press('Escape');
+						await copyAddress.press('Enter');
 						await copyAddress.waitFor({ state: 'hidden' });
+						const toast = page.locator('[data-sonner-toast]').filter({ hasText: 'Address copied to clipboard' });
+						const offset = width <= 600 ? 12 : 24;
+						await page.waitForFunction((offset) => {
+							const item = Array.from(document.querySelectorAll('[data-sonner-toast][data-mounted="true"]')).find(
+								(item) => item.querySelector('[data-title]')?.textContent?.trim() === 'Address copied to clipboard'
+							);
+							if (!item) return false;
+							const list = item.closest('[data-sonner-toaster]');
+							if (!list) return false;
+							const placement = getComputedStyle(list);
+							const anchor = list.getBoundingClientRect();
+							const { left, right, bottom } = item.getBoundingClientRect();
+							return placement.position === 'fixed' && placement.right === `${offset}px` &&
+								placement.bottom === `${offset}px` && left >= 8 && right <= innerWidth &&
+								Math.abs(right - anchor.right) <= 1 && Math.abs(bottom - anchor.bottom) <= 1;
+						}, offset, { timeout: 5000 });
+						assert.equal(await toast.evaluate((item) => item.closest('[aria-live]')?.getAttribute('aria-live')), 'polite');
+						assert.equal(await toast.evaluate((item) => getComputedStyle(item).borderTopLeftRadius), '0px');
+						if (process.env.UI_PASS_SHOTS)
+							await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/toast-${width}-${theme}.png`, animations: 'disabled' });
+						await toast.getByRole('button', { name: 'Dismiss notification' }).press('Enter');
+						await toast.waitFor({ state: 'hidden' });
 					});
 					await check(`server map @${width} ${theme}: opens by keyboard and restores focus`, async () => {
 						const expand = page.getByRole('button', { name: 'Expand world map', exact: true });

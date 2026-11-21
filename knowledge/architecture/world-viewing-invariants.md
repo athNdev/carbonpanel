@@ -54,6 +54,7 @@ sources:
   `startImmediately` needs `modules/start` plus `modules/create`. Checks precede
   world reads and config writes; refusals have no config side effects. The
   managed signal keeps generic Modules-page creation on its existing path.
+  Explicit reuse of retained config checks recorded consent and the active Overworld bind without rewriting files.
 - Managed BlueMap keeps a read-only rootfs/world bind but mounts a writable panel-owned Mojang resource cache at `/app/bluemap`; without it the renderer exits `Resource-File missing`.
 - The managed renderer variant is constructed on the backend from actual world
   facts read via the confined node accessor: private container-only web port

@@ -20,7 +20,12 @@ one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { Save, RefreshCw, Loader2, Link, Send, ChevronRight, Wand2 } from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import { CarbonButton, CarbonInlineLoading, CarbonSelect } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonInlineLoading,
+		CarbonSearch,
+		CarbonSelect
+	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
@@ -594,33 +599,37 @@ one at https://mozilla.org/MPL/2.0/.
 	{#snippet toolbar()}
 		{#if filteredCategories.length}
 			<div class="config-toolbar">
-				<div class="min-w-0">
-					<Label for={`${fieldControlPrefix}-search`}>Search settings</Label>
-					<Input
+				<div class="config-search">
+					<label for={`${fieldControlPrefix}-search`}>Search settings</label>
+					<CarbonSearch
 						id={`${fieldControlPrefix}-search`}
 						type="search"
-						placeholder="Name, environment variable, or description"
+						aria-label="Search settings"
+						placeholder="Name, environment variable or description"
 						bind:value={search}
 					/>
 				</div>
-				<CarbonSelect
-					label="Configuration category"
-					value={activeCategory}
-					onchange={(event) => selectCategory(event.currentTarget.value)}
-				>
-					<option value="all">All categories</option>
-					{#each filteredCategories as category (category.name)}
-						<option value={getCategoryId(category.name)}>{category.name}</option>
-					{/each}
-				</CarbonSelect>
-				<button
-					type="button"
-					class="change-filter focus-ring"
-					aria-pressed={changesOnly}
-					onclick={() => (changesOnly = !changesOnly)}
-				>
-					Unsaved ({modifiedFields.size})
-				</button>
+				<div class="config-filters">
+					<CarbonSelect
+						class="min-w-0"
+						label="Configuration category"
+						value={activeCategory}
+						onchange={(event) => selectCategory(event.currentTarget.value)}
+					>
+						<option value="all">All categories</option>
+						{#each filteredCategories as category (category.name)}
+							<option value={getCategoryId(category.name)}>{category.name}</option>
+						{/each}
+					</CarbonSelect>
+					<button
+						type="button"
+						class="change-filter focus-ring"
+						aria-pressed={changesOnly}
+						onclick={() => (changesOnly = !changesOnly)}
+					>
+						Unsaved ({modifiedFields.size})
+					</button>
+				</div>
 			</div>
 		{/if}
 	{/snippet}
@@ -792,14 +801,28 @@ one at https://mozilla.org/MPL/2.0/.
 	.config-toolbar {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: end;
-		gap: 0.75rem;
-		padding: 0.75rem 1rem;
+		gap: var(--carbon-space-3);
+		padding: var(--carbon-space-4);
+		background: var(--card);
 	}
-	.config-toolbar > :first-child {
-		flex: 2 1 15rem;
+	.config-search {
+		flex: 2 1 17rem;
+		min-width: 0;
+		align-self: end;
 		display: grid;
-		gap: 0.25rem;
+		gap: var(--carbon-space-1);
+		font-size: 0.8125rem;
+	}
+	.config-search :global(input::-webkit-search-cancel-button) {
+		appearance: none;
+	}
+	.config-filters {
+		flex: 1 1 16rem;
+		min-width: 0;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: var(--carbon-space-3);
 	}
 	.change-filter,
 	.source-button {
@@ -811,6 +834,14 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 	.change-filter {
 		min-height: var(--carbon-control-md);
+		padding-inline: var(--carbon-space-3);
+		white-space: nowrap;
+		background: var(--field-surface);
+	}
+	.change-filter:hover,
+	.source-button:hover {
+		color: var(--foreground);
+		border-color: var(--field-hover-edge);
 	}
 	.change-filter[aria-pressed='true'],
 	.source-button[aria-pressed='true'] {
@@ -825,7 +856,8 @@ one at https://mozilla.org/MPL/2.0/.
 		align-items: baseline;
 		gap: 0.5rem;
 		padding: 0.5rem 1rem;
-		background: var(--secondary);
+		background: var(--card);
+		border-block-end: 1px solid var(--border);
 		font-size: 0.875rem;
 		font-weight: 600;
 	}

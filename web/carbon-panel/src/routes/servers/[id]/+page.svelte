@@ -11,16 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { page } from '$app/state';
 	import { displayPreferences } from '$lib/display-preferences.svelte';
-	import {
-		ChevronDown,
-		CircleHelp,
-		Play,
-		Square,
-		Moon,
-		Pause,
-		TriangleAlert,
-		CircleX
-	} from '@lucide/svelte';
+
 	const { metricsExpanded } = displayPreferences;
 	import { onMount, untrack } from 'svelte';
 	import { SvelteURL } from 'svelte/reactivity';
@@ -37,6 +28,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
 	import {
+		ChevronDown,
 		RefreshCcw,
 		MoreVertical,
 		Package,
@@ -83,7 +75,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import { memoryUsagePercent } from '$lib/utils/safe-percent';
-	import { exitFailureCopy, memoryLimitCopy, worldDiskCopy } from '$lib/utils/resource-enforcement';
+	import { memoryLimitCopy, worldDiskCopy } from '$lib/utils/resource-enforcement';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ServerSettings from '$lib/components/server-settings.svelte';
@@ -99,6 +91,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerModules from '$lib/components/server-ui/ServerModules.svelte';
 	import ServerWorld from '$lib/components/server-ui/ServerWorld.svelte';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
+	import ServerRuntimeStatus from '$lib/components/server-ui/ServerRuntimeStatus.svelte';
 	import WorldViewWorkspace from '$lib/components/worldview/WorldViewWorkspace.svelte';
 
 	let serverId = $derived(page.params.id ?? '');
@@ -168,23 +161,6 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 	let requestedMap = $derived(page.url.searchParams.get('map'));
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
-	const runtimeIcons = {
-		[ServerStatus.RUNNING]: Play,
-		[ServerStatus.STOPPED]: Square,
-		[ServerStatus.DEEPSLEEP]: Moon,
-		[ServerStatus.PAUSED]: Pause,
-		[ServerStatus.UNHEALTHY]: TriangleAlert,
-		[ServerStatus.ERROR]: CircleX,
-		[ServerStatus.CREATING]: Package,
-		[ServerStatus.STARTING]: Loader2,
-		[ServerStatus.RESTARTING]: RefreshCcw,
-		[ServerStatus.STOPPING]: Loader2,
-		[ServerStatus.UNSPECIFIED]: CircleHelp
-	};
-	let RuntimeIcon = $derived(
-		runtimeIcons[server?.status ?? ServerStatus.UNSPECIFIED] ?? CircleHelp
-	);
-
 	function openMap(worldKey = '') {
 		const url = new URL(detailUrl.href);
 		url.searchParams.set('map', worldKey);
@@ -482,90 +458,13 @@ one at https://mozilla.org/MPL/2.0/.
 			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] [&>*]:min-w-0"
 			data-testid="showcase-runtime-tiles"
 		>
-			<!-- Runtime state -->
-			<div
-				data-testid="showcase-runtime-tile"
-				class="flex min-h-48 flex-col justify-between gap-3 border border-border bg-card p-4 sm:p-5"
-			>
-				<h2 class="text-sm font-semibold">Runtime status</h2>
-				<div class="flex items-center gap-4">
-					{#if [ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.RESTARTING].includes(server.status)}
-						<svg
-							class="runtime-drive"
-							class:winding={server.status !== ServerStatus.RUNNING}
-							viewBox="0 0 90 64"
-							aria-hidden="true"
-							style:color={`var(--tag-${getStatusTagType(server.status)}-text)`}
-						>
-							<path
-								d="M7 55h75M21 54l9-21h4l8 21m13 0 6-20h4l7 20"
-								fill="none"
-								stroke="currentColor"
-								stroke-opacity=".35"
-								stroke-width="1.5"
-							/>
-							<g transform="translate(32 31)">
-								<g class="drive-wheel">
-									<polygon
-										points="16.4,-4.4 16.8,-2.6 20.0,-1.9 20.0,1.9 16.8,2.6 16.4,4.4 15.8,6.2 18.3,8.4 16.4,11.6 13.3,10.6 12.0,12.0 10.6,13.3 11.6,16.4 8.4,18.3 6.2,15.8 4.4,16.4 2.6,16.8 1.9,20.0 -1.9,20.0 -2.6,16.8 -4.4,16.4 -6.2,15.8 -8.4,18.3 -11.6,16.4 -10.6,13.3 -12.0,12.0 -13.3,10.6 -16.4,11.6 -18.3,8.4 -15.8,6.2 -16.4,4.4 -16.8,2.6 -20.0,1.9 -20.0,-1.9 -16.8,-2.6 -16.4,-4.4 -15.8,-6.2 -18.3,-8.4 -16.4,-11.6 -13.3,-10.6 -12.0,-12.0 -10.6,-13.3 -11.6,-16.4 -8.4,-18.3 -6.2,-15.8 -4.4,-16.4 -2.6,-16.8 -1.9,-20.0 1.9,-20.0 2.6,-16.8 4.4,-16.4 6.2,-15.8 8.4,-18.3 11.6,-16.4 10.6,-13.3 12.0,-12.0 13.3,-10.6 16.4,-11.6 18.3,-8.4 15.8,-6.2"
-									/>
-									<path d="M0-12v6m10.4 12-5.2-3m-15.6 3 5.2-3" />
-									<circle r="3.5" />
-								</g>
-							</g>
-							<g transform="translate(63 31) rotate(22.5)">
-								<g class="drive-wheel pinion">
-									<polygon
-										points="10.0,-4.1 10.5,-2.4 13.8,-2.0 13.8,2.0 10.5,2.4 10.0,4.1 9.2,5.7 11.1,8.3 8.3,11.1 5.7,9.2 4.1,10.0 2.4,10.5 2.0,13.8 -2.0,13.8 -2.4,10.5 -4.1,10.0 -5.7,9.2 -8.3,11.1 -11.1,8.3 -9.2,5.7 -10.0,4.1 -10.5,2.4 -13.8,2.0 -13.8,-2.0 -10.5,-2.4 -10.0,-4.1 -9.2,-5.7 -11.1,-8.3 -8.3,-11.1 -5.7,-9.2 -4.1,-10.0 -2.4,-10.5 -2.0,-13.8 2.0,-13.8 2.4,-10.5 4.1,-10.0 5.7,-9.2 8.3,-11.1 11.1,-8.3 9.2,-5.7"
-									/>
-									<path d="M0-7v3m6.1 7-2.6-1.5m-9.6 1.5 2.6-1.5" />
-									<circle r="2.25" />
-								</g>
-							</g>
-						</svg>
-					{:else}
-						<span
-							class="runtime-emblem"
-							aria-hidden="true"
-							style:color={`var(--tag-${getStatusTagType(server.status)}-text)`}
-						>
-							<RuntimeIcon size={24} strokeWidth={1.5} />
-						</span>
-					{/if}
-					<span class="text-2xl font-medium tracking-tight first-letter:uppercase"
-						>{getStatusDisplayName(server.status).toLowerCase()}</span
-					>
-				</div>
-				<div class="border-t border-border pt-2.5">
-					<p class="text-xs leading-relaxed text-muted-foreground" aria-live="polite">
-						{#if server.status === ServerStatus.RUNNING}
-							Server container is running
-						{:else if server.status === ServerStatus.STOPPED}
-							Container offline
-						{:else if server.status === ServerStatus.CREATING}
-							Provisioning container & checking image
-						{:else if server.status === ServerStatus.STARTING}
-							Starting server (modpack downloads may take several minutes)
-						{:else if server.status === ServerStatus.RESTARTING}
-							Restarting server container
-						{:else if server.status === ServerStatus.DEEPSLEEP}
-							{isProxied
-								? 'Deep sleeping (container stopped, proxy listening for login wake)'
-								: 'Deep sleeping (container stopped, direct port listening for login wake)'}
-						{:else if server.status === ServerStatus.PAUSED}
-							Paused via cgroup freezer (instant resume available)
-						{:else if server.status === ServerStatus.UNHEALTHY}
-							Server running but failing health checks
-						{:else if server.status === ServerStatus.STOPPING}
-							Gracefully shutting down
-						{:else if server.status === ServerStatus.ERROR}
-							{exitFailureCopy(server.statusReason)}
-						{:else}
-							Daemon status: {getStatusDisplayName(server.status)}
-						{/if}
-					</p>
-				</div>
-			</div>
+			{#key server.id}
+				<ServerRuntimeStatus
+					status={server.status}
+					statusReason={server.statusReason}
+					proxied={isProxied}
+				/>
+			{/key}
 
 			<!-- Current world -->
 			<WorldViewWorkspace
@@ -961,73 +860,3 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</CarbonModal>
 {/if}
-
-<style>
-	.runtime-emblem {
-		display: grid;
-		flex: none;
-		width: 3.5rem;
-		aspect-ratio: 1;
-		place-items: center;
-		border: 1px solid currentColor;
-		background-color: color-mix(in srgb, currentColor 7%, var(--card));
-	}
-	.runtime-drive {
-		flex: none;
-		width: 6.5rem;
-		height: auto;
-	}
-	.drive-wheel {
-		fill: var(--card);
-		stroke: currentColor;
-		stroke-width: 1.4;
-		stroke-linejoin: round;
-		animation: drive-turn 12s linear infinite;
-	}
-	.drive-wheel polygon {
-		fill: color-mix(in srgb, currentColor 10%, var(--card));
-	}
-	.pinion {
-		animation-duration: 8s;
-		animation-direction: reverse;
-	}
-	.winding .drive-wheel {
-		animation: drive-engage 3s cubic-bezier(0.35, 0, 0.3, 1) infinite;
-	}
-	.winding .pinion {
-		animation-name: pinion-engage;
-	}
-	@keyframes drive-turn {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@keyframes drive-engage {
-		0%,
-		25% {
-			transform: rotate(0);
-		}
-		85%,
-		100% {
-			transform: rotate(240deg);
-		}
-	}
-	@keyframes pinion-engage {
-		0%,
-		25% {
-			transform: rotate(0);
-		}
-		85%,
-		100% {
-			transform: rotate(-360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.runtime-drive .drive-wheel {
-			animation: none;
-		}
-	}
-	:global([data-carbon-motion='reduced']) .runtime-drive .drive-wheel {
-		animation: none;
-	}
-</style>

@@ -316,6 +316,7 @@ func readAcceptDownload(accessor configAccessor) bool {
 	if err != nil {
 		return false
 	}
+	var seen, accepted bool
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
@@ -325,12 +326,16 @@ func readAcceptDownload(accessor configAccessor) bool {
 		if !ok {
 			key, value, ok = strings.Cut(line, "=")
 		}
-		if ok && strings.EqualFold(strings.Trim(key, `"' `), "accept-download") &&
-			strings.EqualFold(strings.Trim(strings.TrimSpace(value), `"' `), "true") {
-			return true
+		if !ok || !strings.EqualFold(strings.Trim(key, `"' `), "accept-download") {
+			continue
 		}
+		if seen {
+			return false
+		}
+		seen = true
+		accepted = strings.EqualFold(strings.Trim(strings.TrimSpace(value), `"' `), "true")
 	}
-	return false
+	return accepted
 }
 
 // readMapConfig finds a map whose `world` points at the container's /app/world

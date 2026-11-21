@@ -433,6 +433,89 @@ func TestBuiltinBlueMapRefusalsHaveZeroConfigSideEffects(t *testing.T) {
 	}
 }
 
+func TestBuiltinBlueMapRecoversRetainedConfiguration(t *testing.T) {
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "admin-1", Roles: []string{"admin"}})
+	const serverID = "srv-retained"
+	store, dataRoot := blueMapFixtureStore(t, ctx, serverID, "default", "actual_world")
+	defer func() { _ = store.Close() }()
+	log := logger.New()
+	svc := &ModuleService{
+		store: store, enforcer: mustEnforcer(t, store), storageResolver: nodestorage.NewResolver(nil),
+		moduleManager: module.NewManager(store, nil, nil, &config.Config{}, nil, log), log: log,
+	}
+
+	configDir := filepath.Join(dataRoot, "modules", "bluemap", "config")
+	if err := os.MkdirAll(filepath.Join(configDir, "maps"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, value string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(configDir, rel), []byte(value), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	coreFile := "core.conf"
+	mapFile := filepath.Join("maps", "overworld.conf")
+	core := "# My settings\nrender-thread-count: 4\naccept-download: true\n"
+	mapConfig := "# Map left behind by the old module\nworld: \"world\"\ndimension: \"minecraft:overworld\"\nstorage: \"file\"\n"
+	write(coreFile, "accept-download: false\n")
+	write(mapFile, mapConfig)
+
+	call := func(reuse bool) (*connect.Response[v1.CreateModuleResponse], error) {
+		metadata := map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}
+		if reuse {
+			metadata[blueMapReuseSignalKey] = "true"
+		}
+		return svc.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+			Name: "BlueMap", ServerId: serverID, TemplateId: blueMapTemplateID,
+			StartImmediately: true, Metadata: metadata,
+		}))
+	}
+	refused := func(reuse bool, reason string) {
+		t.Helper()
+		_, err := call(reuse)
+		var rpcErr *connect.Error
+		if !errors.As(err, &rpcErr) || rpcErr.Code() != connect.CodeFailedPrecondition || rpcErr.Meta().Get(blueMapSetupHeader) != reason {
+			t.Fatalf("reuse %v, expected %q, got %v", reuse, reason, err)
+		}
+		modules, err := store.ListModulesByTemplate(ctx, blueMapTemplateID)
+		if err != nil || len(modules) != 0 {
+			t.Fatalf("failed recovery created a module: %v, %v", modules, err)
+		}
+	}
+	refused(false, "retained-config")
+	refused(true, "download-consent")
+	write(coreFile, core+"accept-download: false\n")
+	refused(true, "download-consent")
+	write(coreFile, core)
+	write(mapFile, "world: \"/other/world\"\n")
+	refused(true, "world-config")
+	write(mapFile, mapConfig)
+
+	response, err := call(true)
+	if err != nil || response.Msg.GetModule().GetId() == "" {
+		t.Fatalf("reuse retained setup: %v, %v", response, err)
+	}
+	record, err := store.GetModule(ctx, response.Msg.GetModule().GetId())
+	if err != nil || !isManagedBlueMapModule(record) || record.Metadata[blueMapReuseSignalKey] != "" {
+		t.Fatalf("incorrect recovered renderer: %v, %v", record, err)
+	}
+	for path, want := range map[string]string{coreFile: core, mapFile: mapConfig} {
+		if raw, err := os.ReadFile(filepath.Join(configDir, path)); err != nil || string(raw) != want {
+			t.Fatalf("recovery rewrote %s: %q, %v", path, raw, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "maps", "actual_world.conf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovery generated a second Overworld map: %v", err)
+	}
+	// A second request must adopt the recovered module while the worker holds
+	// the lifecycle transition or after its Docker failure in this fixture.
+	again, err := call(true)
+	if err != nil || again.Msg.GetModule().GetId() != record.ID {
+		t.Fatalf("second recovery did not reuse the same module: %v, %v", again, err)
+	}
+}
+
 type fakeModuleAuthorizer struct {
 	allowCreate bool
 	allowStart  bool

@@ -77,8 +77,6 @@ one at https://mozilla.org/MPL/2.0/.
 	/* Sonner defines its own --success-text/--error-text on the toaster host, so
 	 * the app token has to be aliased before it can be passed back to the host
 	 * without self-referencing. These keep rich-color toast text at WCAG AA. */
-	--color-sonner-error-text: var(--destructive-text);
-	--color-sonner-success-text: var(--success-text);
 	--color-warning: var(--warning);
 	--color-warning-text: var(--warning-text);
 	--color-border: var(--border);

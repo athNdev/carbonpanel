@@ -97,6 +97,13 @@ ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
 principal and clock), adopts an existing module without mutation, and requires
 `modules/start` in addition to `modules/create` when starting immediately.
+If the module record is gone and its files remain, **Use existing configuration**
+registers and starts a new private BlueMap container with those files. The
+existing configuration needs a single `accept-download: true` entry in
+`modules/bluemap/config/core.conf` and an Overworld map pointing to
+`/app/world` (the stock relative value `world` also works). Review the
+download terms before changing the acknowledgement. Existing files are reused
+without a rewrite. Use **Open Modules** to inspect or restart an installed renderer.
 Docker image preparation, container creation and start share a two-minute
 startup limit. If the limit expires, the panel releases the server lifecycle
 transition and marks the module as errored. Open Modules and retry Start;

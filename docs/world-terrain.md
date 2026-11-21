@@ -40,9 +40,14 @@ can serve this world's map, and uses the built-in map while that installation
 is stopped or waiting for its first render when a readable save is available. A native
 map reads only saved Overworld data. **Map span** sets the longer edge of the
 viewport from 32 to 1,024 blocks. **Auto** opens at 256 blocks and expands to
-512 when every tile in the initial view has complete coverage. Panning loads
-the visible area with two concurrent requests. To extend a new world's saved
-terrain, explore it in Minecraft and use **Refresh terrain** after the game saves.
+512 when every tile in the initial view has complete coverage. The span sets how
+much fits on screen. Pan or use **Jump** to reach any valid Overworld coordinate.
+The map loads the visible area with up to two concurrent requests and rechecks
+visible gaps every 30 seconds. Explore a new area in Minecraft to generate terrain.
+New chunks can appear after Minecraft saves, and **Refresh terrain** checks
+immediately. Opening, panning or jumping on the map has no effect on the world save.
+For a compatible server with Chunky installed, use the server console to
+pregenerate a selected area. [Chunky pregeneration guide](https://github.com/pop4959/Chunky/wiki/Pregeneration)
 **Latest chunk save in this view** is the newest available Minecraft save time
 among the chunks on screen. Moving players do not appear on the built-in map.
 The server overview preview combines nearby tiles around saved spawn and frames

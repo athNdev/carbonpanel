@@ -4,7 +4,7 @@ title: Native map assets use scoped World View sessions
 description: Native terrain uses the existing authenticated World View session with a server-validated world binding.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/worldview/native_map.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go]
+code_refs: [internal/worldview/native_map.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go, web/carbon-panel/src/lib/features/worldview/native-map-loader.ts]
 sources:
   - title: Native terrain format and access
     resource: ../../docs/world-terrain.md
@@ -36,3 +36,6 @@ game state. World changes invalidate the key and require a new session.
 The viewport queues only visible tiles, nearest first, with two concurrent reads.
 Map span covers 32–1,024 blocks along the longer viewport edge. Automatic span
 widens from 256 to 512 blocks when the initial tiles have full coverage.
+Panning and coordinate jumps load saved tiles across the Java Overworld bounds.
+Empty, incomplete and transiently unavailable tiles recheck every 30 seconds
+while visible. Missing tiles for a new view take priority over refreshes.

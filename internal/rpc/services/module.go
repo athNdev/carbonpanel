@@ -769,7 +769,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		if commitErr := finalizeBlueMap(true, module.ID); commitErr != nil {
 			// finalize performed staged-file cleanup AND deleted the module row
 			// while still holding the singleton lock with a bounded context.
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("managed BlueMap config was rolled back: %w", commitErr))
+			return nil, blueMapConfigPrecondition(commitErr)
 		}
 	} else {
 		go s.createModuleContainer(module.ID, msg.StartImmediately)

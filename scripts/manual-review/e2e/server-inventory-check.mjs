@@ -188,14 +188,28 @@ try {
     fleet[1].status = "SERVER_STATUS_" + state;
     await page.reload();
     await drive.waitFor();
+    assert.equal(await tile.locator(".runtime-shift").count(), 0, "initial status does not flash");
     const animation = () => drive.evaluate(el => getComputedStyle(el).animationName);
     assert.ok((await animation()).endsWith(motion));
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await animation(), "none");
     await page.emulateMedia({ reducedMotion: "no-preference" });
   }
+  for (const [state, shift] of [["RUNNING", "sweep"], ["UNHEALTHY", "attention"], ["STOPPED", "settle"]]) {
+    fleet[1].status = "SERVER_STATUS_" + state;
+    const effect = tile.locator(`.runtime-shift[data-shift="${shift}"]`);
+    await effect.waitFor({ state: "attached" });
+    assert.equal(
+      await effect.evaluate((el) => getComputedStyle(el).animationIterationCount),
+      "1",
+    );
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await effect.waitFor({ state: "detached" });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    assert.equal(await effect.count(), 0, "restoring motion does not replay the transition");
+  }
   fleet[1].status = "SERVER_STATUS_ERROR";
-  results.push("runtime drive distinguishes steady and starting motion and respects reduced motion");
+  results.push("runtime drive and one-shot background effects reflect status changes and respect reduced motion");
   await checkFieldAppearance(page, base);
   results.push("server settings and inventory fields share accessible state treatments in both themes");
   await page.goto(base);
