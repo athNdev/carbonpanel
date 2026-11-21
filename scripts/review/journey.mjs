@@ -86,11 +86,20 @@ async function main() {
   // A failed request is a finding even when the page looks fine, and the
   // browser console only says "400" without saying which call.
   const failedResponses = [];
+  const rendererTileResponses = new WeakMap();
+  const isRendererTile = (response) =>
+    response.ok() &&
+    /^\/api\/v1\/worldview\/map\/[^/]+\/maps\/[^/]+\/tiles\/.+\.(?:prbm|png)$/.test(
+      new URL(response.url()).pathname,
+    );
   page.on("response", (response) => {
     if (response.status() >= 400) {
       failedResponses.push(
         `${response.status()} ${response.request().method()} ${response.url()}`,
       );
+    }
+    if (isRendererTile(response) && !response.request().serviceWorker()) {
+      rendererTileResponses.set(response.request().frame(), response);
     }
   });
 
@@ -223,6 +232,33 @@ async function main() {
           );
           if (!width || width < 1) {
             throw new Error(`skin preview did not decode: naturalWidth=${width}`);
+          }
+          break;
+        }
+        case "assertMapPreviewLoaded": {
+          const preview = page.locator(spec.assertMapPreviewLoaded).first();
+          const source = preview.locator("img, iframe").first();
+          const timeout = spec.timeout ?? 30000;
+          await source.waitFor({ state: "visible", timeout });
+          const handle = await source.elementHandle({ timeout });
+          if (await handle.evaluate((element) => element.tagName === "IMG")) {
+            await page.waitForFunction(
+              (element) => element.complete && element.naturalWidth > 0,
+              handle,
+              { timeout },
+            );
+          } else {
+            const frame = await handle.contentFrame();
+            if (!frame) throw new Error("map preview iframe has no content");
+            await frame.locator("canvas").first().waitFor({ state: "visible", timeout });
+            const tile = rendererTileResponses.get(frame) ?? await page.waitForEvent("response", {
+              predicate: (response) =>
+                isRendererTile(response) &&
+                !response.request().serviceWorker() &&
+                response.request().frame() === frame,
+              timeout,
+            });
+            if (await tile.finished()) throw new Error("map preview tile transfer did not finish");
           }
           break;
         }
@@ -489,6 +525,7 @@ async function main() {
         "assertVisible",
         "assertFrameVisible",
         "assertImageLoaded",
+        "assertMapPreviewLoaded",
         "assertNoFailedTileResponses",
         "assertNoMapConsoleErrors",
         "assertHidden",

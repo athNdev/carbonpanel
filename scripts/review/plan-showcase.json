@@ -463,10 +463,10 @@
       "name": "server World tab renders"
     },
     {
-      "waitFor": "[data-testid=\"server-world-map-card\"] :is(img, iframe)",
+      "assertMapPreviewLoaded": "[data-testid=\"server-world-map-card\"]",
       "timeout": 30000,
       "feature": "worldtab",
-      "name": "the server's World View card has a terrain image or renderer"
+      "name": "the server's World View card has decoded terrain or loaded renderer tiles"
     },
     {
       "screenshot": "showcase-worlds-list",
