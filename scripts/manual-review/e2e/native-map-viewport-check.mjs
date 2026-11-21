@@ -398,7 +398,7 @@ try {
     });
   }
 
-  const saved = "Saved terrain available.";
+  const saved = "All visible chunks have terrain.";
   const partial = "Blank areas have no readable saved surface. Explore in Minecraft, then refresh after a save.";
   const fromMap = (page) =>
     page.getByRole("application", { name: "Survival map" });

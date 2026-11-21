@@ -188,7 +188,7 @@
 			.map((tile) => tile.savedAt)
 			.filter((time) => time !== null)
 			.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-		let message = 'Saved terrain available.';
+		let message = 'All visible chunks have terrain.';
 		if (loading) {
 			message = 'Loading saved terrain…';
 		} else if (failure) {
