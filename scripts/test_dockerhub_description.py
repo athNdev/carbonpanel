@@ -308,7 +308,8 @@ class DockerHubDescriptionTests(unittest.TestCase):
                 return self
             def __exit__(self, *args):
                 return False
-        def opener(url, timeout=None):
+        def opener(request, timeout=None):
+            url = getattr(request, "full_url", request)
             self.assertIn("api.github.com/repos/athNdev/carbonpanel/git/ref/heads/main", url)
             return Response(json.dumps({"object": {"sha": "a" * 40}}).encode("utf-8"))
         previous = Path.cwd()
@@ -325,6 +326,41 @@ class DockerHubDescriptionTests(unittest.TestCase):
                     "athNdev/carbonpanel", "push", "c" * 40, opener=opener), "c" * 40)
             finally:
                 os.chdir(previous)
+
+    def test_resolve_main_authenticates_refs_request_when_token_available(self):
+        import urllib.request
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+        seen = {}
+        def opener(request, timeout=None):
+            seen.update(request.header_items())
+            return Response(json.dumps({"object": {"sha": "d" * 40}}).encode("utf-8"))
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-value"}):
+            self.assertEqual(description.resolve_main_sha(
+                "athNdev/carbonpanel", "schedule", "", opener=opener), "d" * 40)
+        headers = {key.lower(): value for key, value in seen.items()}
+        self.assertEqual(headers.get("authorization"), "Bearer test-token-value")
+        self.assertTrue(headers.get("accept"))
+        self.assertTrue(headers.get("user-agent"))
+        with patch.dict(os.environ, {}, clear=True):
+            seen.clear()
+            description.resolve_main_sha(
+                "athNdev/carbonpanel", "schedule", "", opener=opener)
+        self.assertNotIn("authorization", {key.lower() for key in seen})
+
+    def test_workflow_passes_github_token_to_every_refs_resolution(self):
+        import yaml
+        source = (ROOT / ".github" / "workflows" / "dockerhub-description.yml").read_text(
+            encoding="utf-8")
+        document = yaml.safe_load(source)
+        steps = [step for step in document["jobs"]["update"]["steps"]
+                 if "resolve-main" in " ".join(step.get("run", "").split())]
+        self.assertEqual(len(steps), 3)
+        for step in steps:
+            self.assertEqual(step["env"]["GH_TOKEN"], "${{ github.token }}")
 
     def test_read_back_tolerates_bounded_propagation(self):
         body = json.loads((ROOT / "docs" / "version-index.json").read_text(encoding="utf-8"))

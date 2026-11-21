@@ -234,8 +234,16 @@ def resolve_main_sha(repository, event_name, event_sha, opener=None, timeout=30)
         raise DescriptionError("invalid GitHub repository for main resolution: " + str(repository))
     opener = opener or urllib.request.urlopen
     url = "https://api.github.com/repos/{}/git/ref/heads/main".format(repository)
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "carbonpanel-hub-description"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        # Anonymous GitHub API calls share a 60/hour runner IP budget and can
+        # return 403 during repeated channel runs. The workflow has least-
+        # privilege `contents: read`, which is sufficient to read a ref.
+        headers["Authorization"] = "Bearer " + token
     try:
-        with opener(url, timeout=timeout) as response:
+        request = urllib.request.Request(url, headers=headers)
+        with opener(request, timeout=timeout) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:
         raise DescriptionError("GitHub refs API returned HTTP " + str(error.code)
