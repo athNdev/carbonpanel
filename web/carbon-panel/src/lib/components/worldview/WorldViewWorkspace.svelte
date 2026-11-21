@@ -307,7 +307,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (!current() || key !== sessionScope || attempt !== sessionAttempt || denied) return;
 			if (
 				native !== (response.state === RendererState.NATIVE_AVAILABLE) ||
-				(!native && response.state !== RendererState.READY && response.state !== RendererState.STALE)
+				(!native &&
+					response.state !== RendererState.READY &&
+					response.state !== RendererState.STALE)
 			) {
 				sessionError = new Error('The map renderer changed. Reconnecting…');
 				void store.loadStatus(statusKey, serverId, requestedRef).catch(() => {});
@@ -496,7 +498,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	});
 	let previewImage = $derived(
-		view === 'saved' && embed.src && previewTile?.path === embed.src && previewTile.scope === sessionScope
+		view === 'saved' &&
+			embed.src &&
+			previewTile?.path === embed.src &&
+			previewTile.scope === sessionScope
 			? previewTile.src
 			: undefined
 	);
@@ -736,8 +741,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		>
 			<div class="flex items-start justify-between gap-2">
 				<h2
-					class={['text-sm font-semibold', (previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white']}
-				>World View</h2>
+					class={[
+						'text-sm font-semibold',
+						(previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white'
+					]}
+				>
+					World View
+				</h2>
 				{#if canRead && !denied}
 					<div class="flex gap-1.5">
 						<CarbonButton
@@ -784,7 +794,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{@const connecting = view === 'ready' && Boolean(mapLoadingLabel)}
 				{@const lastKnown = refreshWarning && Boolean(previewImage || previewFrame)}
 				<div class="flex flex-wrap items-end justify-between gap-2">
-					{#if statusTarget.name}<p class={['min-w-0 text-base font-semibold break-words', (previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white']}>
+					{#if statusTarget.name}<p
+							class={[
+								'min-w-0 text-base font-semibold break-words',
+								(previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white'
+							]}
+						>
 							{statusTarget.name}
 						</p>{/if}
 					{#if view !== 'saved' || lastKnown}
@@ -955,7 +970,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					{:else if view === 'saved'}
 						<div class="space-y-2 border border-border bg-card px-4 py-3 text-sm">
 							<p class="text-muted-foreground">
-								Refresh after Minecraft saves to see new builds. This map does not track moving players.
+								Refresh after Minecraft saves to see new builds. This map does not track moving
+								players.
 							</p>
 							{#if statusTarget?.error}
 								<p class="text-muted-foreground">{statusTarget.error}</p>
@@ -1239,7 +1255,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									</div>
 								{/each}
 								{#if adminError}
-									<p class="border-l-2 border-destructive bg-destructive/10 p-3 text-sm text-foreground" role="alert">
+									<p
+										class="border-l-2 border-destructive bg-destructive/10 p-3 text-sm text-foreground"
+										role="alert"
+									>
 										{adminError}
 									</p>
 								{/if}

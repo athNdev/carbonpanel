@@ -60,7 +60,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			bind:value
 			onkeyup={type === 'password' ? trackCaps : undefined}
 			onkeydown={type === 'password' ? trackCaps : undefined}
-			class="focus-ring h-[var(--carbon-control-md)] w-full rounded-none px-4 text-sm text-foreground transition-[color,background-color,border-color] placeholder:text-muted-foreground {revealable && type === 'password' ? 'pr-10' : ''}"
+			class="focus-ring h-[var(--carbon-control-md)] w-full rounded-none px-4 text-sm text-foreground transition-[color,background-color,border-color] placeholder:text-muted-foreground {revealable &&
+			type === 'password'
+				? 'pr-10'
+				: ''}"
 			{...restProps}
 		/>
 		{#if revealable && type === 'password'}

@@ -33,6 +33,27 @@ function appearance(field) {
   });
 }
 
+// Match the final semantic color. The hover event can reach Playwright before
+// Chromium paints the new style, especially with reduced-motion transitions.
+async function waitForFieldColor(page, field, property, token) {
+  const expected = await field.evaluate((el, token) => {
+    const probe = document.createElement("span");
+    probe.style.color = `var(${token})`;
+    el.parentElement.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  }, token);
+  await page.waitForFunction(
+    ({ id, property, expected }) => {
+      const el = document.getElementById(id);
+      return el && getComputedStyle(el)[property] === expected;
+    },
+    { id: await field.getAttribute("id"), property, expected },
+    { timeout: 5000 },
+  );
+}
+
 export async function checkFieldAppearance(page, base) {
   for (const theme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
@@ -46,6 +67,7 @@ export async function checkFieldAppearance(page, base) {
       theme,
     );
     await page.mouse.move(0, 0);
+    await waitForFieldColor(page, text, "borderTopColor", "--field-edge");
     const idle = await appearance(text);
     for (const control of [number, select]) {
       const style = await appearance(control);
@@ -56,9 +78,11 @@ export async function checkFieldAppearance(page, base) {
     assert.ok(contrast(idle.border, idle.fill) >= 3);
     assert.ok(contrast(idle.ink, idle.fill) >= 4.5);
     await text.hover();
+    await waitForFieldColor(page, text, "borderTopColor", "--field-hover-edge");
     assert.notEqual((await appearance(text)).border, idle.border);
     await page.keyboard.press("Tab");
     await text.focus();
+    await waitForFieldColor(page, text, "borderTopColor", "--field-focus");
     const focus = await appearance(text);
     assert.equal(focus.outlineStyle, "solid");
     assert.equal(focus.outlineWidth, "2px");
@@ -66,6 +90,7 @@ export async function checkFieldAppearance(page, base) {
     // Exercise validation and read-only/disabled styling on the mounted shared
     // input without mutating the real server or depending on a save failure.
     await text.evaluate((el) => el.setAttribute("aria-invalid", "true"));
+    await waitForFieldColor(page, text, "borderTopColor", "--destructive-text");
     const invalid = await appearance(text);
     assert.notEqual(invalid.border, focus.border);
     assert.equal(invalid.outline, focus.outline);
@@ -80,6 +105,7 @@ export async function checkFieldAppearance(page, base) {
       el.readOnly = false;
       el.disabled = true;
     });
+    await waitForFieldColor(page, text, "backgroundColor", "--secondary");
     assert.notEqual((await appearance(text)).fill, idle.fill);
     await text.evaluate((el) => {
       el.disabled = false;
