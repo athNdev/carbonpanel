@@ -4,7 +4,7 @@ title: "Player management - Identity, provenance and capabilities"
 description: "PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/player.proto, internal/rpc/services/player.go, internal/rpc/services/player_wiring.go, internal/db/player.go, internal/playeradapters, internal/playerskin, internal/playerdata, internal/rbac/mapping.go]
+code_refs: [proto/carbonpanel/v1/player.proto, internal/rpc/services/player.go, internal/rpc/services/player_wiring.go, internal/db/player.go, internal/playeradapters, internal/playerskin, internal/playerdata, internal/rbac/mapping.go, web/carbon-panel/src/lib/components/server-players.svelte, web/carbon-panel/src/lib/features/players/allowlist-dialog-state.ts]
 sources:
   - title: Parent concept
     resource: player-management.md
@@ -42,12 +42,12 @@ lookup). `LookupPlayer` is read-only: its ephemeral result never persists an
 identity, session, access row, roster entry, presence claim or audit row.
 See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins.
 Authoritative negatives are `NOT_FOUND`, outages are `UNAVAILABLE` and
-unpinnable queries are `AMBIGUOUS`. The server Players tab keeps roster filters
+unpinnable queries are `AMBIGUOUS`. See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins. The server Players tab keeps roster filters
 visible after a zero-match search and opens a scoped allowlist dialog.
 Allowlist adds reuse typed moderation (`players:access:write` on `server_id`),
 journal, audit and undo, and persist only the identity the mutation needs.
 Java name/UUID entries use the negotiated Java adapter. Bedrock Gamertag/XUID
-entries require an adapter proving Bedrock support.
+entries require an adapter proving Bedrock support. The dialog's polling lifetime is in [allowlist dialog lifetime](../decisions/allowlist-dialog-lifetime.md).
 `internal/playerdata` reads `stats`, `advancements` and `playerdata` snapshots
 through the injected node resolver with caller contexts and bounded reads;
 live NBT is never edited.

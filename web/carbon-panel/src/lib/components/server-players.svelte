@@ -12,6 +12,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
 	import AddAllowlistEntry from '$lib/features/players/AddAllowlistEntry.svelte';
+	import { allowlistDialogShouldClose } from '$lib/features/players/allowlist-dialog-state';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
@@ -26,11 +27,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let loadError = $state<string | null>(null);
 	let rosterGeneration = $state(0);
 	let allowlistOpen = $state(false);
+	// Telemetry polling republishes the Server object every few seconds. Track
+	// the last identity, not the object, so a refresh of the same server does
+	// not close an allowlist dialog the operator is using.
+	let previousAllowlistServerId: string | null = null;
 
 	$effect(() => {
-		void server.id;
-		void active;
-		allowlistOpen = false;
+		if (allowlistDialogShouldClose(previousAllowlistServerId, server.id, active)) {
+			allowlistOpen = false;
+		}
+		previousAllowlistServerId = server.id;
 	});
 
 	function loadPlayers() {
