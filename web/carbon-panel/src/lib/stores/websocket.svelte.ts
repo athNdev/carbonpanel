@@ -45,7 +45,6 @@ export interface WebSocketDependencies {
 	enabled: () => boolean;
 	url: () => string;
 	token: () => string;
-	setSessionCookie: (token: string) => void;
 	createSocket: (url: string) => WebSocket;
 	setTimeout: typeof setTimeout;
 	clearTimeout: typeof clearTimeout;
@@ -58,9 +57,6 @@ const defaultDependencies: WebSocketDependencies = {
 	url: () =>
 		`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
 	token: () => get(authStore).token || '',
-	setSessionCookie: (token) => {
-		document.cookie = `cp_session=${encodeURIComponent(token)}; Path=/; SameSite=Strict`;
-	},
 	createSocket: (url) => new WebSocket(url),
 	setTimeout: ((...args: Parameters<typeof setTimeout>) =>
 		globalThis.setTimeout(...args)) as typeof setTimeout,
@@ -120,12 +116,7 @@ class WebSocketClient {
 		this.state.connectionState = 'connecting';
 		this.state.error = null;
 
-		// Pre-upgrade credential (MINE-164) rides the cp_session cookie so the
-		// session token is not written into the URL (MINE-185).
-		const preAuth = this.deps.token();
-		if (preAuth) {
-			this.deps.setSessionCookie(preAuth);
-		}
+		// AuthStore owns the pre-upgrade cp_session cookie (MINE-164).
 		const wsUrl = this.deps.url();
 
 		try {

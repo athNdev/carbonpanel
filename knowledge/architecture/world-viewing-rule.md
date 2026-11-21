@@ -42,11 +42,10 @@ and require the recipient’s scoped read permission. The readonly map shows
 non-sensitive markers, waypoints and points of interest from scoped
 ListMapOverlays results. The marker list centers offscreen points.
 
-Renderer traffic stays same-origin using opaque, short-lived keys. Every
-request authenticates and enforces the concrete server’s map-read permission.
-Missing endpoints, remote limitations, unsupported capabilities and stale
-tiles have distinct states. Renderer endpoints stay private and scoped to
-their own node.
+Renderer traffic stays same-origin with short-lived keys. AuthStore sets the
+browser session cookie before map or WebSocket traffic. Every map asset read
+rechecks the concrete server’s map-read permission. Endpoint and renderer
+failures have distinct states. Renderer endpoints stay private to their node.
 
 Managed BlueMap install and private discovery share one node eligibility
 check. It accepts legacy controller aliases and enabled registered nodes

@@ -8,7 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script module lang="ts">
 	let scrollLocks = 0;
 	let previousOverflow = '';
-	const activeDialogs = new Set<HTMLDivElement>();
+	let activeDialogs: HTMLDivElement[] = [];
 
 	function lockBackgroundScroll() {
 		if (scrollLocks++ === 0) {
@@ -155,15 +155,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function isTopDialog() {
-		return modalElement === [...activeDialogs].at(-1);
+		return modalElement === activeDialogs.at(-1);
 	}
 
 	$effect(() => {
 		if (!open || !modalElement) return;
 		const dialog = modalElement;
-		activeDialogs.add(dialog);
+		activeDialogs = [...activeDialogs, dialog];
 		return () => {
-			activeDialogs.delete(dialog);
+			activeDialogs = activeDialogs.filter((entry) => entry !== dialog);
 		};
 	});
 
