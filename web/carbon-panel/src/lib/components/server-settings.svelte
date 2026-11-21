@@ -470,7 +470,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.mcVersion}
 				onValueChange={(value: string | undefined) => (formData.mcVersion = value || '')}
 			>
-				<SelectTrigger id="mc_version" class="h-10">
+				<SelectTrigger id="mc_version" class="h-10 w-full">
 					<span>{formData.mcVersion || 'Select a version'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -491,7 +491,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.modLoader}
 				onValueChange={(value: string) => (formData.modLoader = value)}
 			>
-				<SelectTrigger id="mod_loader" class="h-10">
+				<SelectTrigger id="mod_loader" class="h-10 w-full">
 					<span
 						>{modLoaders?.modloaders?.find((l) => l.name === formData.modLoader)?.displayName ||
 							_.startCase(formData.modLoader) ||
@@ -522,7 +522,7 @@ one at https://mozilla.org/MPL/2.0/.
 					onValueChange={(value: string | undefined) =>
 						(formData.loaderVersion = value === '__latest__' ? '' : value || '')}
 				>
-					<SelectTrigger id="loader_version" class="h-10">
+					<SelectTrigger id="loader_version" class="h-10 w-full">
 						<span>{formData.loaderVersion || 'Latest (recommended)'}</span>
 					</SelectTrigger>
 					<SelectContent>
@@ -550,7 +550,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.dockerImage}
 				onValueChange={(value: string | undefined) => (formData.dockerImage = value || '')}
 			>
-				<SelectTrigger id="docker_image" class="h-10">
+				<SelectTrigger id="docker_image" class="h-10 w-full">
 					<span>{formData.dockerImage || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>

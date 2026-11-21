@@ -20,8 +20,7 @@ visibility flag are the only mutations, and both are audited. Teleport and
 world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
-The server preview and World tab share a map dialog. Loading labels show the renderer phase.
-The built-in preview omits a routine status badge. The expanded map dates the newest visible chunk save when known.
+The server preview and World tab share a map dialog. Loading labels identify the renderer phase. The built-in preview omits a routine badge and the dialog dates the newest visible chunk save when known.
 The compass respects browser and panel reduced-motion preferences. Command feedback stays with Administration.
 Without an explicit level, scoped GetWorldViewStatus resolves the active map. Standalone links still check only map
 access. The catalogue requires a global read grant. Setup and unavailable

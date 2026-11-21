@@ -50,7 +50,7 @@
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
 - [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
-- [Native terrain reads saved Java elevations](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps.
+- [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.

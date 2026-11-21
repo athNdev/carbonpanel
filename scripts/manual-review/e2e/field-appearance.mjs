@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: MPL-2.0
+import assert from "node:assert/strict";
+
+function luminance(cssColor) {
+  const channels = cssColor
+    .match(/^[^(]+\((\d+), (\d+), (\d+)/)
+    .slice(1)
+    .map(Number);
+  const linear = channels
+    .map((c) => c / 255)
+    .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
+function contrast(a, b) {
+  const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
+
+function appearance(field) {
+  return field.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      border: style.borderTopColor,
+      width: style.borderTopWidth,
+      line: style.borderTopStyle,
+      fill: style.backgroundColor,
+      ink: style.color,
+      outline: style.outlineColor,
+      outlineWidth: style.outlineWidth,
+      outlineStyle: style.outlineStyle,
+    };
+  });
+}
+
+export async function checkFieldAppearance(page, base) {
+  for (const theme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+    await page.goto(base + "/servers/ready");
+    const text = page.getByLabel("Server Name", { exact: true });
+    const number = page.getByLabel("Memory (MB)", { exact: true });
+    const select = page.locator("#mod_loader");
+    await text.waitFor();
+    assert.equal(
+      await page.locator("html").getAttribute("data-carbon-theme"),
+      theme,
+    );
+    await page.mouse.move(0, 0);
+    const idle = await appearance(text);
+    for (const control of [number, select]) {
+      const style = await appearance(control);
+      assert.equal(style.width, "2px");
+      assert.equal(style.fill, idle.fill);
+    }
+    assert.equal(idle.width, "2px");
+    assert.ok(contrast(idle.border, idle.fill) >= 3);
+    assert.ok(contrast(idle.ink, idle.fill) >= 4.5);
+    await text.hover();
+    assert.notEqual((await appearance(text)).border, idle.border);
+    await page.keyboard.press("Tab");
+    await text.focus();
+    const focus = await appearance(text);
+    assert.equal(focus.outlineStyle, "solid");
+    assert.equal(focus.outlineWidth, "2px");
+    assert.ok(contrast(focus.outline, focus.fill) >= 3);
+    // Exercise validation and read-only/disabled styling on the mounted shared
+    // input without mutating the real server or depending on a save failure.
+    await text.evaluate((el) => el.setAttribute("aria-invalid", "true"));
+    const invalid = await appearance(text);
+    assert.notEqual(invalid.border, focus.border);
+    assert.equal(invalid.outline, focus.outline);
+    assert.ok(contrast(invalid.border, invalid.fill) >= 3);
+    await text.evaluate((el) => {
+      el.removeAttribute("aria-invalid");
+      el.readOnly = true;
+      el.blur();
+    });
+    assert.equal((await appearance(text)).line, "dashed");
+    await text.evaluate((el) => {
+      el.readOnly = false;
+      el.disabled = true;
+    });
+    assert.notEqual((await appearance(text)).fill, idle.fill);
+    await text.evaluate((el) => {
+      el.disabled = false;
+    });
+    await page.goto(base + "/servers");
+    const search = page.getByPlaceholder(
+      "Search by name, description, version, loader, or port...",
+    );
+    await search.waitFor();
+    assert.equal((await appearance(search)).fill, idle.fill);
+    assert.equal((await appearance(search)).width, "2px");
+    await page.goto(base + "/worlds");
+    const nativeSelect = page.getByLabel("Map status", { exact: true });
+    await nativeSelect.waitFor();
+    const nativeStyle = await appearance(nativeSelect);
+    assert.equal(nativeStyle.fill, idle.fill);
+    assert.equal(nativeStyle.width, "2px");
+    const controls = await page.evaluate(() => {
+      const box = document.createElement("div");
+      document.body.append(box);
+      const styles = {};
+      for (const tag of [
+        "checkbox",
+        "file",
+        "range",
+        "radio",
+        "color",
+        "textarea",
+      ]) {
+        const el = document.createElement(
+          tag === "textarea" ? "textarea" : "input",
+        );
+        if (el instanceof HTMLInputElement) el.type = tag;
+        box.append(el);
+        styles[tag] = getComputedStyle(el).borderTopWidth;
+      }
+      box.remove();
+      return styles;
+    });
+    assert.equal(controls.textarea, "2px");
+    for (const type of ["checkbox", "file", "range", "radio", "color"])
+      assert.notEqual(controls[type], "2px");
+  }
+  await page.emulateMedia({ colorScheme: null, reducedMotion: null });
+}

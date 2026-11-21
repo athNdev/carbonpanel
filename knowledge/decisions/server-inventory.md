@@ -49,6 +49,7 @@ world download and never deletes inventory. Recreate has no backend request ID
 field, so the frontend deduplicates its in-flight call. Notifications and the
 actual download stay in the view. ERROR is red and UNHEALTHY is yellow in the
 shared presentation policy.
+The detail page keeps container lifecycle and player observation freshness separate. Only a playable reading supplies a player count, including zero. A stale reading means the stored observation is too old to confirm the current count.
 
 # Verification
 
