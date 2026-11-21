@@ -23,6 +23,7 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '@lucide/svelte';
 	const { metricsExpanded } = displayPreferences;
 	import { onMount, untrack } from 'svelte';
+	import { SvelteURL } from 'svelte/reactivity';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
 	import {
@@ -141,7 +142,7 @@ one at https://mozilla.org/MPL/2.0/.
 						category.properties.some((property) => property.key === hash)
 				);
 				if (known && window.location.hash.slice(1) === hash) {
-					const url = new URL(window.location.href);
+					const url = new SvelteURL(window.location.href);
 					url.searchParams.set('tab', 'configuration');
 					// eslint-disable-next-line svelte/no-navigation-without-resolve
 					void goto(url, { shallow: true, replace: true, reset: false });
@@ -156,7 +157,7 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	function selectServerTab(id: string) {
-		const url = new URL(detailUrl.href);
+		const url = new SvelteURL(detailUrl.href);
 		if (id === 'overview') url.searchParams.delete('tab');
 		else url.searchParams.set('tab', id);
 		url.hash = '';
