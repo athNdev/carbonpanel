@@ -58,7 +58,7 @@
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
 - [Publication gates run from the trusted dispatch revision](publication-gate-provenance.md) — Privileged release gates use trusted code with explicit candidate paths, and registry platform evidence has one strict validator.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
-- [Release staging keeps the raw image build context](release-staging-artifact-contract.md) — The trusted staging run publishes both the OCI archive and the raw build context because the Compose matrix consumes the context.
+- [Release qualification uses the retained OCI archive](release-staging-artifact-contract.md) — The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the

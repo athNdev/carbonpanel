@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-21
+
 ### Added
 
 - World View opens saved Overworld terrain for supported local Java servers. Pan and zoom with a pointer or keyboard, jump to spawn or coordinates, share a coordinate link, and view saved markers, waypoints and points of interest.
@@ -132,7 +134,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.0.1...HEAD
+[Unreleased]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.1.0...HEAD
+[2.1.0]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.0.1...carbonpanel-v2.1.0
 [2.0.1]: https://github.com/athNdev/carbonpanel/compare/v1.0.40...carbonpanel-v2.0.1
 [1.0.40]: https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40
 [3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/commit/5bbc06fefe5fc0c600672ef8401f9bf7e4495a01

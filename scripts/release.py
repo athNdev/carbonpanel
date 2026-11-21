@@ -2306,8 +2306,8 @@ def publish(args):
     channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
         "This is a prerelease build.\n\n" if "-" in tag else "")
     upgrade = (migration_guide_notes(repository, git_tag)
-               if product and not product["prerelease"]
-               and int(product["semver"].split(".")[0]) >= 2 else "")
+               if previous_tag == "v1.0.40" and product and not product["prerelease"]
+               and int(product["semver"].split(".")[0]) == 2 else "")
     body = (f"{channel}{upgrade}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
             f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"

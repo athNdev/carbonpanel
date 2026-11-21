@@ -70,6 +70,7 @@ async function main() {
   writeFileSync(join(out, "browser.json"), JSON.stringify(browserMetadata, null, 2) + "\n");
   const context = await browser.newContext({
     viewport: plan.viewport ?? { width: 1440, height: 900 },
+    colorScheme: plan.colorScheme,
     ignoreHTTPSErrors: true,
     deviceScaleFactor: plan.deviceScaleFactor ?? 1,
   });
@@ -108,6 +109,7 @@ async function main() {
       record(label, false, `prerequisite failed for feature ${spec.feature}; screenshot blocked`, spec.feature);
       return;
     }
+    const captureScheme = spec.screenshot ? spec.colorScheme ?? plan.colorScheme : undefined;
     try {
       switch (kind) {
         case "goto":
@@ -292,6 +294,10 @@ async function main() {
       }
 
       if (spec.screenshot) {
+        if (spec.colorScheme) await page.emulateMedia({ colorScheme: spec.colorScheme });
+        if (captureScheme) {
+          await page.locator(`html[data-carbon-theme="${captureScheme}"]`).waitFor();
+        }
         // Settle first. A screenshot taken while the tab indicator or a
         // stagger animation is still moving shows a state no person ever
         // sees, and the review then argues about a phantom bug.
@@ -324,19 +330,12 @@ async function main() {
           const box = await target.boundingBox({ timeout: 15000 });
           if (!box) throw new Error(`no bounding box for ${spec.element}`);
           const vp = page.viewportSize() ?? { width: 1440, height: 900 };
-          const clip = {
-            x: Math.max(0, Math.round(box.x)),
-            y: Math.max(0, Math.round(box.y)),
-            width: Math.min(
-              Math.round(box.width),
-              vp.width - Math.max(0, Math.round(box.x)),
-            ),
-            height: Math.min(
-              Math.round(box.height),
-              vp.height - Math.max(0, Math.round(box.y)),
-              spec.maxHeight ?? Infinity,
-            ),
-          };
+          const padding = spec.padding ?? 0;
+          const x = Math.max(0, Math.floor(box.x - padding));
+          const y = Math.max(0, Math.floor(box.y - padding));
+          const right = Math.min(vp.width, Math.ceil(box.x + box.width + padding));
+          const bottom = Math.min(vp.height, Math.ceil(box.y + box.height + padding));
+          const clip = { x, y, width: right - x, height: Math.min(bottom - y, spec.maxHeight ?? Infinity) };
           if (clip.width < 2 || clip.height < 2)
             throw new Error(`empty clip for ${spec.element}`);
           await page.screenshot({ path: file, clip });
@@ -346,7 +345,7 @@ async function main() {
             fullPage: spec.fullPage ?? false,
           });
         }
-        record(label, true, `screenshot ${file}`, spec.feature);
+        record(label, true, `screenshot ${file}${captureScheme ? ` (${captureScheme} mode)` : ""}`, spec.feature);
       } else {
         record(label, true, "", spec.feature);
       }
@@ -363,6 +362,10 @@ async function main() {
         await page.screenshot({ path: file, fullPage: true }).catch(() => {});
       }
       if (critical) throw error;
+    } finally {
+      if (spec.screenshot && spec.colorScheme) {
+        await page.emulateMedia({ colorScheme: plan.colorScheme ?? null });
+      }
     }
   }
 

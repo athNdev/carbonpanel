@@ -53,13 +53,35 @@ OIDC/PROXY migration go/no-go steps above. See
    `proxy.trusted_proxy_cidrs` (default `[]` trusts nobody). Add every load
    balancer source CIDR and confirm real client IPs are preserved after upgrade.
 
-The 1.0 line stays at `1.0.40` as the current rollback path (not a permanent ban
-on future 1.0.x maintenance). The next planned stable is
-**`carbonpanel-v2.0.1` (MAJOR)**: the wire/Connect API and schema are additive,
-but three intentional operator/upgrade changes break an unchanged v1.0.40
-config, so a compatible MINOR would be dishonest. See
-[UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading. Before changing a
-version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
+The verified 1.0 rollback version is `1.0.40`. Version `2.0.1` introduced
+the 2.x migration. See
+[UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading from v1.0.40.
+
+## Upgrade from 2.0.1 to 2.1.0
+
+Before upgrading a 2.0.1 installation, pause server activity and make a
+consistent backup of the panel database, configuration, server worlds and
+backup directories. Use a SQLite backup or stop the panel before copying
+database files. Keep the previous 2.0.1 image or archive available for rollback.
+
+- **Retained BlueMap config:** An existing BlueMap module keeps its retained
+  configuration. Recovery reuses retained configuration without rewriting it;
+  review BlueMap's resource-download terms before changing
+  `accept-download` in `modules/bluemap/config/core.conf`.
+- **Map bounds and coverage:** World View opens saved Overworld terrain with
+  adjustable coverage. Map bounds follow the selected map span and visible
+  viewport; use Jump or coordinates to move outside the current view. Shared
+  coordinate links open the same location for users with map access.
+- **Backup and restore:** Take backups before upgrade and before world restore
+  operations. Restoring a world invalidates old terrain sessions; reopen World
+  View after restore to confirm the expected world revision and map bounds.
+- **Rollback:** If 2.1.0 is not acceptable, stop the panel, restore the 2.0.1
+  image/archive, and restore the pre-upgrade database/config backup on
+  disposable copies first when data compatibility is uncertain. Preserve world
+  and backup directories during rollback unless you intentionally restore them
+  from backup.
+
+Before changing a version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
 compatibility surface, CLI flags, the configuration schema and documented
 operator behavior — against SemVer. `1.0.0` already defines that API; existing
 published versions and Go module endpoints are never renumbered, retargeted or
@@ -121,18 +143,16 @@ future artifact; no workflow or registry destination exists for it today.
 
 Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpanel/releases).
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
-amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
-archive set and digests are recorded in [release history](release-history.md).
-A future, not-yet-published product release tagged `carbonpanel-v2.0.1` keeps
-the same archive naming convention, derived from its SemVer field (`v2.0.1`
-internally for archive names). For example:
+amd64. The [Stable documentation](https://carbonpanel.dev/docs/) shows the
+published channel version. Archive names follow the SemVer field (for example
+`v2.1.0` for `carbonpanel-v2.1.0`):
 
 ```text
-carbon-panel_v2.0.1_linux_amd64.tar.gz
-carbon-panel_v2.0.1_linux_arm64.tar.gz
-carbon-panel_v2.0.1_darwin_amd64.tar.gz
-carbon-panel_v2.0.1_darwin_arm64.tar.gz
-carbon-panel_v2.0.1_windows_amd64.zip
+carbon-panel_v2.1.0_linux_amd64.tar.gz
+carbon-panel_v2.1.0_linux_arm64.tar.gz
+carbon-panel_v2.1.0_darwin_amd64.tar.gz
+carbon-panel_v2.1.0_darwin_arm64.tar.gz
+carbon-panel_v2.1.0_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
