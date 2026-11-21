@@ -23,8 +23,8 @@ their own authorization.
 The server World tab links to the active map, or to World View scoped to that
 server when the active level is unknown. The scoped fallback uses
 GetWorldViewStatus with the concrete server; the all-server catalogue
-requires a global read grant. World View uses names from the authorized
-server inventory. Setup and unavailable states do not mount a map.
+requires a global read grant. The responsive map list uses names from the
+authorized server inventory. Setup and unavailable states do not mount a map.
 A failed refresh keeps a valid last-known map and reports the error. The page
 renews both built-in and renderer sessions before their deadline, hides expired
 maps and retries temporary failures while the scope remains authorized. Read

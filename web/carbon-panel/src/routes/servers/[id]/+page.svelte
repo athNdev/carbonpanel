@@ -742,9 +742,9 @@ one at https://mozilla.org/MPL/2.0/.
 								mode="form"
 							>
 								<div class="flex flex-col gap-6 p-4 sm:p-6">
-									{#key server.id}
-										<ServerOperations {server} active={activeTab === 'activity'} />
-										<ServerActivity {server} active={activeTab === 'activity'} />
+									{#key serverId}
+										<ServerOperations {serverId} active={activeTab === 'activity'} />
+										<ServerActivity {serverId} active={activeTab === 'activity'} />
 									{/key}
 								</div>
 							</ServerTabPanel>

@@ -9,7 +9,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { create } from '@bufbuild/protobuf';
 	import { Code, ConnectError } from '@connectrpc/connect';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ListOperationsRequestSchema,
 		ResolveOperationRequestSchema,
@@ -25,7 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
 
-	let { server, active = false }: { server: Server; active?: boolean } = $props();
+	let { serverId, active = false }: { serverId: string; active?: boolean } = $props();
 
 	let operations = $state<LifecycleOperation[]>([]);
 	let loading = $state(false);
@@ -48,7 +47,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		loadError = null;
 		try {
 			const response = await rpcClient.operation.listOperations(
-				create(ListOperationsRequestSchema, { serverId: server.id, limit: 50 }),
+				create(ListOperationsRequestSchema, { serverId, limit: 50 }),
 				{ ...silentCallOptions, signal: controller.signal }
 			);
 			if (!controller.signal.aborted) operations = response.operations;
@@ -102,7 +101,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		try {
 			const response = await rpcClient.operation.resolveOperation(
 				create(ResolveOperationRequestSchema, {
-					serverId: server.id,
+					serverId,
 					operationId: target.id,
 					note: resolveNote.trim()
 				})

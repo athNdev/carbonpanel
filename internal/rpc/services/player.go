@@ -1071,6 +1071,9 @@ func (s *PlayerService) GetPlayerDeepData(ctx context.Context, req *connect.Requ
 // auditPlayer writes one append-only audit row. Audit failure never breaks the
 // operation being audited.
 func (s *PlayerService) auditPlayer(ctx context.Context, ip, event, serverID, identityKey, requestID string, props map[string]any) {
+	// An applied mutation must remain auditable if its client disconnects.
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	actorID, actorName := "", ""
 	if user := auth.GetUserFromContext(ctx); user != nil {
 		actorID, actorName = user.ID, user.Username
@@ -1081,7 +1084,7 @@ func (s *PlayerService) auditPlayer(ctx context.Context, ip, event, serverID, id
 			encoded = string(raw)
 		}
 	}
-	if err := activity.Log(s.store.DB().WithContext(ctx), activity.Entry{
+	if err := activity.Log(s.store.DB().WithContext(auditCtx), activity.Entry{
 		ActorID: actorID, ActorName: actorName, IP: ip, Event: event,
 		SubjectTyp: "player", SubjectID: identityKey, ServerID: serverID,
 		Properties: encoded, RequestID: strings.TrimSpace(requestID),
@@ -1164,7 +1167,7 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 	if mutateErr != nil {
 		_ = s.store.AdvancePlayerAction(finalCtx, row.ID, storage.PlayerActionExecuting, storage.PlayerActionFailed, mutateErr.Error())
 		auditProps["outcome"] = "failed"
-		s.auditPlayer(finalCtx, ip, event, serverID, identityKey, requestID, auditProps)
+		s.auditPlayer(ctx, ip, event, serverID, identityKey, requestID, auditProps)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s failed: %w", action, mutateErr))
 	}
 	if err := s.store.AdvancePlayerAction(finalCtx, row.ID, storage.PlayerActionExecuting, storage.PlayerActionComplete, ""); err != nil {
@@ -1175,7 +1178,7 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 	}
 	_ = s.store.DB().WithContext(finalCtx).Model(&storage.PlayerModerationAction{}).Where("id = ?", row.ID).
 		Update("prior_value", prior).Error
-	s.auditPlayer(finalCtx, ip, event, serverID, identityKey, requestID, auditProps)
+	s.auditPlayer(ctx, ip, event, serverID, identityKey, requestID, auditProps)
 	result := &v1.PlayerActionResult{IdentityKey: identityKey, Success: true, Message: action + " applied via " + sourceName}
 	if undoable {
 		result.UndoSupported = true
@@ -1494,7 +1497,7 @@ func (s *PlayerService) BulkPlayerAction(ctx context.Context, req *connect.Reque
 	if err := s.store.AdvancePlayerAction(finalCtx, row.ID, storage.PlayerActionPrepared, phase, fmt.Sprintf("%d of %d failed", failures, len(msg.IdentityKeys))); err != nil {
 		s.log.Error("Failed to finalize bulk journal %s: %v", row.ID, err)
 	}
-	s.auditPlayer(finalCtx, clientIP(req.Peer().Addr), activity.EventPlayerBulk, msg.ServerId, strings.Join(msg.IdentityKeys, ","), msg.RequestId, map[string]any{
+	s.auditPlayer(ctx, clientIP(req.Peer().Addr), activity.EventPlayerBulk, msg.ServerId, strings.Join(msg.IdentityKeys, ","), msg.RequestId, map[string]any{
 		"action": msg.Kind, "reason": msg.Reason, "targets": len(msg.IdentityKeys), "failures": failures, "source": sourceName,
 	})
 	return connect.NewResponse(&v1.BulkPlayerActionResponse{Outcome: &v1.PlayerActionOutcome{

@@ -10,7 +10,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { Code, ConnectError } from '@connectrpc/connect';
 	import { RefreshCw } from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ListActivityLogsRequestSchema,
 		type ActivityLogEntry
@@ -19,12 +18,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { formatTimestamp } from '$lib/utils/format-time';
 	import { activityCategory, describeActivity } from './server-activity';
 
-	let { server, active = false }: { server: Server; active?: boolean } = $props();
+	let { serverId, active = false }: { serverId: string; active?: boolean } = $props();
 
 	const pageSize = 100;
 	const maxEntries = 500;
 	let history = $state<{ serverId: string; entries: ActivityLogEntry[]; limit: number }>();
-	let current = $derived(history?.serverId === server.id ? history : undefined);
+	let current = $derived(history?.serverId === serverId ? history : undefined);
 	let entries = $derived(current?.entries ?? []);
 	let category = $state<string | number>('all');
 	let displayed = $derived(
@@ -70,7 +69,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		if (!active) return;
 		category = 'all';
-		void loadActivity(server.id, pageSize);
+		void loadActivity(serverId, pageSize);
 		return () => request?.abort();
 	});
 </script>
@@ -82,7 +81,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			kind="secondary"
 			size="sm"
 			disabled={loading}
-			onclick={() => loadActivity(server.id, current?.limit ?? pageSize)}
+			onclick={() => loadActivity(serverId, current?.limit ?? pageSize)}
 		>
 			<RefreshCw class="mr-2 h-4 w-4" />
 			{loading ? 'Loading…' : 'Refresh audit log'}
@@ -144,7 +143,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					kind="tertiary"
 					size="sm"
 					disabled={loading}
-					onclick={() => loadActivity(server.id, (current?.limit ?? pageSize) + pageSize)}
+					onclick={() => loadActivity(serverId, (current?.limit ?? pageSize) + pageSize)}
 				>
 					Load older entries
 				</CarbonButton>

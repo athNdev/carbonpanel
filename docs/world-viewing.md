@@ -6,8 +6,9 @@ modifies or teleports anything. The governing decisions are in
 [ADR 0015](adr/0015-world-viewing-renderer-proxy.md) and the durable rule is in
 `knowledge/architecture/world-viewing.md`.
 
-Open **World View** to browse maps, or use **Open map** in a server’s
-**World** tab. If the active level is still unknown, Carbon Panel checks for
+Open **World View** to search maps or filter by server and map status. Select a
+map row to open it or check its setup. You can also use **Open map** from a
+server’s **World** tab. If the active level is still unknown, Carbon Panel checks for
 the active map using that server’s World View read permission. A [built-in
 terrain map](world-terrain.md) opens supported local Java saves without a
 module. Choose **Set up a 3D map with BlueMap** from a built-in map, or
