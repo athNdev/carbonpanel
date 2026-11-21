@@ -49,8 +49,8 @@ sources:
   private draft. The minor alias advances only after public download verification.
 - Stable requires observed dual-registry digests and trusted gate commands.
 - All channel and docs moves share ONE non-cancelling `pages-deploy` lock; no
-  nested group and no dispatched workflow takes the same lock. A manual/site-only
-  dispatch publishes only an already-active source from the receipt. A partial
+  nested group. Site-only dispatches keep their active receipt. A trusted
+  `nightly=true` dispatch uses the full Nightly transaction. A partial
   move converges, a stale/out-of-order candidate is refused, and an idempotent
   alias at the target is a no-op. No immutable tag is overwritten or deleted.
 

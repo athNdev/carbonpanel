@@ -119,6 +119,11 @@ jobs:
       cancel-in-progress: ${{ !((github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly)) || (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true')) }}
 
     steps:
+      - name: Refuse manual Nightly while split recovery is active
+        if: github.event_name == 'workflow_dispatch' && inputs.nightly && vars.NIGHTLY_RECOVERY_ACTIVE == 'true'
+        run: |
+          echo "::error::Finish or compensate the active Nightly recovery before republishing"
+          exit 1
       - name: Resolve the pinned verified commit
         id: pinned
         env:
@@ -435,7 +440,8 @@ jobs:
     if: >-
       vars.NIGHTLY_RECOVERY_ACTIVE != 'true' &&
       ((github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'schedule' && github.event.schedule == '0 19 * * *'))
+      (github.event_name == 'schedule' && github.event.schedule == '0 19 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.nightly && inputs.recovery == 'off'))
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
@@ -545,11 +551,49 @@ jobs:
         run: |
           OBS=$(python3 scripts/release.py channel-observe --reference "$REF" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: steps.pinned.outputs.stable == 'true'
+      - name: Sign in to the linked GitHub container registry
+        if: steps.pinned.outputs.stable == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Ensure immutable Nightly sha counterpart on GHCR (authorized only)
+        id: sha_mirror
+        if: >-
+          steps.pinned.outputs.stable == 'true' &&
+          ((github.event_name == 'workflow_dispatch' && inputs.nightly) ||
+          (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
+          RECOVERY: 'false'
+          PIN_STABLE: ${{ steps.pinned.outputs.stable }}
+          SCHEDULE_OPT_IN: ${{ vars.NIGHTLY_RECOVERY_ACTIVE != 'true' && vars.NIGHTLY_SCHEDULE_PUBLISH || 'false' }}
+        run: |
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)" != "$CHANNEL_COMMIT" ]; then
+            echo "::error::main moved after pinning; refusing the stale mirror"
+            exit 1
+          fi
+          python3 scripts/release.py mirror-ghcr-sha \
+            --commit "$CHANNEL_COMMIT" --event "$CHANNEL_EVENT" --ref "$CHANNEL_REF" \
+            --ci-verified "$CHANNEL_CI_VERIFIED" --nightly-opt-in "$NIGHTLY_OPT_IN" \
+            --recovery "$RECOVERY" --pin-stable "$PIN_STABLE" \
+            --schedule-opt-in "$SCHEDULE_OPT_IN" --apply
+          # Re-observe after any mirror attempt so activation/stage use real state.
+          OBS=$(python3 scripts/release.py channel-observe --reference "sha-$CHANNEL_COMMIT" | jq -c .observations)
+          printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
       - name: Classify first Nightly activation from real immutable observations
         id: activation
         if: steps.pinned.outputs.stable == 'true'
         env:
-          OBS: ${{ steps.sha_obs.outputs.observations }}
+          OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           # Mixed Hub/GHCR state is a BLOCKED qualification, never a silent skip.
           python3 scripts/release.py nightly-activation-decision \
@@ -566,7 +610,7 @@ jobs:
         id: stage
         if: steps.pinned.outputs.stable == 'true' && steps.activation.outputs.action == 'activate'
         env:
-          OBS: ${{ steps.sha_obs.outputs.observations }}
+          OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           PRESENT=$(printf '%s' "$OBS" | jq -r '.docker_hub[0] == "present" and .ghcr[0] == "present"')
           if [ "$PRESENT" = "true" ]; then
@@ -619,20 +663,12 @@ jobs:
           DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
           echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to Docker Hub
         if: steps.pinned.outputs.stable == 'true'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-      - name: Sign in to the linked GitHub container registry
-        if: steps.pinned.outputs.stable == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
 
       - name: Observe live aliases and reconstruct the active receipt
         id: active
@@ -662,6 +698,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           OBSERVED: ${{ steps.stage.outputs.observed }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
           IMMUTABLE_OK: ${{ steps.activation.outputs.action == 'activate' && steps.stage.outcome == 'success' }}
           SITE_OK: ${{ steps.docs.outcome == 'success' }}
         run: |
@@ -693,7 +730,7 @@ jobs:
           printf 'candidate=%s\n' "$CANDIDATE" >> "$GITHUB_OUTPUT"
           python3 scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
-            --event "$CHANNEL_EVENT"
+            --event "$CHANNEL_EVENT" --nightly-opt-in "$NIGHTLY_OPT_IN"
 
       # Preserve the EXACT bytes of the currently DEPLOYED Pages artifact before
       # any write. A freshly rebuilt site is not a rollback source: the prior
@@ -783,6 +820,7 @@ jobs:
         if: steps.canonical.outcome == 'success'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
           STAGED_CANDIDATE: ${{ steps.stage_decision.outputs.candidate }}
           PREV_JSON: ${{ steps.stage_decision.outputs.prior_receipt }}
           LIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
@@ -797,16 +835,29 @@ jobs:
             '{registries:{},docs_commit:$c,docs_digest:$d}')
           python3 scripts/release.py channel-transaction --phase commit \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
-            --event "$CHANNEL_EVENT"
+            --event "$CHANNEL_EVENT" --nightly-opt-in "$NIGHTLY_OPT_IN"
 
+      - name: Re-check the main pin before moving aliases
+        id: late_recheck
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$current" != "$PINNED_COMMIT" ]; then
+            echo "::error::main moved after pinning; refusing stale promotion"
+            exit 1
+          fi
+          python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
       - name: Move the nightly alias in BOTH registries by verified digest
         id: alias_move
-        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        if: steps.late_recheck.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
           ALIASES: ${{ steps.active.outputs.aliases }}
-          SHA_OBS: ${{ steps.sha_obs.outputs.observations }}
+          SHA_OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           # The real sha-tag observations from BOTH registries - no fabricated
           # identical pair. channel-promote re-verifies each observation.
@@ -904,7 +955,7 @@ jobs:
            steps.probe.outcome == 'failure' || steps.canonical.outcome == 'failure' ||
            steps.commit_decision.outcome == 'failure' ||
            steps.commit_decision.outputs.action == 'rollback' ||
-           steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
+           steps.late_recheck.outcome == 'failure' || steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
            steps.final_deploy.outcome == 'failure' || steps.chromium.outcome == 'failure' ||
            steps.live_browser.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
@@ -963,6 +1014,11 @@ jobs:
           path: channel-receipt.json
           if-no-files-found: error
           retention-days: 30
+      - name: Fail when an explicit Nightly transaction was requested but not completed
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.nightly && inputs.recovery == 'off' && steps.final_verify.outcome != 'success' && steps.stage_decision.outputs.action != 'noop' && steps.commit_decision.outputs.action != 'noop'
+        run: |
+          echo "::error::explicit Nightly transaction was requested but did not complete"
+          exit 1
       # The Docker Hub full_description is owned solely by
       # .github/workflows/dockerhub-description.yml. Image/channel publication
       # must never overwrite it with a raw, older README.

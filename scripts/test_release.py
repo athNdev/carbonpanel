@@ -2533,6 +2533,31 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertIn("steps.preserve_prior.outputs.hash",
                       str(doc["jobs"]["channel-transaction"]["steps"]))
 
+    def test_manual_nightly_dispatch_uses_qualified_channel_transaction(self):
+        import yaml
+        cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        doc = yaml.safe_load(cd)
+        tx = doc["jobs"]["channel-transaction"]
+        cond = str(tx.get("if", ""))
+        self.assertIn("github.event_name == 'workflow_dispatch'", cond)
+        self.assertIn("inputs.nightly", cond)
+        self.assertIn("inputs.recovery == 'off'", cond)
+        self.assertEqual(tx["concurrency"]["group"], "pages-deploy")
+        steps = {s.get("name"): s for s in tx["steps"] if s.get("name")}
+        mirror = steps["Ensure immutable Nightly sha counterpart on GHCR (authorized only)"]
+        self.assertIn("mirror-ghcr-sha", mirror["run"])
+        self.assertIn("--apply", mirror["run"])
+        self.assertEqual(tx.get("permissions", {}).get("packages"), "write")
+        stage = next(s for s in tx["steps"] if s.get("id") == "stage_decision")
+        commit = next(s for s in tx["steps"] if s.get("id") == "commit_decision")
+        self.assertIn("--nightly-opt-in", stage["run"])
+        self.assertIn("--nightly-opt-in", commit["run"])
+        self.assertIn("NIGHTLY_OPT_IN", str(stage.get("env", {})))
+        self.assertIn("NIGHTLY_OPT_IN", str(commit.get("env", {})))
+        guard = [s for s in tx["steps"] if "explicit Nightly transaction was requested but not completed" in str(s.get("name", ""))]
+        self.assertTrue(guard)
+        self.assertIn("always()", guard[0]["if"])
+
     def test_release_stable_gate_uses_observed_digests_and_compensates(self):
         import yaml
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -2711,10 +2736,11 @@ class ChannelTransactionTests(unittest.TestCase):
             {"ci": "122"}, seq, "2026-11-19T00:00:00Z")
 
     def decide(self, candidate=None, previous=None, live=None, event="workflow_run",
-               ancestry=None):
+               ancestry=None, nightly_opt_in=False):
         return release.channel_transaction_decision(
             candidate or self.candidate(), previous, live or {}, event,
-            ancestry=ancestry or (lambda older, newer: True))
+            ancestry=ancestry or (lambda older, newer: True),
+            nightly_opt_in=nightly_opt_in)
 
     def test_first_publish_stages_both_surfaces_before_recording_receipt(self):
         action, _, receipt, steps = self.decide()
@@ -2787,6 +2813,25 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertIn("already-active", reason)
         action, _, _, _ = self.decide(previous=previous, event="workflow_dispatch")
         self.assertEqual(action, "publish")
+
+    def test_explicit_nightly_manual_dispatch_uses_same_transaction(self):
+        # Generic workflow_dispatch still refuses inactive receipt.
+        action, reason, _, _ = self.decide(event="workflow_dispatch")
+        self.assertEqual(action, "refuse")
+        self.assertIn("already-active", reason)
+        # Explicit trusted Nightly opt-in may advance through the same qualified transaction.
+        action, reason, receipt, steps = self.decide(event="workflow_dispatch", nightly_opt_in="true")
+        self.assertEqual(action, "publish")
+        self.assertEqual(tuple(steps), release.TX_PUBLISH_STEPS)
+        self.assertEqual(receipt["revision"], self.COMMIT)
+        # Never misrepresent event as schedule: decision is based on workflow_dispatch.
+        self.assertNotEqual(reason, "scheduled")
+        # Opt-in does not relax non-nightly or stable channels.
+        action, _, _, _ = self.decide(
+            candidate=self.candidate(channel="stable", commit=self.PREV_COMMIT, digest=self.PREV_DIGEST,
+                                     release_tag="carbonpanel-v1.0.41"),
+            event="workflow_dispatch", nightly_opt_in="true")
+        self.assertEqual(action, "refuse")
 
     def test_stable_channel_only_moves_from_verified_baseline(self):
         action, _, _, _ = self.decide(candidate=self.candidate(
@@ -3384,6 +3429,106 @@ class NightlyActivationTests(unittest.TestCase):
         self.assertEqual(result["action"], "activate")
         self.assertEqual(result["digest"], self.DIGEST)
         self.assertEqual(result["revision"], self.COMMIT)
+
+
+class NightlyGhcrMirrorTests(unittest.TestCase):
+    """Authorized Nightly sha mirroring to GHCR is digest-preserving and fail-closed."""
+
+    COMMIT = "1" * 40
+    DIGEST = "sha256:" + "a" * 64
+    OTHER = "sha256:" + "b" * 64
+
+    def hub_obs(self, digest=None, commit=None):
+        return ("present", {"digest": digest or self.DIGEST,
+                            "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+
+    def revisions(self, commit=None):
+        c = commit or self.COMMIT
+        return (self.DIGEST, {
+            ("linux", "amd64"): {"digest": "sha256:" + "1" * 64, "revision": c},
+            ("linux", "arm64"): {"digest": "sha256:" + "2" * 64, "revision": c},
+        })
+
+    def test_authorization_matrix(self):
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "workflow_dispatch", nightly_opt_in=True, ref="refs/heads/main",
+            ci_verified=True, recovery=False)
+        self.assertTrue(ok)
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "schedule", ref="refs/heads/main", ci_verified=True,
+            pin_stable=True, schedule_opt_in=True)
+        self.assertTrue(ok)
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "workflow_run", ref="refs/heads/main", ci_verified=True)
+        self.assertTrue(ok)
+        for kwargs in [
+            dict(event_name="workflow_dispatch", nightly_opt_in=False, ref="refs/heads/main", ci_verified=True),
+            dict(event_name="workflow_dispatch", nightly_opt_in=True, ref="refs/heads/main", ci_verified=True, recovery=True),
+            dict(event_name="schedule", ref="refs/heads/main", ci_verified=True, pin_stable=True, schedule_opt_in=False),
+            dict(event_name="push", ref="refs/heads/main", ci_verified=True),
+        ]:
+            ok, _ = release.nightly_ghcr_mirror_authorized(**kwargs)
+            self.assertFalse(ok, kwargs)
+
+    def test_decision_blocks_unauthorized_absent_and_refuses_conflicts(self):
+        hub = self.hub_obs()
+        with patch.object(release, "platform_manifest_revisions", return_value=self.revisions()):
+            action, digest, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("absent", {}), authorized=False)
+            self.assertEqual(action, "blocked")
+            self.assertEqual(digest, self.DIGEST)
+            action, _, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("unknown", {}), authorized=True)
+            self.assertEqual(action, "refuse")
+            self.assertIn("unknown", reason.lower())
+            action, _, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("present", {"digest": self.OTHER}), authorized=True)
+            self.assertEqual(action, "refuse")
+            self.assertIn("conflict", reason.lower())
+
+    def test_decision_allows_copy_and_idempotent_reuse(self):
+        hub = self.hub_obs()
+        ghcr = ("present", {"digest": self.DIGEST, "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+        with patch.object(release, "platform_manifest_revisions", return_value=self.revisions()):
+            action, digest, _ = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("absent", {}), authorized=True)
+            self.assertEqual((action, digest), ("copy", self.DIGEST))
+            action, digest, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ghcr, authorized=False)
+            self.assertEqual(action, "reuse")
+            self.assertEqual(digest, self.DIGEST)
+            self.assertIn("matches", reason.lower())
+
+    def test_ensure_mirror_copies_by_digest_and_reverifies(self):
+        hub = self.hub_obs()
+        ghcr_absent = ("absent", {})
+        ghcr_present = ("present", {"digest": self.DIGEST, "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+        calls = []
+
+        def observe(ref, strict=False):
+            calls.append(("observe", ref))
+            if ref.startswith(release.DOCKER_HUB_IMAGE):
+                return hub
+            return ghcr_present if len([c for c in calls if c[1].startswith("ghcr.io/")]) > 1 else ghcr_absent
+
+        with patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", return_value=self.revisions()), \
+             patch.object(release.subprocess, "run") as run:
+            values = release.ensure_ghcr_sha_mirror(self.COMMIT, authorized=True, apply=True, emit=False)
+        self.assertEqual(values["action"], "copy")
+        self.assertEqual(values["digest"], self.DIGEST)
+        cmd = run.call_args[0][0]
+        self.assertEqual(cmd[:4], ["docker", "buildx", "imagetools", "create"])
+        self.assertIn(f"{release.DOCKER_HUB_IMAGE}@{self.DIGEST}", cmd)
+        self.assertTrue(any("ghcr.io/" in str(x) for x in cmd))
+
+    def test_ensure_mirror_unauthorized_absent_writes_nothing(self):
+        with patch.object(release, "observe_reference", side_effect=[self.hub_obs(), ("absent", {})]), \
+             patch.object(release, "platform_manifest_revisions", return_value=self.revisions()), \
+             patch.object(release.subprocess, "run") as run:
+            values = release.ensure_ghcr_sha_mirror(self.COMMIT, authorized=False, apply=True, emit=False)
+        self.assertEqual(values["action"], "blocked")
+        run.assert_not_called()
 
 
 class StableReleasePublicationTests(unittest.TestCase):

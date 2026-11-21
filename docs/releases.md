@@ -284,7 +284,24 @@ fixed, non-cancellable channel concurrency group; verification builds stay
 per-SHA and cancellable.
 
 Two publication paths exist, and both require exact-commit CI. The manual path
-is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`.
+is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`
+and not recovery. After the immutable Docker Hub `sha-<commit>` image is
+verified, an authorized Nightly path ensures the GHCR immutable sha counterpart
+exists by a digest-preserving copy of the verified Hub index (including
+platforms and attestations) with scoped `packages: write` and existing registry
+credentials. Before any copy, the Hub index, labels and both platform config
+revisions are proven with the existing digest-addressed helpers; an unknown or
+conflicting GHCR sha is never overwritten, and an identical verified GHCR sha
+is reused idempotently. The remote GHCR index and full revision are observed
+again after the copy. Unauthorized or default verification writes nothing.
+
+The explicit trusted Nightly manual dispatch then runs the same qualified
+channel transaction used by automatic/scheduled Nightly: same `pages-deploy`
+lock, same exact-CI/source/marker gates, same candidate probe, and same
+dual-registry alias move with canonical docs reconciliation. It is never
+reported as schedule, and a requested manual Nightly transaction that cannot
+qualify fails the run instead of reporting green.
+
 The unattended path is a native Actions `schedule` (`cd.yml`, 18:00 UTC daily,
 ahead of the 06:30 Australia/Sydney local updater). A schedule **verifies by
 default**: it resolves the CURRENT `main` tip read-only twice (a moving or
@@ -294,14 +311,14 @@ exact-commit CI again immediately before the buildx push, and a THIRD time
 (fresh result, not the pre-push one) immediately before moving the alias. A
 tip that moved after pinning, or a CI run that stopped being green between the
 push and the alias move, blocks the affected write; verification-only runs
-still build locally without pushing. It may
-move only the `nightly` alias, reusing the verified
-`sha-<commit>` image; a present-but-unverified or unknown sha tag is skipped
-with zero writes. The unattended path alone derives the previous alias binding
-from the alias's own digest-addressed platform configs rather than an operator
-string; manual dispatch keeps its original explicit-binding rule and still
-refuses an absent binding. Both paths refuse an unbound, non-ancestor or
-same-commit-digest move.
+still build locally without pushing. It may move only the `nightly` alias,
+reusing the verified `sha-<commit>` image; a present-but-unverified or unknown
+sha tag is skipped with zero writes. The unattended path alone derives the
+previous alias binding from the alias's own digest-addressed platform configs
+rather than an operator string; manual dispatch keeps its original
+explicit-binding rule and still refuses an absent binding. Both paths refuse an
+unbound, non-ancestor or same-commit-digest move. A main advance refuses a stale
+promotion.
 
 A scheduled run writes to the registry only when the separately reviewed,
 **default-off** repository variable `NIGHTLY_SCHEDULE_PUBLISH` is exactly
@@ -314,10 +331,11 @@ only one writer can touch the shared sha identity and aliases at a time.
 
 Nightly never writes `latest`, a stable minor tag, `edge`, a GitHub release, a
 release record or any MCP/runtime/module image; those lanes have no schedule
-trigger. Its GHCR write is the verified dual-registry alias move described
-under the OSS-413 gates below, not a separate release lane. Seeding a live
-`nightly` tag is a distinct, separately authorized operation; the existing
-`edge` image predates current main and is never relabelled as a fresh nightly.
+trigger. Its GHCR write is the verified dual-registry immutable sha mirror
+and/or alias move described by the OSS-413 gates below, not a separate release
+lane. Seeding a live `nightly` tag is a distinct, separately authorized
+operation; the existing `edge` image predates current main and is never
+relabelled as a fresh nightly.
 
 ## OSS-413 verified channel promotion
 
