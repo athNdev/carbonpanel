@@ -2558,6 +2558,23 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertTrue(guard)
         self.assertIn("always()", guard[0]["if"])
 
+    def test_nightly_stage_preserves_deployed_canonical_docs(self):
+        import yaml
+        workflow = yaml.safe_load((release.ROOT / ".github/workflows/cd.yml").read_text(
+            encoding="utf-8"))
+        steps = {step["id"]: step for step in workflow["jobs"]["channel-transaction"]["steps"]
+                 if "id" in step}
+        self.assertLess(list(steps).index("preserve_prior"), list(steps).index("compose_stage"))
+        self.assertIn("cp -a .website-build/prior-site .website-build/site",
+                      steps["compose_stage"]["run"])
+        self.assertIn("steps.compose_stage.outputs.hash", steps["stage_decision"]["env"]["DOCS_HASH"])
+        prior = ".website-build/prior-site/version-index.json"
+        self.assertIn("--stable-source " + prior, steps["markers"]["run"])
+        final = steps["final_artifact"]["run"]
+        self.assertIn("prior_index=" + prior, final)
+        self.assertIn("CARBONPANEL_STABLE_REVISION", final)
+        self.assertIn("--stable-source " + prior, final)
+
     def test_release_stable_gate_uses_observed_digests_and_compensates(self):
         import yaml
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
