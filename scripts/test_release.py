@@ -2715,7 +2715,8 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         self.assertIn("observed=", by_id["stage"]["run"])
         self.assertEqual(by_id["browser_ui"]["run"],
                          "python3 scripts/browser_version_check.py")
-        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_deploy"]["if"])
+        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_upload"]["if"])
+        self.assertIn("steps.final_upload.outcome == 'success'", by_id["final_deploy"]["if"])
 
     def test_public_release_waits_for_verified_aliases_and_live_browser(self):
         import yaml
