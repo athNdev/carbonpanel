@@ -25,6 +25,9 @@ The Docker Hub `full_description` for `atharvnaphade/carbonpanel` is owned by
   for byte. Production generation fails closed when the live published index is
   unavailable or older than the checked-in baseline: neither a docs outage nor
   a pre-promotion identity may be advertised. A main-head guard prevents a
-  stale scheduled run from reverting a newly promoted Stable. Only the
-  resolver steps use the workflow's read-only GitHub token so these ref
-  lookups avoid the shared unauthenticated rate limit.
+  stale scheduled run from reverting a newly promoted Stable. Only the resolver
+  steps use the workflow's read-only GitHub token so these ref lookups avoid the
+  shared unauthenticated rate limit. Before any write, production must also
+  prove that identity against a public, final Stable release manifest and the
+  verified `:latest` digest/revision in both registries; on disagreement or an
+  unavailable provider it preserves the last published body.
