@@ -464,6 +464,21 @@
       "name": "server World tab renders"
     },
     {
+      "waitFor": "[data-testid=\"server-world-map-card\"]",
+      "feature": "worldtab",
+      "name": "the server's World View card loads"
+    },
+    {
+      "screenshot": "showcase-worlds-list",
+      "element": "[data-testid=\"showcase-runtime-tiles\"]",
+      "maxHeight": 720,
+      "scroll": false,
+      "feature": "worldtab",
+      "name": "world map card in the server view",
+      "alt": "Server runtime cards including the map preview and its expand control",
+      "focus": "The world map card and observed renderer state"
+    },
+    {
       "click": "#server-detail-tabs-tab-world",
       "feature": "worldtab",
       "name": "open the server World tab"
@@ -482,21 +497,6 @@
       "name": "per-server World tab with real world facts",
       "alt": "Per-server World tab showing the actual level, binding and relevant configuration",
       "focus": "Active world, binding and revision for the seeded vanilla server"
-    },
-    {
-      "waitFor": "[data-testid=\"server-world-map-card\"]",
-      "feature": "worldtab",
-      "name": "the server's World View card loads"
-    },
-    {
-      "screenshot": "showcase-worlds-list",
-      "element": "[data-testid=\"showcase-runtime-tiles\"]",
-      "maxHeight": 720,
-      "scroll": false,
-      "feature": "worldtab",
-      "name": "world map card in the server view",
-      "alt": "Server runtime cards including the map preview and its expand control",
-      "focus": "The world map card and observed renderer state"
     },
     {
       "goto": "/servers",

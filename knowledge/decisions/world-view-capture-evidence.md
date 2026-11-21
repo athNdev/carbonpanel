@@ -26,6 +26,7 @@ placeholder is publishable. The panel-wide CSP stays unchanged: the disposable
 stack overlays the pinned, digest-checked CSP-safe webapp build (ADR 0048) over
 the generated web root without touching `settings.json` or the real `maps/`
 tile tree, and a digest drift fails the fixture closed.
+The preview-grid capture runs before the World tab scrolls the server view.
 
 The journey fails closed on renderer console errors (`unsafe-eval`,
 `new Function`, `compileToFunction`, map load failure), and the asset gate
