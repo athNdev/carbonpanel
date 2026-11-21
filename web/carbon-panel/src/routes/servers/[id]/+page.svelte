@@ -738,12 +738,14 @@ one at https://mozilla.org/MPL/2.0/.
 						{:else if activeTab === 'activity'}
 							<ServerTabPanel
 								title="Activity"
-								description="Lifecycle journal and who did what on this server, newest first"
+								description="Lifecycle outcomes and recorded actions for this server"
 								mode="form"
 							>
 								<div class="flex flex-col gap-6 p-4 sm:p-6">
-									<ServerOperations {server} active={activeTab === 'activity'} />
-									<ServerActivity {server} active={activeTab === 'activity'} />
+									{#key server.id}
+										<ServerOperations {server} active={activeTab === 'activity'} />
+										<ServerActivity {server} active={activeTab === 'activity'} />
+									{/key}
 								</div>
 							</ServerTabPanel>
 						{:else if activeTab === 'routing'}

@@ -126,6 +126,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 	let canUpdate = $derived(checkPermission(auth.permissions, 'world_view', 'update', serverId));
 	let canCommand = $derived(checkPermission(auth.permissions, 'servers', 'command', serverId));
+	const canManageModules = (resource: string, action: string) =>
+		checkPermission(auth.permissions, resource, action, serverId);
+	let blueMapSetupKey = $state('');
 	let deniedByRead = $state(false);
 	let denied = $derived(deniedByRead || isReadDenied(statusError));
 	let canBrowseAll = $derived(checkPermission(auth.permissions, 'world_view', 'read', '*'));
@@ -660,8 +663,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<BlueMapInstall
 							{serverId}
 							target={statusTarget}
-							can={(resource, action) =>
-								checkPermission(auth.permissions, resource, action, serverId)}
+							can={canManageModules}
 							oncomplete={() => void retry()}
 						/>
 					</div>
@@ -724,6 +726,39 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</p>
 					</div>
 				{:else if view === 'saved'}
+					<div class="space-y-2 border border-border bg-card px-4 py-3 text-sm">
+						<p class="text-muted-foreground">
+							The built-in map shows saved terrain elevation. Use Refresh terrain after the server
+							saves changes.
+						</p>
+						{#if canManageModules('modules', 'create') && canManageModules('modules', 'start')}
+							{#key statusKey}
+								<details
+									ontoggle={(event) => {
+										if (event.currentTarget.open) blueMapSetupKey = statusKey;
+									}}
+								>
+									<summary class="focus-ring w-fit cursor-pointer text-accent-text"
+										>Set up a 3D map with BlueMap</summary
+									>
+									{#if blueMapSetupKey === statusKey}
+										<div class="mt-3 space-y-3">
+											<p class="text-muted-foreground">
+												The managed BlueMap module renders textured buildings and terrain from saved
+												chunks. Player positions require a separate live feed.
+											</p>
+											<BlueMapInstall
+												{serverId}
+												target={statusTarget}
+												can={canManageModules}
+												oncomplete={() => void retry()}
+											/>
+										</div>
+									{/if}
+								</details>
+							{/key}
+						{/if}
+					</div>
 					{#if embed.src}
 						{#key statusKey}
 							<NativeMapViewport

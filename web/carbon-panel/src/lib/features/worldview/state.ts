@@ -53,7 +53,7 @@ export const VIEW_STATE_LABEL: Record<ViewState, string> = {
 	onboarding: 'SETUP NEEDED',
 	installing: 'INSTALLING',
 	rendering: 'RENDERING',
-	ready: 'LIVE',
+	ready: 'MAP READY',
 	saved: 'BUILT-IN MAP',
 	stale: 'LAST-KNOWN TILES',
 	stopped: 'RENDERER STOPPED',
