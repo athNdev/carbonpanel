@@ -34,8 +34,9 @@ The canonical bundle contains `showcase-dashboard`, `showcase-dashboard-full`,
 Both dashboard images are native 2× captures of the 1440 × 1280 desktop
 layout with navigation and the shell. `showcase-dashboard-full` leads the README
 in dark mode. The linked `showcase-dashboard` shows the same dashboard in light
-mode. Console, Studio, the modpack catalog, and World Library show their page
-context in dark mode. The World View frame
+mode. The server overview (`showcase-worlds-list`) retains the shell, tabs,
+runtime cards and rendered map preview. Console, Studio, the modpack catalog
+and World Library also show their page context in dark mode. The World View frame
 uses a broad camera over the seeded Vanilla server's generated Overworld,
 rendered by BlueMap through the authenticated panel route.
 
