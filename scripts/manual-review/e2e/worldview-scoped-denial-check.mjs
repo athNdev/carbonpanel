@@ -88,9 +88,14 @@ try {
   base = base.replace(/\/$/, "");
   ({ browser } = await launchReviewBrowser());
 
+  const fixtureSession = "fixture-worldview-session";
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     reducedMotion: "reduce",
+    storageState: {
+      cookies: [],
+      origins: [{ origin: new URL(base).origin, localStorage: [{ name: "auth_token", value: fixtureSession }] }],
+    },
   });
   const page = await context.newPage();
   const errors = [];
@@ -112,7 +117,7 @@ try {
       reply({ code: "permission_denied", message: "insufficient scope for this write" }, 403);
 
     if (method === "GetAuthStatus")
-      return reply({ localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false });
+      return reply({ localAuthEnabled: true, oidcEnabled: false, anonymousAccessEnabled: false });
     if (method === "GetCurrentUser")
       return reply({
         user: { id: "fixture", username: "Fixture" },
@@ -207,13 +212,14 @@ try {
     return reply({});
   });
   // Same-origin map assets: harmless document so the sandbox iframe has no live dependency.
-  await page.route("**/api/v1/**", (route) =>
-    route.fulfill({
-      status: 200,
+  await page.route("**/api/v1/worldview/map/**", async (route) => {
+    const cookie = (await route.request().headerValue("cookie")) ?? "";
+    return route.fulfill({
+      status: cookie.split(/;\s*/).includes(`cp_session=${fixtureSession}`) ? 200 : 401,
       contentType: "text/html",
       body: "<!doctype html><html><body>fixture map</body></html>",
-    }),
-  );
+    });
+  });
 
   // encodeWorldKey packs [kind, serverId, levelName, bindingId, snapshotId];
   // KIND_SERVER_LOCAL = 2 (worldview_pb.ts).
@@ -224,6 +230,9 @@ try {
   // Warm route dependencies; Vite's initial optimization reloads the page.
   await page.goto(base);
   await page.waitForLoadState("networkidle");
+  const cookie = (await context.cookies(base)).find((entry) => entry.name === "cp_session");
+  assert.equal(cookie?.value, fixtureSession, "restored auth must set the cookie before the viewer loads");
+  assert.equal(cookie?.sameSite, "Strict");
 
   async function load() {
     await page.goto(url);
