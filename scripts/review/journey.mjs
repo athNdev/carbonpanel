@@ -258,7 +258,21 @@ async function main() {
                 response.request().frame() === frame,
               timeout,
             });
-            if (await tile.finished()) throw new Error("map preview tile transfer did not finish");
+            let timer;
+            try {
+              const transferError = await Promise.race([
+                tile.finished(),
+                new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error("map preview tile transfer timed out")), timeout);
+                }),
+              ]);
+              const failure = tile.request().failure();
+              if (failure || transferError) {
+                throw new Error(`map preview tile transfer failed: ${failure?.errorText ?? transferError.message}`);
+              }
+            } finally {
+              clearTimeout(timer);
+            }
           }
           break;
         }
