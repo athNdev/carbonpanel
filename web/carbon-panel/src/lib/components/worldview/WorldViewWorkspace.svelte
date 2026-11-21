@@ -16,7 +16,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		AlertTriangle,
 		ArrowLeft,
 		Ban,
-		LoaderCircle,
 		Lock,
 		Maximize,
 		MapPin,
@@ -30,7 +29,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonButton,
 		CarbonSelect,
 		CarbonTextInput,
-		CarbonInlineLoading,
 		CarbonEmptyState,
 		CarbonErrorState,
 		CarbonAccordion,
@@ -84,6 +82,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
+	import WorldMapLoading from '$lib/components/worldview/WorldMapLoading.svelte';
 	import {
 		loadNativeManifest,
 		loadNativeTile,
@@ -92,7 +91,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		type MapPoint
 	} from '$lib/features/worldview/native-map';
 	import { nativeMapMarkers } from '$lib/features/worldview/native-map-markers';
-	import { prefersReducedMotion } from '$lib/motion';
 
 	let {
 		serverId,
@@ -440,12 +438,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				)
 	);
 	let previewTile = $state<{ scope: string; src: string }>();
+	let previewFetching = $state(false);
 	$effect(() => {
 		const path = embed.src;
 		const scope = sessionScope;
 		if (!preview || view !== 'saved' || !path) return;
 		const controller = new AbortController();
 		const { signal } = controller;
+		previewFetching = true;
 		void (async () => {
 			const manifest = await loadNativeManifest(path, signal);
 			if (signal.aborted) return;
@@ -465,8 +465,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (tile.status === 'access') {
 				handleError(new ConnectError('World map access was revoked.', Code.PermissionDenied));
 			} else if (tile.status === 'saved') previewTile = { scope, src: tile.src };
-		})().catch(() => {});
-		return () => controller.abort();
+		})()
+			.catch(() => {})
+			.finally(() => {
+				if (!signal.aborted) previewFetching = false;
+			});
+		return () => {
+			controller.abort();
+			previewFetching = false;
+		};
 	});
 	let previewImage = $derived(
 		view === 'saved' && embed.src && previewTile?.scope === sessionScope
@@ -474,6 +481,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			: undefined
 	);
 	let previewFrame = $derived(view !== 'saved' ? embed.src : null);
+	let mapLoadingLabel = $derived.by(() => {
+		if (auth.isLoading) return 'Checking map access…';
+		if (!enabled || denied || !canRead || statusUnavailable) return '';
+		if (view === 'loading')
+			return worldKey === undefined ? 'Finding the active world…' : 'Checking the map renderer…';
+		if (view === 'installing') return 'Starting the map renderer…';
+		if (view === 'rendering') return 'Rendering terrain…';
+		if (previewFetching) return 'Reading saved terrain…';
+		if (sessionMode && !session && !sessionError)
+			return view === 'saved' ? 'Opening saved terrain…' : 'Connecting to the map…';
+		return '';
+	});
 	let visibleOverlays = $derived(
 		!statusError && liveOverlaysEnabled(view)
 			? filterOverlays(overlays, dimension, playerVisible && canObserve)
@@ -692,12 +711,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</div>
 				{/if}
 			</div>
-			{#if !previewImage && !previewFrame}
+			{#if !previewImage && !previewFrame && mapLoadingLabel}
+				<WorldMapLoading label={mapLoadingLabel} compact />
+			{:else if !previewImage && !previewFrame}
 				<div class="flex flex-1 items-center gap-2 text-sm text-muted-foreground" role="status">
 					<MapPin class="h-4 w-4 shrink-0" aria-hidden="true" />
-					{#if auth.isLoading || (canRead && !denied && view === 'loading' && !statusUnavailable)}
-						Checking for a map…
-					{:else if !canRead || denied}
+					{#if !canRead || denied}
 						World View access required
 					{:else if view === 'onboarding'}
 						Expand to set up a map
@@ -762,8 +781,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="sr-only" role="status" aria-live="polite">{announcement}</div>
 
 		{#if auth.isLoading}
-			<div class="border border-border bg-card p-6" role="status">
-				<CarbonInlineLoading description="Checking world-view access…" />
+			<div class="border border-border bg-card">
+				<WorldMapLoading label={mapLoadingLabel} />
 			</div>
 		{:else if !canRead || denied}
 			<CarbonEmptyState
@@ -780,13 +799,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				message="This URL does not carry a recognisable world reference. Return to the world picker and open the world again."
 			/>
 		{:else if !worldRef && !statusUnavailable}
-			<div class="border border-border bg-card p-6" role="status">
-				{#if statusTarget}No active world could be resolved for this server.{:else}
-					<CarbonInlineLoading description="Finding the active world…" />
-				{/if}
-			</div>
+			{#if statusTarget}
+				<CarbonErrorState
+					title="Active world unavailable"
+					message="The server did not report a world that can be opened."
+					onretry={retry}
+				/>
+			{:else}
+				<div class="border border-border bg-card"><WorldMapLoading label={mapLoadingLabel} /></div>
+			{/if}
 		{:else}
-			<div class={['grid min-w-0 gap-4', view !== 'saved' && 'lg:grid-cols-[minmax(0,1fr)_20rem]']}>
+			<div
+				class={[
+					'grid min-w-0 gap-4',
+					rendererControlsAvailable && view !== 'saved' && 'lg:grid-cols-[minmax(0,1fr)_20rem]'
+				]}
+			>
 				<section class="min-w-0 space-y-3" aria-label="Map surface">
 					<div class="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2">
 						<span class="mono-label">WORLD</span>
@@ -812,9 +840,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									: 'Carbon Panel received no map status for this world.'}
 							onretry={retry}
 						/>
-					{:else if view === 'loading'}
-						<div class="border border-border bg-card p-8" role="status">
-							<CarbonInlineLoading description="Checking renderer state…" />
+					{:else if view === 'loading' || view === 'installing' || view === 'rendering'}
+						<div class="border border-border bg-card">
+							<WorldMapLoading label={mapLoadingLabel} />
 						</div>
 					{:else if view === 'onboarding'}
 						<div class="space-y-3 border border-border bg-card p-4 sm:p-6">
@@ -828,32 +856,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								can={canManageModules}
 								oncomplete={() => void retry()}
 							/>
-						</div>
-					{:else if view === 'installing'}
-						<div class="space-y-3 border border-border bg-card p-8" role="status">
-							<div class="flex items-center gap-2">
-								<LoaderCircle
-									class="h-5 w-5 text-accent-text {prefersReducedMotion() ? '' : 'animate-spin'}"
-								/>
-								<h2 class="text-base font-semibold">Installing renderer</h2>
-							</div>
-							<p class="text-sm text-muted-foreground">
-								The renderer module is being created and started. No map is mounted until it reports
-								ready tiles.
-							</p>
-						</div>
-					{:else if view === 'rendering'}
-						<div class="space-y-3 border border-border bg-card p-8" role="status">
-							<div class="flex items-center gap-2">
-								<LoaderCircle
-									class="h-5 w-5 text-chart-4 {prefersReducedMotion() ? '' : 'animate-spin'}"
-								/>
-								<h2 class="text-base font-semibold">Rendering map</h2>
-							</div>
-							<p class="text-sm text-muted-foreground">
-								The initial render is in progress. The backend does not report a percentage, so none
-								is shown here.
-							</p>
 						</div>
 					{:else if view === 'error'}
 						<CarbonErrorState
@@ -943,7 +945,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								onretry={retry}
 							/>
 						{:else}
-							<CarbonInlineLoading description="Opening saved terrain" />
+							<div class="border border-border bg-card">
+								<WorldMapLoading label={mapLoadingLabel} />
+							</div>
 						{/if}
 					{:else if view === 'stale' || view === 'ready'}
 						{#if view === 'stale'}
@@ -980,6 +984,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
 								></iframe>
 							</div>
+						{:else if mapLoadingLabel}
+							<div class="border border-border bg-card">
+								<WorldMapLoading label={mapLoadingLabel} />
+							</div>
 						{:else}
 							<div class="space-y-3 border border-border bg-card p-8">
 								<h2 class="text-base font-semibold">Map not available</h2>
@@ -994,7 +1002,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					{/if}
 				</section>
 
-				<aside class="min-w-0 space-y-3" class:hidden={view === 'saved'}>
+				<aside
+					class="min-w-0 space-y-3"
+					class:hidden={!rendererControlsAvailable || view === 'saved'}
+				>
 					{#if rendererControlsAvailable}
 						<p class="text-xs text-muted-foreground">
 							Use the controls inside the map to pan, zoom, or search for coordinates.

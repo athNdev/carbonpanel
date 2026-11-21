@@ -20,8 +20,8 @@ visibility flag are the only mutations, and both are audited. Teleport and
 world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
-Server World View uses a compact preview and a full dialog. The World tab
-opens the same dialog. With no explicit level the viewer resolves the active
+The server preview and World tab open the same map dialog. Loading labels
+show the renderer phase. With no explicit level the viewer resolves the active
 map through scoped GetWorldViewStatus. Standalone links still check only map
 access. The catalogue requires a global read grant. Setup and unavailable
 states do not mount an iframe.

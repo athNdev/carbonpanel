@@ -16,7 +16,7 @@
 	import CarbonAccordionItem from '$lib/components/carbon/CarbonAccordionItem.svelte';
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonErrorState from '$lib/components/carbon/CarbonErrorState.svelte';
-	import CarbonInlineLoading from '$lib/components/carbon/CarbonInlineLoading.svelte';
+	import WorldMapLoading from './WorldMapLoading.svelte';
 	import CarbonSelect from '$lib/components/carbon/CarbonSelect.svelte';
 	import CarbonTextInput from '$lib/components/carbon/CarbonTextInput.svelte';
 	import {
@@ -400,9 +400,7 @@
 	</header>
 
 	{#if !result}
-		<div class="px-4 py-10" role="status">
-			<CarbonInlineLoading description="Loading saved terrain…" />
-		</div>
+		<WorldMapLoading label="Loading saved terrain…" />
 	{:else if result.status !== 'ready'}
 		<CarbonErrorState
 			class="border-0"
