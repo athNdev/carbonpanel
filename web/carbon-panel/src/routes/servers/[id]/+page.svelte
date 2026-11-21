@@ -11,7 +11,16 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { page } from '$app/state';
 	import { displayPreferences } from '$lib/display-preferences.svelte';
-	import { ChevronDown } from '@lucide/svelte';
+	import {
+		ChevronDown,
+		CircleHelp,
+		Play,
+		Square,
+		Moon,
+		Pause,
+		TriangleAlert,
+		CircleX
+	} from '@lucide/svelte';
 	const { metricsExpanded } = displayPreferences;
 	import { onMount, untrack } from 'svelte';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
@@ -96,20 +105,87 @@ one at https://mozilla.org/MPL/2.0/.
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let actionLoading = $state(false);
-	let activeTab = $state('overview');
+	const subViewTabs = [
+		{ id: 'overview', label: 'Overview', icon: Settings },
+		{ id: 'console', label: 'Console', icon: Terminal },
+		{ id: 'configuration', label: 'Configuration', icon: HardDrive },
+		{ id: 'mods', label: 'Mods', icon: Package },
+		{ id: 'datapacks', label: 'Datapacks', icon: Database },
+		{ id: 'world', label: 'World', icon: Globe2 },
+		{ id: 'modules', label: 'Modules', icon: Boxes },
+		{ id: 'files', label: 'Files', icon: Files },
+		{ id: 'tasks', label: 'Tasks', icon: ListTodo },
+		{ id: 'backups', label: 'Backups', icon: Archive },
+		{ id: 'players', label: 'Players', icon: Users },
+		{ id: 'activity', label: 'Activity', icon: History },
+		{ id: 'routing', label: 'Routing', icon: Radio }
+	];
+	let detailUrl = $derived(page.shallow?.url ?? page.url);
+	let activeTab = $derived(
+		subViewTabs.find((tab) => tab.id === detailUrl.searchParams.get('tab'))?.id ?? 'overview'
+	);
+
+	// Older copied Configuration links contained only a category or property fragment.
+	// Confirm it against this server's catalog before changing the default tab.
+	$effect(() => {
+		const hash = window.location.hash.slice(1);
+		if (!serverId || detailUrl.searchParams.has('tab') || !hash || hash === 'carbon-main') return;
+		let current = true;
+		void rpcClient.config
+			.getServerConfig({ serverId })
+			.then(({ categories }) => {
+				if (!current) return;
+				const known = categories.some(
+					(category) =>
+						category.name.toLowerCase().replace(/\s+/g, '-') === hash ||
+						category.properties.some((property) => property.key === hash)
+				);
+				if (known && window.location.hash.slice(1) === hash) {
+					const url = new URL(window.location.href);
+					url.searchParams.set('tab', 'configuration');
+					// eslint-disable-next-line svelte/no-navigation-without-resolve
+					void goto(url, { shallow: true, replace: true, reset: false });
+				}
+			})
+			.catch(() => {
+				/* An unavailable configuration cannot identify a legacy fragment. */
+			});
+		return () => {
+			current = false;
+		};
+	});
+
+	function selectServerTab(id: string) {
+		const url = new URL(detailUrl.href);
+		if (id === 'overview') url.searchParams.delete('tab');
+		else url.searchParams.set('tab', id);
+		url.hash = '';
+		activeTab = id;
+		// Keep the selected tab bookmarkable without reloading its server inventory.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(url, { shallow: true, replace: true, state: page.state, reset: false });
+	}
 	let requestedMap = $derived(page.url.searchParams.get('map'));
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
-	let runtimeChanging = $derived(
-		[
-			ServerStatus.CREATING,
-			ServerStatus.STARTING,
-			ServerStatus.RESTARTING,
-			ServerStatus.STOPPING
-		].includes(server?.status ?? ServerStatus.UNSPECIFIED)
+	const runtimeIcons = {
+		[ServerStatus.RUNNING]: Play,
+		[ServerStatus.STOPPED]: Square,
+		[ServerStatus.DEEPSLEEP]: Moon,
+		[ServerStatus.PAUSED]: Pause,
+		[ServerStatus.UNHEALTHY]: TriangleAlert,
+		[ServerStatus.ERROR]: CircleX,
+		[ServerStatus.CREATING]: Package,
+		[ServerStatus.STARTING]: Loader2,
+		[ServerStatus.RESTARTING]: RefreshCcw,
+		[ServerStatus.STOPPING]: Loader2,
+		[ServerStatus.UNSPECIFIED]: CircleHelp
+	};
+	let RuntimeIcon = $derived(
+		runtimeIcons[server?.status ?? ServerStatus.UNSPECIFIED] ?? CircleHelp
 	);
 
 	function openMap(worldKey = '') {
-		const url = new URL(page.url.href);
+		const url = new URL(detailUrl.href);
 		url.searchParams.set('map', worldKey);
 		// This opens a dialog on the current server route.
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
@@ -117,7 +193,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function closeMap() {
-		const url = new URL(page.url.href);
+		const url = new URL(detailUrl.href);
 		for (const key of ['map', 'dimension', 'x', 'z', 'layer']) url.searchParams.delete(key);
 		// Only map-related query parameters are removed.
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
@@ -286,22 +362,6 @@ one at https://mozilla.org/MPL/2.0/.
 		copyText(text);
 		toast.success('Address copied to clipboard');
 	}
-
-	const subViewTabs = [
-		{ id: 'overview', label: 'Overview', icon: Settings },
-		{ id: 'console', label: 'Console', icon: Terminal },
-		{ id: 'configuration', label: 'Configuration', icon: HardDrive },
-		{ id: 'mods', label: 'Mods', icon: Package },
-		{ id: 'datapacks', label: 'Datapacks', icon: Database },
-		{ id: 'world', label: 'World', icon: Globe2 },
-		{ id: 'modules', label: 'Modules', icon: Boxes },
-		{ id: 'files', label: 'Files', icon: Files },
-		{ id: 'tasks', label: 'Tasks', icon: ListTodo },
-		{ id: 'backups', label: 'Backups', icon: Archive },
-		{ id: 'players', label: 'Players', icon: Users },
-		{ id: 'activity', label: 'Activity', icon: History },
-		{ id: 'routing', label: 'Routing', icon: Radio }
-	];
 </script>
 
 {#if loading && !server}
@@ -426,23 +486,54 @@ one at https://mozilla.org/MPL/2.0/.
 				data-testid="showcase-runtime-tile"
 				class="flex min-h-48 flex-col justify-between gap-3 border border-border bg-card p-4 sm:p-5"
 			>
-				<div class="flex items-center justify-between">
-					<h2 class="text-sm font-semibold">Runtime status</h2>
-					<CarbonTag type={getStatusTagType(server.status)} size="sm">
-						{getStatusDisplayName(server.status)}
-					</CarbonTag>
-				</div>
-				<div
-					class="runtime-signal"
-					class:changing={runtimeChanging}
-					class:running={server.status === ServerStatus.RUNNING}
-					class:sleeping={server.status === ServerStatus.DEEPSLEEP}
-					aria-hidden="true"
-					style:--signal-ink={`var(--tag-${getStatusTagType(server.status)}-text)`}
-				>
-					{#each [0.25, 0.4, 0.62, 0.85, 1, 0.85, 0.62, 0.4, 0.25] as height, i (i)}
-						<span class="signal-block" style:--rest={height} style:--delay={`${i * 0.13}s`}></span>
-					{/each}
+				<h2 class="text-sm font-semibold">Runtime status</h2>
+				<div class="flex items-center gap-4">
+					{#if [ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.RESTARTING].includes(server.status)}
+						<svg
+							class="runtime-drive"
+							class:winding={server.status !== ServerStatus.RUNNING}
+							viewBox="0 0 90 64"
+							aria-hidden="true"
+							style:color={`var(--tag-${getStatusTagType(server.status)}-text)`}
+						>
+							<path
+								d="M7 55h75M21 54l9-21h4l8 21m13 0 6-20h4l7 20"
+								fill="none"
+								stroke="currentColor"
+								stroke-opacity=".35"
+								stroke-width="1.5"
+							/>
+							<g transform="translate(32 31)">
+								<g class="drive-wheel">
+									<polygon
+										points="16.4,-4.4 16.8,-2.6 20.0,-1.9 20.0,1.9 16.8,2.6 16.4,4.4 15.8,6.2 18.3,8.4 16.4,11.6 13.3,10.6 12.0,12.0 10.6,13.3 11.6,16.4 8.4,18.3 6.2,15.8 4.4,16.4 2.6,16.8 1.9,20.0 -1.9,20.0 -2.6,16.8 -4.4,16.4 -6.2,15.8 -8.4,18.3 -11.6,16.4 -10.6,13.3 -12.0,12.0 -13.3,10.6 -16.4,11.6 -18.3,8.4 -15.8,6.2 -16.4,4.4 -16.8,2.6 -20.0,1.9 -20.0,-1.9 -16.8,-2.6 -16.4,-4.4 -15.8,-6.2 -18.3,-8.4 -16.4,-11.6 -13.3,-10.6 -12.0,-12.0 -10.6,-13.3 -11.6,-16.4 -8.4,-18.3 -6.2,-15.8 -4.4,-16.4 -2.6,-16.8 -1.9,-20.0 1.9,-20.0 2.6,-16.8 4.4,-16.4 6.2,-15.8 8.4,-18.3 11.6,-16.4 10.6,-13.3 12.0,-12.0 13.3,-10.6 16.4,-11.6 18.3,-8.4 15.8,-6.2"
+									/>
+									<path d="M0-12v6m10.4 12-5.2-3m-15.6 3 5.2-3" />
+									<circle r="3.5" />
+								</g>
+							</g>
+							<g transform="translate(63 31) rotate(22.5)">
+								<g class="drive-wheel pinion">
+									<polygon
+										points="10.0,-4.1 10.5,-2.4 13.8,-2.0 13.8,2.0 10.5,2.4 10.0,4.1 9.2,5.7 11.1,8.3 8.3,11.1 5.7,9.2 4.1,10.0 2.4,10.5 2.0,13.8 -2.0,13.8 -2.4,10.5 -4.1,10.0 -5.7,9.2 -8.3,11.1 -11.1,8.3 -9.2,5.7 -10.0,4.1 -10.5,2.4 -13.8,2.0 -13.8,-2.0 -10.5,-2.4 -10.0,-4.1 -9.2,-5.7 -11.1,-8.3 -8.3,-11.1 -5.7,-9.2 -4.1,-10.0 -2.4,-10.5 -2.0,-13.8 2.0,-13.8 2.4,-10.5 4.1,-10.0 5.7,-9.2 8.3,-11.1 11.1,-8.3 9.2,-5.7"
+									/>
+									<path d="M0-7v3m6.1 7-2.6-1.5m-9.6 1.5 2.6-1.5" />
+									<circle r="2.25" />
+								</g>
+							</g>
+						</svg>
+					{:else}
+						<span
+							class="runtime-emblem"
+							aria-hidden="true"
+							style:color={`var(--tag-${getStatusTagType(server.status)}-text)`}
+						>
+							<RuntimeIcon size={24} strokeWidth={1.5} />
+						</span>
+					{/if}
+					<span class="text-2xl font-medium tracking-tight first-letter:uppercase"
+						>{getStatusDisplayName(server.status).toLowerCase()}</span
+					>
 				</div>
 				<div class="border-t border-border pt-2.5">
 					<p class="text-xs leading-relaxed text-muted-foreground" aria-live="polite">
@@ -489,36 +580,33 @@ one at https://mozilla.org/MPL/2.0/.
 					<h2 class="text-sm font-semibold">Engine specs</h2>
 					<Info class="h-4 w-4 text-[var(--chart-4)]" />
 				</div>
-				<div class="mt-3 space-y-2 font-mono text-xs">
-					<div class="flex items-center justify-between">
-						<span class="text-muted-foreground">Minecraft:</span>
-						<span class="font-semibold text-foreground">{server.mcVersion || 'Latest'}</span>
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-muted-foreground">Loader:</span>
-						<span class="flex items-center gap-1.5">
-							{#if server.loaderVersion}
-								<span class="font-mono text-xs text-muted-foreground">{server.loaderVersion}</span>
-							{/if}
-							<CarbonTag type="teal" size="sm">
-								{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
-									'vanilla'}
-							</CarbonTag>
-						</span>
-					</div>
+				<dl class="mt-3 grid [grid-template-columns:max-content_minmax(0,1fr)] gap-2 text-xs">
+					<dt class="text-muted-foreground">Minecraft</dt>
+					<dd class="font-mono font-medium">{server.mcVersion || 'Latest'}</dd>
+					<dt class="text-muted-foreground">Loader</dt>
+					<dd class="flex flex-wrap items-center gap-1.5">
+						<CarbonTag type="teal" size="sm"
+							>{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
+								'vanilla'}</CarbonTag
+						>
+						{#if server.loaderVersion}<span class="font-mono break-all">{server.loaderVersion}</span
+							>{/if}
+					</dd>
 					{#if server.javaVersion}
-						<div class="flex items-center justify-between">
-							<span class="text-muted-foreground">Java:</span>
-							<span class="text-muted-foreground">JDK {server.javaVersion}</span>
-						</div>
+						<dt class="text-muted-foreground">Java</dt>
+						<dd class="font-mono">JDK {server.javaVersion}</dd>
 					{/if}
-				</div>
-				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
-				>
-					<span>Port: {server.port}</span>
-					<span>Max Players: {server.maxPlayers}</span>
-				</div>
+				</dl>
+				<dl class="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-3 text-xs">
+					<div class="flex gap-2">
+						<dt class="text-muted-foreground">Port</dt>
+						<dd class="font-mono">{server.port}</dd>
+					</div>
+					<div class="flex gap-2">
+						<dt class="text-muted-foreground">Max players</dt>
+						<dd class="font-mono">{server.maxPlayers}</dd>
+					</div>
+				</dl>
 			</div>
 
 			<!-- Tile 4: Hardware Quotas -->
@@ -530,7 +618,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="mt-3 space-y-2.5">
 					<!-- Memory Bar -->
 					<div>
-						<div class="flex items-center justify-between font-mono text-xs">
+						<div class="flex flex-wrap items-baseline gap-x-2 font-mono text-xs">
 							<span class="text-muted-foreground">RAM</span>
 							<span class="text-foreground">
 								{#if server.status === ServerStatus.CREATING}
@@ -538,7 +626,7 @@ one at https://mozilla.org/MPL/2.0/.
 										server.memory / 1024
 									).toFixed(1)} GB
 								{:else}
-									{server.memoryUsage ? (Number(server.memoryUsage) / 1024).toFixed(1) : '0'} / {(
+									{server.memoryUsage ? (Number(server.memoryUsage) / 1024).toFixed(1) : '—'} / {(
 										server.memory / 1024
 									).toFixed(1)} GB
 								{/if}
@@ -556,7 +644,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<!-- CPU Bar -->
 					<div>
-						<div class="flex items-center justify-between font-mono text-xs">
+						<div class="flex flex-wrap items-baseline gap-x-2 font-mono text-xs">
 							<span class="text-muted-foreground">CPU</span>
 							<span class="text-accent-text">
 								{server.cpuPercent !== undefined ? `${server.cpuPercent.toFixed(1)}%` : '—'}
@@ -575,30 +663,38 @@ one at https://mozilla.org/MPL/2.0/.
 					{memoryLimitCopy(server.resourceEnforcement).label}
 					· {worldDiskCopy(server.resourceEnforcement).label}
 				</p>
-				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px]"
+				<dl
+					class="mt-3 flex flex-wrap items-start gap-x-6 gap-y-2 border-t border-border pt-3 text-xs"
 				>
-					<span class="text-muted-foreground">TPS:</span>
-					<span
-						class="{server.status === ServerStatus.RUNNING && server.tps > 0
-							? server.tps >= 18
-								? 'text-success-text'
-								: 'text-warning-text'
-							: 'text-muted-foreground'} font-semibold"
-					>
-						{server.status === ServerStatus.RUNNING && server.tps > 0 ? server.tps.toFixed(1) : '—'}
-					</span>
-					<span class="text-muted-foreground">Players:</span>
-					<span
-						class="font-semibold {joinIsPlayable(server)
-							? 'text-success-text'
-							: 'text-muted-foreground'}"
-					>
-						{joinIsPlayable(server)
-							? server.playersOnline || 0
-							: joinKindLabel(server.joinObservationKind)}
-					</span>
-				</div>
+					<div class="flex items-baseline gap-2">
+						<dt class="text-muted-foreground">TPS</dt>
+						<dd
+							class="font-mono font-semibold {server.status === ServerStatus.RUNNING &&
+							server.tps > 0
+								? server.tps >= 18
+									? 'text-success-text'
+									: 'text-warning-text'
+								: ''}"
+						>
+							{server.status === ServerStatus.RUNNING && server.tps > 0
+								? server.tps.toFixed(1)
+								: '—'}
+						</dd>
+					</div>
+					<div class="flex items-baseline gap-2">
+						<dt class="text-muted-foreground">Players</dt>
+						<dd class="font-medium {joinIsPlayable(server) ? 'text-success-text' : ''}">
+							{joinIsPlayable(server)
+								? server.playersOnline
+								: joinKindLabel(server.joinObservationKind)}
+						</dd>
+					</div>
+				</dl>
+				{#if server.joinObservationKind === 'stale'}
+					<p class="mt-2 text-xs text-muted-foreground">
+						The last server reading is too old to confirm the current player count.
+					</p>
+				{/if}
 			</div>
 		</div>
 
@@ -619,7 +715,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<button
 					type="button"
-					onclick={() => (activeTab = 'console')}
+					onclick={() => selectServerTab('console')}
 					class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border border-border bg-card px-3 font-mono text-xs text-accent-text transition-colors hover:bg-accent"
 				>
 					<Terminal class="h-3.5 w-3.5" />
@@ -646,7 +742,8 @@ one at https://mozilla.org/MPL/2.0/.
 			<!-- Tab Bar -->
 			<CarbonTabs
 				tabs={subViewTabs}
-				bind:selectedTab={activeTab}
+				selectedTab={activeTab}
+				onselect={selectServerTab}
 				idPrefix="server-detail-tabs"
 				class="sticky top-0 z-20 shrink-0 bg-background"
 			/>
@@ -865,84 +962,71 @@ one at https://mozilla.org/MPL/2.0/.
 {/if}
 
 <style>
-	.runtime-signal {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		min-height: 4.5rem;
-		color: var(--signal-ink, var(--muted-foreground));
-		background:
-			linear-gradient(
-					90deg,
-					transparent,
-					color-mix(in srgb, currentColor 15%, transparent),
-					transparent
-				)
-				center / 100% 1px no-repeat,
-			radial-gradient(
-				ellipse at center,
-				color-mix(in srgb, currentColor 9%, transparent),
-				transparent 70%
-			);
+	.runtime-emblem {
+		display: grid;
+		flex: none;
+		width: 3.5rem;
+		aspect-ratio: 1;
+		place-items: center;
+		border: 1px solid currentColor;
+		background-color: color-mix(in srgb, currentColor 7%, var(--card));
 	}
-
-	.signal-block {
-		width: 0.5rem;
-		height: 2rem;
-		background: currentColor;
-		transform: scaleY(var(--rest));
-		opacity: 0.55;
-		transition:
-			opacity 240ms var(--ease-in-out-standard),
-			transform 240ms var(--ease-in-out-standard);
+	.runtime-drive {
+		flex: none;
+		width: 6.5rem;
+		height: auto;
 	}
-
-	.changing .signal-block {
-		animation: signal-pass 2.8s var(--ease-in-out-standard) var(--delay) infinite;
+	.drive-wheel {
+		fill: var(--card);
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linejoin: round;
+		animation: drive-turn 12s linear infinite;
 	}
-
-	.running .signal-block {
-		animation: signal-pass 7.5s var(--ease-in-out-standard) var(--delay) infinite;
+	.drive-wheel polygon {
+		fill: color-mix(in srgb, currentColor 10%, var(--card));
 	}
-
-	.sleeping .signal-block {
-		opacity: 0.22;
-		transform: scaleY(0.2);
+	.pinion {
+		animation-duration: 8s;
+		animation-direction: reverse;
 	}
-	.sleeping .signal-block:nth-child(5) {
-		animation: signal-breathe 6s ease-in-out infinite;
+	.winding .drive-wheel {
+		animation: drive-engage 3s cubic-bezier(0.35, 0, 0.3, 1) infinite;
 	}
-
-	@keyframes signal-pass {
+	.winding .pinion {
+		animation-name: pinion-engage;
+	}
+	@keyframes drive-turn {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@keyframes drive-engage {
 		0%,
-		32%,
-		100% {
-			transform: scaleY(var(--rest));
-			opacity: 0.52;
+		25% {
+			transform: rotate(0);
 		}
-		15% {
-			transform: translateY(-0.125rem) scaleY(1.12);
-			opacity: 0.92;
+		85%,
+		100% {
+			transform: rotate(240deg);
 		}
 	}
-
-	@keyframes signal-breathe {
+	@keyframes pinion-engage {
 		0%,
-		100% {
-			transform: scaleY(0.25);
-			opacity: 0.35;
+		25% {
+			transform: rotate(0);
 		}
-		50% {
-			transform: scaleY(0.6);
-			opacity: 0.72;
+		85%,
+		100% {
+			transform: rotate(-360deg);
 		}
 	}
-
 	@media (prefers-reduced-motion: reduce) {
-		.signal-block {
-			animation: none !important;
-			transition: none !important;
+		.runtime-drive .drive-wheel {
+			animation: none;
 		}
+	}
+	:global([data-carbon-motion='reduced']) .runtime-drive .drive-wheel {
+		animation: none;
 	}
 </style>

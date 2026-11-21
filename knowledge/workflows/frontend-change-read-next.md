@@ -46,4 +46,8 @@ change alone does not establish application-wide propagation.
   ratchet is not a whole-panel claim, and Cloud's content-pinned token snapshot
   is not edited by a Panel token migration.
 
+Native text-entry controls and select triggers share the panel field rule in `app.css` and the theme's `--field-*` tokens. Invalid fields keep their error edge on focus. Read-only fields have a dashed edge.
+
+Server Configuration and global Server Defaults share the category/search editor. Filtering preserves edits across categories. Copied setting links include the owning tab and property-key fragment so a fresh visit reveals the field.
+
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).

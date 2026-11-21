@@ -430,7 +430,7 @@ const SETTINGS_CATEGORIES = [
 	},
 	{
 		name: 'Networking',
-		properties: [{ key: 'port', label: 'Game port', value: '25565', type: 'number' }]
+		properties: [{ key: 'port', label: 'Game port', envVar: 'SERVER_PORT', description: 'TCP listener for the game.', value: '25565', type: 'number' }]
 	}
 ];
 
@@ -510,6 +510,11 @@ async function seedPackagedRoutes(page, state, authMode) {
 				});
 			}
 			if (method === 'GetGlobalSettings') return reply({ categories: SETTINGS_CATEGORIES });
+			if (method === 'GetServerConfig') return reply({ categories: SETTINGS_CATEGORIES });
+			if (method === 'UpdateServerConfig') {
+				state.configRequest = route.request().postDataJSON();
+				return reply({ categories: SETTINGS_CATEGORIES });
+			}
 			if (method === 'UpdateGlobalSettings') {
 				const { updates } = route.request().postDataJSON();
 				state.savedMotd = updates?.motd;
@@ -1958,6 +1963,55 @@ async function runNarrowSettingsJourney(browser, base) {
 						await save.press('Enter');
 						await page.getByText('Global settings saved successfully', { exact: true }).waitFor();
 						if (state.savedMotd !== 'Ready to save') throw new Error('Keyboard Save did not submit MOTD');
+					});
+					await check(`server configuration ${label}: find, edit and stage across categories`, async () => {
+						await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+						const metrics = page.getByRole('button', { name: 'Runtime metrics' });
+						if (await metrics.getAttribute('aria-expanded') === 'true') await metrics.click();
+						const tab = page.getByRole('tab', { name: 'Configuration', exact: true });
+						await tab.click();
+						assert.equal(new URL(page.url()).searchParams.get('tab'), 'configuration');
+						const search = page.getByRole('searchbox', { name: 'Search settings' });
+						await search.waitFor();
+						await capture('configuration');
+						await search.fill('tcp SERVER_PORT');
+						const port = page.getByRole('spinbutton', { name: 'Game port' });
+						await port.waitFor();
+						assert.equal(await page.locator('[data-field]').count(), 1);
+						const details = page.getByRole('button', { name: 'Details for Game port' });
+						await details.press('Enter');
+						assert.equal(await details.getAttribute('aria-expanded'), 'true');
+						await page.getByText('TCP listener for the game.', { exact: true }).waitFor();
+						await assertHorizontallyVisible(details);
+						await assertHorizontallyVisible(page.getByText('TCP listener for the game.', { exact: true }));
+						await page.getByRole('button', { name: 'Copy link', exact: true }).scrollIntoViewIfNeeded();
+						await capture('configuration-details');
+						await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: root });
+						await page.getByRole('button', { name: 'Copy link', exact: true }).click();
+						const link = await page.evaluate(() => navigator.clipboard.readText());
+						assert.equal(link, root + '/servers/srv-1?tab=configuration#port');
+						await page.goto(root + '/servers', { waitUntil: 'domcontentloaded' });
+						await page.goto(link, { waitUntil: 'domcontentloaded' });
+						await port.waitFor();
+						await page.locator('#port.highlighted').waitFor();
+						assert.equal(await tab.getAttribute('aria-selected'), 'true');
+						await page.goto(root + '/servers/srv-1#port');
+						await page.locator('#port.highlighted').waitFor();
+						assert.equal(await tab.getAttribute('aria-selected'), 'true');
+						await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+						await page.getByRole('heading', { name: 'Server Settings', exact: true }).waitFor();
+						assert.equal(new URL(page.url()).hash, '');
+						await tab.click();
+						await port.fill('25568');
+						await search.fill('');
+						await page.getByRole('button', { name: 'Unsaved (1)' }).click();
+						assert.equal(await page.locator('[data-field]').count(), 1);
+						await assertHorizontallyVisible(port);
+						await page.getByRole('button', { name: 'Stage', exact: true }).click();
+						await page.getByText('Configuration staged', { exact: true }).waitFor();
+						assert.equal(state.configRequest.stage, true);
+						assert.equal(state.configRequest.serverId, 'srv-1');
+						assert.deepEqual(state.configRequest.updates, { port: '25568' });
 					});
 					await check(`settings auth ${label}: OIDC names wrap inside their panel`, async () => {
 						await page.goto(root + '/settings?tab=auth', { waitUntil: 'domcontentloaded' });

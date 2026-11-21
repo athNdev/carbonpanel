@@ -14,6 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The server's map preview shows surface materials and water depth. Open the map to see when Minecraft last saved the visible terrain. A ready BlueMap installation for the active world opens in the same view.
+- Search server configuration by setting or environment variable, filter by category or unsaved edits, and expand individual settings for defaults and help.
+- Server metrics group labels with their readings, and form fields use consistent hover, keyboard focus and error states in both themes.
 - World View offers adjustable coverage and renders saved terrain from qualifying partially generated chunks. World View rows link to the map from the full row.
 - Modpacks uses a compact catalogue table with a details dialog for compatibility, runtime requirements, and indexed files. The server Players tab keeps the roster visible and opens allowlist entry in a dialog.
 
