@@ -2530,6 +2530,10 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertEqual(steps["rollback_docs"]["with"]["path"], ".website-build/prior-site")
         self.assertEqual(steps["rollback_deploy"]["with"]["artifact_name"],
                          "github-pages-prior")
+        for step in ("rollback_docs", "rollback_deploy"):
+            self.assertIn("always()", steps[step]["if"])
+        self.assertIn("steps.browser_ui.outcome == 'failure'", rollback["if"])
+        self.assertIn("steps.final_upload.outcome == 'failure'", rollback["if"])
         self.assertIn("steps.preserve_prior.outputs.hash",
                       str(doc["jobs"]["channel-transaction"]["steps"]))
 
@@ -2579,6 +2583,23 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertIn("prior_index=" + prior, final)
         self.assertIn("CARBONPANEL_STABLE_REVISION", final)
         self.assertIn("--stable-source " + prior, final)
+
+    def test_nightly_alias_move_binds_current_and_prior_observations(self):
+        import yaml
+        from scripts.docs_publication_gate import PAGES_DEPLOY_STEPS
+        workflow = yaml.safe_load((release.ROOT / ".github/workflows/cd.yml").read_text(
+            encoding="utf-8"))
+        steps = {step["id"]: step for step in workflow["jobs"]["channel-transaction"]["steps"]
+                 if "id" in step}
+        alias = steps["alias_move"]
+        self.assertIn("steps.stage_decision.outputs.prior_receipt", alias["env"]["PRIOR"])
+        self.assertIn("channel-observe --reference nightly", alias["run"])
+        self.assertIn('--previous-commit "$PREVIOUS_COMMIT"', alias["run"])
+        self.assertIn('--previous-digest "$PREVIOUS_DIGEST"', alias["run"])
+        self.assertIn("--previous-binding true", alias["run"])
+        self.assertEqual(PAGES_DEPLOY_STEPS[steps["deploy"]["name"]],
+                         steps["deploy"]["with"]["artifact_name"])
+        self.assertNotIn("artifact_name", steps["final_deploy"].get("with", {}))
 
     def test_release_stable_gate_uses_observed_digests_and_compensates(self):
         import yaml
@@ -2694,7 +2715,8 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         self.assertIn("observed=", by_id["stage"]["run"])
         self.assertEqual(by_id["browser_ui"]["run"],
                          "python3 scripts/browser_version_check.py")
-        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_deploy"]["if"])
+        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_upload"]["if"])
+        self.assertIn("steps.final_upload.outcome == 'success'", by_id["final_deploy"]["if"])
 
     def test_public_release_waits_for_verified_aliases_and_live_browser(self):
         import yaml
