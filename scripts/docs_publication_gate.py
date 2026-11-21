@@ -53,6 +53,7 @@ PAGES_DEPLOY_STEPS = {
     "Deploy to GitHub Pages": PAGES_ARTIFACT_NAME,
     "Deploy the synchronized stable docs marker once": PAGES_ARTIFACT_NAME,
     "Deploy the off-path Stable candidate probe": "github-pages-stable-probe",
+    "Deploy the off-path Nightly candidate probe": "github-pages-nightly-probe",
     "Deploy the exact prior docs bytes": "github-pages-prior",
     "Restore prior stable docs after a failed synchronized transaction": "github-pages-prior-stable",
     "Deploy the exact prior stable docs bytes": "github-pages-prior-stable",

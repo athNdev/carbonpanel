@@ -785,11 +785,14 @@ jobs:
         if: steps.markers.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
+          name: github-pages-nightly-probe
           path: .website-build/site
-      - name: Deploy the full canonical stage artifact
+      - name: Deploy the off-path Nightly candidate probe
         id: deploy
         if: steps.markers.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-nightly-probe
 
       # Probe the NON-ACTIVE staging route only. Canonical routes are never used
       # for the candidate probe.
@@ -860,15 +863,20 @@ jobs:
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
-          ALIASES: ${{ steps.active.outputs.aliases }}
+          PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
           SHA_OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           # The real sha-tag observations from BOTH registries - no fabricated
           # identical pair. channel-promote re-verifies each observation.
           IMMUTABLE=$(printf '%s' "$SHA_OBS" | jq -c .)
+          PREVIOUS_COMMIT=$(jq -er 'select(.verified == true and .channel == "nightly") | .revision' <<< "$PRIOR")
+          PREVIOUS_DIGEST=$(jq -er '.digest' <<< "$PRIOR")
+          ALIASES=$(python3 scripts/release.py channel-observe --reference nightly | jq -ce .observations)
           python3 scripts/release.py channel-promote \
             --channel nightly --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
-            --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
+            --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" \
+            --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
+            --previous-binding true --apply
 
       # Reconcile the public canonical site with the NEW aliases only after both
       # registry moves succeed. Before this point the canonical docs stay at the
@@ -919,13 +927,14 @@ jobs:
           CARBONPANEL_EXPECT_PROMOTION_STATE: final
         run: python3 scripts/browser_version_check.py
       - name: Upload the final canonical artifact
+        id: final_upload
         if: steps.browser_ui.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
       - name: Deploy the final canonical artifact
         id: final_deploy
-        if: steps.browser_ui.outcome == 'success'
+        if: steps.final_upload.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
       - name: Live browser QA on deployed HTTPS (switcher, pins, both channels)
@@ -968,6 +977,7 @@ jobs:
            steps.commit_decision.outputs.action == 'rollback' ||
            steps.late_recheck.outcome == 'failure' || steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
            steps.final_deploy.outcome == 'failure' || steps.chromium.outcome == 'failure' ||
+           steps.browser_ui.outcome == 'failure' || steps.final_upload.outcome == 'failure' ||
            steps.live_browser.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
@@ -979,19 +989,19 @@ jobs:
       # A re-stamp cannot restore byte identity, so a distinct artifact is used.
       - name: Upload the exact prior docs bytes as a distinct Pages artifact
         id: rollback_docs
-        if: steps.rollback.outcome == 'success'
+        if: always() && steps.rollback.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: github-pages-prior
           path: .website-build/prior-site
       - name: Deploy the exact prior docs bytes
         id: rollback_deploy
-        if: steps.rollback_docs.outcome == 'success'
+        if: always() && steps.rollback_docs.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         with:
           artifact_name: github-pages-prior
       - name: Verify restored aliases and public docs bytes/marker
-        if: steps.rollback_deploy.outcome == 'success'
+        if: always() && steps.rollback_deploy.outcome == 'success'
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
           PRIOR_HASH: ${{ steps.preserve_prior.outputs.hash }}
@@ -1005,7 +1015,7 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$PRIOR_DIGEST"
       - name: Fail the run when a rollback was required
-        if: steps.rollback.outcome == 'success'
+        if: always() && steps.rollback.outcome == 'success'
         run: |
           echo "::error::channel transaction rolled back to the prior verified receipt; no success reported"
           exit 1
