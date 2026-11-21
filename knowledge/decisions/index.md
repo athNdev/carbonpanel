@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Allowlist dialog lifetime across telemetry polling](allowlist-dialog-lifetime.md) — The scoped allowlist dialog closes only on a real server switch or tab deactivation, not on every telemetry republish.
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
 - [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
