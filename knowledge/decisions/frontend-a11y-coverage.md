@@ -51,9 +51,9 @@ locked Playwright package and owned cache the review harness already provides.
 
 Chromium is the primary gate. Firefox and WebKit run smoke checks. Seeded SPA checks cover Modpacks filters, refusal/Retry, catalogue details and focus restoration across widths in both themes.
 Player roster shortcuts yield to dialogs and native controls. An empty cross-server filter keeps the server selector and Clear filters available.
-Dialog initial focus must preserve focus already moved inside by the user.
-Screen readers, 400% zoom and mobile-device emulation remain outside coverage.
-
+Dialogs preserve focus already moved inside by the user. The server route journey
+exercises keyboard access to the map and Copy Address. Screen readers, 400% zoom
+and mobile-device emulation remain outside coverage.
 On relevant PRs and main changes, the Modpacks browser review runs both plans
 against an owned authenticated controller. It checks the Modrinth-backed
 catalog, unmatched search and recovery, and the Studio library entry controls.

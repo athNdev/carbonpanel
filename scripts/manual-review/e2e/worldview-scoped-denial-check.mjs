@@ -46,7 +46,7 @@ let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
 const survivalMapLink = { name: "Open map for Fixture Overworld on Fixture Survival Server", exact: true };
-const creativeMapLink = { name: "Open map for Fixture Creative on Fixture Creative Server", exact: true };
+const creativeMapLink = { name: "Set up map for Fixture Creative on Fixture Creative Server", exact: true };
 const target = {
   serverId: "srv-1",
   worldRef,
@@ -353,9 +353,10 @@ try {
       const content = page.getByTestId("showcase-worlds-content");
       const mapLink = content.getByRole("link", survivalMapLink);
       await mapLink.waitFor();
-      await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not reported", { exact: true }).filter({ visible: true }).first().waitFor();
+      await mapLink.getByText(/Fixture Survival Server · overworld/).waitFor();
+      const setupLink = content.getByRole("link", creativeMapLink);
+      await setupLink.getByText("SETUP NEEDED", { exact: true }).waitFor();
+      assert.doesNotMatch(await setupLink.innerText(), /Checked |Rendered /);
       assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
       const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
       assert.equal(overflow, false, "World View fits at width " + width);

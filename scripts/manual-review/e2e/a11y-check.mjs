@@ -826,11 +826,11 @@ const PACKAGED_ROUTES = [
 		h1: 'World View',
 		controls: [
 			['heading', 'World View'],
-			['textbox', 'Search viewable worlds'],
+			['textbox', 'Search maps'],
 			['combobox', 'Server'],
-			['combobox', 'State'],
+			['combobox', 'Map status'],
 			['button', 'Refresh'],
-			['link', 'Alpha Overworld']
+			['link', 'Open map for Alpha Overworld on Alpha Server']
 		]
 	},
 	{
@@ -858,7 +858,8 @@ const PACKAGED_ROUTES = [
 		controls: [
 			['tablist', 'Sections'],
 			['button', 'More server actions'],
-			['button', 'Copy Address']
+			['button', 'Refresh map preview'],
+			['button', 'Expand world map']
 		]
 	},
 	{
@@ -1047,6 +1048,26 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					}
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
+				if (route.path === '/servers/srv-1') {
+					await check(`server actions @${width} ${theme}: Copy Address is reachable by keyboard`, async () => {
+						const trigger = page.getByRole('button', { name: 'More server actions', exact: true });
+						await trigger.press('Enter');
+						const copyAddress = page.getByRole('menuitem', { name: 'Copy Address', exact: true });
+						await copyAddress.waitFor();
+						await page.keyboard.press('Escape');
+						await copyAddress.waitFor({ state: 'hidden' });
+					});
+					await check(`server map @${width} ${theme}: opens by keyboard and restores focus`, async () => {
+						const expand = page.getByRole('button', { name: 'Expand world map', exact: true });
+						await expand.press('Enter');
+						const dialog = page.getByRole('dialog', { name: 'World map', exact: true });
+						await dialog.getByRole('button', { name: 'Close modal', exact: true }).waitFor();
+						await page.waitForFunction(() => Boolean(document.activeElement?.closest('[role="dialog"]')));
+						await page.keyboard.press('Escape');
+						await dialog.waitFor({ state: 'hidden' });
+						assert.equal(await expand.evaluate((button) => document.activeElement === button), true);
+					});
+				}
 			}
 
 			if (width === 1440 || width === 360) await checkPlayerLookup(page, state, root, width, theme);

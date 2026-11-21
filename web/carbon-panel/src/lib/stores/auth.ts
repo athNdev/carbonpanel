@@ -84,8 +84,8 @@ function createAuthStore() {
 	// Load token from localStorage on init
 	if (browser) {
 		const token = localStorage.getItem('auth_token');
-		syncSessionCookie(token);
 		if (token) {
+			syncSessionCookie(token);
 			update((state) => ({ ...state, token }));
 		}
 	}
@@ -329,6 +329,11 @@ function createAuthStore() {
 		getToken(): string | null {
 			const state = get({ subscribe });
 			return state.token || (browser ? localStorage.getItem('auth_token') : null);
+		},
+
+		refreshBrowserSessionCookie() {
+			const token = get({ subscribe }).token;
+			if (browser && token) syncSessionCookie(token);
 		},
 
 		hasRole(role: string): boolean {

@@ -315,6 +315,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				sessionError = new Error('The map changed. Refresh to reopen it.');
 				return;
 			}
+			if (response.proxyPath) authStore.refreshBrowserSessionCookie();
 			sessionOwner = key;
 			session = response;
 			sessionExpired = false;
@@ -1072,7 +1073,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<aside
 					class="min-w-0 space-y-3"
-					class:hidden={!rendererControlsAvailable || view === 'saved'}
+					class:hidden={!rendererControlsAvailable && !canCommand && !capabilitiesError}
 				>
 					{#if capabilitiesError}
 						<p class="border-l-4 border-warning bg-warning/10 p-2 text-xs" role="alert">

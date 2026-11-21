@@ -161,6 +161,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		if (!open || !modalElement) return;
 		const dialog = modalElement;
+		const overlay = dialog.parentElement;
+		// Svelte can reopen the same portal while its closing transition is running.
+		// Keep paint order and keyboard ownership aligned on each open.
+		if (overlay?.parentElement === document.body && overlay !== document.body.lastElementChild) {
+			document.body.append(overlay);
+		}
 		activeDialogs = [...activeDialogs, dialog];
 		return () => {
 			activeDialogs = activeDialogs.filter((entry) => entry !== dialog);
@@ -199,9 +205,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				return () => clearTimeout(focusTimer);
 			}
 		} else {
-			if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-				previousActiveElement.focus();
-				previousActiveElement = null;
+			const restore = previousActiveElement;
+			previousActiveElement = null;
+			const top = activeDialogs.at(-1);
+			if (restore?.isConnected && (!top || top === modalElement || top.contains(restore))) {
+				restore.focus();
 			}
 		}
 	});

@@ -57,7 +57,11 @@ const defaultDependencies: WebSocketDependencies = {
 	url: () =>
 		`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
 	token: () => get(authStore).token || '',
-	createSocket: (url) => new WebSocket(url),
+	createSocket: (url) => {
+		// Pre-upgrade authentication uses the cookie (MINE-164).
+		authStore.refreshBrowserSessionCookie();
+		return new WebSocket(url);
+	},
 	setTimeout: ((...args: Parameters<typeof setTimeout>) =>
 		globalThis.setTimeout(...args)) as typeof setTimeout,
 	clearTimeout: (timer) => globalThis.clearTimeout(timer),
@@ -116,7 +120,6 @@ class WebSocketClient {
 		this.state.connectionState = 'connecting';
 		this.state.error = null;
 
-		// AuthStore owns the pre-upgrade cp_session cookie (MINE-164).
 		const wsUrl = this.deps.url();
 
 		try {
