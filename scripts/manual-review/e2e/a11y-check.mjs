@@ -492,6 +492,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 			return reply({
 				server: {
 					...server,
+					...(control?.marker ? { name: control.marker } : {}),
 					...(state.narrowSettings
 						? { nodeId: 'local', containerId: 'fixture-container', mcVersion: '1.21.1' }
 						: {})
@@ -1406,8 +1407,22 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					const refreshArrived = new Promise((resolve) => { markArrived = resolve; });
 					let releaseRefresh;
 					const refreshReleased = new Promise((resolve) => { releaseRefresh = resolve; });
-					const control = { hold: true, count: 0, arrived: markArrived, release: refreshReleased };
+					const marker = 'Telemetry Refresh Probe';
+					const control = {
+						hold: true,
+						count: 0,
+						marker,
+						arrived: markArrived,
+						release: refreshReleased
+					};
 					state.detailRefresh = control;
+					let released = false;
+					const release = () => {
+						if (!released) {
+							released = true;
+							releaseRefresh();
+						}
+					};
 					try {
 						const trigger = page.getByRole('button', { name: 'Add player to allowlist' });
 						await trigger.click();
@@ -1416,7 +1431,8 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 						await field.waitFor();
 
 						// Hold the refresh at the RPC boundary until the operator has
-						// typed, then deliver a fresh object with the same server id.
+						// typed, then deliver a fresh object with the same id and a
+						// harmless visible marker we can await in the rendered UI.
 						await Promise.race([
 							refreshArrived,
 							new Promise((_, reject) =>
@@ -1427,8 +1443,10 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 						assert.equal(await field.inputValue(), 'TypedDuringRefresh');
 						assert(await dialog.isVisible(), 'dialog must stay open while the refresh is held');
 
-						releaseRefresh();
-						await page.waitForTimeout(400);
+						release();
+						// Awaiting the rendered marker proves Svelte consumed the
+						// refresh; a count or fixed sleep would pass on a stalled response.
+						await page.getByText(marker, { exact: true }).first().waitFor({ timeout: 10000 });
 						assert(control.count >= 1, 'a real GetServer refresh must have been delivered');
 						assert(await dialog.isVisible(), 'dialog must stay open after a same-identity refresh');
 						assert.equal(
@@ -1444,6 +1462,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 						await dialog.waitFor({ state: 'hidden' });
 						return `dialog survived ${control.count} same-identity refresh(es) and closed on tab exit`;
 					} finally {
+						release();
 						control.hold = false;
 						delete state.detailRefresh;
 					}
