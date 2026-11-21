@@ -2568,6 +2568,11 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertIn("cp -a .website-build/prior-site .website-build/site",
                       steps["compose_stage"]["run"])
         self.assertIn("steps.compose_stage.outputs.hash", steps["stage_decision"]["env"]["DOCS_HASH"])
+        self.assertIn("--expect-promotion-state candidate", steps["docs"]["run"])
+        self.assertIn("--expect-nightly-revision", steps["docs"]["run"])
+        for step in ("stage_decision", "markers"):
+            self.assertIn("--stable-commit", steps[step]["run"])
+            self.assertIn("--stable-digest", steps[step]["run"])
         prior = ".website-build/prior-site/version-index.json"
         self.assertIn("--stable-source " + prior, steps["markers"]["run"])
         final = steps["final_artifact"]["run"]

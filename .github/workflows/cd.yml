@@ -632,9 +632,11 @@ jobs:
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
         run: |
           python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
-            --nightly-digest "$CHANNEL_DIGEST" \
+            --nightly-digest "$CHANNEL_DIGEST" --promotion-state candidate \
             --promotion-receipt "staged-$CHANNEL_COMMIT"
-          python3 scripts/check_website.py
+          python3 scripts/check_website.py --expect-nightly-revision "$CHANNEL_COMMIT" \
+            --expect-nightly-digest "$CHANNEL_DIGEST" --expect-promotion-state candidate \
+            --expect-promotion-receipt "staged-$CHANNEL_COMMIT"
           mkdir -p .website-build/candidate-probe
           cp -a ".website-build/site/docs/candidate/$CHANNEL_COMMIT/." .website-build/candidate-probe/
           PAGE=".website-build/candidate-probe/getting-started/proxmox/index.html"
@@ -725,7 +727,10 @@ jobs:
           IMMUTABLE_OK: ${{ steps.activation.outputs.action == 'activate' && steps.stage.outcome == 'success' }}
           SITE_OK: ${{ steps.docs.outcome == 'success' }}
         run: |
-          python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json
+          prior_index=.website-build/prior-site/version-index.json
+          python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json \
+            --stable-commit "$(jq -er .channels.stable.commit "$prior_index")" \
+            --stable-digest "$(jq -er .channels.stable.image.digest "$prior_index")"
           PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
             --channel nightly --aliases "$ALIASES" \
             --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
@@ -773,7 +778,9 @@ jobs:
             --active-commit "$ACTIVE_COMMIT" --active-digest "$ACTIVE_DIGEST" \
             --stable-source .website-build/prior-site/version-index.json
           python3 scripts/release.py validate-channel-contract \
-            --path .website-build/site/version-index.json
+            --path .website-build/site/version-index.json \
+            --stable-commit "$(jq -er .channels.stable.commit .website-build/prior-site/version-index.json)" \
+            --stable-digest "$(jq -er .channels.stable.image.digest .website-build/prior-site/version-index.json)"
       - name: Upload the full canonical stage artifact with the candidate probe
         if: steps.markers.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
