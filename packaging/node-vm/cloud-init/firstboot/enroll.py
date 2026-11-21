@@ -32,6 +32,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,9 @@ class KeyPair:
     def fingerprint(self):
         return hashlib.sha256(self.spki_der()).hexdigest()
 
+    def csr_pre(self, node_id):
+        raise NotImplementedError
+
     def sign(self, context):
         raise NotImplementedError
 
@@ -96,6 +100,9 @@ class FakeKeyPair(KeyPair):
     def spki_der(self):
         return b"SYNTHETIC-SPKI::" + self._label
 
+    def csr_pre(self, node_id):
+        return b"SYNTHETIC-CSR::" + node_id.encode("ascii")
+
     def sign(self, context):
         return hashlib.sha256(b"SYNTHETIC-SIG::" + self._label + b"::" + context).digest()
 
@@ -104,29 +111,33 @@ class FakeKeyPair(KeyPair):
 
 
 class OpenSSLKeyPair(KeyPair):
-    """Ed25519 key generated with the openssl CLI available in cloud images.
+    """An Ed25519 key stored in the root-only guest identity directory."""
 
-    Only constructed by main() on a real VM; offline fixtures never invoke it.
-    """
+    def __init__(self, private_key_path):
+        self._priv = Path(private_key_path)
+        self._pub_der = subprocess.run(
+            ["openssl", "pkey", "-in", str(self._priv), "-pubout", "-outform", "DER"],
+            check=True, capture_output=True,
+        ).stdout
 
-    def __init__(self):
-        self._dir = tempfile.mkdtemp(prefix="carbon-enroll-key-")
-        os.chmod(self._dir, 0o700)
-        self._priv = Path(self._dir) / "node.key"
-        self._pub_der = Path(self._dir) / "node.spki.der"
+    @classmethod
+    def generate(cls, private_key_path):
         subprocess.run(
-            ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(self._priv)],
+            ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(private_key_path)],
             check=True, capture_output=True,
         )
-        os.chmod(self._priv, 0o600)
-        subprocess.run(
-            ["openssl", "pkey", "-in", str(self._priv), "-pubout", "-outform", "DER",
-             "-out", str(self._pub_der)],
-            check=True, capture_output=True,
-        )
+        os.chmod(private_key_path, 0o600)
+        return cls(private_key_path)
 
     def spki_der(self):
-        return self._pub_der.read_bytes()
+        return self._pub_der
+
+    def csr_pre(self, node_id):
+        return subprocess.run(
+            ["openssl", "req", "-new", "-key", str(self._priv), "-subj", "/CN=" + node_id,
+             "-outform", "DER"],
+            check=True, capture_output=True,
+        ).stdout
 
     def sign(self, context):
         with tempfile.NamedTemporaryFile() as ctx, tempfile.NamedTemporaryFile() as sig:
@@ -142,17 +153,14 @@ class OpenSSLKeyPair(KeyPair):
     def verify(self, context, signature):
         with tempfile.NamedTemporaryFile() as pub, tempfile.NamedTemporaryFile() as ctx, \
                 tempfile.NamedTemporaryFile() as sig:
-            subprocess.run(
-                ["openssl", "pkey", "-pubin", "-inform", "DER", "-in",
-                 str(self._pub_der), "-out", pub.name],
-                check=True, capture_output=True,
-            )
+            pub.write(self._pub_der)
+            pub.flush()
             ctx.write(context)
             ctx.flush()
             sig.write(signature)
             sig.flush()
             done = subprocess.run(
-                ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", pub.name,
+                ["openssl", "pkeyutl", "-verify", "-pubin", "-keyform", "DER", "-inkey", pub.name,
                  "-rawin", "-in", ctx.name, "-sigfile", sig.name],
                 capture_output=True,
             )
@@ -256,8 +264,8 @@ def canonical_context(node_id, enrollment_id, challenge_id, server_nonce,
         ",".join(canonical_capability_names(capabilities)).encode("ascii"),
         _as_bytes(channel_context, "channel_context"),
     ]
-    if any(b"\x00" in part for part in parts[1:7]):
-        raise ValueError("NUL byte in a delimited claim context field")
+    if any(b"\x00" in parts[i] for i in (1, 2, 3, 5, 6)):
+        raise ValueError("NUL byte in a text claim context field")
     return b"\x00".join(parts)
 
 
@@ -290,15 +298,7 @@ def sign_claim(keypair, context):
     """Fresh post-challenge signature by the operator-approved Ed25519 key only."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment signing is Ed25519-only")
-    if not isinstance(context, bytes):
-        raise ValueError("claim context must be raw bytes")
-    if not context.startswith(SIGNING_DOMAIN + b"\x00"):
-        raise ValueError("claim context is not a carbon-panel-enroll-v1 context")
-    # The old canonical-JSON encoding is explicitly refused; its bytes cannot
-    # verify against the shared ClaimContextRaw encoder.
-    remainder = context[len(SIGNING_DOMAIN) + 1:]
-    if remainder.startswith(b"{") or b'\x00{"' in context or b'"node_id"' in context:
-        raise ValueError("canonical-JSON claim context refused; use shared NUL encoding")
+    _check_claim_context(context)
     return keypair.sign(context)
 
 
@@ -306,41 +306,41 @@ def verify_claim(keypair, context, signature):
     """Verify a fresh SIG_CLAIM over the exact shared context (Ed25519 only)."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment verification is Ed25519-only")
-    expected = canonical_context(*_claim_fields(context))
-    if context != expected:
-        raise ValueError("claim context does not match shared ClaimContextRaw encoding")
+    _check_claim_context(context)
     return bool(keypair.verify(context, signature))
 
 
-def _claim_fields(context):
-    """Parse a NUL-delimited context into canonical_context() arguments."""
-    fields = context.split(b"\x00")
-    if len(fields) != 8 or fields[0] != SIGNING_DOMAIN:
+def _check_claim_context(context):
+    # The server verifies the exact context constructed from its stored fields.
+    # The opaque nonce and channel bytes may contain NUL and are not parsed here.
+    prefix = SIGNING_DOMAIN + b"\x00"
+    if not isinstance(context, bytes) or not context.startswith(prefix):
         raise ValueError("malformed NUL-delimited claim context")
-    return (fields[1], fields[2], fields[3], fields[4], fields[5],
-            fields[6].decode("ascii").split(",") if fields[6] else [], fields[7])
+    if context[len(prefix):].startswith(b"{"):
+        raise ValueError("canonical-JSON claim context refused; use shared NUL encoding")
+    if context.count(b"\x00") < 7:
+        raise ValueError("malformed NUL-delimited claim context")
 
 
-def build_preregistration_bundle(node_label, salt, secret, keypair, policy):
+def build_preregistration_bundle(node_id, node_label, salt, secret, keypair, policy):
     """Build the digest-only exportable bundle. S and the private key never enter it."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment key generation is Ed25519-only")
     digest = compute_digest(salt, secret)
-    csr_pre = {
+    csr_pre = keypair.csr_pre(node_id)
+    bundle = {
+        "node_id": node_id,
         "node_label": node_label,
         "enrollment_salt": _b64(salt),
         "enrollment_secret_digest": digest,
         "approved_public_key_spki": _b64(keypair.spki_der()),
         "approved_key_fingerprint": keypair.fingerprint(),
+        "csr_pre": _b64(csr_pre),
+        "csr_pre_signature": _b64(keypair.sign(csr_pre)),
     }
-    csr_pre_bytes = json.dumps(csr_pre, sort_keys=True, separators=(",", ":")).encode()
-    bundle = dict(csr_pre)
-    bundle["csr_pre"] = _b64(csr_pre_bytes)
-    bundle["csr_pre_signature"] = _b64(keypair.sign(csr_pre_bytes))
     # The policy document nests the scoped fields under "policy"; accept either
     # shape so the same module works with the checked-in file and flat test data.
     scoped = policy.get("policy", policy)
-    bundle["node_id"] = derive_node_id(node_label + "::" + str(policy.get("artifact_revision", "first-boot")))
     bundle["bootstrap_scopes"] = list(policy.get("bootstrap_scopes", scoped["bootstrap_scopes"]))
     bundle["object_id_binding"] = policy.get("object_id_binding", scoped["object_id_binding"])
     bundle["contract_ref"] = policy["contract_ref"]
@@ -389,18 +389,18 @@ def write_identity(bundle, secret, out_dir):
     return str(bundle_path), str(secret_path)
 
 
-def first_boot_identity(instance_id, node_label, policy, rng=None, keypair=None,
+def first_boot_identity(instance_id, node_label, policy, keypair, rng=None,
                         rng_salt=None):
     """Pure orchestration of first-boot identity; deterministic when deps injected."""
-    keypair = keypair or OpenSSLKeyPair()
     scoped = policy.get("policy", policy)
-    secret = generate_secret(scoped["first_boot"]["generate_secret_bits"], rng)
+    random_bytes = generate_secret(scoped["first_boot"]["generate_secret_bits"], rng)
+    # The shared ClaimEnrollmentRequest carries the secret in a protobuf string.
+    secret = base64.urlsafe_b64encode(random_bytes).rstrip(b"=")
     salt = generate_salt(scoped["first_boot"]["generate_salt_bytes"], rng_salt or rng)
     node_id = derive_node_id(instance_id)
     bundle, digest, secret = build_preregistration_bundle(
-        node_label, salt, secret, keypair, policy,
+        node_id, node_label, salt, secret, keypair, policy,
     )
-    bundle["node_id"] = node_id
     assert_bundle_has_no_secret(bundle, secret, salt)
     return {"node_id": node_id, "secret": secret, "salt": salt,
             "digest": digest, "bundle": safe_bundle(bundle)}
@@ -408,6 +408,50 @@ def first_boot_identity(instance_id, node_label, policy, rng=None, keypair=None,
 
 def _load_policy(path):
     return json.loads(Path(path).read_text())
+
+
+def load_identity(out, node_id, node_label):
+    if out.is_symlink() or not stat.S_ISDIR(out.stat().st_mode):
+        raise ValueError("enrollment state must be a local directory")
+    if os.name == "posix" and out.stat().st_mode & 0o077:
+        raise ValueError("enrollment state directory must be private")
+    for name in ("node.key", "enrollment-bundle.json", "enrollment-secret.bin"):
+        info = (out / name).lstat()
+        if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and info.st_mode & 0o077):
+            raise ValueError("enrollment identity files must be private regular files")
+    bundle = json.loads((out / "enrollment-bundle.json").read_text())
+    secret = (out / "enrollment-secret.bin").read_bytes()
+    keypair = OpenSSLKeyPair(out / "node.key")
+    salt = base64.b64decode(bundle["enrollment_salt"], validate=True)
+    assert_bundle_has_no_secret(bundle, secret, salt)
+    if (bundle["node_id"] != node_id or bundle["node_label"] != node_label
+            or bundle["approved_key_fingerprint"] != keypair.fingerprint()
+            or bundle["approved_public_key_spki"] != _b64(keypair.spki_der())
+            or bundle["enrollment_secret_digest"] != compute_digest(salt, secret)):
+        raise ValueError("enrollment identity does not match guest state")
+    return bundle
+
+
+def ensure_identity(out, instance_id, node_label, policy):
+    node_id = derive_node_id(instance_id)
+    if out.exists() or out.is_symlink():
+        return load_identity(out, node_id, node_label)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".enrollment-", dir=out.parent) as tmp:
+        # Publish the key, secret, and bundle together. A failed first boot can
+        # retry without replacing any already-published identity.
+        staged = Path(tmp) / "identity"
+        staged.mkdir(mode=0o700)
+        keypair = OpenSSLKeyPair.generate(staged / "node.key")
+        identity = first_boot_identity(instance_id, node_label, policy, keypair)
+        write_identity(identity["bundle"], identity["secret"], staged)
+        try:
+            staged.rename(out)
+        except OSError:
+            if not out.exists():
+                raise
+            return load_identity(out, node_id, node_label)
+        return identity["bundle"]
 
 
 def main(argv=None):
@@ -421,15 +465,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     policy = _load_policy(args.policy)
-    identity = first_boot_identity(args.instance_id, args.node_label, policy)
-    bundle_path, _ = write_identity(identity["bundle"], identity["secret"], args.out_dir)
+    out = Path(args.out_dir)
+    bundle = ensure_identity(out, args.instance_id, args.node_label, policy)
     # stdout carries only public metadata; never the secret, key or digest-only
     # bundle contents (the operator reads the local 0600 file out of band).
     print(json.dumps({
-        "node_id": identity["node_id"],
-        "approved_key_fingerprint": identity["bundle"]["approved_key_fingerprint"],
-        "bundle_path": bundle_path,
-        "contract_ref": identity["bundle"]["contract_ref"],
+        "node_id": bundle["node_id"],
+        "approved_key_fingerprint": bundle["approved_key_fingerprint"],
+        "bundle_path": str(out / "enrollment-bundle.json"),
+        "contract_ref": bundle["contract_ref"],
     }, sort_keys=True))
     return 0
 

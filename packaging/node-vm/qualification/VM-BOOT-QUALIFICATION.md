@@ -1,4 +1,17 @@
-# OSS-377 VM artifact qualification evidence (real base-image bytes; boot blocked)
+# OSS-377 VM artifact qualification evidence
+
+Sections 1–10 record the original provenance run before a QEMU runner was
+available. Sections 12 onward record the later QEMU results. The runtime
+publication entry point still emits an offline plan. These boots use disposable
+overlays of the pinned upstream image and a generated NoCloud seed.
+
+The shipped `carbon-node` command is a preflight/doctor CLI, and the Panel's
+`NodeControlService` is deliberately unmounted. Managed-node mTLS enrollment,
+heartbeat, and daemon health rely on those runtime entry points. Guest proof
+accepted through the shared Go boundary establishes protocol compatibility
+only.
+
+## Original provenance run
 
 Status: **artifact provenance VERIFIED including real image bytes; real clean
 boot BLOCKED by the absence of a system emulator on this host.** Runtime and
@@ -207,3 +220,203 @@ qemu-img info ubuntu-amd64.img
 # offline fixtures (no network, synthetic keys)
 python -m unittest discover -s scripts -p 'test_node_vm_*.py' -v
 ```
+
+## 12. 2026-11-19 follow-up: disposable container TCG probe and boot attempt (this session)
+
+Environment probe (Windows host, WSL `ubuntu_general`):
+- `qemu-system-x86_64`/`qemu-system-aarch64`: not installed on host or in WSL.
+- `/dev/kvm`: absent in WSL.
+- Docker: available in WSL (`docker-ok`, Docker 29.3.0) and able to pull/run
+  disposable containers (`alpine:3.20` smoke run succeeded). This provides a
+  disposable, isolated execution environment on this machine, but not a host
+  `qemu-system` binary or KVM acceleration.
+
+Tooling improvement (VM packaging paths, build-only/offline): added
+`scripts/node_vm_boot_qual.py` (+ `scripts/test_node_vm_boot_qual.py`) to
+prepare deterministic seed/NoCloud ISO inputs, verify qemu availability, run a
+disposable QEMU boot attempt with serial-console capture, scan for cloud-init
+and first-boot enrollment markers, and optionally perform read-only offline disk
+inspection for bundle/secret persistence when guestfs tools are available. The
+driver reports gates conservatively and does not claim live enrollment, daemon
+health or effective network isolation from serial markers alone.
+
+Preparation (task-owned, WSL): deterministic NoCloud seed/ISO generated for
+`instance-id oss377-boot-qual-0001`, `node-label oss377boot` (CIDATA ISO via
+`genisoimage`). Verified amd64 `release-20261017` image re-downloaded in WSL
+temp and hash-checked: `04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`,
+621284352 B (matches pinned provenance; see section 3).
+
+Disposable QEMU TCG boot attempt (boot-attempt-3, 2026-11-19, container
+`oss377-qemu:local` / Debian bookworm `qemu-system-x86_64` 7.2, `--accel tcg`,
+`-m 2048 -smp 2`, user-mode networking, `-no-reboot` to capture first
+boot-to-reboot boundary, serial console to file, offline inspection skipped):
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| qemu available / seed / seed ISO / boot disk overlay | PASS | qemu-system-x86_64 found; deterministic nocloud seed and prebuilt CIDATA ISO used; qcow2 backing overlay created |
+| boot attempt | **COMPLETED** | qemu exited `returncode 0`, `timed_out false`, elapsed ~504.1s (2400s timeout) |
+| serial console | SCANNED | `serial-console.log` captured (88272 bytes) |
+| cloud-init finished | **PASS (marker)** | `cloud_init_finished: true` in serial scan |
+| first-boot identity marker (enroll stdout JSON) | **INCONCLUSIVE** | `enroll_stdout_json: false`; cloud-init finished marker seen but enroll stdout JSON not found in serial log (runcmd stdout is typically recorded in guest `cloud-init-output.log`, not serial console). On-disk bundle/secret creation not proven by this scan. |
+| reboot/poweroff boundary | **OBSERVED** | `reboot_or_poweroff_signal: true`; clean qemu exit with `-no-reboot` at boundary |
+| serial secret scan | NO_HIGH_SIGNAL_MARKERS | no PEM/assignment markers found in captured serial log; absence of all secret material not proven |
+| network config | CONFIGURED (not proven) | seed DHCP-only; qemu user-mode netdev configured; effective connectivity/health not proven |
+| offline disk inspection / bundle persistence | NOT_RUN | inspection skipped (no guestfs tools in runtime container); bundle/secret on-disk presence and reboot persistence not verified |
+| service health / reboot persistence (second boot) | NOT_RUN | no in-guest health probe; second-boot persistence not automatically verified |
+
+**Interpretation:** this provides real disposable-runner evidence of **clean VM
+boot and cloud-init completion** for the verified amd64 image with the
+deterministic NoCloud seed, and a clean reboot/poweroff boundary under TCG
+(~8.4 min). It does **not** by itself prove first-boot enrollment bundle/secret
+creation on disk, effective user-setup completion beyond cloud-init markers,
+network connectivity/daemon health, or post-reboot persistence (second boot not
+performed, guest disk not inspected). Prior claims remain unchanged: whole-image
+byte provenance is VERIFIED (section 3). Full OSS-377 boot acceptance still
+requires evidence for user setup/bundle persistence and reboot persistence (and
+network/health where possible) on a capable disposable runner; this run reduces
+but does not close that gap. No live mTLS enrollment, registry/release,
+deployment or live host write was performed. Task-owned downloaded image and run
+artifacts in WSL temp remain local evidence unless explicitly retained/cleaned
+per task policy.
+
+## 13. 2026-11-20 follow-up: scanner fix, second boot and offline persistence inspection
+
+No downloads, installs, live guests, enrollment RPC, release or registry writes
+were performed. All inputs were the task-owned artifacts already present in the
+owned WSL instance: Docker image `oss377-qemu:local` (`qemu-system-x86_64`
+7.2.22), the pinned amd64 image (621284352 B, SHA256
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`), the
+deterministic NoCloud seed/CIDATA ISO and the boot-attempt-3 qcow2 overlay.
+
+### Genuine harness defect fixed (grounded in captured output)
+
+The attempt-3 serial log contains this real first-boot success line at line 798:
+
+```
+[  377.903394] cloud-init[964]: {"approved_key_fingerprint": "244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167", "bundle_path": "/var/lib/carbon-node/enrollment/enrollment-bundle.json", "contract_ref": "ADR0019 / proto/carbonpanel/v1/node_control.proto", "node_id": "node-94ed0fec32c64d9fb5236be6d57ec629"}
+```
+
+`ENROLL_STDOUT_RE` required compact JSON separators, so a successful boot whose
+stdout used `json.dumps` defaults (spaces after `:` and `,`) was reported
+`enroll_stdout_json: false` and `first_boot_identity_marker: INCONCLUSIVE` in
+section 12. The regex now tolerates that whitespace, and a regression test uses
+the exact captured line. Re-scanning the **unchanged** 88,272-byte attempt-3 log
+now reports `cloud_init_finished: true`, `enroll_stdout_json: true`,
+`node_id: node-94ed0fec32c64d9fb5236be6d57ec629`,
+`fingerprint: 244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167`,
+`reboot_or_poweroff_signal: true`, and no high-signal secret markers.
+All 43 `test_node_vm_*` fixtures pass.
+
+### Second boot (boot-attempt-4)
+
+Started 2026-11-19T23:33:07Z from the **same** boot-attempt-3 overlay and seed
+ISO under TCG, in a disposable task-owned container. It booted to a login prompt
+and emitted cloud-init `init-local`, `init`, `modules:config`, `modules:final`
+and `finished` (84.32 s), reaching `network-online.target`; no enrollment JSON
+was re-emitted and no second clean reboot boundary occurred before the container
+was stopped with a bounded 30 s SIGTERM at 2026-11-20T00:02:10Z. The preserved
+serial log is 57,138 B, SHA256
+`4b0beafd53b52a558d1e8f44c0689897a04c0842d684edbb98d30bdd7230ec07`.
+
+### Read-only offline disk inspection
+
+After stopping the container, the booted overlay was converted to raw and its
+ext4 root partition (GPT start LBA 2099200) read with `debugfs` only. Observed:
+`/var/lib/carbon-node/enrollment/` mode `0700`, containing
+`enrollment-bundle.json` (1341 B, mode `0600`) and `enrollment-secret.bin`
+(32 B, mode `0600`). The bundle's `node_id` and fingerprint match the serial
+markers, `bootstrap_scopes` are the two expected enrollment scopes, and the
+exported shape is digest-only (salt, secret digest, CSR-pre, SPKI, fingerprint)
+with no secret/private-key/token field. `cloud-init-output.log` contains the
+first-boot enrollment JSON and both boots' cloud-init stages, confirming the
+first-boot identity step was not repeated after reboot.
+
+### What this does and does not establish
+
+| Gate | Value | Basis |
+| --- | --- | --- |
+| Cloud-init completion | PASS (first and second boot) | serial + `cloud-init-output.log` markers |
+| First-boot identity marker | PASS (after scanner fix) | real serial JSON + on-disk bundle identity |
+| Bundle/secret on disk, root-only modes | PASS | read-only ext4 `debugfs` inspection |
+| State survival across the first reboot | PASS (bounded) | second boot from post-reboot disk retained bundle/secret and did not re-enroll; not a second clean reboot cycle |
+| Effective network connectivity / daemon health | NOT TESTED | no in-guest health probe; `ci-info` at init showed `ens3` without an address; `network-online.target` reached but no connectivity assertion |
+| Live mTLS enrollment | NOT TESTED | no controller endpoint or enrollment traffic in this fixture |
+
+Whole-image byte provenance remains VERIFIED (section 3). This update does not
+claim live enrollment, network health, host provisioning, image publication or
+any release/registry mutation.
+
+## 14. 2026-11-20 disposable UEFI rerun
+
+Rehashed the 621,284,352-byte amd64 base against the pinned and published
+digests. The digest was
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`.
+The matching release-20261017 SHA256SUMS and signature file correspond
+to the signature verification in section 2. The base was mounted read-only
+in a disposable container. The only writes went to a fresh QCOW2 overlay
+and a fresh OVMF variable store.
+
+| Input | Exact version or SHA256 |
+| --- | --- |
+| QEMU | 7.2.22 under TCG, amd64 |
+| Runner container image ID | `4d9be18bc8fc6a7a4708e9ab62691e601b7778cde624f52357e7b0050b4f8c50` |
+| OVMF 4M code | Ubuntu package `2024.02-2ubuntu0.10`, `ad23261d43116abc3747d59a7837fbf578c9586a8993f4eeba064cd07eccb083` |
+| Deterministic artifact-profile seed manifest | `f6be9a6c887350ea9d16f476c1fe8906355d8c50621399d7bdf0712db1b26d1f` |
+| Guest enrollment script in seed | `bab23eec024dc02f966a34fb576fd3e2acaa608734695522fc2543c61846c4c9` |
+| DHCP network config in seed | `7cf6fffd684b1bbd3b21a8d22fb704ad764f616d2c7ad73ccd8cbf17cbc25a6b` |
+| CIDATA ISO used in rerun | `c0b47b2d7171ae5b4e7b5d54fd63ea7806165c6b9f6d87799f6235d62a6aae97` |
+
+Generated the seed with `node_vm_build.py --profile artifact --check` and
+instance ID `oss377-efi-qual-20261120-a`. Commit
+`d451c8de386b69a416934800de57565fbe2a9944` contains the enrollment script
+and network template with the digests above. The boot fixture appended only an
+ephemeral SSH **public** key to inspect the guest and exercise enrollment.
+QEMU ran with two vCPUs, 2048 MiB RAM, virtio disk and Ethernet,
+readonly OVMF code, and `-no-reboot`. Docker networking was disabled.
+QEMU's restricted user-mode network exposed SSH only on loopback inside
+the container network namespace.
+
+The initial q35 run with an expanded 20 GiB overlay entered emergency mode.
+Linux reported an alternate GPT header at the original disk end, and
+systemd timed out waiting for `BOOT` and `UEFI` device labels. This run's
+serial log SHA256 was
+`6e4d11cb9b420a4f0a8e85c93212297107072cc276816c8770926266db5c023d`.
+The retry used OVMF with the i440fx machine and an overlay at the base image's
+original 3.5 GiB virtual size. The expanded 20 GiB profile still needs
+qualification.
+
+The retry mounted `/boot` and `/boot/efi`, obtained an IPv4 DHCP lease on
+`ens3`, and loaded the NoCloud seed from `/dev/vdb`. At 07:07:38 UTC
+cloud-init reported completion. The first-boot command emitted node ID
+`node-a55c4391379f14e5630dbbec8b3efe68` and approved key fingerprint
+`9291419073ec0c86b3ca058f058c3d2d6b6c8ea4ef7d66f075667fcd9e0ac92f`.
+The guest requested a reboot and QEMU exited successfully at 07:09:26 UTC.
+The first-boot serial log contains 98,295 bytes, SHA256
+`3faebc211bee64253a8abe2520e496c4250462e4daabd4c36905944a4ef42701`.
+
+The second boot reused the same overlay and ISO. At 07:18:52 UTC cloud-init
+completed without errors. An authenticated SSH probe confirmed the UEFI
+runtime, `systemd-networkd` and SSH active, `ens3` with an IPv4 DHCP lease,
+and cgroup v2. The enrollment directory was `0700 root:root` and contained
+`node.key`, `enrollment-bundle.json` and `enrollment-secret.bin`, each
+`0600 root:root`. Neither serial capture nor the CIDATA ISO contained the
+actual enrollment token or a private-key PEM marker.
+The installed guest enrollment script matched the seed SHA256 above. The
+cloud-init boot did not emit a second identity marker. An explicit rerun
+of the first-boot command loaded and validated the persisted key and token
+digest and returned the exact original node ID and public key fingerprint.
+The guest had no Carbon node systemd unit.
+The guest accepted a power-off request. The disposable container had exited
+when checked after its timeout boundary. A clean second shutdown receipt
+was unavailable. The second-boot
+serial log contains 72,562 bytes, SHA256
+`2966f59e1851dbd4c8edaf0ffa6061df595873db79d95201e67634930adc4f41`.
+
+A separate WSL fixture ran the same corrected first-boot script and submitted
+its registration and proof to the checkout's shared Go enrollment authority.
+The authority accepted the DER CSR and fresh signature, issued a certificate
+for the approved public key, and refused a changed signature, replay, and
+wrong node scope. Its stored snapshot did not contain the plaintext token.
+The attempt to feed proof from the rebooted VM to that authority timed out
+while retrieving the registration bundle over SSH. Live guest enrollment,
+controller mTLS, heartbeat transmission and node daemon health remain open.

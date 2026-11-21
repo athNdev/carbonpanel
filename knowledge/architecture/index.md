@@ -35,7 +35,7 @@
 - [Node resolution — Rule + Why](node-resolution-rule.md) — A server belongs to a node. An operation that targets a remote node must obtain
 - [Node VM artifact](node-vm-artifact.md) — Reproducible, secret-free QCOW2/cloud-init node VM builds with pinned provenance, scoped first-boot enrollment and staged rollback; fixture-only, not published.
 - [Node VM artifact — Rule](node-vm-artifact-rule.md) — The node VM artifact (packaging/node-vm/, drivers in scripts/node_vm_*.py)
-- [Node VM artifact — Rule (part 2)](node-vm-artifact-rule-2.md) — or published; no live VM, enrollment, daemon or deployment success is claimed.
+- [Node VM artifact — Rule (part 2)](node-vm-artifact-rule-2.md) — Disposable boot and enrollment proof checks for the planned QCOW2 artifact.
 - [Node VM artifact — Why + How to check + Read next](node-vm-artifact-why.md) — A shared image with baked credentials or an unpinned base would defeat the
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Operation journal — Shape + Rules + Read next](operation-journal-shape.md) — Every create, start, stop, restart, delete and migrate is written to

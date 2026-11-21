@@ -1,19 +1,23 @@
 # SPDX-License-Identifier: MPL-2.0
 """Offline fixtures for first-boot identity and scoped enrollment material.
 
-Synthetic keys/RNG only. No openssl, no VM, no controller, no real credential.
+Includes guest CLI tests with throwaway OpenSSL keys when OpenSSL is available.
 """
 import base64
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 ENROLL_PATH = ROOT / "packaging" / "node-vm" / "cloud-init" / "firstboot" / "enroll.py"
 SHARED_GOLDEN = ROOT / "packaging" / "node-vm" / "qualification" / "fixtures" / "claim-context-shared.json"
+POLICY_PATH = ROOT / "packaging" / "node-vm" / "config" / "enrollment-policy.json"
 
 
 def load_enroll():
@@ -60,7 +64,7 @@ class IdentityTests(unittest.TestCase):
         secret = enroll.generate_secret(256, repeating(b"\x11"))
         salt = enroll.generate_salt(16, repeating(b"\x22"))
         bundle, digest, returned_secret = enroll.build_preregistration_bundle(
-            "fixture01", salt, secret, key, policy,
+            "node-fixture", "fixture01", salt, secret, key, policy,
         )
         self.assertEqual(secret, returned_secret)
         self.assertEqual(digest, hashlib.sha256(salt + secret).hexdigest())
@@ -78,7 +82,7 @@ class IdentityTests(unittest.TestCase):
         policy = json.loads((ROOT / "packaging/node-vm/config/enrollment-policy.json").read_text())
         secret = enroll.generate_secret(256, repeating(b"\x33"))
         salt = enroll.generate_salt(16, repeating(b"\x44"))
-        bundle, _, _ = enroll.build_preregistration_bundle("fixture01", salt, secret, key, policy)
+        bundle, _, _ = enroll.build_preregistration_bundle("node-fixture", "fixture01", salt, secret, key, policy)
         enroll.assert_bundle_has_no_secret(bundle, secret, salt)  # safe case
         bad = dict(bundle)
         bad["enrollment_secret"] = "leak"
@@ -106,7 +110,7 @@ class IdentityTests(unittest.TestCase):
         policy = json.loads((ROOT / "packaging/node-vm/config/enrollment-policy.json").read_text())
         secret = enroll.generate_secret(256, repeating(b"\x99"))
         salt = enroll.generate_salt(16, repeating(b"\xaa"))
-        bundle, _, _ = enroll.build_preregistration_bundle("fixture01", salt, secret, key, policy)
+        bundle, _, _ = enroll.build_preregistration_bundle("node-fixture", "fixture01", salt, secret, key, policy)
         with tempfile.TemporaryDirectory() as tmp:
             bundle_path, secret_path = enroll.write_identity(bundle, secret, tmp)
             bundle_data = Path(bundle_path).read_text()
@@ -167,9 +171,9 @@ class IdentityTests(unittest.TestCase):
         key = enroll.FakeKeyPair("fixture-key")
         challenge = {
             "challenge_id": "challenge-enroll-vm-1",
-            "server_nonce": bytes.fromhex("cafebabe"),
+            "server_nonce": bytes.fromhex("cafe00babe"),
             "expires_at": "2026-11-20T00:00:00Z",
-            "channel_context": b"controller-derived:cn=carbon-panel",
+            "channel_context": b'controller-derived:\x00{"node_id"}',
         }
         claim = enroll.claim_from_challenge(
             key, "node-vm-1", "enroll-vm-1", challenge,
@@ -189,7 +193,7 @@ class IdentityTests(unittest.TestCase):
         p256 = enroll.FakeKeyPair("p256", algorithm="P-256")
         policy = json.loads((ROOT / "packaging/node-vm/config/enrollment-policy.json").read_text())
         with self.assertRaises(ValueError):
-            enroll.build_preregistration_bundle("fixture01", b"s" * 16, b"x" * 32, p256, policy)
+            enroll.build_preregistration_bundle("node-fixture", "fixture01", b"s" * 16, b"x" * 32, p256, policy)
         with self.assertRaises(ValueError):
             enroll.sign_claim(p256, enroll.SIGNING_DOMAIN + b"\x00node")
         with self.assertRaises(ValueError):
@@ -202,6 +206,66 @@ class IdentityTests(unittest.TestCase):
 
     def test_guest_script_compiles(self):
         compile(ENROLL_PATH.read_text(), str(ENROLL_PATH), "exec")
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("openssl"),
+                     "requires Linux guest OpenSSL")
+class GuestIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = json.loads(POLICY_PATH.read_text())
+
+    def test_persists_private_key_and_registerable_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            bundle = enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            identity_bytes = {path.name: path.read_bytes() for path in out.iterdir()}
+            self.assertEqual(set(identity_bytes), {
+                "node.key", "enrollment-bundle.json", "enrollment-secret.bin",
+            })
+            self.assertEqual(
+                enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy), bundle,
+            )
+            self.assertEqual({path.name: path.read_bytes() for path in out.iterdir()}, identity_bytes)
+            with self.assertRaises(ValueError):
+                enroll.ensure_identity(out, "instance-b", "fixture-a", self.policy)
+            self.assertEqual({path.name: path.read_bytes() for path in out.iterdir()}, identity_bytes)
+
+            secret = identity_bytes["enrollment-secret.bin"]
+            self.assertEqual(len(base64.urlsafe_b64decode(secret + b"=")), 32)
+            salt = base64.b64decode(bundle["enrollment_salt"])
+            self.assertEqual(enroll.compute_digest(salt, secret), bundle["enrollment_secret_digest"])
+            self.assertNotIn(secret, identity_bytes["enrollment-bundle.json"])
+            self.assertNotIn(b"PRIVATE KEY", identity_bytes["enrollment-bundle.json"])
+
+            csr = base64.b64decode(bundle["csr_pre"])
+            subprocess.run(
+                ["openssl", "req", "-inform", "DER", "-noout", "-verify"],
+                input=csr, check=True, capture_output=True,
+            )
+            csr_pem_key = subprocess.run(
+                ["openssl", "req", "-inform", "DER", "-noout", "-pubkey"],
+                input=csr, check=True, capture_output=True,
+            ).stdout
+            csr_spki = subprocess.run(
+                ["openssl", "pkey", "-pubin", "-outform", "DER"],
+                input=csr_pem_key, check=True, capture_output=True,
+            ).stdout
+            key = enroll.OpenSSLKeyPair(out / "node.key")
+            self.assertEqual(csr_spki, key.spki_der())
+            self.assertEqual(csr_spki, base64.b64decode(bundle["approved_public_key_spki"]))
+            message = b"carbon-panel-enroll-v1\x00node\x00enroll\x00claim\x00nonce\x00expiry\x00caps\x00channel"
+            self.assertTrue(enroll.verify_claim(key, message, enroll.sign_claim(key, message)))
+
+    def test_refuses_incomplete_preexisting_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            out.mkdir(mode=0o700)
+            marker = out / "enrollment-bundle.json"
+            marker.write_text("{}")
+            with self.assertRaises(FileNotFoundError):
+                enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            self.assertEqual(list(out.iterdir()), [marker])
+            self.assertEqual(marker.read_text(), "{}")
 
 
 if __name__ == "__main__":
