@@ -21,7 +21,7 @@ SPDX-License-Identifier: MPL-2.0
 	import type { ConfigCategory } from '$lib/proto/carbonpanel/v1/config_pb';
 	import type { CompatibilityReport, WorldRevision } from '$lib/proto/carbonpanel/v1/world_pb';
 	import {
-		ListWorldViewTargetsRequestSchema,
+		GetWorldViewStatusRequestSchema,
 		WorldRefSchema,
 		WorldRef_Kind,
 		type WorldViewTarget
@@ -71,9 +71,10 @@ SPDX-License-Identifier: MPL-2.0
 	interface Props {
 		server: Server;
 		active?: boolean;
+		onopenmap: (worldKey?: string) => void;
 	}
 
-	let { server, active = false }: Props = $props();
+	let { server, active = false, onopenmap }: Props = $props();
 
 	let loading = $state(true);
 	let error = $state<unknown>(null);
@@ -269,11 +270,12 @@ SPDX-License-Identifier: MPL-2.0
 
 	async function loadTargets(): Promise<WorldViewTarget[]> {
 		if (!canView) return [];
-		const response = await rpcClient.worldView.listWorldViewTargets(
-			create(ListWorldViewTargetsRequestSchema),
+		const serverId = server.id;
+		const { target } = await rpcClient.worldView.getWorldViewStatus(
+			create(GetWorldViewStatusRequestSchema, { serverId }),
 			silentCallOptions
 		);
-		return response.targets.filter((target) => target.serverId === server.id);
+		return target?.serverId === serverId ? [target] : [];
 	}
 
 	async function loadConfig(): Promise<ConfigCategory[]> {
@@ -507,11 +509,8 @@ SPDX-License-Identifier: MPL-2.0
 		}
 	}
 
-	let mapHref = $derived.by(() => {
-		if (!canView) return null;
-		if (!description.levelName) {
-			return resolve('/worlds') + '?' + new URLSearchParams({ server: server.id });
-		}
+	let activeMapKey = $derived.by(() => {
+		if (!description.levelName) return undefined;
 		const ref = description.binding
 			? create(WorldRefSchema, {
 					kind: WorldRef_Kind.LIBRARY_BINDING,
@@ -524,7 +523,7 @@ SPDX-License-Identifier: MPL-2.0
 					serverId: server.id,
 					levelName: description.levelName
 				});
-		return resolve('/worlds/[server]/[world]', { server: server.id, world: encodeWorldKey(ref) });
+		return encodeWorldKey(ref);
 	});
 
 	function libraryHref(): string {
@@ -551,8 +550,13 @@ SPDX-License-Identifier: MPL-2.0
 		</CarbonTag>
 	{/snippet}
 	{#snippet actions()}
-		{#if mapHref}
-			<CarbonButton kind="secondary" size="sm" href={mapHref} class="justify-center gap-2">
+		{#if canView}
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				onclick={() => onopenmap(activeMapKey)}
+				class="justify-center gap-2"
+			>
 				<MapIcon class="h-3.5 w-3.5" aria-hidden="true" />
 				Open map
 			</CarbonButton>

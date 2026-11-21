@@ -47,7 +47,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			aria-describedby={hasDescription ? describedById : undefined}
 			aria-invalid={error ? 'true' : undefined}
 			bind:value
-			class="focus-ring h-[var(--carbon-control-md)] w-full cursor-pointer appearance-none rounded-none border-b border-input bg-card pr-10 pl-4 text-sm text-foreground transition-[color,background-color,border-color] focus:border-b-2 focus:border-ring focus:bg-accent disabled:border-border disabled:bg-background disabled:text-muted-foreground {error
+			class="focus-ring h-[var(--carbon-control-md)] w-full cursor-pointer appearance-none rounded-none border-b border-input bg-background pr-10 pl-4 text-sm text-foreground transition-[color,background-color,border-color] focus:border-b-2 focus:border-ring focus:bg-accent disabled:border-border disabled:bg-secondary disabled:text-muted-foreground {error
 				? '!border-b-2 !border-destructive'
 				: ''}"
 			{...restProps}

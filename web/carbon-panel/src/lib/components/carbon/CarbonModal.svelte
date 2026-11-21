@@ -5,6 +5,21 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
+<script module lang="ts">
+	let scrollLocks = 0;
+	let previousOverflow = '';
+
+	function lockBackgroundScroll() {
+		if (scrollLocks++ === 0) {
+			previousOverflow = document.body.style.overflow;
+			document.body.style.overflow = 'hidden';
+		}
+		return () => {
+			if (--scrollLocks === 0) document.body.style.overflow = previousOverflow;
+		};
+	}
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
@@ -93,7 +108,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
-		if (!open) return;
+		if (!open || !isTopDialog()) return;
 
 		if (event.key === 'Escape') {
 			event.preventDefault();
@@ -138,14 +153,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	function isTopDialog() {
+		const dialogs = document.querySelectorAll('[data-carbon-active-modal]');
+		return modalElement === dialogs[dialogs.length - 1];
+	}
+
 	$effect(() => {
 		// Lock background scrolling while the dialog owns the viewport.
 		if (!open || typeof document === 'undefined') return;
-		const previous = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = previous;
-		};
+		return lockBackgroundScroll();
 	});
 
 	$effect(() => {
@@ -154,7 +170,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				previousActiveElement = document.activeElement as HTMLElement | null;
 				// Focus the modal or its first actionable element on open
 				const focusTimer = setTimeout(() => {
-					if (!modalElement || modalElement.contains(document.activeElement)) return;
+					if (!modalElement || !isTopDialog() || modalElement.contains(document.activeElement))
+						return;
 					const focusableSelectors = [
 						'input:not([disabled])',
 						'button:not([disabled])',
@@ -200,6 +217,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div
 			bind:this={modalElement}
 			role="dialog"
+			data-carbon-active-modal={open ? '' : undefined}
 			aria-modal="true"
 			aria-labelledby={title ? titleId : undefined}
 			aria-describedby={description ? descId : undefined}

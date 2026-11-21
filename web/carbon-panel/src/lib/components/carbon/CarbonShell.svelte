@@ -16,7 +16,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		ChevronRight,
 		CirclePlus,
 		FileCode2,
-		Globe,
 		History,
 		LayoutGrid,
 		LibraryBig,
@@ -210,7 +209,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			| '/servers'
 			| '/servers/new'
 			| '/players'
-			| '/worlds'
 			| '/library'
 			| '/modpacks/studio'
 			| '/modpacks'
@@ -231,7 +229,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{ href: '/servers', label: 'Servers', icon: Server, badge: true },
 		{ href: '/servers/new', label: 'Create Server', icon: CirclePlus },
 		{ href: '/players', label: 'Players', icon: Users },
-		{ href: '/worlds', label: 'World View', icon: Globe },
 		{ href: '/library', label: 'World Library', icon: LibraryBig },
 		{ href: '/modpacks/studio', label: 'Modpack Studio', icon: Blocks },
 		{ href: '/modpacks', label: 'Modpacks', icon: Package },

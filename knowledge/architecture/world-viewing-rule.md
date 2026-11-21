@@ -4,7 +4,7 @@ title: "Map viewing — Rule"
 description: "WorldViewService observes worlds; it does not own them. A WorldRef"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds, web/carbon-panel/src/lib/components/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md
@@ -20,11 +20,11 @@ visibility flag are the only mutations, and both are audited. Teleport and
 world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
-The server World tab links to the active map, or to World View scoped to that
-server when the active level is unknown. The scoped fallback uses
-GetWorldViewStatus with the concrete server; the all-server catalogue
-requires a global read grant. The responsive map list uses names from the
-authorized server inventory. Setup and unavailable states do not mount a map.
+Server World View uses a compact preview and a full dialog. The World tab
+opens the same dialog. With no explicit level the viewer resolves the active
+map through scoped GetWorldViewStatus. Standalone links still check only map
+access. The catalogue requires a global read grant. Setup and unavailable
+states do not mount an iframe.
 A failed refresh keeps a valid last-known map and reports the error. The page
 renews both built-in and renderer sessions before their deadline, hides expired
 maps and retries temporary failures while the scope remains authorized. Read

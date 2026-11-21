@@ -19,7 +19,8 @@ sources:
 ---
 
 The gated World View capture must prove *rendered* terrain, not just a mounted
-iframe, a visible canvas and clean HTTP responses. Real BlueMap v5.29 tiles and
+iframe, a visible canvas and clean HTTP responses. Capture opens the map from
+the seeded server’s preview card. Real BlueMap v5.29 tiles and
 `settings.json` must come from a disposable seeded renderer; no mockup or
 placeholder is publishable. The panel-wide CSP stays unchanged: the disposable
 stack overlays the pinned, digest-checked CSP-safe webapp build (ADR 0048) over

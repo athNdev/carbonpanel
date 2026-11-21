@@ -32,7 +32,6 @@ one at https://mozilla.org/MPL/2.0/.
 		Package,
 		Loader2,
 		Copy,
-		ExternalLink,
 		Trash2,
 		Cpu,
 		Info,
@@ -67,6 +66,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonTag,
 		CarbonTabs,
 		CarbonConfirm,
+		CarbonModal,
 		CarbonErrorState,
 		CarbonPageHeader
 	} from '$lib/components/carbon';
@@ -89,14 +89,40 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerModules from '$lib/components/server-ui/ServerModules.svelte';
 	import ServerWorld from '$lib/components/server-ui/ServerWorld.svelte';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
+	import WorldViewWorkspace from '$lib/components/worldview/WorldViewWorkspace.svelte';
 
-	let serverId = $derived(page.params.id);
+	let serverId = $derived(page.params.id ?? '');
 	let server = $derived($serversStore.find((entry) => entry.id === serverId) ?? null);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let actionLoading = $state(false);
 	let activeTab = $state('overview');
+	let requestedMap = $derived(page.url.searchParams.get('map'));
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
+	let runtimeChanging = $derived(
+		[
+			ServerStatus.CREATING,
+			ServerStatus.STARTING,
+			ServerStatus.RESTARTING,
+			ServerStatus.STOPPING
+		].includes(server?.status ?? ServerStatus.UNSPECIFIED)
+	);
+
+	function openMap(worldKey = '') {
+		const url = new URL(page.url.href);
+		url.searchParams.set('map', worldKey);
+		// This opens a dialog on the current server route.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(url, { reset: false });
+	}
+
+	function closeMap() {
+		const url = new URL(page.url.href);
+		for (const key of ['map', 'dimension', 'x', 'z', 'layer']) url.searchParams.delete(key);
+		// Only map-related query parameters are removed.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(url, { replaceState: true, reset: false });
+	}
 
 	function timestampToDate(timestamp: Timestamp | undefined): Date {
 		if (!timestamp) return new Date();
@@ -351,6 +377,13 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								<DropdownMenuItem
 									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
+									onclick={() => copyConnection(connectAddress)}
+								>
+									<Copy class="h-3.5 w-3.5" />
+									<span>Copy Address</span>
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
 									onclick={() => handleServerAction('recreate')}
 								>
 									<RefreshCcw class="h-3.5 w-3.5" />
@@ -388,48 +421,33 @@ one at https://mozilla.org/MPL/2.0/.
 			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-runtime-tiles"
 		>
-			<!-- Tile 1: Status & Heartbeat -->
+			<!-- Runtime state -->
 			<div
 				data-testid="showcase-runtime-tile"
-				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors hover:border-foreground/30"
+				class="flex min-h-48 flex-col justify-between gap-3 border border-border bg-card p-4"
 			>
 				<div class="flex items-center justify-between">
-					<span
-						class="font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-						>Runtime Status</span
-					>
+					<h2 class="text-sm font-semibold">Runtime status</h2>
 					<CarbonTag type={getStatusTagType(server.status)} size="sm">
 						{getStatusDisplayName(server.status)}
 					</CarbonTag>
 				</div>
-				<div class="mt-3 flex items-center justify-center gap-2 py-4">
-					<div class="heartbeat-container">
-						{#if server.status === ServerStatus.RUNNING}
-							{#each Array(5) as _, i (i)}
-								<div class="heartbeat-bar bg-success" style="animation-delay: {i * 0.15}s"></div>
-							{/each}
-						{:else if server.status === ServerStatus.ERROR}
-							{#each Array(5) as _, i (i)}
-								<div
-									class="heartbeat-bar heartbeat-erratic bg-destructive"
-									style="animation-delay: {i * 0.1}s"
-								></div>
-							{/each}
-						{:else if server.status === ServerStatus.UNHEALTHY}
-							{#each Array(5) as _, i (i)}
-								<div class="heartbeat-bar bg-warning" style="animation-delay: {i * 0.15}s"></div>
-							{/each}
-						{:else}
-							{#each Array(5) as _, i (i)}
-								<div class="heartbeat-bar bg-secondary" style="animation-delay: {i * 0.25}s"></div>
-							{/each}
-						{/if}
-					</div>
+				<div
+					class="runtime-signal"
+					class:changing={runtimeChanging}
+					class:running={server.status === ServerStatus.RUNNING}
+					class:sleeping={server.status === ServerStatus.DEEPSLEEP}
+					aria-hidden="true"
+					style:--signal-ink={`var(--tag-${getStatusTagType(server.status)}-text)`}
+				>
+					{#each [0.25, 0.4, 0.62, 0.85, 1, 0.85, 0.62, 0.4, 0.25] as height, i (i)}
+						<span class="signal-block" style:--rest={height} style:--delay={`${i * 0.13}s`}></span>
+					{/each}
 				</div>
-				<div class="mt-3 border-t border-border pt-3 text-center">
-					<p class="font-sans text-[11px] text-muted-foreground">
+				<div class="border-t border-border pt-2.5">
+					<p class="text-xs leading-relaxed text-muted-foreground" aria-live="polite">
 						{#if server.status === ServerStatus.RUNNING}
-							Server healthy and processing ticks
+							Server container is running
 						{:else if server.status === ServerStatus.STOPPED}
 							Container offline
 						{:else if server.status === ServerStatus.CREATING}
@@ -457,49 +475,13 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 
-			<!-- Tile 2: Connection Address -->
-			<div
-				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors hover:border-foreground/30"
-			>
-				<div class="flex items-center justify-between">
-					<span
-						class="font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-						>Network Ingress</span
-					>
-					<div class="flex items-center gap-2">
-						{#if isProxied}
-							<span
-								class="rounded-none bg-primary/20 px-1.5 py-0.5 font-mono text-[10px] text-accent-text"
-								>PROXIED</span
-							>
-						{:else}
-							<span
-								class="rounded-none bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-								>DIRECT PORT</span
-							>
-						{/if}
-						<ExternalLink class="h-4 w-4 text-accent-text" />
-					</div>
-				</div>
-				<div class="mt-3 py-1">
-					<p class="font-mono text-xs text-muted-foreground uppercase">Connect String</p>
-					<p class="mt-0.5 truncate font-mono text-base font-semibold text-foreground">
-						{connectAddress}
-					</p>
-				</div>
-				<div class="mt-3 border-t border-border pt-3">
-					<button
-						type="button"
-						onclick={() => {
-							copyConnection(connectAddress);
-						}}
-						class="flex h-8 w-full cursor-pointer items-center justify-center gap-2 rounded-none border border-border bg-background px-3 font-mono text-xs text-accent-text transition-colors hover:bg-accent"
-					>
-						<Copy class="h-3.5 w-3.5" />
-						<span>Copy Address</span>
-					</button>
-				</div>
-			</div>
+			<!-- Current world -->
+			<WorldViewWorkspace
+				{serverId}
+				presentation="preview"
+				enabled={$metricsExpanded && requestedMap === null}
+				onexpand={() => openMap()}
+			/>
 
 			<!-- Tile 3: Engine Details -->
 			<div
@@ -724,7 +706,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{:else if activeTab === 'datapacks'}
 							<ServerDatapacks {server} />
 						{:else if activeTab === 'world'}
-							<ServerWorld {server} active={activeTab === 'world'} />
+							<ServerWorld {server} active={activeTab === 'world'} onopenmap={openMap} />
 						{:else if activeTab === 'modules'}
 							<ServerModules {server} active={activeTab === 'modules'} />
 						{:else if activeTab === 'files'}
@@ -877,57 +859,100 @@ one at https://mozilla.org/MPL/2.0/.
 			</fieldset>
 		{/snippet}
 	</CarbonConfirm>
+	<CarbonModal
+		open={requestedMap !== null}
+		title="World map"
+		size="full"
+		hasFooter={false}
+		onclose={closeMap}
+	>
+		{#if requestedMap !== null}
+			{#key serverId}
+				<WorldViewWorkspace {serverId} worldKey={requestedMap || undefined} presentation="dialog" />
+			{/key}
+		{/if}
+	</CarbonModal>
 {/if}
 
 <style>
-	.heartbeat-container {
+	.runtime-signal {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 3px;
-		height: 36px;
+		gap: 0.25rem;
+		min-height: 3.75rem;
+		color: var(--signal-ink, var(--muted-foreground));
+		background:
+			linear-gradient(
+					90deg,
+					transparent,
+					color-mix(in srgb, currentColor 15%, transparent),
+					transparent
+				)
+				center / 100% 1px no-repeat,
+			radial-gradient(
+				ellipse at center,
+				color-mix(in srgb, currentColor 9%, transparent),
+				transparent 70%
+			);
 	}
 
-	.heartbeat-bar {
-		width: 4px;
-		height: 32px;
-		border-radius: 0px;
-		animation: heartbeat 3.5s ease-in-out infinite;
+	.signal-block {
+		width: 0.375rem;
+		height: 1.5rem;
+		background: currentColor;
+		transform: scaleY(var(--rest));
+		opacity: 0.55;
+		transition:
+			opacity 240ms var(--ease-in-out-standard),
+			transform 240ms var(--ease-in-out-standard);
 	}
 
-	.heartbeat-bar.heartbeat-erratic {
-		animation: heartbeat-erratic 1.5s ease-in-out infinite;
+	.changing .signal-block {
+		animation: signal-pass 2.8s var(--ease-in-out-standard) var(--delay) infinite;
 	}
 
-	@keyframes heartbeat {
+	.running .signal-block {
+		animation: signal-pass 7.5s var(--ease-in-out-standard) var(--delay) infinite;
+	}
+
+	.sleeping .signal-block {
+		opacity: 0.22;
+		transform: scaleY(0.2);
+	}
+	.sleeping .signal-block:nth-child(5) {
+		animation: signal-breathe 6s ease-in-out infinite;
+	}
+
+	@keyframes signal-pass {
+		0%,
+		32%,
+		100% {
+			transform: scaleY(var(--rest));
+			opacity: 0.52;
+		}
+		15% {
+			transform: translateY(-0.125rem) scaleY(1.12);
+			opacity: 0.92;
+		}
+	}
+
+	@keyframes signal-breathe {
 		0%,
 		100% {
-			height: 6px;
-			opacity: 0.3;
+			transform: scaleY(0.25);
+			opacity: 0.35;
 		}
 		50% {
-			height: 32px;
-			opacity: 1;
+			transform: scaleY(0.6);
+			opacity: 0.72;
 		}
 	}
 
-	@keyframes heartbeat-erratic {
-		0%,
-		100% {
-			height: 4px;
-			opacity: 0.2;
-		}
-		25% {
-			height: 24px;
-			opacity: 0.9;
-		}
-		50% {
-			height: 12px;
-			opacity: 0.5;
-		}
-		75% {
-			height: 30px;
-			opacity: 1;
+	@media (prefers-reduced-motion: reduce) {
+		.signal-block {
+			animation: none !important;
+			transition: none !important;
 		}
 	}
 </style>
