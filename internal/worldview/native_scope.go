@@ -64,7 +64,7 @@ func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *sto
 	if err != nil {
 		return nativeScope{}, errNativeSourceAbsent
 	}
-	level := configuredLevelName(cfg)
+	level := cfg.ActualLevelName()
 	if level == "" {
 		return nativeScope{}, errNativeSourceAbsent
 	}

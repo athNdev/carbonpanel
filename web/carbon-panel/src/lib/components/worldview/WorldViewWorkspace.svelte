@@ -88,13 +88,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
 	import WorldMapLoading from '$lib/components/worldview/WorldMapLoading.svelte';
-	import {
-		loadNativeManifest,
-		loadNativeTile,
-		parseNativeCoordinate,
-		TILE_BLOCKS,
-		type MapPoint
-	} from '$lib/features/worldview/native-map';
+	import { parseNativeCoordinate, type MapPoint } from '$lib/features/worldview/native-map';
+	import { loadNativePreview } from '$lib/features/worldview/native-map-preview';
 	import { nativeMapMarkers } from '$lib/features/worldview/native-map-markers';
 
 	let {
@@ -310,9 +305,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{ ...silentCallOptions, timeoutMs: 10_000 }
 			);
 			if (!current() || key !== sessionScope || attempt !== sessionAttempt || denied) return;
-			if (response.proxyPath && native !== (response.state === RendererState.NATIVE_AVAILABLE)) {
-				clearSession();
-				sessionError = new Error('The map changed. Refresh to reopen it.');
+			if (
+				native !== (response.state === RendererState.NATIVE_AVAILABLE) ||
+				(!native && response.state !== RendererState.READY && response.state !== RendererState.STALE)
+			) {
+				sessionError = new Error('The map renderer changed. Reconnecting…');
+				void store.loadStatus(statusKey, serverId, requestedRef).catch(() => {});
 				return;
 			}
 			if (response.proxyPath) authStore.refreshBrowserSessionCookie();
@@ -431,6 +429,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
+		if (!enabled || !canRead || denied || !sessionScope || !sessionError) return;
+		if (sessionOwner === sessionScope && session?.proxyPath) return;
+		const retrySession = setTimeout(() => void loadSession(), 5_000);
+		return () => clearTimeout(retrySession);
+	});
+
+	$effect(() => {
 		if (!canRead || denied || sessionOwner !== sessionScope || !session?.proxyPath) return;
 		const expiresAt = timestampToMs(session.expiresAt);
 		if (expiresAt === null) return;
@@ -465,7 +470,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					session
 				)
 	);
-	let previewTile = $state<{ scope: string; src: string }>();
+	let previewTile = $state<{ path: string; scope: string; src: string }>();
 	let previewFetching = $state(false);
 	$effect(() => {
 		const path = embed.src;
@@ -475,24 +480,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const { signal } = controller;
 		previewFetching = true;
 		void (async () => {
-			const manifest = await loadNativeManifest(path, signal);
-			if (signal.aborted) return;
-			const spawn = manifest.status === 'ready' ? manifest.manifest.spawn : null;
-			const tile =
-				manifest.status === 'ready'
-					? await loadNativeTile(
-							path,
-							{
-								x: Math.floor((spawn?.x ?? 0) / TILE_BLOCKS),
-								z: Math.floor((spawn?.z ?? 0) / TILE_BLOCKS)
-							},
-							signal
-						)
-					: manifest;
+			const tile = await loadNativePreview(path, signal);
 			if (signal.aborted) return;
 			if (tile.status === 'access') {
 				handleError(new ConnectError('World map access was revoked.', Code.PermissionDenied));
-			} else if (tile.status === 'saved') previewTile = { scope, src: tile.src };
+			} else if (tile.status === 'saved') previewTile = { path, scope, src: tile.src };
 		})()
 			.catch(() => {})
 			.finally(() => {
@@ -504,7 +496,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	});
 	let previewImage = $derived(
-		view === 'saved' && embed.src && previewTile?.scope === sessionScope
+		view === 'saved' && embed.src && previewTile?.path === embed.src && previewTile.scope === sessionScope
 			? previewTile.src
 			: undefined
 	);
@@ -735,7 +727,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 		{#if previewImage || previewFrame}
 			<div
-				class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/75"
+				class="pointer-events-none absolute inset-0 bg-linear-to-b from-black/15 via-transparent to-black/20"
 			></div>
 		{/if}
 		<div
@@ -743,7 +735,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			class:text-white={Boolean(previewImage || previewFrame)}
 		>
 			<div class="flex items-start justify-between gap-2">
-				<h2 class="text-sm font-semibold">World View</h2>
+				<h2
+					class={['text-sm font-semibold', (previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white']}
+				>World View</h2>
 				{#if canRead && !denied}
 					<div class="flex gap-1.5">
 						<CarbonButton
@@ -790,28 +784,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{@const connecting = view === 'ready' && Boolean(mapLoadingLabel)}
 				{@const lastKnown = refreshWarning && Boolean(previewImage || previewFrame)}
 				<div class="flex flex-wrap items-end justify-between gap-2">
-					{#if statusTarget.name}<p class="min-w-0 text-base font-semibold break-words">
+					{#if statusTarget.name}<p class={['min-w-0 text-base font-semibold break-words', (previewImage || previewFrame) && 'bg-black/70 px-2 py-1 text-white']}>
 							{statusTarget.name}
 						</p>{/if}
-					<CarbonTag
-						type={lastKnown ? 'yellow' : connecting ? 'blue' : VIEW_STATE_TONE[view]}
-						size="sm"
-					>
-						{lastKnown
-							? 'LAST KNOWN'
-							: connecting
-								? 'CONNECTING'
-								: view === 'saved'
-									? 'SAVED TERRAIN'
-									: VIEW_STATE_LABEL[view]}
-					</CarbonTag>
+					{#if view !== 'saved' || lastKnown}
+						<CarbonTag
+							type={lastKnown ? 'yellow' : connecting ? 'blue' : VIEW_STATE_TONE[view]}
+							size="sm"
+						>
+							{lastKnown ? 'LAST KNOWN' : connecting ? 'CONNECTING' : VIEW_STATE_LABEL[view]}
+						</CarbonTag>
+					{/if}
 				</div>
 			{/if}
 		</div>
 	</section>
 {:else}
 	<div
-		class="h-full flex-1 space-y-4 bg-background font-sans text-foreground"
+		class="min-w-0 flex-1 space-y-4 bg-background font-sans text-foreground"
 		data-testid="showcase-world-map-content"
 	>
 		{#if presentation === 'page'}
@@ -918,14 +908,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-3 border border-border bg-card p-4 sm:p-6">
 							<h2 class="text-base font-semibold">Set up a map</h2>
 							<p class="max-w-xl text-sm text-muted-foreground">
-								Connect a renderer to see this world in Carbon Panel.
+								{statusTarget?.freshness?.source === 'worldview.discovered.bluemap'
+									? statusTarget.freshness.note
+									: 'Connect a renderer to see this world in Carbon Panel.'}
 							</p>
-							<BlueMapInstall
-								{serverId}
-								target={statusTarget}
-								can={canManageModules}
-								oncomplete={() => void retry()}
-							/>
+							{#if statusTarget?.freshness?.source !== 'worldview.discovered.bluemap'}
+								<BlueMapInstall
+									{serverId}
+									target={statusTarget}
+									can={canManageModules}
+									oncomplete={() => void retry()}
+								/>
+							{/if}
 						</div>
 					{:else if view === 'error'}
 						<CarbonErrorState
@@ -955,17 +949,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<h2 class="text-base font-semibold">Renderer stopped</h2>
 							</div>
 							<p class="text-sm text-muted-foreground">
-								Live tiles and overlays are unavailable. Last observation:
-								{formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}.
+								{statusTarget?.freshness?.note || 'The renderer has stopped serving tiles.'}
 							</p>
 						</div>
 					{:else if view === 'saved'}
 						<div class="space-y-2 border border-border bg-card px-4 py-3 text-sm">
 							<p class="text-muted-foreground">
-								The built-in map shows saved terrain elevation. Use Refresh terrain after the server
-								saves changes.
+								Refresh after Minecraft saves to see new builds. This map does not track moving players.
 							</p>
-							{#if canManageModules('modules', 'create') && canManageModules('modules', 'start')}
+							{#if statusTarget?.error}
+								<p class="text-muted-foreground">{statusTarget.error}</p>
+							{:else if canManageModules('modules', 'create') && canManageModules('modules', 'start')}
 								{#key statusKey}
 									<details
 										ontoggle={(event) => {
@@ -1244,6 +1238,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										{/if}
 									</div>
 								{/each}
+								{#if adminError}
+									<p class="border-l-2 border-destructive bg-destructive/10 p-3 text-sm text-foreground" role="alert">
+										{adminError}
+									</p>
+								{/if}
 							</div>
 						</CarbonAccordionItem>
 					</CarbonAccordion>
@@ -1291,9 +1290,4 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			adminError = '';
 		}}
 	/>
-	{#if adminError}
-		<div class="mt-3 border border-destructive bg-destructive/20 p-3 text-xs" role="alert">
-			{adminError}
-		</div>
-	{/if}
 {/if}

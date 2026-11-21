@@ -213,6 +213,77 @@ func TestNativeInventoryDefersUnexaminedWorldsFixture(t *testing.T) {
 	}
 }
 
+func TestInstalledBlueMapUpgradesAndFallsBackOnActiveWorld(t *testing.T) {
+	service := nativeProbeServiceFixture(t, 1)
+	m := installedModuleFixture()
+	m.serverID, m.worldName = "native-server-0", "actual-world"
+	discovery := &fakeDiscovery{facts: readyFacts(m, privateRendererFixture(t))}
+	service.deps.Resolver = NewResolverWithDiscovery(Config{}, &fakeLocator{local: map[string]bool{m.nodeID: true}}, discovery)
+	ctx := svcCtx("native-viewer", "user")
+	var embeddedKey string
+	for _, tc := range []struct {
+		name      string
+		lifecycle ModuleLifecycle
+		rendered  bool
+		wantType  v1.RendererType
+		wantState v1.RendererState
+	}{
+		{"installed but waiting for tiles", ModuleRunning, false, v1.RendererType_RENDERER_TYPE_NATIVE, v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE},
+		{"verified first render", ModuleRunning, true, v1.RendererType_RENDERER_TYPE_BLUEMAP, v1.RendererState_RENDERER_STATE_READY},
+		{"renderer stopped", ModuleStopped, true, v1.RendererType_RENDERER_TYPE_NATIVE, v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discovery.facts.Lifecycle, discovery.facts.Rendered = tc.lifecycle, tc.rendered
+			status, err := service.GetWorldViewStatus(ctx, connect.NewRequest(&v1.GetWorldViewStatusRequest{ServerId: m.serverID}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := status.Msg.GetTarget()
+			if target.GetRendererState() != tc.wantState || target.GetRendererType() != tc.wantType ||
+				target.GetWorldRef().GetLevelName() != m.worldName {
+				t.Fatalf("status did not select the active world's expected renderer: %v", target)
+			}
+			if (target.GetError() != "") != (tc.wantType == v1.RendererType_RENDERER_TYPE_NATIVE) {
+				t.Fatalf("unexpected fallback reason: %q", target.GetError())
+			}
+			caps, err := service.ListCapabilities(ctx, connect.NewRequest(&v1.ListCapabilitiesRequest{ServerId: m.serverID}))
+			if err != nil || caps.Msg.GetRendererType() != tc.wantType {
+				t.Fatalf("capabilities do not match active renderer: %v (%v)", caps, err)
+			}
+			session, err := service.GetWorldViewSession(ctx, connect.NewRequest(&v1.GetWorldViewSessionRequest{
+				ServerId: m.serverID, WorldRef: target.GetWorldRef(),
+			}))
+			if err != nil || session.Msg.GetState() != tc.wantState || session.Msg.GetProxyPath() == "" {
+				t.Fatalf("session does not match active renderer: %v (%v)", session, err)
+			}
+			if tc.wantState == v1.RendererState_RENDERER_STATE_READY {
+				embeddedKey = strings.Trim(strings.TrimPrefix(session.Msg.GetProxyPath(), ProxyPrefix), "/")
+			}
+		})
+	}
+
+	discovery.facts.Lifecycle = ModuleRunning
+	for _, ref := range []*v1.WorldRef{
+		{Kind: v1.WorldRef_KIND_SERVER_LOCAL, LevelName: "previous-level"},
+		{Kind: v1.WorldRef_KIND_STATIC_IMPORT, SnapshotId: "saved", LevelName: m.worldName},
+	} {
+		session, err := service.GetWorldViewSession(ctx, connect.NewRequest(&v1.GetWorldViewSessionRequest{ServerId: m.serverID, WorldRef: ref}))
+		if err != nil || session.Msg.GetProxyPath() != "" {
+			t.Fatalf("active BlueMap must not serve a different world reference: %v (%v)", session, err)
+		}
+	}
+
+	discovery.facts.WorldName = "newly-active-level"
+	handler := NewProxyHandler(ProxyDeps{
+		Auth:       &fakeAuth{users: map[string]*auth.AuthenticatedUser{"viewer-token": auth.GetUserFromContext(ctx)}},
+		Authorizer: service.deps.Authorizer, Servers: service.deps.Store,
+		Resolver: service.deps.Resolver, Sessions: service.SessionRegistry(),
+	})
+	if response := callProxy(handler, embeddedKey, "viewer-token", http.MethodGet); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("previous BlueMap session followed the changed world: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestNativeInspectionCongestionPreservesIssuedSessionFixture(t *testing.T) {
 	service := nativeProbeServiceFixture(t, 1)
 	ctx := svcCtx("native-viewer", "user")

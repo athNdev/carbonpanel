@@ -348,7 +348,7 @@
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
 		<div class="min-w-0">
 			<h2 id={id + '-title'} class="text-sm font-semibold text-foreground">{title}</h2>
-			<p class="mt-1 text-xs text-muted-foreground">Overworld · Saved terrain</p>
+			<p class="mt-1 text-xs text-muted-foreground">Overworld</p>
 		</div>
 		{#if result?.status === 'ready'}
 			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap items-end gap-1">
@@ -497,7 +497,7 @@
 					{/if}
 					{#if summary.savedAt}
 						<p class="mt-1">
-							Newest tile save <time datetime={summary.savedAt}
+							Latest chunk save in this view <time datetime={summary.savedAt}
 								>{formatTime.format(new Date(summary.savedAt))}</time
 							>
 						</p>

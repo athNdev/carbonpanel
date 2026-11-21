@@ -149,6 +149,9 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	identity, inspectErr := runtime.InspectModuleRuntime(ctx, chosen.ID, chosen.ContainerID, d.networkName)
 	if inspectErr != nil || identity == nil {
 		facts.Lifecycle = worldview.ModuleFailed
+		if chosen.ContainerID == "" && (chosen.Status == storage.ModuleStatusCreating || chosen.Status == storage.ModuleStatusStarting) {
+			facts.Lifecycle = worldview.ModulePending
+		}
 		return facts, nil
 	}
 	facts.Lifecycle = lifecycleFromState(identity.State)
@@ -237,9 +240,9 @@ func canonicalNode(nodeID string) string {
 
 func lifecycleFromState(state string) worldview.ModuleLifecycle {
 	switch strings.ToLower(state) {
-	case "running", "restarting":
+	case "running":
 		return worldview.ModuleRunning
-	case "created", "paused":
+	case "created", "paused", "restarting":
 		return worldview.ModulePending
 	case "":
 		return worldview.ModuleFailed
@@ -341,15 +344,16 @@ func readMapConfig(accessor configAccessor) (string, bool) {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".conf") || !plainComponent(name) {
+		id, valid := strings.CutSuffix(name, ".conf")
+		if entry.IsDir() || !valid || !plainComponent(id) {
 			continue
 		}
 		raw, err := accessor.ReadFile("modules/bluemap/config/maps/" + name)
 		if err != nil {
 			continue
 		}
-		id, world, ok := parseMapConfig(string(raw))
-		if !ok || !isAppWorld(world) || !plainComponent(id) {
+		world, dimension := parseMapConfig(string(raw))
+		if !isAppWorld(world) || (dimension != "" && dimension != "minecraft:overworld") {
 			continue
 		}
 		ids = append(ids, id)
@@ -358,10 +362,15 @@ func readMapConfig(accessor configAccessor) (string, bool) {
 		return "", false
 	}
 	sort.Strings(ids)
+	for _, id := range ids {
+		if tilesExist(accessor, id) {
+			return id, true
+		}
+	}
 	return ids[0], true
 }
 
-func parseMapConfig(raw string) (id, world string, ok bool) {
+func parseMapConfig(raw string) (world, dimension string) {
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
@@ -377,13 +386,13 @@ func parseMapConfig(raw string) (id, world string, ok bool) {
 		key = strings.Trim(strings.TrimSpace(key), `"' `)
 		value = strings.Trim(strings.TrimSpace(value), `"' `)
 		switch strings.ToLower(key) {
-		case "id":
-			id = value
 		case "world":
 			world = value
+		case "dimension":
+			dimension = value
 		}
 	}
-	return id, world, id != ""
+	return world, dimension
 }
 
 func plainComponent(name string) bool {
@@ -406,11 +415,35 @@ func tilesExist(accessor configAccessor, mapID string) bool {
 	if !plainComponent(mapID) {
 		return false
 	}
-	entries, err := accessor.ReadDir("modules/bluemap/web/maps/" + mapID + "/tiles")
-	if err != nil {
-		return false
+	root := path.Join("modules/bluemap/web/maps", mapID, "tiles")
+	lods, _ := accessor.ReadDir(root)
+	remaining := 32
+	for _, lod := range lods {
+		if !lod.IsDir() {
+			continue
+		}
+		columns, _ := accessor.ReadDir(path.Join(root, lod.Name()))
+		for _, column := range columns {
+			if !column.IsDir() {
+				continue
+			}
+			if remaining == 0 {
+				return false
+			}
+			remaining--
+			tiles, _ := accessor.ReadDir(path.Join(root, lod.Name(), column.Name()))
+			for _, tile := range tiles {
+				name := strings.TrimSuffix(tile.Name(), ".gz")
+				if tile.Type().IsRegular() && (strings.HasSuffix(name, ".png") || strings.HasSuffix(name, ".prbm")) {
+					info, err := tile.Info()
+					if err == nil && info.Size() > 0 {
+						return true
+					}
+				}
+			}
+		}
 	}
-	return len(entries) > 0
+	return false
 }
 
 // webUp only answers "is the private listener up". It is called only after all

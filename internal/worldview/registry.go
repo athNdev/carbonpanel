@@ -16,12 +16,13 @@ import (
 // is not a credential: every proxied request still authenticates with the
 // panel cookie/bearer token and re-checks world_view/read for the server.
 type session struct {
-	Key      string
-	ServerID string
-	WorldKey string
-	UserID   string
-	Expires  time.Time
-	native   nativeScope
+	Key        string
+	ServerID   string
+	WorldKey   string
+	UserID     string
+	Expires    time.Time
+	native     nativeScope
+	discovered bool
 }
 
 // SessionRegistry is a mutex-protected, in-memory registry with lazy expiry
@@ -40,10 +41,10 @@ func NewSessionRegistry() *SessionRegistry {
 // Issue creates a new key. serverID/userID must be non-empty; callers derive
 // them from the authenticated RPC context rather than from request input.
 func (r *SessionRegistry) Issue(serverID, worldKey, userID string, ttl time.Duration) (string, time.Time) {
-	return r.issue(serverID, worldKey, userID, ttl, nativeScope{})
+	return r.issue(serverID, worldKey, userID, ttl, nativeScope{}, false)
 }
 
-func (r *SessionRegistry) issue(serverID, worldKey, userID string, ttl time.Duration, native nativeScope) (string, time.Time) {
+func (r *SessionRegistry) issue(serverID, worldKey, userID string, ttl time.Duration, native nativeScope, discovered bool) (string, time.Time) {
 	if ttl <= 0 {
 		ttl = DefaultSessionTTL
 	}
@@ -57,7 +58,7 @@ func (r *SessionRegistry) issue(serverID, worldKey, userID string, ttl time.Dura
 	now := r.currentTime()
 	s := &session{
 		Key: key, ServerID: serverID, WorldKey: worldKey,
-		UserID: userID, Expires: now.Add(ttl), native: native,
+		UserID: userID, Expires: now.Add(ttl), native: native, discovered: discovered,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

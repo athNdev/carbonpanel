@@ -84,6 +84,18 @@ dimension: "minecraft:overworld"
 	}
 }
 
+func TestReadStockMapConfigUsesFilenameAndOverworld(t *testing.T) {
+	dir := t.TempDir()
+	mapsDir := filepath.Join(dir, "modules", "bluemap", "config", "maps")
+	writeFixture(t, filepath.Join(mapsDir, "end.conf"), "world: \"world\"\ndimension: \"minecraft:the_end\"\n")
+	writeFixture(t, filepath.Join(mapsDir, "nether.conf"), "world: \"world\"\ndimension: \"minecraft:the_nether\"\n")
+	writeFixture(t, filepath.Join(mapsDir, "overworld.conf"), "world: \"world\"\ndimension: \"minecraft:overworld\"\n")
+	id, ok := readMapConfig(fixtureAccessor(t, dir))
+	if !ok || id != "overworld" {
+		t.Fatalf("stock standalone configs resolved to map %q, present = %v; want overworld", id, ok)
+	}
+}
+
 func TestIsAppWorldFixture(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -104,7 +116,12 @@ func TestTilesExistFixture(t *testing.T) {
 	if tilesExist(accessor, "overworld") {
 		t.Fatal("an empty map web dir must not claim rendered tiles")
 	}
-	writeFixture(t, filepath.Join(dir, "modules", "bluemap", "web", "maps", "overworld", "tiles", "0", "0", "0.png"), "not-a-real-tile")
+	tilesDir := filepath.Join(dir, "modules", "bluemap", "web", "maps", "overworld", "tiles", "3", "x0")
+	writeFixture(t, filepath.Join(tilesDir, "z0.png"), "")
+	if tilesExist(accessor, "overworld") {
+		t.Fatal("a tile directory or empty placeholder must not qualify")
+	}
+	writeFixture(t, filepath.Join(tilesDir, "z0.png"), "fixture-tile")
 	if !tilesExist(accessor, "overworld") {
 		t.Fatal("a present tile must be observed as rendered")
 	}

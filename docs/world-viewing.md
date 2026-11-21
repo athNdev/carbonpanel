@@ -61,11 +61,37 @@ A remote node needs an explicit, allowlisted node-local endpoint.
 No renderer is discovered by port probing or host-port bindings.
 
 A discovered module reaches READY after the renderer's `/settings.json` lists
-the configured map for the server's actual level and the node data accessor
-finds a scoped tile. Both discovered modules and explicit BlueMap endpoints
+the configured Overworld map for the server's actual level and the node data
+accessor finds a scoped tile. The map ID comes from its configuration filename,
+as in BlueMap's generated `overworld.conf`.
+Both discovered modules and explicit BlueMap endpoints
 also need to serve textures for every map they list, including secondary
 dimensions. A discovered renderer with unavailable textures shows an error
-and a retry action in World View.
+and a retry action in World View. When a discovered module is still starting,
+rendering, stopped or unavailable, World View shows the built-in saved-terrain
+map if the world supports it, with the module's current condition. The server
+preview and full viewer switch automatically after the required checks pass.
+
+For an existing BlueMap module, use the server's **Modules** tab to inspect
+its logs and current volume settings:
+
+- If the logs report a missing resource download, review the Minecraft EULA
+  and BlueMap's resource download terms. If you accept both, edit
+  `modules/bluemap/config/core.conf` from the server's **Files** tab and set
+  `accept-download: true`.
+- If the `/app/world` volume points to the server data root, edit BlueMap's
+  **Volumes** and set its host source to
+  `{{server.data_path}}/<active-level-folder>` with **Read Only** enabled. Use
+  the actual folder containing `level.dat`.
+- For older BlueMap modules without a writable resource cache, add a
+  **Volumes** entry from `{{server.data_path}}/modules/bluemap/resources`
+  to `/app/bluemap` with **Create Directory** enabled. The current template
+  supplies this mount for new Modules-tab installs.
+- Confirm that `modules/bluemap/config/maps/overworld.conf` (or an equivalent
+  Overworld map config) points to the mounted world at `/app/world`. Apply
+  volume changes through the module's existing save/recreate flow, then start
+  or restart the module. World View will pick it up after its first render.
+
 The in-context **Install BlueMap** action uses the existing
 ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated

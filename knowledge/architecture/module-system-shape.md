@@ -34,6 +34,10 @@ describe a server's desired configuration.
   matching lifecycle journal receipt.
 - The Resource Pack Host serves a dedicated read-only folder. Docker prepares
   explicitly requested bind sources within mapped, symlink-checked safe roots.
+- The built-in BlueMap template's read-only world bind resolves the same active
+  level as World View, including Minecraft's default when the Level field is
+  unset. It uses a writable server-local resource cache. Explicit mounts are
+  preserved. See [World View](../../docs/world-viewing.md).
 - Create-path blueprints are Java/tag seeds resolved to image, env and
   protocol. A Bedrock full-image seed is labeled unsupported and is not a
   native edition path. See [blueprint create qualification](../decisions/blueprint-create-qualification.md).

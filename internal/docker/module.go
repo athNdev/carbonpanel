@@ -356,7 +356,19 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 
 	// Sub aliases in paths
 	for i := range volumes {
-		volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
+		// Older Modules forms persist this exact template source. Resolve it
+		// to the actual level so an unset Level cannot mount the data root.
+		// A source explicitly chosen by the operator follows normal alias rules.
+		if aliasCtx != nil && aliasCtx.Module != nil && aliasCtx.Module.TemplateID == "builtin-bluemap" &&
+			volumes[i].Source == "{{server.data_path}}/{{server.config.level}}" && volumes[i].Target == "/app/world" {
+			level := aliasCtx.ServerConfig.ActualLevelName()
+			if aliasCtx.Server == nil || level == "" {
+				return nil, fmt.Errorf("cannot resolve BlueMap world volume without a valid configured level")
+			}
+			volumes[i].Source = filepath.Join(aliasCtx.Server.DataPath, level)
+		} else {
+			volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
+		}
 		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
 		if alias.HasUnresolvedVariables(volumes[i].Source) {
 			c.log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)

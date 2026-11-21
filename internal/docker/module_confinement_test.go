@@ -11,11 +11,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/alias"
 	models "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/moby/moby/api/types/container"
 )
+
+func TestBuiltinBlueMapDefaultVolumeResolvesActualLevel(t *testing.T) {
+	root := t.TempDir()
+	panelLevel, properties, invalid := "panel-level", "level-name=custom-level", "level-name=../outside"
+	for _, name := range []string{"world", "panel-level", "custom-level", "operator-level"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const templateSource = "{{server.data_path}}/{{server.config.level}}"
+	for _, tc := range []struct {
+		name, source, want string
+		config             *models.ServerConfig
+	}{
+		{"existing generic template without level", templateSource, "world", &models.ServerConfig{}},
+		{"server properties override", templateSource, "custom-level", &models.ServerConfig{Level: &panelLevel, CustomServerProperties: &properties}},
+		{"operator mount remains explicit", "{{server.data_path}}/operator-level", "operator-level", &models.ServerConfig{Level: &panelLevel}},
+		{"invalid save folder", templateSource, "", &models.ServerConfig{CustomServerProperties: &invalid}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{log: logger.New()}
+			volumes, err := client.parseModuleVolumes(`[{"source":"`+tc.source+`","target":"/app/world","read_only":true}]`, &alias.Context{
+				Server: &models.Server{DataPath: root}, ServerConfig: tc.config,
+				Module: &models.Module{TemplateID: "builtin-bluemap"},
+			})
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("invalid default level resolved to a bind source")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			mounts := client.moduleVolumesToMounts(volumes, root, root)
+			if len(mounts) != 1 || filepath.Clean(mounts[0].Source) != filepath.Join(root, tc.want) || mounts[0].Target != "/app/world" || !mounts[0].ReadOnly {
+				t.Fatalf("effective world mount = %+v, want read-only %q", mounts, tc.want)
+			}
+		})
+	}
+}
 
 func TestPrepareReadOnlyModuleBindStaysWithinServerRoot(t *testing.T) {
 	client := &Client{}

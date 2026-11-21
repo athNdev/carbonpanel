@@ -160,7 +160,8 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 		return connect.NewResponse(&v1.GetWorldViewSessionResponse{State: state, Reason: reason}), nil
 	}
 
-	key, expires := s.deps.Sessions.issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL, native)
+	discovered := target.GetFreshness().GetSource() == discoveredSource
+	key, expires := s.deps.Sessions.issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL, native, discovered)
 	if key == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
 	}
@@ -186,8 +187,15 @@ func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found: %w", err))
 	}
 	renderer, resolveErr := s.resolver().Resolve(ctx, canonicalNodeID(server.NodeID), serverID)
-	if resolveErr != nil || renderer == nil {
-		_, nativeErr := s.nativeScopeFor(ctx, server, nil, resolveErr, nil)
+	fallback := resolveErr
+	if discovered, ok := renderer.(*discoveredRenderer); ok {
+		h, err := discovered.Health(ctx)
+		if !discoveredReady(h, err) {
+			fallback = ErrRendererUnavailable
+		}
+	}
+	if fallback != nil || renderer == nil {
+		_, nativeErr := s.nativeScopeFor(ctx, server, nil, fallback, nil)
 		if nativeErr == nil {
 			return connect.NewResponse(&v1.ListCapabilitiesResponse{
 				RendererType: v1.RendererType_RENDERER_TYPE_NATIVE,
@@ -196,6 +204,11 @@ func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.
 		}
 		if transientErr := nativeTransientError(nativeErr); transientErr != nil {
 			return nil, transientErr
+		}
+		if renderer != nil {
+			return connect.NewResponse(&v1.ListCapabilitiesResponse{
+				RendererType: renderer.Type(), Capabilities: renderer.Capabilities(),
+			}), nil
 		}
 		detail := "renderer is not configured; map capabilities are unavailable"
 		if errors.Is(nativeErr, worldterrain.ErrTerrainUnsupported) {
@@ -363,7 +376,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		levelName := ""
 		if s.deps.Store != nil {
 			if cfg, cfgErr := s.deps.Store.GetServerConfig(ctx, server.ID); cfgErr == nil {
-				levelName = configuredLevelName(cfg)
+				levelName = cfg.ActualLevelName()
 			}
 		}
 		ref = &v1.WorldRef{Kind: v1.WorldRef_KIND_SERVER_LOCAL, ServerId: server.ID, LevelName: levelName}
@@ -391,8 +404,27 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 	}
 
 	renderer, err := s.resolver().Resolve(ctx, nodeID, server.ID)
-	if err != nil || renderer == nil {
-		native, nativeErr := s.nativeScopeFor(ctx, server, ref, err, budget)
+	var h *Health
+	var healthErr error
+	fallback := err
+	if discovered, ok := renderer.(*discoveredRenderer); ok {
+		h, healthErr = discovered.Health(ctx)
+		if discoveredReady(h, healthErr) {
+			if discovered.matchesWorldRef(ref) {
+				ref.Kind = v1.WorldRef_KIND_SERVER_LOCAL
+				ref.LevelName = discovered.facts.WorldName
+			} else {
+				renderer = nil
+				err = ErrRendererUnavailable
+				fallback = err
+				h = nil
+			}
+		} else {
+			fallback = ErrRendererUnavailable
+		}
+	}
+	if fallback != nil || renderer == nil {
+		native, nativeErr := s.nativeScopeFor(ctx, server, ref, fallback, budget)
 		if nativeErr == nil {
 			ref.LevelName = native.level
 			if ref.GetKind() == v1.WorldRef_KIND_UNSPECIFIED {
@@ -411,10 +443,13 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 				Source: nativeSource, Applicability: "saved Java terrain", Confidence: "detected",
 				Note: "Terrain updates after Minecraft saves its chunks.",
 			}
+			if h != nil {
+				target.Error = h.Detail
+			}
 			return target, native, nil
 		}
 
-		if errors.Is(nativeErr, worldterrain.ErrTerrainUnsupported) {
+		if errors.Is(nativeErr, worldterrain.ErrTerrainUnsupported) && renderer == nil {
 			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
 			target.Renderer.Type = target.RendererType
 			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
@@ -439,6 +474,8 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 			}
 			return target, nativeScope{}, nil
 		}
+	}
+	if renderer == nil {
 		if errors.Is(err, ErrUnsupportedRenderer) {
 			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
 		} else if err != nil && !errors.Is(err, ErrRendererUnavailable) {
@@ -461,7 +498,9 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		return target, nativeScope{}, nil
 	}
 
-	h, healthErr := renderer.Health(ctx)
+	if _, ok := renderer.(*discoveredRenderer); !ok {
+		h, healthErr = renderer.Health(ctx)
+	}
 	target.RendererType = renderer.Type()
 	if desc := renderer.Descriptor(); desc != nil {
 		if h != nil {
@@ -540,61 +579,8 @@ func canonicalNodeID(nodeID string) string {
 	return nodeID
 }
 
-// ActualLevelName is the exported form used by the private module-discovery
-// adapter so it resolves the same world identity as the target projection.
-func ActualLevelName(cfg *storage.ServerConfig) string { return configuredLevelName(cfg) }
-
-// configuredLevelName resolves the ACTUAL save-folder identity with an
-// explicit, documented precedence (OSS-388): an operator's level-name line in
-// server.properties wins, then the panel's Level field, then Minecraft's
-// built-in "world" default. A folder name is validated as a plain path
-// component; an invalid or unknown value stays empty rather than being guessed.
-func configuredLevelName(cfg *storage.ServerConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	if cfg.CustomServerProperties != nil {
-		for _, line := range strings.Split(*cfg.CustomServerProperties, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			key, value, ok := strings.Cut(line, "=")
-			if !ok || !strings.EqualFold(strings.TrimSpace(key), "level-name") {
-				continue
-			}
-			name := strings.TrimSpace(value)
-			if validLevelName(name) {
-				return name
-			}
-			return "" // explicitly configured but invalid: fail closed
-		}
-	}
-	if cfg.Level != nil && strings.TrimSpace(*cfg.Level) != "" {
-		name := strings.TrimSpace(*cfg.Level)
-		if validLevelName(name) {
-			return name
-		}
-		return ""
-	}
-	return "world" // Minecraft's documented default when the panel has no override
-}
-
-// validLevelName accepts only a single plain path component. Directory
-// separators, drive/URL separators and relative/absolute path markers are
-// rejected so a world name can never escape the server data directory.
-func validLevelName(name string) bool {
-	if name == "" || strings.TrimSpace(name) != name {
-		return false
-	}
-	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
-		return false
-	}
-	if strings.ContainsAny(name, "\x00\r\n") || strings.HasPrefix(name, "-") {
-		return false
-	}
-	return true
-}
+// ActualLevelName reports the same save-folder identity used by module mounts.
+func ActualLevelName(cfg *storage.ServerConfig) string { return cfg.ActualLevelName() }
 
 func (s *Service) audit(e activity.Entry) error {
 	if s.deps.Auditor == nil {

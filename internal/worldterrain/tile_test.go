@@ -172,6 +172,85 @@ func TestRenderOverworldTileFromConfinedRegion(t *testing.T) {
 	}
 }
 
+func TestRenderOverworldTileUsesSavedSurfaceMaterials(t *testing.T) {
+	raw := chunkData(0, 0, 3955, "full")
+	// Replace the heightmap with a flat surface at y=63, then append one
+	// material section before the root terminator.
+	var heights [37]uint64
+	for i := range 256 {
+		heights[i/7] |= uint64(128) << ((i % 7) * 9)
+	}
+	for i, value := range heights {
+		offset := len(raw) - 2 - len(heights)*8 + i*8
+		binary.BigEndian.PutUint64(raw[offset:], value)
+	}
+	var b bytes.Buffer
+	b.Write(raw[:len(raw)-1])
+	write := func(v any) { _ = binary.Write(&b, binary.BigEndian, v) }
+	str := func(s string) {
+		write(uint16(len(s)))
+		b.WriteString(s)
+	}
+	tag := func(kind byte, name string) {
+		b.WriteByte(kind)
+		str(name)
+	}
+	tag(9, "sections")
+	b.WriteByte(10)
+	write(int32(1))
+	tag(1, "Y")
+	b.WriteByte(3)
+	tag(10, "block_states")
+	tag(9, "palette")
+	b.WriteByte(10)
+	palette := []string{"minecraft:sand", "minecraft:water", "minecraft:oak_leaves", "example:unknown"}
+	write(int32(len(palette)))
+	for _, name := range palette {
+		tag(8, "Name")
+		str(name)
+		b.WriteByte(0)
+	}
+	tag(12, "data")
+	var states [256]uint64
+	for z := range 16 {
+		// The uppermost layer has a left-to-right material transition.
+		states[240+z] = 0x3333222211110000
+	}
+	// Only x=5 has a column of water below the surface.
+	for y := 5; y < 15; y++ {
+		states[y*16] = 1 << (5 * 4)
+	}
+	write(int32(len(states)))
+	for _, value := range states {
+		write(value)
+	}
+	b.Write([]byte{0, 0, 0})
+	_, store := regionStore(t, "r.0.0.mca", regionData(t, savedChunk{0, 0, b.Bytes(), 2, testSave}))
+	tile, err := RenderOverworldTile(t.Context(), store, "fixture_world", TileCoord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(tile.PNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		x, z int
+		want color.NRGBA
+	}{
+		{0, 0, color.NRGBA{R: 220, G: 198, B: 144, A: 255}},
+		{4, 0, color.NRGBA{R: 51, G: 137, B: 170, A: 255}},
+		{5, 0, color.NRGBA{R: 30, G: 95, B: 142, A: 255}},
+		{8, 0, color.NRGBA{R: 69, G: 111, B: 52, A: 255}},
+		{12, 0, terrainColor(63, 0)},
+		{16, 0, color.NRGBA{}},
+	} {
+		if got := color.NRGBAModel.Convert(img.At(tc.x, tc.z)); got != tc.want {
+			t.Errorf("pixel %d, %d = %v; want %v", tc.x, tc.z, got, tc.want)
+		}
+	}
+}
+
 func TestRenderOverworldTileRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name string

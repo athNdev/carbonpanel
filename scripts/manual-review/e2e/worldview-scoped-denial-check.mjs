@@ -322,6 +322,15 @@ try {
   await dumpOnFailure("command-denial", async () => {
     const admin = page.getByRole("button", { name: /^Administration/ });
     if ((await admin.getAttribute("aria-expanded")) !== "true") await admin.click();
+    await page.getByRole("button", { name: /Teleport player to marker/ }).click();
+    const adminPanelId = await admin.getAttribute("aria-controls");
+    const validation = page.locator(`[id="${adminPanelId}"]`).getByRole("alert");
+    await validation.filter({ hasText: "Set both map coordinates" }).waitFor();
+    assert.equal(writeCalls.length, baseline, "missing coordinates must not send a command");
+    const alertBox = await validation.boundingBox();
+    const headingBox = await admin.boundingBox();
+    assert.ok(alertBox && headingBox && alertBox.y >= headingBox.y + headingBox.height,
+      "the validation message belongs below the Administration heading");
     await page.getByRole("button", { name: /Save world now/i }).click();
     await page.getByRole("button", { name: /Run command/i }).click();
     await page.waitForTimeout(700);

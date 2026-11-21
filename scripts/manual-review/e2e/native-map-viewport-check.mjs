@@ -433,6 +433,8 @@ try {
           "at most two tile fetches",
         );
         const map = fromMap(page);
+        const saveTime = page.locator("p").filter({hasText: "Latest chunk save in this view"}).locator("time");
+        assert.equal(await saveTime.getAttribute("datetime"), "2026-11-12T12:32:00Z");
         await text(page, "Faded terrain shows saved heights from chunks still generating.").waitFor();
         const span = page.getByRole("combobox", { name: "Map span" });
         await span.selectOption("1024");

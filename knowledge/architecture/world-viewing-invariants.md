@@ -26,10 +26,10 @@ sources:
   (host/native modes cannot resolve container names); no port probing,
   host-port binding, public listener or cross-server fallback. No HTTP is sent
   when a runtime gate fails, even using a previously issued map session.
-- A listening web server is not a configured or rendered world. READY requires
-  the exact target world in the module config, a rendered scoped tile and the
-  renderer's own map list (`/settings.json`); missing facts report setup,
-  rendering, stopped, unreachable or error with a next action.
+- READY requires the active Overworld config's filename ID in the renderer's
+  map list (`/settings.json`) and a scoped rendered tile. The saved-terrain
+  preview and viewer persist while BlueMap is unavailable and switch when
+  discovery qualifies it. An issued BlueMap key stays bound to its world.
 - Both discovered and explicit BlueMap adapters require a bounded JSON
   textures document for every map listed by the renderer before reporting
   READY. The health check and proxy both retry the exact `.gz` sibling on a
