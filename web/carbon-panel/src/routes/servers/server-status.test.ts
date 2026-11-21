@@ -11,6 +11,10 @@ import path from 'node:path';
 const overview = fs.readFileSync(path.resolve(import.meta.dirname, '../+page.svelte'), 'utf-8');
 const list = fs.readFileSync(path.resolve(import.meta.dirname, './+page.svelte'), 'utf-8');
 const detail = fs.readFileSync(path.resolve(import.meta.dirname, './[id]/+page.svelte'), 'utf-8');
+const runtimeStatus = fs.readFileSync(
+	path.resolve(import.meta.dirname, '../../lib/components/server-ui/ServerRuntimeStatus.svelte'),
+	'utf-8'
+);
 
 test('all inventory routes consume the shared severity policy', () => {
 	for (const [name, content] of [
@@ -45,14 +49,14 @@ test('overview pips and buckets treat unhealthy as degraded, not critical', () =
 	assert.ok(!criticalBlock.includes('UNHEALTHY'), 'critical bucket must not count unhealthy');
 });
 
-test('detail tile shows amber heartbeat and names the condition', () => {
+test('detail runtime card distinguishes degraded and failed states', () => {
 	assert.ok(
-		detail.includes('{:else if server.status === ServerStatus.ERROR}') &&
-			detail.includes('{:else if server.status === ServerStatus.UNHEALTHY}'),
-		'error and unhealthy heartbeats must be separate branches'
+		runtimeStatus.includes('{:else if status === ServerStatus.ERROR}') &&
+			runtimeStatus.includes('{:else if status === ServerStatus.UNHEALTHY}'),
+		'error and unhealthy descriptions must be separate branches'
 	);
 	assert.ok(
-		detail.includes('Server running but failing health checks'),
+		runtimeStatus.includes('Server running but failing health checks'),
 		'unhealthy tile must name the condition instead of a daemon code'
 	);
 });
@@ -63,10 +67,12 @@ test('list issues pill goes amber when nothing actually errored', () => {
 });
 
 test('error tile names the recorded failure cause', () => {
-	const detail = fs.readFileSync(path.resolve(import.meta.dirname, './[id]/+page.svelte'), 'utf-8');
-	assert.ok(detail.includes('exitFailureCopy'), 'error tile must read the recorded reason');
 	assert.ok(
-		detail.includes('exitFailureCopy(server.statusReason)'),
+		detail.includes('statusReason={server.statusReason}'),
+		'detail must pass the recorded reason'
+	);
+	assert.ok(
+		runtimeStatus.includes('exitFailureCopy(statusReason)'),
 		'error tile must name the failure instead of only a daemon code'
 	);
 });

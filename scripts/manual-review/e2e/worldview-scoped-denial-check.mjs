@@ -99,6 +99,8 @@ try {
   });
   const page = await context.newPage();
   const errors = [];
+  let createModuleMode = "failure";
+  const recoveryRequests = [];
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
@@ -171,6 +173,22 @@ try {
     if (method === "ListModules") return reply({ modules: [] });
     if (method === "CreateModule") {
       createModuleCalls += 1;
+      if (createModuleMode !== "failure") {
+        const reuse = payload.metadata?.bluemap_reuse_config;
+        recoveryRequests.push({ reuse: reuse === "true", consent: payload.metadata?.bluemap_consent_accepted });
+        if (createModuleMode === "reuse-ready" && reuse === "true") {
+          statusMode = "ready";
+          return reply({ module: { id: "recovered-bluemap", serverId: "srv-1", templateId: "builtin-bluemap" } });
+        }
+        return route.fulfill({
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Carbonpanel-Bluemap-Setup": reuse === "true" ? "download-consent" : "retained-config",
+          },
+          json: { code: "failed_precondition", message: "Retained BlueMap configuration" },
+        });
+      }
       return reply({ code: "failed_precondition", message: "Fixture install failure" }, 400);
     }
     if (method === "ListCapabilities")
@@ -322,6 +340,15 @@ try {
   await dumpOnFailure("command-denial", async () => {
     const admin = page.getByRole("button", { name: /^Administration/ });
     if ((await admin.getAttribute("aria-expanded")) !== "true") await admin.click();
+    await page.getByRole("button", { name: /Teleport player to marker/ }).click();
+    const adminPanelId = await admin.getAttribute("aria-controls");
+    const validation = page.locator(`[id="${adminPanelId}"]`).getByRole("alert");
+    await validation.filter({ hasText: "Set both map coordinates" }).waitFor();
+    assert.equal(writeCalls.length, baseline, "missing coordinates must not send a command");
+    const alertBox = await validation.boundingBox();
+    const headingBox = await admin.boundingBox();
+    assert.ok(alertBox && headingBox && alertBox.y >= headingBox.y + headingBox.height,
+      "the validation message belongs below the Administration heading");
     await page.getByRole("button", { name: /Save world now/i }).click();
     await page.getByRole("button", { name: /Run command/i }).click();
     await page.waitForTimeout(700);
@@ -548,6 +575,30 @@ try {
     await page.screenshot({ path: path.join(evidence, "setup-error-360.png"), animations: "disabled" });
   });
   results.push("remote setup stays guarded and local consented install failure is shown once inline");
+
+  await dumpOnFailure("renderer-recovery", async () => {
+    statusMode = "setup";
+    createModuleMode = "retained";
+    await page.goto(url);
+    await page.getByRole("button", { name: "Install BlueMap", exact: true }).click();
+    await page.getByRole("checkbox", { name: /I explicitly accept/ }).check();
+    await page.getByRole("button", { name: "Accept and install" }).click();
+    await page.getByText("BlueMap configuration found", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Use existing configuration" }).click();
+    await page.getByText("accept-download: true", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Open server files" }).getAttribute("href"), "/servers/srv-1?tab=files");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: path.join(evidence, "setup-recovery-360.png"), animations: "disabled" });
+    createModuleMode = "reuse-ready";
+    await page.getByRole("button", { name: "Check and start" }).click();
+    await page.getByRole("region", { name: /World map/i }).waitFor();
+    assert.deepEqual(recoveryRequests, [
+      { reuse: false, consent: "true" },
+      { reuse: true, consent: "true" },
+      { reuse: true, consent: "true" },
+    ]);
+  });
+  results.push("retained BlueMap setup shows file guidance, reuses only after consent, and opens the verified renderer");
 
   assert.deepEqual(errors, [], `page errors: ${errors.join("; ")}`);
   await fs.writeFile(

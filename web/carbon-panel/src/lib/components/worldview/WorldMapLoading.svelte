@@ -2,19 +2,26 @@
 
 <script lang="ts">
 	let { label, compact = false }: { label: string; compact?: boolean } = $props();
-	const elevations = [0, 1, 2, 1, 0, 1, 2, 2, 1, 0, 0, 1, 0, 1, 2];
+	const bearings = Array.from({ length: 32 }, (_, index) => index * 11.25);
 </script>
 
 <div class="map-loading" class:compact role="status">
-	<div class="tiles" aria-hidden="true">
-		{#each elevations as elevation, index (index)}
-			<span
-				class="tile"
-				style:--tile-tint={`${10 + 13 * elevation}%`}
-				style:--tile-delay={`${((index % 5) + Math.floor(index / 5)) * 0.17}s`}
-			></span>
+	<svg class="compass" viewBox="-52 -52 104 104" aria-hidden="true" focusable="false">
+		<circle r="45" fill="none" stroke="var(--border)" />
+		{#each bearings as angle, index (angle)}
+			<path
+				transform={`rotate(${angle})`}
+				d={index % 8 === 0 ? 'M0 -41v7' : index % 4 === 0 ? 'M0 -41v5' : 'M0 -41v2'}
+				stroke="currentColor"
+			/>
 		{/each}
-	</div>
+		<path d="M-3 -48 0 -52 3 -48Z" fill="var(--accent-text)" />
+		<g class="needle">
+			<path d="M0 -30 5 0 0 3 -5 0Z" fill="var(--accent-text)" />
+			<path d="m0 30-5-30 5-3 5 3Z" fill="currentColor" />
+			<circle r="3" fill="var(--card)" stroke="currentColor" />
+		</g>
+	</svg>
 	<p class="text-sm font-medium text-muted-foreground">{label}</p>
 </div>
 
@@ -28,47 +35,41 @@
 		padding: 1rem;
 		text-align: center;
 	}
-
-	.map-loading.compact {
+	.compact {
 		min-height: 0;
+		gap: 0.625rem;
 		padding: 0.25rem;
-		gap: 0.75rem;
 	}
-
-	.tiles {
-		--tile-size: 1.25rem;
-		display: grid;
-		grid-template-columns: repeat(5, var(--tile-size));
-		gap: 0.1875rem;
+	.compass {
+		display: block;
+		width: min(6.5rem, 100%);
+		height: auto;
+		color: var(--muted-foreground);
 	}
-
-	.compact .tiles {
-		--tile-size: 1rem;
+	.compact .compass {
+		width: min(4rem, 100%);
 	}
-
-	.tile {
-		height: var(--tile-size);
-		border: 1px solid color-mix(in srgb, var(--accent-text) 16%, var(--border));
-		background: color-mix(in srgb, var(--accent-text) var(--tile-tint), var(--card));
-		animation: tile-sweep 3.6s var(--ease-in-out-standard) var(--tile-delay) infinite;
+	.needle {
+		transform: rotate(24deg);
 	}
-
-	@keyframes tile-sweep {
+	@media (prefers-reduced-motion: no-preference) {
+		:global(:root:not([data-carbon-motion='reduced'])) .needle {
+			animation: find-bearing 5s ease-in-out infinite;
+		}
+	}
+	@keyframes find-bearing {
 		0%,
-		38%,
 		100% {
-			opacity: 0.65;
-			transform: translateY(0);
+			transform: rotate(24deg);
 		}
-		18% {
-			opacity: 1;
-			transform: translateY(-0.125rem);
+		34% {
+			transform: rotate(-42deg);
 		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.tile {
-			animation: none;
+		62% {
+			transform: rotate(32deg);
+		}
+		80% {
+			transform: rotate(20deg);
 		}
 	}
 </style>

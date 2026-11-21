@@ -31,9 +31,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 </div>
 
-[![Carbon Panel cluster dashboard with host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[![Full Carbon Panel dashboard in dark mode with navigation, host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
-[Open the original full-resolution dashboard PNG ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[Open the full-resolution dashboard ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png) · [View it in light mode ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
 
 ## Modpack Studio. Modpacks, made simple.
 
@@ -118,9 +118,9 @@ depend on the server version, host and idle-mode configuration.
 <details>
 <summary><strong>A closer look: dashboard and modpack library</strong></summary>
 
-### Your machines, together
+### Dashboard in light mode
 
-![Cluster dashboard with server state and observed host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
+![Full Carbon Panel dashboard in light mode with navigation, server state and host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
 
 ### A home for your packs
 

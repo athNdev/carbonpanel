@@ -188,20 +188,25 @@
 			.map((tile) => tile.savedAt)
 			.filter((time) => time !== null)
 			.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-		let message = 'Saved terrain available.';
+		let message = 'All visible chunks have terrain.';
 		if (loading) {
 			message = 'Loading saved terrain…';
 		} else if (failure) {
 			message = NATIVE_FAILURE_MESSAGE[failure];
 		} else if (saved.length === 0) {
-			message = spawn
-				? 'No saved surface here. Move or try the world spawn.'
-				: 'No saved surface here. Move to a different area.';
+			message = 'Explore this area in Minecraft. The map checks for new saves automatically.';
 		} else if (partial || saved.length < states.length) {
 			message =
-				'Blank areas have no readable saved surface. Explore in Minecraft, then refresh after a save.';
+				'Blank areas have no readable terrain yet. The map checks for new saves automatically.';
 		}
-		return { loading, failure, savedAt, message, provisional };
+		return {
+			loading,
+			failure,
+			savedAt,
+			message,
+			provisional,
+			empty: !loading && !failure && !saved.length
+		};
 	});
 
 	function moveTo(x: number, z: number) {
@@ -348,7 +353,7 @@
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
 		<div class="min-w-0">
 			<h2 id={id + '-title'} class="text-sm font-semibold text-foreground">{title}</h2>
-			<p class="mt-1 text-xs text-muted-foreground">Overworld · Saved terrain</p>
+			<p class="mt-1 text-xs text-muted-foreground">Overworld</p>
 		</div>
 		{#if result?.status === 'ready'}
 			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap items-end gap-1">
@@ -396,6 +401,27 @@
 					</CarbonButton>
 				{/if}
 			</div>
+			<form
+				onsubmit={jumpToCoordinates}
+				class="flex min-w-0 basis-full flex-wrap items-end gap-2"
+				aria-label="Jump to coordinates"
+			>
+				<div class="grid max-w-[17rem] min-w-0 flex-[1_1_12rem] grid-cols-2 gap-2">
+					<CarbonTextInput
+						label="X coordinate"
+						bind:value={xInput}
+						error={coordinateError.x}
+						maxlength={9}
+					/>
+					<CarbonTextInput
+						label="Z coordinate"
+						bind:value={zInput}
+						error={coordinateError.z}
+						maxlength={9}
+					/>
+				</div>
+				<CarbonButton type="submit" kind="secondary" size="md">Jump</CarbonButton>
+			</form>
 		{/if}
 	</header>
 
@@ -445,6 +471,13 @@
 			{/each}
 			<div class="pointer-events-none absolute inset-0 grid place-items-center" aria-hidden="true">
 				<Crosshair class="map-cursor h-5 w-5" strokeWidth={2} />
+				{#if summary.empty}
+					<div
+						class="absolute top-1/2 mt-6 max-w-[85%] border border-border bg-card px-3 py-2 text-center text-sm text-foreground"
+					>
+						No terrain available at these coordinates
+					</div>
+				{/if}
 			</div>
 			{#each visiblePins as { marker, left, top } (marker.id)}
 				<button
@@ -492,12 +525,23 @@
 			<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 				<div class="min-w-0 text-xs text-muted-foreground">
 					<p role="status">{summary.message}</p>
+					{#if summary.empty}
+						<p class="mt-1">
+							If Chunky is installed, you can also
+							<a
+								class="focus-ring text-accent-text underline"
+								href="https://github.com/pop4959/Chunky/wiki/Pregeneration"
+								target="_blank"
+								rel="noreferrer">pregenerate this area from the server console</a
+							>.
+						</p>
+					{/if}
 					{#if summary.provisional}
 						<p class="mt-1">Faded terrain shows saved heights from chunks still generating.</p>
 					{/if}
 					{#if summary.savedAt}
 						<p class="mt-1">
-							Newest tile save <time datetime={summary.savedAt}
+							Latest chunk save in this view <time datetime={summary.savedAt}
 								>{formatTime.format(new Date(summary.savedAt))}</time
 							>
 						</p>
@@ -515,27 +559,6 @@
 				Drag or use the arrow keys to pan. Use + and − to zoom.
 			</p>
 			<div class="flex min-w-0 flex-wrap items-end justify-between gap-3">
-				<form
-					onsubmit={jumpToCoordinates}
-					class="flex min-w-0 flex-wrap items-end gap-2"
-					aria-label="Jump to coordinates"
-				>
-					<div class="grid min-w-0 grid-cols-2 gap-2">
-						<CarbonTextInput
-							label="X coordinate"
-							bind:value={xInput}
-							error={coordinateError.x}
-							maxlength={9}
-						/>
-						<CarbonTextInput
-							label="Z coordinate"
-							bind:value={zInput}
-							error={coordinateError.z}
-							maxlength={9}
-						/>
-					</div>
-					<CarbonButton type="submit" kind="secondary" size="md">Jump</CarbonButton>
-				</form>
 				<div class="flex min-w-0 flex-wrap items-center gap-2">
 					<code class="text-xs text-foreground" data-testid="native-map-coordinates"
 						>X: {block.x} · Z: {block.z}</code

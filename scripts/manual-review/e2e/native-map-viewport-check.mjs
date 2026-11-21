@@ -398,8 +398,9 @@ try {
     });
   }
 
-  const saved = "Saved terrain available.";
-  const partial = "Blank areas have no readable saved surface. Explore in Minecraft, then refresh after a save.";
+  const saved = "All visible chunks have terrain.";
+  const partial = "Blank areas have no readable terrain yet. The map checks for new saves automatically.";
+  const empty = "Explore this area in Minecraft. The map checks for new saves automatically.";
   const fromMap = (page) =>
     page.getByRole("application", { name: "Survival map" });
   const coordinates = (page) => page.getByTestId("native-map-coordinates");
@@ -433,6 +434,8 @@ try {
           "at most two tile fetches",
         );
         const map = fromMap(page);
+        const saveTime = page.locator("p").filter({hasText: "Latest chunk save in this view"}).locator("time");
+        assert.equal(await saveTime.getAttribute("datetime"), "2026-11-12T12:32:00Z");
         await text(page, "Faded terrain shows saved heights from chunks still generating.").waitFor();
         const span = page.getByRole("combobox", { name: "Map span" });
         await span.selectOption("1024");
@@ -636,10 +639,38 @@ try {
     viewport: { width: 360, height: 900 },
   });
   try {
+    const travelPage = await context.newPage();
+    await configure(travelPage, "dark");
+    await travelPage.clock.install();
+    scenario = "empty";
+    await travelPage.goto(base);
+    await text(travelPage, empty).waitFor();
+    const distantTile = travelPage.waitForRequest((request) =>
+      request.url().endsWith("/native/overworld/193/-146.png"),
+    );
+    await travelPage
+      .getByRole("textbox", { name: "X coordinate", exact: true })
+      .fill("24800");
+    await travelPage
+      .getByRole("textbox", { name: "Z coordinate", exact: true })
+      .fill("-18600");
+    await travelPage.getByRole("button", { name: "Jump", exact: true }).click();
+    await distantTile;
+    await text(travelPage, empty).waitFor();
+    assert.equal(await fromMap(travelPage).locator("img").count(), 0);
+    await travelPage.getByRole("link", { name: /pregenerate this area from the server console/ }).waitFor();
+    await travelPage.screenshot({ path: path.join(evidence, "distant-blank-360.png"), animations: "disabled" });
+    scenario = "saved";
+    await travelPage.clock.fastForward(31_000);
+    await fromMap(travelPage).locator("img").first().waitFor({ timeout: 5_000 });
+    assert.equal(await coordinates(travelPage).innerText(), "X: 24800 · Z: -18600");
+    results.push("a distant empty viewport rechecks saved terrain without resetting the camera");
+    await travelPage.close();
+
     const page = await context.newPage();
     await configure(page, "dark");
     const statuses = [
-      ["empty", "No saved surface here. Move or try the world spawn."],
+      ["empty", empty],
       ["busy", "Map rendering is busy. Retry in a moment."],
       [
         "changed",

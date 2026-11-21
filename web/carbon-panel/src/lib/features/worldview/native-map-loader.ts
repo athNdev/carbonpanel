@@ -1,8 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
-import { loadNativeTile, tileKey, type MapPoint, type TileResult } from './native-map';
+import {
+	CHUNKS_PER_TILE,
+	loadNativeTile,
+	tileKey,
+	type MapPoint,
+	type TileResult
+} from './native-map';
 
 const MAX_ACTIVE_REQUESTS = 2;
 const MAX_CACHED_TILES = 96;
+const RECHECK_DELAY_MS = 30_000;
+
+function recheckAt(result: TileResult): number {
+	const incomplete =
+		result.status === 'saved' &&
+		(result.chunks === null || result.chunks < CHUNKS_PER_TILE || result.provisionalChunks > 0);
+	return incomplete ||
+		result.status === 'empty' ||
+		result.status === 'busy' ||
+		result.status === 'unavailable'
+		? Date.now() + RECHECK_DELAY_MS
+		: Infinity;
+}
 
 /** The visible tiles are ordered from the center out by the viewport. */
 export function createNativeTileLoader(
@@ -12,11 +31,12 @@ export function createNativeTileLoader(
 ) {
 	let visible = new Map<string, MapPoint>();
 	const active = new Map<string, AbortController>();
-	const cache = new Map<string, TileResult>();
+	const cache = new Map<string, { result: TileResult; recheckAt: number }>();
+	let recheckTimer: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
 
 	function publish() {
-		update(new Map(cache));
+		update(new Map([...cache].map(([key, entry]) => [key, entry.result])));
 	}
 
 	function evictOutsideViewport() {
@@ -28,17 +48,23 @@ export function createNativeTileLoader(
 	}
 
 	function startNext() {
+		clearTimeout(recheckTimer);
 		if (disposed) return;
-		for (const [key, tile] of visible) {
-			if (active.size >= MAX_ACTIVE_REQUESTS) break;
-			if (cache.has(key) || active.has(key)) continue;
+		const now = Date.now();
+		const eligible = [...visible].filter(
+			([key]) => !active.has(key) && (cache.get(key)?.recheckAt ?? now) <= now
+		);
+		// Pan into new terrain before rechecking a tile already on screen.
+		eligible.sort(([a], [b]) => Number(cache.has(a)) - Number(cache.has(b)));
+		for (const [key, tile] of eligible) {
+			if (active.size >= MAX_ACTIVE_REQUESTS) return;
 			const controller = new AbortController();
 			active.set(key, controller);
 			void load(root, tile, controller.signal)
 				.catch((): TileResult => ({ status: 'unavailable' }))
 				.then((result) => {
 					if (disposed || controller.signal.aborted) return;
-					cache.set(key, result);
+					cache.set(key, { result, recheckAt: recheckAt(result) });
 					evictOutsideViewport();
 					publish();
 				})
@@ -46,6 +72,14 @@ export function createNativeTileLoader(
 					active.delete(key);
 					startNext();
 				});
+		}
+		if (active.size >= MAX_ACTIVE_REQUESTS) return;
+		let earliest = Infinity;
+		for (const key of visible.keys()) {
+			if (!active.has(key)) earliest = Math.min(earliest, cache.get(key)?.recheckAt ?? Infinity);
+		}
+		if (Number.isFinite(earliest)) {
+			recheckTimer = setTimeout(startNext, Math.max(0, earliest - Date.now()));
 		}
 	}
 
@@ -69,6 +103,7 @@ export function createNativeTileLoader(
 
 	function dispose() {
 		disposed = true;
+		clearTimeout(recheckTimer);
 		for (const controller of active.values()) controller.abort();
 		cache.clear();
 	}

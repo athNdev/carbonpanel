@@ -50,7 +50,7 @@
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
 - [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
-- [Native terrain reads saved Java elevations](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps.
+- [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
@@ -58,7 +58,7 @@
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
 - [Publication gates run from the trusted dispatch revision](publication-gate-provenance.md) — Privileged release gates use trusted code with explicit candidate paths, and registry platform evidence has one strict validator.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
-- [Release staging keeps the raw image build context](release-staging-artifact-contract.md) — The trusted staging run publishes both the OCI archive and the raw build context because the Compose matrix consumes the context.
+- [Release qualification uses the retained OCI archive](release-staging-artifact-contract.md) — The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the

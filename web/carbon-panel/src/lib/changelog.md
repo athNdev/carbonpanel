@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-21
+
 ### Added
 
 - World View opens saved Overworld terrain for supported local Java servers. Pan and zoom with a pointer or keyboard, jump to spawn or coordinates, share a coordinate link, and view saved markers, waypoints and points of interest.
@@ -14,12 +16,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The server's map preview shows surface materials and water depth. Open the map to see when Minecraft last saved the visible terrain. A ready BlueMap installation for the active world opens in the same view.
+- Search server configuration by setting or environment variable, filter by category or unsaved edits, and expand individual settings for defaults and help. The same toolbar is used in Server Defaults.
+- Server metrics group labels with their readings. The runtime card animates status changes and form fields use consistent hover, keyboard focus and error states in both themes.
+- Notifications stack in the bottom-right corner and use the panel's theme, status icons and a keyboard-accessible dismiss button.
 - World View offers adjustable coverage and renders saved terrain from qualifying partially generated chunks. World View rows link to the map from the full row.
 - Modpacks uses a compact catalogue table with a details dialog for compatibility, runtime requirements, and indexed files. The server Players tab keeps the roster visible and opens allowlist entry in a dialog.
 
 ### Fixed
 
 - World View opens from the server's World tab and recovers when a map session expires. Restoring a world invalidates old terrain sessions. Managed BlueMap works with registered local Docker nodes, and interrupted startup can reuse its container on retry.
+- Recover BlueMap from retained configuration without rewriting it. The built-in map checks empty and incomplete visible tiles again after Minecraft has time to save.
 - Responsive settings keep their Save controls visible, tabs have named panels and predictable keyboard focus, and modpack filters have accessible names.
 - Dashboard totals distinguish measured zeroes, configured limits and unavailable or stale observations. The sidebar no longer displays a hard-coded product version.
 - Theme selections apply immediately, persist across reloads and can follow the system setting. The dashboard scrolls past the System Health card, shows multiple Docker nodes from the sidebar, and gives server names and resource meters more room.
@@ -127,7 +134,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.0.1...HEAD
+[Unreleased]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.1.0...HEAD
+[2.1.0]: https://github.com/athNdev/carbonpanel/compare/carbonpanel-v2.0.1...carbonpanel-v2.1.0
 [2.0.1]: https://github.com/athNdev/carbonpanel/compare/v1.0.40...carbonpanel-v2.0.1
 [1.0.40]: https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40
 [3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/commit/5bbc06fefe5fc0c600672ef8401f9bf7e4495a01

@@ -430,7 +430,7 @@ const SETTINGS_CATEGORIES = [
 	},
 	{
 		name: 'Networking',
-		properties: [{ key: 'port', label: 'Game port', value: '25565', type: 'number' }]
+		properties: [{ key: 'port', label: 'Game port', envVar: 'SERVER_PORT', description: 'TCP listener for the game.', value: '25565', type: 'number' }]
 	}
 ];
 
@@ -510,6 +510,11 @@ async function seedPackagedRoutes(page, state, authMode) {
 				});
 			}
 			if (method === 'GetGlobalSettings') return reply({ categories: SETTINGS_CATEGORIES });
+			if (method === 'GetServerConfig') return reply({ categories: SETTINGS_CATEGORIES });
+			if (method === 'UpdateServerConfig') {
+				state.configRequest = route.request().postDataJSON();
+				return reply({ categories: SETTINGS_CATEGORIES });
+			}
 			if (method === 'UpdateGlobalSettings') {
 				const { updates } = route.request().postDataJSON();
 				state.savedMotd = updates?.motd;
@@ -1062,13 +1067,35 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
 				if (route.path === '/servers/srv-1') {
-					await check(`server actions @${width} ${theme}: Copy Address is reachable by keyboard`, async () => {
+					await check(`server actions @${width} ${theme}: Copy Address announces a dismissible bottom-right toast`, async () => {
 						const trigger = page.getByRole('button', { name: 'More server actions', exact: true });
 						await trigger.press('Enter');
 						const copyAddress = page.getByRole('menuitem', { name: 'Copy Address', exact: true });
 						await copyAddress.waitFor();
-						await page.keyboard.press('Escape');
+						await copyAddress.press('Enter');
 						await copyAddress.waitFor({ state: 'hidden' });
+						const toast = page.locator('[data-sonner-toast]').filter({ hasText: 'Address copied to clipboard' });
+						const offset = width <= 600 ? 12 : 24;
+						await page.waitForFunction((offset) => {
+							const item = Array.from(document.querySelectorAll('[data-sonner-toast][data-mounted="true"]')).find(
+								(item) => item.querySelector('[data-title]')?.textContent?.trim() === 'Address copied to clipboard'
+							);
+							if (!item) return false;
+							const list = item.closest('[data-sonner-toaster]');
+							if (!list) return false;
+							const placement = getComputedStyle(list);
+							const anchor = list.getBoundingClientRect();
+							const { left, right, bottom } = item.getBoundingClientRect();
+							return placement.position === 'fixed' && placement.right === `${offset}px` &&
+								placement.bottom === `${offset}px` && left >= 8 && right <= innerWidth &&
+								Math.abs(right - anchor.right) <= 1 && Math.abs(bottom - anchor.bottom) <= 1;
+						}, offset, { timeout: 5000 });
+						assert.equal(await toast.evaluate((item) => item.closest('[aria-live]')?.getAttribute('aria-live')), 'polite');
+						assert.equal(await toast.evaluate((item) => getComputedStyle(item).borderTopLeftRadius), '0px');
+						if (process.env.UI_PASS_SHOTS)
+							await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/toast-${width}-${theme}.png`, animations: 'disabled' });
+						await toast.getByRole('button', { name: 'Dismiss notification' }).press('Enter');
+						await toast.waitFor({ state: 'hidden' });
 					});
 					await check(`server map @${width} ${theme}: opens by keyboard and restores focus`, async () => {
 						const expand = page.getByRole('button', { name: 'Expand world map', exact: true });
@@ -1958,6 +1985,55 @@ async function runNarrowSettingsJourney(browser, base) {
 						await save.press('Enter');
 						await page.getByText('Global settings saved successfully', { exact: true }).waitFor();
 						if (state.savedMotd !== 'Ready to save') throw new Error('Keyboard Save did not submit MOTD');
+					});
+					await check(`server configuration ${label}: find, edit and stage across categories`, async () => {
+						await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+						const metrics = page.getByRole('button', { name: 'Runtime metrics' });
+						if (await metrics.getAttribute('aria-expanded') === 'true') await metrics.click();
+						const tab = page.getByRole('tab', { name: 'Configuration', exact: true });
+						await tab.click();
+						assert.equal(new URL(page.url()).searchParams.get('tab'), 'configuration');
+						const search = page.getByRole('searchbox', { name: 'Search settings' });
+						await search.waitFor();
+						await capture('configuration');
+						await search.fill('tcp SERVER_PORT');
+						const port = page.getByRole('spinbutton', { name: 'Game port' });
+						await port.waitFor();
+						assert.equal(await page.locator('[data-field]').count(), 1);
+						const details = page.getByRole('button', { name: 'Details for Game port' });
+						await details.press('Enter');
+						assert.equal(await details.getAttribute('aria-expanded'), 'true');
+						await page.getByText('TCP listener for the game.', { exact: true }).waitFor();
+						await assertHorizontallyVisible(details);
+						await assertHorizontallyVisible(page.getByText('TCP listener for the game.', { exact: true }));
+						await page.getByRole('button', { name: 'Copy link', exact: true }).scrollIntoViewIfNeeded();
+						await capture('configuration-details');
+						await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: root });
+						await page.getByRole('button', { name: 'Copy link', exact: true }).click();
+						const link = await page.evaluate(() => navigator.clipboard.readText());
+						assert.equal(link, root + '/servers/srv-1?tab=configuration#port');
+						await page.goto(root + '/servers', { waitUntil: 'domcontentloaded' });
+						await page.goto(link, { waitUntil: 'domcontentloaded' });
+						await port.waitFor();
+						await page.locator('#port.highlighted').waitFor();
+						assert.equal(await tab.getAttribute('aria-selected'), 'true');
+						await page.goto(root + '/servers/srv-1#port');
+						await page.locator('#port.highlighted').waitFor();
+						assert.equal(await tab.getAttribute('aria-selected'), 'true');
+						await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+						await page.getByRole('heading', { name: 'Server Settings', exact: true }).waitFor();
+						assert.equal(new URL(page.url()).hash, '');
+						await tab.click();
+						await port.fill('25568');
+						await search.fill('');
+						await page.getByRole('button', { name: 'Unsaved (1)' }).click();
+						assert.equal(await page.locator('[data-field]').count(), 1);
+						await assertHorizontallyVisible(port);
+						await page.getByRole('button', { name: 'Stage', exact: true }).click();
+						await page.getByText('Configuration staged', { exact: true }).waitFor();
+						assert.equal(state.configRequest.stage, true);
+						assert.equal(state.configRequest.serverId, 'srv-1');
+						assert.deepEqual(state.configRequest.updates, { port: '25568' });
 					});
 					await check(`settings auth ${label}: OIDC names wrap inside their panel`, async () => {
 						await page.goto(root + '/settings?tab=auth', { waitUntil: 'domcontentloaded' });

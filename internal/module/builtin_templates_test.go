@@ -183,7 +183,7 @@ func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(tpl.DefaultVolumes), &vols); err != nil {
 		t.Fatalf("DefaultVolumes: %v", err)
 	}
-	foundWorld := false
+	foundWorld, foundResourceCache := false, false
 	for _, v := range vols {
 		if v.Target == "/app/world" {
 			foundWorld = true
@@ -191,9 +191,15 @@ func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
 				t.Fatal("world mount must stay read-only")
 			}
 		}
+		if v.Target == "/app/bluemap" {
+			foundResourceCache = v.Source == "{{server.data_path}}/modules/bluemap/resources" && !v.ReadOnly && v.CreateDir
+		}
 	}
 	if !foundWorld {
 		t.Fatal("missing /app/world read-only mount")
+	}
+	if !foundResourceCache {
+		t.Fatal("missing writable, server-local BlueMap resource cache")
 	}
 	if len(tpl.Ports) != 1 || tpl.Ports[0].ContainerPort != 8100 || tpl.Ports[0].ExposePublic {
 		t.Fatalf("renderer port must stay private container-only 8100: %+v", tpl.Ports)

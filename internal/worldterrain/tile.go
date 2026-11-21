@@ -51,7 +51,7 @@ type ReadStorage interface {
 // TileCoord addresses a TileBlocks-square tile of the vanilla-height Overworld.
 type TileCoord struct{ X, Z int }
 
-// Tile contains a height-shaded PNG and its source coverage. Unavailable
+// Tile contains a top-down PNG and its source coverage. Unavailable
 // chunks and void columns are transparent. Save timestamps come from the
 // region header and are zero when the rendered chunks have no timestamp.
 type Tile struct {
@@ -104,6 +104,8 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 	}
 
 	grid := make([]int16, TileBlocks*TileBlocks)
+	blocks := make([]string, len(grid))
+	waterDepths := make([]uint8, len(grid))
 	for i := range grid {
 		grid[i] = noSurface
 	}
@@ -144,7 +146,10 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 				tile.recordSave(binary.BigEndian.Uint32(original[sectorBytes+index : sectorBytes+index+4]))
 				for row := 0; row < chunkBlocks; row++ {
 					start := (z*chunkBlocks+row)*TileBlocks + x*chunkBlocks
-					copy(grid[start:start+chunkBlocks], chunk.Heights[row*chunkBlocks:(row+1)*chunkBlocks])
+					first, last := row*chunkBlocks, (row+1)*chunkBlocks
+					copy(grid[start:start+chunkBlocks], chunk.Heights[first:last])
+					copy(blocks[start:start+chunkBlocks], chunk.Blocks[first:last])
+					copy(waterDepths[start:start+chunkBlocks], chunk.WaterDepths[first:last])
 				}
 			}
 		}
@@ -171,7 +176,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&out, shadeGrid(grid, provisional)); err != nil {
+	if err := encoder.Encode(&out, shadeGrid(grid, blocks, waterDepths, provisional)); err != nil {
 		return Tile{}, fmt.Errorf("encode terrain tile: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -215,8 +220,7 @@ func (t *Tile) recordSave(seconds uint32) {
 	}
 }
 
-// An original elevation palette. Colors describe height, independent of
-// biome, surface block, resource pack or game textures.
+// Elevation colors keep chunks visible when block data is unavailable.
 var elevation = [...]struct {
 	y       int
 	r, g, b int
@@ -230,11 +234,12 @@ var elevation = [...]struct {
 	{worldlib.JavaOverworldMaxY, 239, 235, 221},
 }
 
-func shadeGrid(grid []int16, provisional [chunksPerTile * chunksPerTile]bool) *image.NRGBA {
+func shadeGrid(grid []int16, blocks []string, waterDepths []uint8, provisional [chunksPerTile * chunksPerTile]bool) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, TileBlocks, TileBlocks))
 	for z := 0; z < TileBlocks; z++ {
 		for x := 0; x < TileBlocks; x++ {
-			height := int(grid[z*TileBlocks+x])
+			index := z*TileBlocks + x
+			height := int(grid[index])
 			if height == noSurface {
 				continue
 			}
@@ -242,8 +247,8 @@ func shadeGrid(grid []int16, provisional [chunksPerTile * chunksPerTile]bool) *i
 			r := neighborHeight(grid, x+1, z, height)
 			n := neighborHeight(grid, x, z-1, height)
 			s := neighborHeight(grid, x, z+1, height)
-			shade := max(-38, min(38, (l-r)*4+(n-s)*3))
-			pixel := terrainColor(height, shade)
+			shade := max(-26, min(26, (l-r)*3+(n-s)*2))
+			pixel := surfaceColor(blocks[index], int(waterDepths[index]), height, shade)
 			if provisional[(z/chunkBlocks)*chunksPerTile+x/chunkBlocks] {
 				pixel.A = 176
 			}
@@ -251,6 +256,67 @@ func shadeGrid(grid []int16, provisional [chunksPerTile * chunksPerTile]bool) *i
 		}
 	}
 	return img
+}
+
+// The palette is authored for Carbon Panel. Block states provide the material
+// categories, while the heightmap gives them relief and keeps unknown blocks visible.
+func surfaceColor(block string, waterDepth, height, shade int) color.NRGBA {
+	const vanilla = "minecraft:"
+	name, vanillaBlock := strings.CutPrefix(block, vanilla)
+	if !vanillaBlock {
+		return terrainColor(height, shade)
+	}
+	var base [3]int
+	switch {
+	case waterDepth > 0:
+		depth := max(3, min(10, waterDepth))
+		base = [3]int{60 - depth*3, 155 - depth*6, 182 - depth*4}
+		shade /= 5
+	case name == "lava":
+		base = [3]int{237, 106, 38}
+	case name == "snow" || name == "snow_block" || name == "powder_snow":
+		base = [3]int{231, 238, 234}
+	case name == "ice" || name == "packed_ice" || name == "blue_ice":
+		base = [3]int{151, 201, 221}
+	case name == "sand" || name == "sandstone":
+		base = [3]int{220, 198, 144}
+	case name == "red_sand" || name == "red_sandstone" || name == "terracotta":
+		base = [3]int{183, 111, 66}
+	case name == "gravel" || name == "clay":
+		base = [3]int{146, 139, 128}
+	case name == "stone" || name == "cobblestone" || name == "andesite" || name == "tuff" || name == "stone_bricks":
+		base = [3]int{129, 132, 124}
+	case name == "diorite" || name == "calcite":
+		base = [3]int{187, 186, 174}
+	case name == "deepslate" || name == "cobbled_deepslate":
+		base = [3]int{87, 88, 90}
+	case name == "granite" || name == "bricks":
+		base = [3]int{148, 103, 84}
+	case name == "dirt" || name == "coarse_dirt" || name == "rooted_dirt" || name == "podzol" || name == "farmland":
+		base = [3]int{122, 88, 60}
+	case name == "dirt_path" || strings.HasSuffix(name, "_planks"):
+		base = [3]int{162, 131, 85}
+	case strings.HasSuffix(name, "_log") || strings.HasSuffix(name, "_wood"):
+		base = [3]int{113, 87, 54}
+	case name == "cherry_leaves" || name == "pink_petals":
+		base = [3]int{211, 149, 172}
+	case name == "spruce_leaves":
+		base = [3]int{53, 90, 69}
+		shade /= 2
+	case name == "birch_leaves":
+		base = [3]int{105, 142, 66}
+		shade /= 2
+	case strings.HasSuffix(name, "_leaves") || name == "vine":
+		base = [3]int{69, 111, 52}
+		shade /= 2
+	case name == "grass_block" || name == "short_grass" || name == "grass" || name == "tall_grass" ||
+		name == "fern" || name == "large_fern" || name == "moss_block" || name == "moss_carpet":
+		base = [3]int{105, 151, 77}
+	default:
+		return terrainColor(height, shade)
+	}
+	channel := func(v int) uint8 { return uint8(max(0, min(255, v+shade))) }
+	return color.NRGBA{R: channel(base[0]), G: channel(base[1]), B: channel(base[2]), A: 255}
 }
 
 func neighborHeight(grid []int16, x, z, fallback int) int {

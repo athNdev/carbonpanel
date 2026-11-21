@@ -13,7 +13,7 @@ captures are published on the asset branch. `manifest.json` there records the
 exact source commit, version, data provenance, and a SHA256, byte count and
 pixel size for every published image.
 
-These are unretouched browser crops of the packaged application running in an
+These are unretouched browser captures of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage
 sample islands. The stack seeds a first admin, a local node, a running Vanilla
 1.21.1 server, real Packwiz mods, one World Library revision, and a player session from a
@@ -31,10 +31,11 @@ The canonical bundle contains `showcase-dashboard`, `showcase-dashboard-full`,
 `showcase-server-detail`, `showcase-studio`, `showcase-modpacks`,
 `showcase-library`, `showcase-library-revisions`, `showcase-player-allowlist`,
 `showcase-worlds-list`, `showcase-world-tab`, and `showcase-world-view`.
-The full dashboard is a native 2× capture of the 1440 CSS-pixel desktop
-layout with navigation and shell.
-The leading dashboard image captures the content at a narrower desktop width
-for the README. Its link opens the original full-window PNG. The World View frame
+Both dashboard images are native 2× captures of the 1440 × 1280 desktop
+layout with navigation and the shell. `showcase-dashboard-full` leads the README
+in dark mode. The linked `showcase-dashboard` shows the same dashboard in light
+mode. Console, Studio, the modpack catalog, and World Library show their page
+context in dark mode. The World View frame
 uses a broad camera over the seeded Vanilla server's generated Overworld,
 rendered by BlueMap through the authenticated panel route.
 
@@ -96,6 +97,7 @@ python3 scripts/showcase_assets.py validate \
 ```
 
 Use a unique stack name and data directory; never use a shared installation or
-real player data for public screenshots. The standard viewport is 1440 × 1000
-at 2× device scale. Crops remove navigation and unrelated fields to keep
-features readable at README width; no labels, metrics or logs are repainted.
+real player data for public screenshots. The standard viewport is 1440 × 1080
+at 2× device scale. Wider frames keep navigation and surrounding controls where
+they explain the feature. Focused captures retain nearby context and preserve
+the genuine labels, metrics and logs.

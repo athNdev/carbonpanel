@@ -77,8 +77,6 @@ one at https://mozilla.org/MPL/2.0/.
 	/* Sonner defines its own --success-text/--error-text on the toaster host, so
 	 * the app token has to be aliased before it can be passed back to the host
 	 * without self-referencing. These keep rich-color toast text at WCAG AA. */
-	--color-sonner-error-text: var(--destructive-text);
-	--color-sonner-success-text: var(--success-text);
 	--color-warning: var(--warning);
 	--color-warning-text: var(--warning-text);
 	--color-border: var(--border);
@@ -164,6 +162,65 @@ one at https://mozilla.org/MPL/2.0/.
 	samp,
 	pre {
 		font-family: var(--font-mono);
+	}
+}
+
+/* The same field chrome applies to the shared primitives and native form
+   controls. Monaco owns its editing and accessibility surfaces. */
+:is(
+	input:not([type]),
+	input:is(
+		[type='text'],
+		[type='number'],
+		[type='email'],
+		[type='password'],
+		[type='search'],
+		[type='url'],
+		[type='tel'],
+		[type='date'],
+		[type='time'],
+		[type='datetime-local'],
+		[type='month'],
+		[type='week']
+	),
+	select,
+	textarea,
+	button[data-slot='select-trigger'],
+	button[role='combobox']
+):not(.monaco-editor *, .monaco-diff-editor *) {
+	border: 2px solid var(--field-edge);
+	background-color: var(--field-surface);
+	color: var(--foreground);
+	box-shadow: none;
+	transition:
+		border-color 120ms ease,
+		background-color 120ms ease;
+
+	&::placeholder {
+		color: var(--muted-foreground);
+		opacity: 1;
+	}
+	&:hover:where(:not(:disabled, [aria-disabled='true'], [readonly])) {
+		border-color: var(--field-hover-edge);
+	}
+	&[readonly] {
+		border-style: dashed;
+		background-color: var(--card);
+	}
+	&:is(:focus-visible, [data-state='open']) {
+		border-color: var(--field-focus);
+		outline: 2px solid var(--field-focus);
+		outline-offset: 2px;
+	}
+	&:is([aria-invalid='true'], :user-invalid) {
+		border-color: var(--destructive-text);
+	}
+	&:is(:disabled, [aria-disabled='true'], [data-disabled]) {
+		border-color: var(--border);
+		background-color: var(--secondary);
+		color: var(--muted-foreground);
+		opacity: 1;
+		cursor: not-allowed;
 	}
 }
 

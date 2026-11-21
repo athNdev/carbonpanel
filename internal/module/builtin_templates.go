@@ -134,6 +134,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{"source": "{{server.data_path}}/modules/bluemap/config", "target": "/app/config", "read_only": false, "create_dir": true},
 				{"source": "{{server.data_path}}/{{server.config.level}}", "target": "/app/world", "read_only": true},
 				{"source": "{{server.data_path}}/modules/bluemap/data", "target": "/app/data", "read_only": false, "create_dir": true},
+				{"source": "{{server.data_path}}/modules/bluemap/resources", "target": "/app/bluemap", "read_only": false, "create_dir": true},
 				{"source": "{{server.data_path}}/modules/bluemap/web", "target": "/app/web", "read_only": false, "create_dir": true}
 				]`,
 			HealthCheckPath: "/",

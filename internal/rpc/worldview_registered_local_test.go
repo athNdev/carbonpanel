@@ -263,9 +263,9 @@ func TestPrivateBlueMapRegisteredNodeConnect(t *testing.T) {
 	}
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"modules/bluemap/config/core.conf":                              "accept-download: true",
-		"modules/bluemap/config/maps/" + level + ".conf":                "id: " + level + "\nworld: /app/world",
-		"modules/bluemap/web/maps/" + level + "/tiles/rendered.fixture": "tile fixture",
+		"modules/bluemap/config/core.conf":                         "accept-download: true",
+		"modules/bluemap/config/maps/" + level + ".conf":           "world: /app/world\ndimension: minecraft:overworld",
+		"modules/bluemap/web/maps/" + level + "/tiles/3/x0/z0.png": "tile fixture",
 	} {
 		file := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {

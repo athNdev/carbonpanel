@@ -48,6 +48,11 @@ and warning also have text roles. Status tags have dedicated foreground and
 background pairs. Do not convey meaning by color alone. Charts must use labels
 or patterns as well as color and provide a text alternative.
 
+Text fields and selects use a quiet field surface and a two-pixel gray edge.
+Hover strengthens the edge. Keyboard focus adds an outer outline that remains
+visible alongside an invalid field’s error edge. Read-only fields retain a
+dashed outline and selectable text. Disabled fields use the secondary surface.
+
 The system preference follows the operating system on first use and when its
 appearance changes. Explicit Light and Dark choices persist in this browser
 and take precedence over the OS. The panel's display preference owner applies

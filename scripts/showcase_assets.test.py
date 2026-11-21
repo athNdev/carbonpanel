@@ -375,6 +375,17 @@ class ShowcasePipelineTest(unittest.TestCase):
         ):
             self.assertIn(name, section, f"canonical publish set may drop {name}")
 
+    def test_readme_dashboard_keeps_the_full_window_in_both_themes(self) -> None:
+        plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        config = json.loads(plan.read_text(encoding="utf-8"))
+        shots = {step["screenshot"]: step for step in config["steps"] if "screenshot" in step}
+        for name, theme in (("showcase-dashboard-full", "dark"), ("showcase-dashboard", "light")):
+            with self.subTest(name=name):
+                shot = shots[name]
+                self.assertNotIn("element", shot)
+                self.assertTrue(shot["fullPage"])
+                self.assertEqual(theme, shot.get("colorScheme", config["colorScheme"]))
+
     def test_server_players_capture_requires_a_scoped_observation(self) -> None:
         plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
         steps = json.loads(plan.read_text(encoding="utf-8"))["steps"]
@@ -525,30 +536,21 @@ class ShowcasePipelineTest(unittest.TestCase):
             Path(__file__).resolve().parent / "review" / "plan-showcase.json"
         ).read_text(encoding="utf-8"))
         steps = plan["steps"]
-        viewport = plan["viewport"]
-        narrow = [
-            i for i, step in enumerate(steps)
-            if "setViewport" in step and step["setViewport"] != viewport
-        ]
-        self.assertTrue(narrow, "expected a narrow inline-capture viewport step")
-        world_view = next(
-            i for i, step in enumerate(steps)
-            if step.get("screenshot") == "showcase-world-view"
-        )
-        restores = [
-            step for i, step in enumerate(steps)
-            if max(narrow) < i < world_view
-            and step.get("setViewport") == viewport
-        ]
-        self.assertTrue(
-            restores,
-            "desktop viewport must be restored before the World View capture",
-        )
-        # The restore must always run when the narrowing step runs.
-        self.assertIn(
-            steps[max(narrow)].get("feature"),
-            [step.get("feature") for step in restores],
-        )
+        self.assertTrue(any(
+            step.get("feature") == "players"
+            and step.get("setViewport", {}).get("width", 1440) < 1440
+            for step in steps
+        ), "expected a narrow player capture viewport")
+        for features in ({"worlds"}, {"worlds", "players", "playerdetail"}):
+            with self.subTest(features=features):
+                viewport = plan["viewport"]
+                for step in steps:
+                    if not step.get("feature") or step["feature"] in features:
+                        viewport = step.get("setViewport", viewport)
+                    if step.get("screenshot") == "showcase-world-view":
+                        break
+                self.assertGreaterEqual(viewport["width"], 1440)
+                self.assertGreaterEqual(viewport["height"], 1000)
 
 
 if __name__ == "__main__":

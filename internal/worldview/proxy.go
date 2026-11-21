@@ -180,6 +180,13 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "renderer unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if sess.discovered {
+		discovered, ok := renderer.(*discoveredRenderer)
+		if !ok || !discovered.matchesSessionWorld(sess.WorldKey) {
+			http.Error(w, "renderer no longer serves the selected world", http.StatusServiceUnavailable)
+			return
+		}
+	}
 
 	h.proxyAsset(w, r, renderer.ProxyBaseURL(), upstreamAsset, renderer.Type() == v1.RendererType_RENDERER_TYPE_BLUEMAP)
 }

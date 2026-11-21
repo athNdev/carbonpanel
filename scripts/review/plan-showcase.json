@@ -3,10 +3,11 @@
   "title": "Showcase: dashboard, live console, Studio, library, players and modpack browser",
   "viewport": {
     "width": 1440,
-    "height": 1000
+    "height": 1280
   },
   "deviceScaleFactor": 2,
-  "docs": "Capture the real packaged application from a disposable seeded stack. Core images (dashboard, console, Studio, modpacks) are always captured. Feature-tagged images require an explicit --features selection; the same selection gates the published manifest. The embedded World View requires the seeded BlueMap terrain fixture. No repainted UI, mockups or invented metrics. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
+  "colorScheme": "dark",
+  "docs": "Capture the real packaged application from a disposable seeded stack. Screenshots prefer complete app windows in dark mode, with a full light dashboard alternate. Core images (dashboard, console, Studio, modpacks) are always captured. Feature-tagged images require an explicit --features selection; the same selection gates the published manifest. The embedded World View requires the seeded BlueMap terrain fixture. No repainted UI, mockups or invented metrics. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
   "bootstrap": {
     "path": "/login",
     "detectSelector": "input[placeholder=\"Enter your username\"]",
@@ -62,26 +63,22 @@
     {
       "screenshot": "showcase-dashboard-full",
       "fullPage": true,
-      "name": "full-window dashboard with shell and populated cards",
-      "alt": "Full desktop dashboard with navigation, header, populated resource panels and several named seeded servers",
+      "name": "complete dark dashboard with shell and populated cards",
+      "alt": "Full desktop dashboard in dark mode with navigation, resource panels and seeded servers",
       "focus": "Shell navigation, cluster overview and the seeded server fleet"
     },
     {
-      "setViewport": { "width": 1256, "height": 1260 },
-      "name": "frame the dashboard content for README width"
-    },
-    {
       "screenshot": "showcase-dashboard",
-      "element": "[data-testid=\"showcase-dashboard-content\"]",
-      "scroll": false,
-      "name": "dashboard content crop",
-      "alt": "Cluster dashboard with server state and observed host resource tiles",
-      "focus": "Server state and observed host resources",
-      "required": true
+      "name": "complete light dashboard with shell and populated cards",
+      "alt": "Full desktop dashboard in light mode with navigation, resource panels and seeded servers",
+      "focus": "Shell navigation, cluster overview and the seeded server fleet",
+      "required": true,
+      "fullPage": true,
+      "colorScheme": "light"
     },
     {
-      "setViewport": { "width": 1440, "height": 1000 },
-      "name": "restore the standard desktop viewport"
+      "setViewport": { "width": 1440, "height": 1080 },
+      "name": "resize to the standard viewport after the complete dashboard"
     },
     {
       "goto": "/servers",
@@ -102,6 +99,11 @@
     {
       "wait": 2000,
       "name": "let detail settle",
+      "required": true
+    },
+    {
+      "click": "button[aria-controls=\"server-runtime-metrics\"][aria-expanded=\"true\"]",
+      "name": "collapse runtime metrics to keep the console and the server header in one frame",
       "required": true
     },
     {
@@ -128,15 +130,19 @@
     },
     {
       "screenshot": "showcase-server-detail",
-      "element": "#server-detail-tabs-panel-console",
-      "scroll": false,
-      "name": "live console feature crop",
+      "name": "live console with server identity, navigation and tabs",
       "alt": "Running server console with filtered Minecraft startup messages and command input",
       "focus": "Live console, filtered startup logs and command controls",
+      "required": true,
+      "fullPage": true
+    },
+    {
+      "click": "button[aria-controls=\"server-runtime-metrics\"][aria-expanded=\"false\"]",
+      "name": "restore runtime metrics for the map card captures",
       "required": true
     },
     {
-      "setViewport": { "width": 1540, "height": 1000 },
+      "setViewport": { "width": 1540, "height": 850 },
       "name": "fit the Studio workspace tabs and settings"
     },
     {
@@ -167,16 +173,14 @@
     },
     {
       "screenshot": "showcase-studio",
-      "element": "[data-testid=\"showcase-studio-workspace\"]",
-      "maxHeight": 690,
-      "scroll": false,
       "name": "Studio workspace with pack identity, settings and mod controls",
       "alt": "Showcase Pack in Modpack Studio with pack settings, installed mod versions and sides, and export controls",
       "focus": "Pack settings, installed mods, side and pin controls, and export",
-      "required": true
+      "required": true,
+      "fullPage": true
     },
     {
-      "setViewport": { "width": 1440, "height": 1000 },
+      "setViewport": { "width": 1440, "height": 1080 },
       "name": "restore the standard desktop viewport"
     },
     {
@@ -202,13 +206,11 @@
     },
     {
       "screenshot": "showcase-modpacks",
-      "element": "[data-testid=\"showcase-modpacks-content\"]",
-      "maxHeight": 528,
-      "scroll": false,
-      "name": "modpack browse controls and first row",
+      "name": "modpack browser with navigation, filters and catalog",
       "alt": "Modpack browser with provider filters and the first row of real catalog results",
       "focus": "Provider filters and real catalog results",
-      "required": true
+      "required": true,
+      "fullPage": true
     },
     {
       "setViewport": { "width": 1256, "height": 1040 },
@@ -308,7 +310,8 @@
       "feature": "players",
       "name": "server-scoped allowlist form",
       "alt": "Add player to allowlist dialog with a username or UUID field",
-      "focus": "The add-player form and the server it applies to"
+      "focus": "The add-player form and the server it applies to",
+      "padding": 24
     },
     {
       "setViewport": { "width": 1256, "height": 1040 },
@@ -349,7 +352,7 @@
       "focus": "Identity, presence and the loaded skin image"
     },
     {
-      "setViewport": { "width": 1440, "height": 1000 },
+      "setViewport": { "width": 1440, "height": 1080 },
       "feature": "players",
       "name": "restore desktop viewport after narrow player captures"
     },
@@ -366,13 +369,11 @@
     },
     {
       "screenshot": "showcase-library",
-      "element": "[data-testid=\"showcase-library-content\"]",
-      "maxHeight": 528,
-      "scroll": false,
       "feature": "library",
       "name": "world library grid",
       "alt": "World Library list with the seeded real revision entry",
-      "focus": "Library entries, edition filter and revision counts"
+      "focus": "Library entries, edition filter and revision counts",
+      "fullPage": true
     },
     {
       "click": "a[href^=\"/library/\"]:not([href=\"/library/import\"]):not([href=\"/library/new\"])",
@@ -396,13 +397,11 @@
     },
     {
       "screenshot": "showcase-library-revisions",
-      "element": "[data-testid=\"showcase-library-detail-content\"]",
-      "maxHeight": 1000,
-      "scroll": false,
       "feature": "library",
       "name": "world library immutable revision",
       "alt": "Immutable world revision created from configuration in the seeded library entry",
-      "focus": "Revision identity, hash, version and provenance"
+      "focus": "Revision identity, hash, version and provenance",
+      "fullPage": true
     },
     {
       "click": "#world-tab-compatibility",
@@ -476,7 +475,8 @@
       "feature": "worldtab",
       "name": "world map card in the server view",
       "alt": "Server runtime cards including the map preview and its expand control",
-      "focus": "The world map card and observed renderer state"
+      "focus": "The world map card and observed renderer state",
+      "padding": 24
     },
     {
       "click": "#server-detail-tabs-tab-world",
@@ -496,7 +496,8 @@
       "feature": "worldtab",
       "name": "per-server World tab with real world facts",
       "alt": "Per-server World tab showing the actual level, binding and relevant configuration",
-      "focus": "Active world, binding and revision for the seeded vanilla server"
+      "focus": "Active world, binding and revision for the seeded vanilla server",
+      "padding": 24
     },
     {
       "goto": "/servers",
@@ -554,7 +555,8 @@
       "feature": "worlds",
       "name": "full panel view with rendered BlueMap terrain",
       "alt": "In-app World View panel with the embedded BlueMap renderer showing genuine rendered terrain tiles and its overlay controls",
-      "focus": "Authenticated proxied terrain in the embedded renderer and the surrounding view controls"
+      "focus": "Authenticated proxied terrain in the embedded renderer and the surrounding view controls",
+      "padding": 24
     }
   ]
 }
