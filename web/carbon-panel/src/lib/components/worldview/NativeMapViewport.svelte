@@ -5,7 +5,6 @@
 		Copy,
 		Flag,
 		Landmark,
-		Link,
 		MapPin,
 		Minus,
 		Plus,
@@ -50,7 +49,6 @@
 		preservePositionOnRenewal = false,
 		onReopen,
 		location = null,
-		mapLink,
 		markers = [],
 		markersUnavailable = false
 	}: {
@@ -59,7 +57,6 @@
 		preservePositionOnRenewal?: boolean;
 		onReopen?: () => void;
 		location?: MapPoint | null;
-		mapLink?: (point: MapPoint) => string;
 		markers?: readonly NativeMapMarker[];
 		markersUnavailable?: boolean;
 	} = $props();
@@ -240,16 +237,6 @@
 			copyNote = 'Coordinates copied.';
 		} catch {
 			copyNote = 'Clipboard unavailable. Select the coordinates to copy them.';
-		}
-	}
-
-	async function copyMapLink() {
-		if (!mapLink) return;
-		try {
-			await navigator.clipboard.writeText(mapLink(block));
-			copyNote = 'Map link copied.';
-		} catch {
-			copyNote = 'Could not copy the map link.';
 		}
 	}
 
@@ -567,12 +554,6 @@
 						<Copy class="h-4 w-4" aria-hidden="true" />
 						<span>Copy coordinates</span>
 					</CarbonButton>
-					{#if mapLink}
-						<CarbonButton kind="tertiary" size="md" class="gap-2" onclick={copyMapLink}>
-							<Link class="h-4 w-4" aria-hidden="true" />
-							<span>Copy map link</span>
-						</CarbonButton>
-					{/if}
 				</div>
 			</div>
 			{#if copyNote}

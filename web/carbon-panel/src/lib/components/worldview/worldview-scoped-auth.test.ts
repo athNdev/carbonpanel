@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // scopes (update, observe_players, servers/command). Read-only users must keep a
 // usable map view, while action failures and denials stay local to that action.
 const source = readFileSync(
-	new URL('../../../../lib/components/worldview/WorldViewWorkspace.svelte', import.meta.url),
+	new URL('./WorldViewWorkspace.svelte', import.meta.url),
 	'utf8'
 );
 

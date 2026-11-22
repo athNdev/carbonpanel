@@ -1,10 +1,10 @@
----
+﻿---
 type: Architecture
-title: "Map viewing — Read next"
+title: "Map viewing â€” Read next"
 description: "Fail-closed authorization"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, web/carbon-panel/src/routes/worlds]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md

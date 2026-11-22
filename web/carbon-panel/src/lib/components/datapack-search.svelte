@@ -75,7 +75,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function onkeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter') search();
+		if (event.key === 'Enter') {
+			// Stop implicit <form> submission: this input can sit inside the
+			// create-server wizard form, and Enter must only trigger a search.
+			event.preventDefault();
+			search();
+		}
 	}
 </script>
 

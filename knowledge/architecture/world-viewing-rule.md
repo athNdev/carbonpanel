@@ -4,7 +4,7 @@ title: "Map viewing — Rule"
 description: "WorldViewService observes worlds; it does not own them. A WorldRef"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds, web/carbon-panel/src/lib/components/worldview]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/lib/components/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md

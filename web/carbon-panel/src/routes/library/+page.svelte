@@ -353,7 +353,7 @@ SPDX-License-Identifier: MPL-2.0
 								{#if checkPermission(auth.permissions, 'world_view', 'read', server.id)}
 									<a
 										class="focus-ring text-xs text-accent-text hover:underline"
-										href={resolve(`/worlds?server=${encodeURIComponent(server.id)}`)}>View map</a
+										href={resolve('/servers/[id]', { id: server.id }) + '?tab=world'}>View map</a
 									>
 								{/if}
 							</div>

@@ -14,7 +14,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import {
 		AlertTriangle,
-		ArrowLeft,
 		Ban,
 		Lock,
 		Maximize,
@@ -24,7 +23,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '@lucide/svelte';
 	import {
 		CarbonPageHeader,
-		CarbonBreadcrumbs,
 		CarbonTag,
 		CarbonButton,
 		CarbonSelect,
@@ -95,13 +93,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let {
 		serverId,
 		worldKey,
-		presentation = 'page',
+		presentation = 'dialog',
 		enabled = true,
 		onexpand
 	}: {
 		serverId: string;
 		worldKey?: string;
-		presentation?: 'page' | 'preview' | 'dialog';
+		presentation?: 'preview' | 'dialog';
 		enabled?: boolean;
 		onexpand?: () => void;
 	} = $props();
@@ -155,12 +153,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let blueMapSetupKey = $state('');
 	let deniedByRead = $state(false);
 	let denied = $derived(deniedByRead || isReadDenied(statusError));
-	let canBrowseAll = $derived(checkPermission(auth.permissions, 'world_view', 'read', '*'));
-	let worldListHref = $derived(
-		canBrowseAll
-			? resolve('/worlds')
-			: resolve('/worlds') + '?' + new URLSearchParams({ server: serverId })
-	);
 	let worldTitle = $derived(
 		canRead && !denied ? statusTarget?.name || worldRef?.levelName || 'World map' : 'World map'
 	);
@@ -232,17 +224,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const z = parseNativeCoordinate(page.url.searchParams.get('z') ?? '');
 		return x === null || z === null ? null : { x, z };
 	});
-
-	function mapLink(point: MapPoint): string {
-		const path = resolve('/worlds/[server]/[world]', {
-			server: serverId,
-			world: effectiveWorldKey
-		});
-		const url = new URL(path, page.url.origin);
-		url.searchParams.set('x', String(point.x));
-		url.searchParams.set('z', String(point.z));
-		return url.href;
-	}
 
 	function parseNumber(value: string | null): number | null {
 		if (value === null || value.trim() === '') return null;
@@ -820,12 +801,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		class="min-w-0 flex-1 space-y-4 bg-background font-sans text-foreground"
 		data-testid="showcase-world-map-content"
 	>
-		{#if presentation === 'page'}
-			<CarbonBreadcrumbs
-				items={[{ label: 'World View', href: worldListHref }, { label: worldTitle }]}
-			/>
-		{/if}
-
 		<CarbonPageHeader title={worldTitle}>
 			{#snippet tag()}
 				{#if canRead && !denied && worldRef}
@@ -839,12 +814,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			{/snippet}
 			{#snippet actions()}
-				{#if presentation === 'page'}
-					<CarbonButton kind="tertiary" size="sm" href={worldListHref} class="gap-2">
-						<ArrowLeft class="h-3.5 w-3.5" />
-						<span>{canBrowseAll ? 'All worlds' : 'Server maps'}</span>
-					</CarbonButton>
-				{/if}
 				{#if canRead && !denied && worldRef && !statusUnavailable && view !== 'unknown'}
 					<CarbonButton kind="secondary" size="sm" class="gap-2" onclick={retry}>
 						<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
@@ -1025,7 +994,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									title="World terrain"
 									preservePositionOnRenewal
 									location={nativeLocation}
-									{mapLink}
 									markers={nativeMarkers}
 									markersUnavailable={Boolean(overlaysError)}
 									onReopen={() => void loadSession()}
