@@ -1,5 +1,5 @@
 ---
-type: Operations
+type: Runbook
 title: Windows panel with a WSL2 Docker daemon
 description: "The split-filesystem deployment: path mapping, storage layout and container egress."
 status: stable
