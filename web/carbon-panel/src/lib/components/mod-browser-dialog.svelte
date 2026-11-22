@@ -15,7 +15,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		DialogHeader,
 		DialogTitle
 	} from '$lib/components/ui/dialog';
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonTag } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
@@ -31,7 +31,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		AlertTriangle,
 		Layers,
 		Filter,
-		X
+		X,
+		Check,
+		ChevronDown
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -149,6 +151,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let selectedVersion = $state<ModVersion | null>(null);
 	let selectedDependencies = $state<Record<string, boolean>>({});
 	let installing = $state(false);
+
+	// Mods installed through this dialog session. Backs the header count chip
+	// and the session summary so a completed install stays visible after the
+	// version view closes instead of dumping back to a bare search list.
+	interface SessionInstalledMod {
+		key: string;
+		title: string;
+		version: string;
+		depCount: number;
+	}
+	let sessionInstalled = $state<SessionInstalledMod[]>([]);
+	let sessionSummaryOpen = $state(true);
+	let sessionInstalledCount = $derived(sessionInstalled.length);
+
+	function sessionKey(mod: { platform: string; id: string }): string {
+		return `${mod.platform}:${mod.id}`;
+	}
 
 	let selectedDepIds = $derived(
 		Object.keys(selectedDependencies).filter((k) => selectedDependencies[k])
@@ -481,6 +500,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (data.success) {
 				toast.success(data.message || `Installed ${selectedMod.title}`);
 				selectedMod.installed = true;
+				const installedKey = sessionKey(selectedMod);
+				sessionInstalled = [
+					...sessionInstalled.filter((entry) => entry.key !== installedKey),
+					{
+						key: installedKey,
+						title: selectedMod.title,
+						version: selectedVersion.version_number || selectedVersion.name,
+						depCount: (selectedVersion.dependencies || []).length
+					}
+				];
+				sessionSummaryOpen = true;
 				if (onInstalled) {
 					onInstalled();
 				}
@@ -520,6 +550,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		} else if (!open && wasOpen) {
 			wasOpen = false;
 			selectedMod = null;
+			sessionInstalled = [];
+			sessionSummaryOpen = true;
 		}
 	});
 </script>
@@ -563,6 +595,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div class="flex items-center gap-2">
+					{#if sessionInstalledCount > 0}
+						<button
+							type="button"
+							class="inline-flex cursor-pointer items-center"
+							onclick={() => {
+								sessionSummaryOpen = true;
+								document.getElementById('session-summary')?.scrollIntoView({ block: 'nearest' });
+							}}
+							title="View mods added during this session"
+						>
+							<CarbonTag type="green" size="sm">{sessionInstalledCount} added</CarbonTag>
+						</button>
+					{/if}
 					<Badge variant="outline" class="font-mono text-xs uppercase">
 						{loaderSearchName(gameLoader)}
 					</Badge>
@@ -709,6 +754,49 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			</div>
 
+			{#if sessionInstalledCount > 0}
+				<!-- Session Summary: mods installed through this dialog session -->
+				<div id="session-summary" class="mt-4 border border-border bg-card">
+					<button
+						type="button"
+						class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-secondary"
+						onclick={() => (sessionSummaryOpen = !sessionSummaryOpen)}
+						aria-expanded={sessionSummaryOpen}
+						aria-controls="session-summary-list"
+					>
+						<span
+							class="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+						>
+							Added this session
+						</span>
+						<span class="flex items-center gap-2">
+							<CarbonTag type="green" size="sm">{sessionInstalledCount} added</CarbonTag>
+							<ChevronDown
+								class="h-3.5 w-3.5 text-muted-foreground transition-transform {sessionSummaryOpen
+									? ''
+									: 'rotate-180'}"
+							/>
+						</span>
+					</button>
+					{#if sessionSummaryOpen}
+						<ul id="session-summary-list" class="divide-y divide-border border-t border-border">
+							{#each sessionInstalled as entry (entry.key)}
+								<li class="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+									<span class="flex min-w-0 items-center gap-2">
+										<Check class="h-3.5 w-3.5 shrink-0 text-success-text" />
+										<span class="truncate font-medium text-foreground">{entry.title}</span>
+									</span>
+									<span class="flex shrink-0 items-center gap-3 font-mono text-muted-foreground">
+										<span>v{entry.version}</span>
+										<span>{entry.depCount} {entry.depCount === 1 ? 'dep' : 'deps'}</span>
+									</span>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Search Results / Mod List -->
 			<div
 				class="mt-4 max-h-[500px] min-h-[280px] flex-1 space-y-3 overflow-y-auto pr-1 sm:min-h-[360px]"
@@ -763,13 +851,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 													<span class="truncate text-xs text-muted-foreground">by {mod.author}</span
 													>
 												{/if}
-												{#if mod.installed || queuedMods.some((entry) => entry.project === `${mod.platform}:${mod.id}`)}
-													<Badge
-														variant="default"
-														class="h-4 bg-emerald-600 px-1.5 py-0 text-xs text-white"
-													>
-														{mod.installed ? 'Installed' : 'Selected'}
-													</Badge>
+												{#if sessionInstalled.some((entry) => entry.key === sessionKey(mod))}
+													<CarbonTag type="green" size="sm">Added just now</CarbonTag>
+												{:else if mod.installed}
+													<CarbonTag type="green" size="sm">Installed</CarbonTag>
+												{:else if queuedMods.some((entry) => entry.project === sessionKey(mod))}
+													<CarbonTag type="teal" size="sm">Selected</CarbonTag>
 												{/if}
 											</div>
 											<p class="line-clamp-2 text-xs text-muted-foreground">{mod.description}</p>
@@ -860,6 +947,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										: 'hover:bg-muted/50'}"
 								>
 									<div class="flex items-center gap-2">
+										<span class="flex w-4 shrink-0 items-center justify-center">
+											{#if selectedVersion?.id === ver.id}
+												<Check class="h-4 w-4 text-primary" />
+											{/if}
+										</span>
 										<span>{ver.version_number || ver.name}</span>
 										<Badge
 											variant={ver.version_type === 'release' ? 'default' : 'secondary'}
