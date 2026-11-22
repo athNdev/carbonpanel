@@ -29,7 +29,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/carbonpanel/v1/proxy_pb';
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let {
@@ -215,7 +215,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="p-4 sm:p-6">
 		{#if loading}
 			<div class="flex items-center justify-center py-8">
-				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+				<CarbonSpinner size="md" label="Loading" description="Loading routing..." />
 			</div>
 		{:else if !routingInfo?.proxyEnabled}
 			<Alert>

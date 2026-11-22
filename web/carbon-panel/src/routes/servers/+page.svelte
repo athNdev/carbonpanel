@@ -596,7 +596,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Carbon Tile / Grid Layout -->
 	{:else}
 		<div
-			class="motion-stagger grid grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 [&>*]:min-w-0"
+			class="motion-stagger-fade grid grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 [&>*]:min-w-0"
 		>
 			{#each filteredServers as server (server.id)}
 				<div

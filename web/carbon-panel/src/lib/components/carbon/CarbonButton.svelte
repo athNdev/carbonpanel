@@ -8,6 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLButtonAttributes, HTMLAnchorAttributes } from 'svelte/elements';
+	import CarbonSpinner from './CarbonSpinner.svelte';
 
 	type BaseProps = {
 		kind?: 'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger';
@@ -90,10 +91,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}}
 	>
 		{#if loading}
-			<span
-				class="h-4 w-4 shrink-0 animate-spin border-2 border-current border-t-transparent"
-				aria-hidden="true"
-			></span>
+			<!--
+				The arc inherits the label color (currentColor), so it stays visible
+				on primary and danger fills where the Carbon blue would vanish.
+				aria-hidden: the control already carries aria-busy.
+			-->
+			<span class="inline-flex shrink-0" aria-hidden="true">
+				<CarbonSpinner size="sm" />
+			</span>
 		{/if}
 		{@render children?.()}
 	</a>
@@ -110,10 +115,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		onclick={onclick as HTMLButtonAttributes['onclick']}
 	>
 		{#if loading}
-			<span
-				class="h-4 w-4 shrink-0 animate-spin border-2 border-current border-t-transparent"
-				aria-hidden="true"
-			></span>
+			<!--
+				The arc inherits the label color (currentColor), so it stays visible
+				on primary and danger fills where the Carbon blue would vanish.
+				aria-hidden: the control already carries aria-busy.
+			-->
+			<span class="inline-flex shrink-0" aria-hidden="true">
+				<CarbonSpinner size="sm" />
+			</span>
 		{/if}
 		{@render children?.()}
 	</button>

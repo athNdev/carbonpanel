@@ -19,9 +19,14 @@ one at https://mozilla.org/MPL/2.0/.
 	import { beginLifecycleRequest } from '$lib/lifecycle-request';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
+	import { Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { CarbonAccordion, CarbonAccordionItem, CarbonConfirm } from '$lib/components/carbon';
+	import {
+		CarbonAccordion,
+		CarbonAccordionItem,
+		CarbonConfirm,
+		CarbonSpinner
+	} from '$lib/components/carbon';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -812,7 +817,7 @@ one at https://mozilla.org/MPL/2.0/.
 						class="h-10 min-w-36 gap-2"
 					>
 						{#if migrating}
-							<Loader2 class="h-4 w-4 animate-spin" />
+							<CarbonSpinner size="sm" label="Migrating" />
 							Migrating...
 						{:else}
 							<ArrowRightLeft class="h-4 w-4" />
@@ -841,7 +846,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="flex animate-pulse items-center gap-2 rounded-md border border-primary/20 bg-primary/10 p-3 text-xs text-primary"
 					>
-						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						<CarbonSpinner size="sm" label="Migrating" />
 						<span>{migrationStep}</span>
 					</div>
 				{/if}
@@ -854,7 +859,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="flex justify-end pt-2">
 		<Button onclick={handleSave} disabled={!isDirty || saving} size="sm" class="min-w-[120px]">
 			{#if saving}
-				<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+				<CarbonSpinner size="sm" label="Saving" />
 			{:else}
 				<Save class="mr-2 h-4 w-4" />
 			{/if}

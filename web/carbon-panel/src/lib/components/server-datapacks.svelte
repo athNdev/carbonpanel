@@ -6,7 +6,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -147,8 +147,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		{#if loading}
-			<div class="flex items-center justify-center py-8 text-muted-foreground">
-				<Loader2 class="h-5 w-5 animate-spin" />
+			<div class="flex items-center justify-center py-8">
+				<CarbonSpinner size="md" label="Loading" description="Loading datapacks..." />
 			</div>
 		{:else if datapacks.length === 0}
 			<Card class="border-border bg-card">

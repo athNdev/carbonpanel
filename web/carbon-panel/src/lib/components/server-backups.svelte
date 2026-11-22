@@ -19,7 +19,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/backup_pb';
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
-	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonConfirm,
+		CarbonErrorState,
+		CarbonSpinner
+	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
@@ -181,11 +186,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
 		{#if loadError && backups.length === 0}
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
+		{:else if loading}
+			<div class="flex items-center justify-center py-8">
+				<CarbonSpinner size="md" label="Loading" description="Loading backups..." />
+			</div>
 		{:else if backups.length === 0}
 			<p class="py-8 text-center font-mono text-xs text-muted-foreground">
-				{loading
-					? 'Loading backups…'
-					: 'No backups yet. Back up now or create a scheduled backup task.'}
+				No backups yet. Back up now or create a scheduled backup task.
 			</p>
 		{:else}
 			<table class="w-full text-xs" aria-label="Server backups">

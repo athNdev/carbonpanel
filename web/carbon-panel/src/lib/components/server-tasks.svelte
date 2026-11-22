@@ -12,7 +12,12 @@ one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonConfirm,
+		CarbonErrorState,
+		CarbonSpinner
+	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
@@ -911,7 +916,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#if loading}
 		<div class="flex flex-1 items-center justify-center py-8">
-			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+			<CarbonSpinner size="md" label="Loading" description="Loading tasks..." />
 		</div>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-auto p-4">

@@ -14,7 +14,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		ListActivityLogsRequestSchema,
 		type ActivityLogEntry
 	} from '$lib/proto/carbonpanel/v1/activity_pb';
-	import { CarbonButton, CarbonSelect, CarbonTag } from '$lib/components/carbon';
+	import { CarbonButton, CarbonSelect, CarbonTag, CarbonSpinner } from '$lib/components/carbon';
 	import { formatTimestamp } from '$lib/utils/format-time';
 	import { activityCategory, describeActivity } from './server-activity';
 
@@ -149,9 +149,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</CarbonButton>
 			</div>
 		{/if}
-	{:else if loading || !loadError}
+	{:else if loading}
+		<div class="flex items-center justify-center py-8" role="status">
+			<CarbonSpinner size="md" label="Loading" description="Loading activity..." />
+		</div>
+	{:else if !loadError}
 		<p role="status" class="p-6 text-sm text-muted-foreground">
-			{loading ? 'Loading activity…' : 'No audit entries have been recorded for this server.'}
+			No audit entries have been recorded for this server.
 		</p>
 	{/if}
 </section>

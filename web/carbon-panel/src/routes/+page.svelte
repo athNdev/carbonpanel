@@ -342,7 +342,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon KPI Tiles -->
 		<div
-			class="motion-stagger grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
+			class="motion-stagger-fade grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-kpi-tiles"
 		>
 			<!-- Tile 1: Total Servers -->

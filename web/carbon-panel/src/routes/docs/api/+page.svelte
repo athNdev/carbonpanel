@@ -305,7 +305,7 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 			</p>
 		</div>
-		<div class="motion-stagger grid gap-px bg-secondary sm:grid-cols-2 lg:grid-cols-3">
+		<div class="motion-stagger-fade grid gap-px bg-secondary sm:grid-cols-2 lg:grid-cols-3">
 			{#each connectServices as service (service.name)}
 				<div class="bg-card p-4 transition-colors hover:bg-accent">
 					<div class="flex items-center justify-between gap-2">

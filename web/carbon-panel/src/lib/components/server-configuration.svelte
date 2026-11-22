@@ -20,12 +20,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { Save, RefreshCw, Loader2, Link, Send, ChevronRight, Wand2 } from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import {
-		CarbonButton,
-		CarbonInlineLoading,
-		CarbonSearch,
-		CarbonSelect
-	} from '$lib/components/carbon';
+	import { CarbonButton, CarbonSearch, CarbonSelect, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
@@ -635,7 +630,9 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	<div class="config-list">
 		{#if loading}
-			<div class="p-4"><CarbonInlineLoading description="Loading server configuration…" /></div>
+			<div class="flex items-center justify-center py-8">
+				<CarbonSpinner size="md" label="Loading" description="Loading configuration..." />
+			</div>
 		{:else if !filteredCategories.length}
 			<p class="p-4 text-sm text-muted-foreground">No configuration is available.</p>
 		{:else}

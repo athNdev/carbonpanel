@@ -62,7 +62,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { GetServerRoutingResponse } from '$lib/proto/carbonpanel/v1/proxy_pb';
 
 	import { enumToString } from '$lib/utils';
-	import { effectiveLoader } from '$lib/utils/mod-loader';
+	import { effectiveLoader, isModpackPlatform } from '$lib/utils/mod-loader';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import {
 		CarbonTag,
@@ -70,7 +70,8 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm,
 		CarbonModal,
 		CarbonErrorState,
-		CarbonPageHeader
+		CarbonPageHeader,
+		CarbonSpinner
 	} from '$lib/components/carbon';
 	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
@@ -342,10 +343,17 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#if loading && !server}
-	<div class="flex h-96 items-center justify-center bg-background">
-		<div class="flex flex-col items-center gap-3">
-			<div class="h-10 w-10 animate-spin border-4 border-primary border-t-transparent"></div>
-			<p class="font-mono text-xs text-muted-foreground">Connecting to server daemon...</p>
+	<div class="flex h-96 flex-col items-center justify-center gap-6 bg-background">
+		<CarbonSpinner size="lg" label="Loading server" description="Connecting to server daemon..." />
+		<!-- Skeleton tiles mirror the runtime tile grid below so it does not pop in. -->
+		<div
+			class="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+			aria-hidden="true"
+		>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
 		</div>
 	</div>
 {:else if server}
@@ -480,31 +488,50 @@ one at https://mozilla.org/MPL/2.0/.
 					<h2 class="text-sm font-semibold">Engine specs</h2>
 					<Info class="h-4 w-4 text-[var(--chart-4)]" />
 				</div>
-				<dl class="mt-3 grid [grid-template-columns:max-content_minmax(0,1fr)] gap-2 text-xs">
-					<dt class="text-muted-foreground">Minecraft</dt>
-					<dd class="font-mono font-medium">{server.mcVersion || 'Latest'}</dd>
-					<dt class="text-muted-foreground">Loader</dt>
-					<dd class="flex flex-wrap items-center gap-1.5">
-						<CarbonTag type="teal" size="sm"
-							>{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
-								'vanilla'}</CarbonTag
-						>
-						{#if server.loaderVersion}<span class="font-mono break-all">{server.loaderVersion}</span
-							>{/if}
-					</dd>
-					{#if server.javaVersion}
-						<dt class="text-muted-foreground">Java</dt>
-						<dd class="font-mono">JDK {server.javaVersion}</dd>
-					{/if}
-				</dl>
-				<dl class="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-3 text-xs">
-					<div class="flex gap-2">
-						<dt class="text-muted-foreground">Port</dt>
-						<dd class="font-mono">{server.port}</dd>
+				<dl class="mt-3 divide-y divide-border text-xs">
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs uppercase text-muted-foreground">Minecraft</dt>
+						<dd class="text-right font-mono font-medium text-foreground">
+							{server.mcVersion || 'Latest'}
+						</dd>
 					</div>
-					<div class="flex gap-2">
-						<dt class="text-muted-foreground">Max players</dt>
-						<dd class="font-mono">{server.maxPlayers}</dd>
+					{#if isModpackPlatform(server.modLoader)}
+						<div class="flex items-center justify-between gap-3 py-2">
+							<dt class="font-mono text-xs uppercase text-muted-foreground">Modpack</dt>
+							<dd class="text-right font-mono text-foreground">
+								{enumToString(ModLoader, server.modLoader)}
+							</dd>
+						</div>
+					{/if}
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs uppercase text-muted-foreground">Loader</dt>
+						<dd class="flex flex-wrap items-center justify-end gap-1.5 text-right">
+							<CarbonTag type="teal" size="sm"
+								>{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
+									'vanilla'}</CarbonTag
+							>
+							{#if server.loaderVersion}<span class="font-mono break-all text-foreground"
+									>{server.loaderVersion}</span
+								>{/if}
+						</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs uppercase text-muted-foreground">Java</dt>
+						<dd class="text-right font-mono text-foreground">
+							{#if server.javaVersion}
+								JDK {server.javaVersion}
+							{:else}
+								<span class="text-muted-foreground">—</span>
+							{/if}
+						</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs uppercase text-muted-foreground">Port</dt>
+						<dd class="text-right font-mono text-foreground">{server.port}</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs uppercase text-muted-foreground">Max players</dt>
+						<dd class="text-right font-mono text-foreground">{server.maxPlayers}</dd>
 					</div>
 				</dl>
 			</div>
