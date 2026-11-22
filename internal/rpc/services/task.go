@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -67,6 +66,8 @@ func dbTaskTypeToProto(t storage.TaskType) v1.TaskType {
 		return v1.TaskType_TASK_TYPE_MODPACK_UPDATE
 	case storage.TaskTypeChunkyPregen:
 		return v1.TaskType_TASK_TYPE_CHUNKY_PREGEN
+	case storage.TaskTypeModUpdate:
+		return v1.TaskType_TASK_TYPE_MOD_UPDATE
 	default:
 		return v1.TaskType_TASK_TYPE_UNSPECIFIED
 	}
@@ -93,6 +94,8 @@ func protoTaskTypeToDB(t v1.TaskType) storage.TaskType {
 		return storage.TaskTypeModpackUpdate
 	case v1.TaskType_TASK_TYPE_CHUNKY_PREGEN:
 		return storage.TaskTypeChunkyPregen
+	case v1.TaskType_TASK_TYPE_MOD_UPDATE:
+		return storage.TaskTypeModUpdate
 	default:
 		return storage.TaskTypeCommand
 	}
@@ -340,6 +343,16 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
+	status := storage.TaskStatusEnabled
+	if taskType == storage.TaskTypeModUpdate {
+		policy, err := scheduler.ParseModUpdateConfigJSON(msg.Config)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		if !policy.Enabled {
+			status = storage.TaskStatusDisabled
+		}
+	}
 
 	// Create task
 	task := &storage.ScheduledTask{
@@ -348,7 +361,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 		Name:              msg.Name,
 		Description:       msg.Description,
 		TaskType:          taskType,
-		Status:            storage.TaskStatusEnabled,
+		Status:            status,
 		Schedule:          scheduleType,
 		CronExpr:          msg.CronExpr,
 		IntervalSecs:      int(msg.IntervalSecs),
@@ -389,7 +402,9 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 	if err != nil && task.Schedule != storage.ScheduleTypeEvent {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
 	}
-	task.NextRun = nextRun
+	if task.Status == storage.TaskStatusEnabled {
+		task.NextRun = nextRun
+	}
 
 	// Save to database
 	if err := s.store.CreateScheduledTask(ctx, task); err != nil {
@@ -412,6 +427,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
 	}
+	previous := *task
 
 	// Update fields if provided
 	if msg.Name != nil {
@@ -513,16 +529,39 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
-
-	// Recalculate next run
-	nextRun, err := s.scheduler.CalculateNextRun(task)
-	if err != nil && task.Schedule != storage.ScheduleTypeEvent {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
+	if task.TaskType == storage.TaskTypeModUpdate {
+		if err := scheduler.ValidateModUpdateConfigJSON(task.Config); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
-	task.NextRun = nextRun
 
-	// Save changes
-	if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
+	policy := task.TaskType == storage.TaskTypeModUpdate
+	scheduleChanged := !sameTaskTiming(&previous, task)
+	if !policy || scheduleChanged {
+		nextRun, err := s.scheduler.CalculateNextRun(task)
+		if err != nil && task.Schedule != storage.ScheduleTypeEvent {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
+		}
+		task.NextRun = nextRun
+		if policy && task.Status != storage.TaskStatusEnabled {
+			task.NextRun = nil
+		}
+	}
+
+	if policy {
+		saved, err := s.store.UpdateModUpdatePolicy(ctx, &previous, task, scheduleChanged)
+		if err != nil {
+			s.log.Error("Failed to update mod policy: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update task"))
+		}
+		if !saved {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("the task changed while saving its policy; reload and try again"))
+		}
+		task, err = s.store.GetScheduledTask(ctx, msg.Id)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
+		}
+	} else if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		s.log.Error("Failed to update task: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update task"))
 	}
@@ -532,6 +571,25 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	return connect.NewResponse(&v1.UpdateTaskResponse{
 		Task: dbTaskToProto(task),
 	}), nil
+}
+
+func sameTaskTiming(a, b *storage.ScheduledTask) bool {
+	if a.Schedule != b.Schedule {
+		return false
+	}
+	switch a.Schedule {
+	case storage.ScheduleTypeCron:
+		return a.CronExpr == b.CronExpr && a.Timezone == b.Timezone
+	case storage.ScheduleTypeInterval:
+		return a.IntervalSecs == b.IntervalSecs
+	case storage.ScheduleTypeOnce:
+		if a.RunAt == nil || b.RunAt == nil {
+			return a.RunAt == b.RunAt
+		}
+		return a.RunAt.Equal(*b.RunAt)
+	default:
+		return true
+	}
 }
 
 // DeleteTask deletes a task
@@ -558,15 +616,30 @@ func (s *TaskService) ToggleTask(ctx context.Context, req *connect.Request[v1.To
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
 	}
 
+	previous := *task
 	task.Status = protoTaskStatusToDB(req.Msg.Status)
 
 	// Recalculate next run if enabling
 	if task.Status == storage.TaskStatusEnabled {
 		nextRun, _ := s.scheduler.CalculateNextRun(task)
 		task.NextRun = nextRun
+	} else if task.TaskType == storage.TaskTypeModUpdate {
+		task.NextRun = nil
 	}
 
-	if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
+	if task.TaskType == storage.TaskTypeModUpdate {
+		saved, err := s.store.ToggleModUpdateSchedule(ctx, &previous, task)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to toggle task"))
+		}
+		if !saved {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("the task schedule changed while toggling; reload and try again"))
+		}
+		task, err = s.store.GetScheduledTask(ctx, task.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
+		}
+	} else if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		s.log.Error("Failed to toggle task: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to toggle task"))
 	}

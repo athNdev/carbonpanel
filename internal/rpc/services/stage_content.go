@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -68,6 +69,12 @@ func serverAccessor(ctx context.Context, store *storage.Store, server *storage.S
 // .carbon-panel/staged. A delete records the live path and writes nothing.
 // The server's mods directory, datapacks directory, and world are not modified.
 func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
+	return stageContentBytesWithPrecondition(ctx, store, server, resolver, kind, action, targetRel, fileName, data, "")
+}
+
+// stageContentBytesWithPrecondition records the live digest observed at stage
+// time. The journaled publish rechecks it before copying replacement bytes.
+func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -91,18 +98,60 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 		}
 	}
 	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
-		ID:         id,
-		ServerID:   server.ID,
-		Kind:       kind,
-		Action:     action,
-		TargetPath: target,
-		StagePath:  stagePath,
-		FileName:   base,
+		ID:                 id,
+		ServerID:           server.ID,
+		Kind:               kind,
+		Action:             action,
+		TargetPath:         target,
+		StagePath:          stagePath,
+		FileName:           base,
+		ExpectedLiveSha512: expectedLiveSha512,
 	})
 	if err != nil {
 		if stagePath != "" {
 			_ = acc.RemoveAll(stagedContentRoot + "/" + id)
 		}
+		return nil, err
+	}
+	return row, nil
+}
+
+// stageModContentToBatch writes candidate bytes and inserts the staged row
+// only while the reviewed batch is still open with the reviewed window. This
+// closes the window between choosing the batch and writing its payload.
+func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
+	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
+	targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
+	target, err := safeStageTarget(targetRel)
+	if err != nil {
+		return nil, err
+	}
+	base, err := stagedFileBase(fileName)
+	if err != nil {
+		return nil, err
+	}
+	acc, err := serverAccessor(ctx, store, server, resolver)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = acc.Close() }()
+	id := uuid.New().String()
+	stagePath := stagedContentRoot + "/" + id + "/" + base
+	if _, err := nodestorage.WriteFrom(ctx, acc, stagePath, bytes.NewReader(data), 64<<30); err != nil {
+		return nil, err
+	}
+	row := &storage.StagedContentChange{
+		ID:                 id,
+		ServerID:           server.ID,
+		Kind:               storage.StagedKindMod,
+		Action:             storage.StagedActionReplace,
+		TargetPath:         target,
+		StagePath:          stagePath,
+		FileName:           base,
+		ExpectedLiveSha512: expectedLiveSha512,
+	}
+	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
+		_ = acc.RemoveAll(stagedContentRoot + "/" + id)
 		return nil, err
 	}
 	return row, nil

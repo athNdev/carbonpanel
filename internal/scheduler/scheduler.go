@@ -44,6 +44,27 @@ import (
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
 
+// ModUpdatePlanner stages reviewed compatible releases. The concrete owner
+// lives in the RPC service layer; the scheduler keeps only this interface so
+// manual and scheduled updates use one operation without an import cycle or a
+// process-global provider. A nil planner fails closed.
+type ModUpdatePlanner interface {
+	StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (staged int, refused int, reasons []string, err error)
+}
+
+// maxAutomaticModUpdatesPerRun bounds a single policy run. The value is also
+// used as an allocation capacity in the planner, so an oversized persisted
+// config must never reach it unchecked.
+const maxAutomaticModUpdatesPerRun = 50
+
+// DefaultModUpdatesPerRun is the budget used when a policy omits its limit.
+const DefaultModUpdatesPerRun = 10
+
+type modUpdateRunBudget struct {
+	staged    int
+	exhausted bool
+}
+
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
@@ -100,6 +121,15 @@ type Scheduler struct {
 	// root so scheduled and RPC starts contend on the same node key. Nil fails
 	// closed at the acquire helper.
 	admission *serverruntime.AdmissionCoordinator
+
+	// modUpdatePlanner is injected at composition root. It is the same planner
+	// the manual review-and-apply RPC uses, so a schedule cannot fork policy.
+	modUpdatePlanner ModUpdatePlanner
+}
+
+// SetModUpdatePlanner supplies the shared manual/scheduled mod update planner.
+func (s *Scheduler) SetModUpdatePlanner(planner ModUpdatePlanner) {
+	s.modUpdatePlanner = planner
 }
 
 // Config holds scheduler configuration
@@ -386,8 +416,28 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			continue
 		}
 
-		// Update next run time immediately to prevent re-querying from DB if check runs again before task finishes
-		s.updateNextRun(task)
+		// Advance the schedule before dispatch. If it cannot be advanced the
+		// task must not run: a still-due row would otherwise be claimed again
+		// on every tick. Disable it with the reason in the log.
+		if err := s.updateNextRun(task); err != nil {
+			if errors.Is(err, storage.ErrModUpdateScheduleChanged) {
+				s.releaseTask(task.ID)
+				continue
+			}
+			s.log.Error("Task %s: cannot advance schedule, refusing dispatch: %v", task.Name, err)
+			var dbErr error
+			if task.TaskType == storage.TaskTypeModUpdate {
+				dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
+			} else {
+				dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+					Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
+			}
+			if dbErr != nil {
+				s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+			}
+			s.releaseTask(task.ID)
+			continue
+		}
 
 		// Execute task asynchronously
 		s.wg.Add(1)
@@ -556,7 +606,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Update next run time if not already updated at dispatch
 		if trigger != "scheduled" {
-			s.updateNextRun(task)
+			if err := s.updateNextRun(task); err != nil {
+				s.log.Error("Task %s: failed to advance schedule after skip: %v", task.Name, err)
+			}
 		}
 		return execution, nil
 	}
@@ -606,9 +658,10 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		retries = 0
 	}
 
+	var modBudget modUpdateRunBudget
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
-		if execErr == nil || attempt >= retries || execCtx.Err() != nil {
+		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData, &modBudget)
+		if execErr == nil || attempt >= retries || execCtx.Err() != nil || modBudget.exhausted {
 			break
 		}
 
@@ -671,7 +724,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 	// Update next run time if not already updated at dispatch
 	if trigger != "scheduled" {
-		s.updateNextRun(task)
+		if err := s.updateNextRun(task); err != nil {
+			s.log.Error("Task %s: failed to advance schedule after execution: %v", task.Name, err)
+		}
 	}
 
 	return execution, execErr
@@ -727,7 +782,7 @@ func (s *Scheduler) recordChainStop(ctx context.Context, execution *storage.Task
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any, modBudget *modUpdateRunBudget) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -745,6 +800,8 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	case storage.TaskTypeModpackUpdate:
 		return s.executeModpackUpdateTask(ctx, server, task)
+	case storage.TaskTypeModUpdate:
+		return s.executeModUpdateTask(ctx, server, task, modBudget)
 	case storage.TaskTypeChunkyPregen:
 		return s.executeChunkyPregen(ctx, server, task)
 	default:
@@ -787,36 +844,35 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return fmt.Errorf("execution not found or already finished")
 }
 
-// updateNextRun calculates and updates the next run time for a task
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
+// updateNextRun calculates and updates the next run time for a task. It uses
+// CalculateNextRun so dispatch and explicit recalculation honor the same
+// per-task timezone and cannot drift apart.
+func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
-	var nextRun *time.Time
-
-	switch task.Schedule {
-	case storage.ScheduleTypeCron:
-		if task.CronExpr != "" {
-			schedule, err := s.cronParser.Parse(task.CronExpr)
-			if err == nil {
-				next := schedule.Next(now)
-				nextRun = &next
-			}
+	advance := func(nextRun *time.Time) error {
+		if task.TaskType == storage.TaskTypeModUpdate {
+			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now)
 		}
-	case storage.ScheduleTypeInterval:
-		if task.IntervalSecs > 0 {
-			next := now.Add(time.Duration(task.IntervalSecs) * time.Second)
-			nextRun = &next
-		}
-	case storage.ScheduleTypeOnce:
-		// Once tasks don't repeat, disable after execution
-		task.Status = storage.TaskStatusDisabled
-		nextRun = nil
-	case storage.ScheduleTypeEvent:
-		// Event-triggered tasks have no time-based next run.
-		nextRun = nil
+		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
-
-	s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
+		if err := advance(nil); err != nil {
+			return fmt.Errorf("clear next run: %w", err)
+		}
+		if task.Schedule == storage.ScheduleTypeOnce {
+			task.Status = storage.TaskStatusDisabled
+		}
+		return nil
+	}
+	nextRun, err := s.CalculateNextRun(task)
+	if err != nil {
+		return err
+	}
+	if err := advance(nextRun); err != nil {
+		return fmt.Errorf("store next run: %w", err)
+	}
+	return nil
 }
 
 // Task type executors
@@ -1300,9 +1356,31 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		if task.CronExpr == "" {
 			return nil, fmt.Errorf("cron expression required")
 		}
+		// Timezone applies only to cron slots. An interval or one-shot task
+		// must keep its absolute deadline even if a stale zone is configured.
+		var location *time.Location
+		if zone := strings.TrimSpace(task.Timezone); zone != "" {
+			location = time.UTC
+			if !strings.EqualFold(zone, "UTC") {
+				loaded, err := time.LoadLocation(zone)
+				if err != nil {
+					return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+				}
+				location = loaded
+			}
+		}
 		schedule, err := s.cronParser.Parse(task.CronExpr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
+		}
+		// The shared parser builds a spec schedule in the host zone. Rebind its
+		// location so five-field slots are interpreted in the operator's zone.
+		if location != nil {
+			if spec, ok := schedule.(*cron.SpecSchedule); ok {
+				zoneSpec := *spec
+				zoneSpec.Location = location
+				schedule = &zoneSpec
+			}
 		}
 		next := schedule.Next(now)
 		return &next, nil
@@ -1399,6 +1477,81 @@ func webhookEventName(t v1.TriggeredEventType) string {
 	default:
 		return "manual"
 	}
+}
+
+// ValidateModUpdateConfigJSON rejects a malformed policy before it is stored,
+// so a misconfigured schedule fails at create/update time rather than hours
+// later when the schedule first fires.
+func ValidateModUpdateConfigJSON(raw string) error {
+	_, err := ParseModUpdateConfigJSON(raw)
+	return err
+}
+
+// ParseModUpdateConfigJSON returns the validated policy used to create a task.
+func ParseModUpdateConfigJSON(raw string) (storage.ModUpdateTaskConfig, error) {
+	var cfg storage.ModUpdateTaskConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return cfg, fmt.Errorf("invalid mod update policy: %w", err)
+	}
+	return cfg, ValidateModUpdateConfig(cfg)
+}
+
+// ValidateModUpdateConfig checks a decoded policy at the execution boundary.
+func ValidateModUpdateConfig(cfg storage.ModUpdateTaskConfig) error {
+	if cfg.MaxUpdatesPerRun < 0 || cfg.MaxUpdatesPerRun > maxAutomaticModUpdatesPerRun {
+		return fmt.Errorf("max_updates_per_run must be between 0 and %d", maxAutomaticModUpdatesPerRun)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Window)) {
+	case "", "next_restart":
+	case "idle":
+		if cfg.IdleMinutes <= 0 || cfg.IdleMinutes > 10080 {
+			return errors.New("idle_minutes must be between 1 and 10080 for the idle window")
+		}
+	default:
+		return fmt.Errorf("unknown apply window %q", cfg.Window)
+	}
+	return nil
+}
+
+// executeModUpdateTask runs an opt-in mod update policy through the shared
+// planner. It never publishes bytes itself: the existing journaled batch apply
+// remains the only path that writes the live mods directory.
+func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, budget *modUpdateRunBudget) (string, error) {
+	var cfg storage.ModUpdateTaskConfig
+	if task.Config != "" {
+		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+			return "", fmt.Errorf("invalid mod update policy: %w", err)
+		}
+	}
+	if !cfg.Enabled {
+		return "mod update policy is disabled; nothing staged", nil
+	}
+	if err := ValidateModUpdateConfig(cfg); err != nil {
+		return "", fmt.Errorf("invalid mod update policy: %w", err)
+	}
+	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
+		return "server is running; mod update policy skipped by running-server policy", nil
+	}
+	if s.modUpdatePlanner == nil {
+		return "", errors.New("mod update planner is not installed")
+	}
+	limit := cfg.MaxUpdatesPerRun
+	if limit == 0 {
+		limit = DefaultModUpdatesPerRun
+	}
+	cfg.MaxUpdatesPerRun = limit - budget.staged
+	staged, refused, reasons, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
+	budget.staged += staged
+	budget.exhausted = budget.staged >= limit
+	output := fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", budget.staged, refused)
+	if len(reasons) > 0 {
+		shown := reasons
+		if len(shown) > 3 {
+			shown = shown[:3]
+		}
+		output += "; reasons: " + strings.Join(shown, " | ")
+	}
+	return output, err
 }
 
 // ModpackUpdateTaskConfig matches the configuration for periodic modpack updates
