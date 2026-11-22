@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Container creation no longer corrupts daemon-side bind paths on deployments where the panel's filesystem differs from the daemon's (for example a Windows panel against a WSL2 or remote Linux daemon): the work-temp mount keeps the daemon path's separator style, and the data directory is pre-created from the panel-side path.
 - Pressing Enter in the datapack search during server creation searches; it no longer submits the wizard.
 - Players added manually to a server no longer report a fabricated "last seen"; identities without a session record show "Never observed" and sort after observed players.
 - Player actions on the cross-server roster resolve each player's server from its allowlist record when no session exists, refuse empty targets with a clear message, and disable actions for rows without a server.
