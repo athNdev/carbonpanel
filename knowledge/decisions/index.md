@@ -53,6 +53,7 @@
 - [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
+- [Plugin indexer seam](plugin-indexers.md) — Hangar and Modrinth plugin discovery behind a PluginIndexer registry, gated by one loader-capability predicate.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
@@ -63,6 +64,7 @@
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
+- [Reviewed mod update application](mod-update-apply.md) — Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
 - [Runtime artifact format support](runtime-artifact-formats.md) — Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
 - [Runtime artifact format support — Alternatives + Consequence](runtime-artifact-formats-alternatives.md) — Publishing converted VHDX/VMDK/VDI images from qemu-img output would claim
 - [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Candidate artifact kinds and the evidence required before publication.
