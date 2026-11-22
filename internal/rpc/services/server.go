@@ -1665,6 +1665,17 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	originalModLoader := server.ModLoader
 	originalMCVersion := server.MCVersion
 	originalDockerImage := server.DockerImage
+
+	// Pre-flight compatibility gate: refuse a Minecraft version change that
+	// installed content declares incompatible BEFORE any mutation, so a
+	// failed recreation can never leave the new version behind in the
+	// database (the row is persisted before recreation is attempted).
+	if msg.McVersion != "" && msg.McVersion != originalMCVersion {
+		if err := s.refuseVersionIncompatibleContent(ctx, server, msg.McVersion); err != nil {
+			return nil, err
+		}
+	}
+
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
 		canonical, imageErr := docker.CanonicalServerImage(msg.DockerImage)
 		if imageErr != nil {
@@ -2237,6 +2248,150 @@ func unsafeDataRemoval(path string) bool {
 	return rest == ""
 }
 
+// startRecreateSettleWindow bounds how long a failed start waits for a
+// mid-termination container to settle before recreation takes over.
+const startRecreateSettleWindow = 30 * time.Second
+
+// startStopWaitPoll is the DB/docker polling cadence while a start waits
+// behind an in-flight stop.
+const startStopWaitPoll = 500 * time.Millisecond
+
+// waitForInFlightStop waits out a stop that still owns the server before a
+// start proceeds. It returns nil when the server is not stopping, when the
+// stop demonstrably finished (status left STOPPING, or the container is
+// observed no longer holding a live JVM), or when the caller's context ends;
+// it returns an aborted error with the waited duration when the budget runs
+// out, so the UI shows a clear refusal instead of appearing to hang.
+func (s *ServerService) waitForInFlightStop(ctx context.Context, server *storage.Server) error {
+	if server.Status != storage.StatusStopping {
+		return nil
+	}
+	budget := s.stopWaitBudget(ctx, server)
+	s.log.Info("start waiting for in-flight stop to finish (server %s, waiting up to %s)", server.ID, budget.Round(time.Second))
+	err := awaitInFlightStop(ctx, server.ID, budget, startStopWaitPoll,
+		func() bool { return docker.ServerTransitionInFlight(server.ID) },
+		func(wctx context.Context) { _ = docker.WaitForServerTransition(wctx, server.ID) },
+		func() bool { return s.stopSettled(ctx, server) })
+	if err != nil {
+		return err
+	}
+	s.log.Info("in-flight stop finished; proceeding with start (server %s)", server.ID)
+	return nil
+}
+
+// awaitInFlightStop is the polling loop behind waitForInFlightStop. The
+// inputs are injected so tests can drive the loop without real Docker or a
+// long budget.
+func awaitInFlightStop(ctx context.Context, serverID string, budget, pollInterval time.Duration,
+	transitionInFlight func() bool, waitForTransition func(context.Context), settled func() bool) error {
+	deadline := time.Now().Add(budget)
+	for {
+		if transitionInFlight() {
+			// The stop still owns the lifecycle transition: block on its
+			// release instead of spinning.
+			wctx, cancel := context.WithDeadline(ctx, deadline)
+			waitForTransition(wctx)
+			cancel()
+		}
+		if settled() {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return connect.NewError(connect.CodeAborted, fmt.Errorf("server is still stopping; the previous stop has not finished (waited %s)", budget.Round(time.Second)))
+		}
+		select {
+		case <-ctx.Done():
+			// The caller went away; the follow-up start attempt will fail
+			// naturally on the dead context.
+			return nil
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// stopSettled reports whether the recorded stop has demonstrably finished:
+// the server row left STOPPING, or the container is observed no longer
+// holding a live JVM (a container mid-save still reports running).
+func (s *ServerService) stopSettled(ctx context.Context, server *storage.Server) bool {
+	if fresh, err := s.store.GetServer(ctx, server.ID); err == nil && fresh.Status != storage.StatusStopping {
+		return true
+	}
+	if server.ContainerID == "" {
+		return false
+	}
+	dockerCli, err := s.getDockerClientStrict(server.NodeID)
+	if err != nil || dockerCli == nil {
+		return false
+	}
+	obsCtx, cancel := context.WithTimeout(ctx, statusRefreshTimeout)
+	defer cancel()
+	status, err := dockerCli.GetContainerStatus(obsCtx, server.ContainerID)
+	if err != nil {
+		// An absent container is a finished stop; anything else is unknown.
+		return errdefs.IsNotFound(err)
+	}
+	return status != storage.StatusRunning && status != storage.StatusStarting && status != storage.StatusUnhealthy
+}
+
+// stopWaitBudget bounds how long a start waits behind an in-flight stop: the
+// stop's own save window (whichever path started it) plus margin for the
+// journal finalize and status persist that trail the Docker stop.
+func (s *ServerService) stopWaitBudget(ctx context.Context, server *storage.Server) time.Duration {
+	window := docker.DefaultStopWindow
+	if cfg, err := s.store.GetServerConfig(ctx, server.ID); err == nil {
+		if w := docker.StopWindow(cfg); w > window {
+			window = w
+		}
+	}
+	return window + 45*time.Second
+}
+
+// interactiveStopWindow resolves the save window for a user-initiated stop or
+// restart: the server's explicit StopDuration override when one is
+// configured, otherwise the short interactive default.
+func (s *ServerService) interactiveStopWindow(ctx context.Context, server *storage.Server) time.Duration {
+	if cfg, err := s.store.GetServerConfig(ctx, server.ID); err == nil {
+		return docker.InteractiveStopWindow(cfg)
+	}
+	return docker.DefaultInteractiveStopWindow
+}
+
+// awaitTerminatingContainer polls a container that failed to start until it
+// has finished terminating: gone, exited, dead, or otherwise stopped. It
+// reports whether the container settled before the window closed. A start
+// that failed while the container is paused, or that cannot be observed,
+// returns immediately so recreation proceeds without a pointless stall.
+func awaitTerminatingContainer(ctx context.Context, dockerCli *docker.Client, containerID string, maxWait time.Duration) bool {
+	if dockerCli == nil || containerID == "" {
+		return false
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		obsCtx, cancel := context.WithTimeout(ctx, statusRefreshTimeout)
+		status, err := dockerCli.GetContainerStatus(obsCtx, containerID)
+		cancel()
+		switch {
+		case err != nil:
+			if errdefs.IsNotFound(err) {
+				return true // already gone
+			}
+			return false // unobservable: do not stall recreation
+		case status == storage.StatusStopped:
+			return true // exited, dead, removing, or a stopped replacement
+		case status == storage.StatusPaused:
+			return false // frozen, not terminating: recreation must unpause
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(startStopWaitPoll):
+		}
+	}
+}
+
 // StartServer starts a server
 func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1.StartServerRequest]) (out *connect.Response[v1.StartServerResponse], retErr error) {
 	defer func() {
@@ -2247,6 +2402,15 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
 	if reqErr != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, reqErr)
+	}
+	// A stop holds the lifecycle transition and journal for its whole save
+	// window. Instead of failing fast with "server transition already in
+	// progress" (which the UI reads as a hang), wait for the in-flight stop
+	// to finish before claiming the transition.
+	if peek, peekErr := s.store.GetServer(ctx, req.Msg.Id); peekErr == nil {
+		if waitErr := s.waitForInFlightStop(ctx, peek); waitErr != nil {
+			return nil, waitErr
+		}
 	}
 	transition, err := beginServerLifecycleTransition(req.Msg.Id)
 	if err != nil {
@@ -2430,6 +2594,14 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		}); err != nil {
 			s.log.Error("Failed to start container, attempting to recreate: %v", err)
 
+			// A start that races an unfinished stop finds the old container
+			// mid-termination. Recreating on top of it would run a second
+			// full stop window inside the lifecycle lock, so first give the
+			// old container a bounded chance to settle on its own.
+			if awaitTerminatingContainer(ctx, dockerCli, server.ContainerID, startRecreateSettleWindow) {
+				s.log.Info("Container %s settled before recreation", server.ContainerID)
+			}
+
 			// Get server config for container creation
 			serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
 			if err != nil {
@@ -2608,10 +2780,11 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 		}
 	}
 
-	window := docker.DefaultStopWindow
-	if cfg, cfgErr := s.store.GetServerConfig(ctx, server.ID); cfgErr == nil {
-		window = docker.StopWindow(cfg)
-	}
+	// Interactive stop: the short default window keeps the lifecycle
+	// transition and journal held for ~35s worst case instead of ~75s+, so a
+	// start issued right after a stop waits briefly instead of failing fast.
+	// An explicit StopDuration override is still honored.
+	window := s.interactiveStopWindow(ctx, server)
 
 	// Persist stopping before the save window so a panel restart resumes the
 	// stop instead of starting the JVM again.
@@ -2885,9 +3058,20 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}), nil
 	}
 
-	// Restart container
+	// Restart container. The inner stop uses the same short interactive
+	// window as StopServer — RestartContainer would use DefaultStopWindow
+	// (60s) and hold the lifecycle lock for a full minute.
+	restartWindow := s.interactiveStopWindow(ctx, server)
 	if err := s.runJournaledMutation(ctx, server, "restart", requestID, func() error {
-		return dockerCli.RestartContainer(ctx, server.ContainerID, 2*time.Second)
+		if _, stopErr := dockerCli.StopContainerWithin(ctx, server.ContainerID, restartWindow); stopErr != nil {
+			return stopErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		return dockerCli.StartContainer(ctx, server.ContainerID)
 	}); err != nil {
 		s.log.Warn("Failed to restart container directly (%v), attempting recreation", err)
 		serverConfig, cfgErr := s.store.GetServerConfig(ctx, server.ID)
@@ -3077,9 +3261,14 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q is unavailable: %w", server.NodeID, err))
 	}
-	status, err := dockerCli.GetContainerStatus(ctx, server.ContainerID)
-	if err != nil || status != storage.StatusRunning {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server is not running"))
+	// Status-aware refusals: a frozen (paused) or deep-sleeping server is not
+	// "not running", and saying so sends the operator down the wrong recovery
+	// path. Deep sleep is visible only in the database row — the container is
+	// exited by design (MINE-121). The wording is shared with the websocket
+	// console path (internal/ws/hub.go).
+	status, statusErr := dockerCli.GetContainerStatus(ctx, server.ContainerID)
+	if reason := commandBlockedReason(server.Status, status, statusErr); reason != "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New(reason))
 	}
 
 	if req.Msg.Command == "" {
@@ -3113,6 +3302,32 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 		Success: true,
 		Output:  output,
 	}), nil
+}
+
+// commandBlockedReason renders the refusal for a console command a server
+// cannot take right now. It returns "" when the command may proceed. The
+// database row speaks for deep sleep (the container is exited by design) and
+// for the panel-recorded paused/stopping intent; the live Docker observation
+// covers a freeze the row has not caught up with.
+func commandBlockedReason(dbStatus, observed storage.ServerStatus, observeErr error) string {
+	if observeErr == nil && observed == storage.StatusRunning {
+		return ""
+	}
+	switch dbStatus {
+	case storage.StatusPaused:
+		return "server is frozen (paused); resume the server before sending commands"
+	case storage.StatusDeepSleep:
+		return "server is in deep sleep; it wakes when a player connects — wake it first to run commands"
+	case storage.StatusStopping:
+		return "server is stopping; try again shortly"
+	}
+	switch observed {
+	case storage.StatusPaused:
+		return "server is frozen (paused); resume the server before sending commands"
+	case storage.StatusStopping:
+		return "server is stopping; try again shortly"
+	}
+	return "server is not running"
 }
 
 // ListServerPlayers returns the live online roster from the metrics
