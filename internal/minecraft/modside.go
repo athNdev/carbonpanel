@@ -25,20 +25,34 @@ const (
 	SideBoth ModSide = "both"
 	// SideUnknown means the metadata declares nothing reliable (e.g. Forge).
 	SideUnknown ModSide = "unknown"
+	// SidePlugin means the jar is a Bukkit/Paper plugin: it carries a
+	// plugin.yml or paper-plugin.yml descriptor at the jar root instead of
+	// mod metadata. Multi-loader jars (e.g. LuckPerms) may carry both plugin
+	// and mod descriptors; the plugin descriptor wins because it names the
+	// content type a Paper-family server loads.
+	SidePlugin ModSide = "plugin"
 )
 
 // InspectModSide reads a mod jar's metadata to determine whether it targets the
 // client, the server, or both. Client-only mods crash dedicated servers at class
 // load, so a panel must catch them before installing (ME-04).
 //
-// Fabric and Quilt declare an explicit environment; Forge and NeoForge have no
-// reliable equivalent, so those return SideUnknown rather than guessing.
+// Bukkit/Paper plugins are identified by descriptor presence (plugin.yml or
+// paper-plugin.yml at the jar root) rather than parsed contents. Fabric and
+// Quilt declare an explicit environment; Forge and NeoForge have no reliable
+// equivalent, so those return SideUnknown rather than guessing.
 func InspectModSide(jarPath string) (ModSide, error) {
 	r, err := zip.OpenReader(jarPath)
 	if err != nil {
 		return SideUnknown, fmt.Errorf("open mod jar: %w", err)
 	}
 	defer func() { _ = r.Close() }()
+
+	for _, name := range []string{"plugin.yml", "paper-plugin.yml"} {
+		if findZipEntry(&r.Reader, name) != nil {
+			return SidePlugin, nil
+		}
+	}
 
 	for _, name := range []string{"fabric.mod.json", "quilt.mod.json"} {
 		f := findZipEntry(&r.Reader, name)

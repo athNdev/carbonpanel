@@ -114,6 +114,85 @@ func TestInspectModSideUnknownForForge(t *testing.T) {
 	}
 }
 
+// TestInspectModSidePlugin: Bukkit/Paper plugins are identified by their
+// descriptor (plugin.yml / paper-plugin.yml at the jar root), regardless of
+// whether the YAML is parseable.
+func TestInspectModSidePlugin(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry string
+	}{
+		{"bukkit plugin", "plugin.yml"},
+		{"paper plugin", "paper-plugin.yml"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			jar := filepath.Join(dir, "plugin.jar")
+			writeJarWithEntry(t, jar, c.entry, "name: TestPlugin\nversion: 1.0\n")
+
+			got, err := InspectModSide(jar)
+			if err != nil {
+				t.Fatalf("InspectModSide: %v", err)
+			}
+			if got != SidePlugin {
+				t.Errorf("%s jar = %q, want %q", c.entry, got, SidePlugin)
+			}
+		})
+	}
+
+	// A nested descriptor is not at the jar root and must not count.
+	dir := t.TempDir()
+	jar := filepath.Join(dir, "nested.jar")
+	writeJarWithEntry(t, jar, "sub/dir/plugin.yml", "name: TestPlugin\n")
+	if got, err := InspectModSide(jar); err != nil || got != SideUnknown {
+		t.Errorf("nested descriptor = %q, %v; want %q, nil", got, err, SideUnknown)
+	}
+}
+
+// TestInspectModSidePluginDescriptorWins: a multi-loader jar (e.g. LuckPerms)
+// ships plugin and mod descriptors together; on any loader the jar is a plugin
+// artifact first.
+func TestInspectModSidePluginDescriptorWins(t *testing.T) {
+	dir := t.TempDir()
+	jar := filepath.Join(dir, "multi.jar")
+
+	f, err := os.Create(jar)
+	if err != nil {
+		t.Fatalf("create jar: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	zw := zip.NewWriter(f)
+	for _, entry := range []struct{ name, content string }{
+		{"fabric.mod.json", `{"environment": "client"}`},
+		{"plugin.yml", "name: MultiLoader\n"},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		if _, err := w.Write([]byte(entry.content)); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+
+	got, err := InspectModSide(jar)
+	if err != nil {
+		t.Fatalf("InspectModSide: %v", err)
+	}
+	if got != SidePlugin {
+		t.Errorf("multi-loader jar = %q, want %q", got, SidePlugin)
+	}
+	// A plugin-classified jar is never client-only: the upload guard must
+	// keep accepting it.
+	if ok, err := IsClientOnly(jar); err != nil || ok {
+		t.Errorf("IsClientOnly(multi-loader) = %v, %v; want false, nil", ok, err)
+	}
+}
+
 // TestInspectModSideMalformedJSON: a corrupt descriptor must not be trusted as
 // "both"; it is an error so the caller can reject the upload.
 func TestInspectModSideMalformedJSON(t *testing.T) {
