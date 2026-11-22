@@ -146,3 +146,107 @@ func TestHandleCommandDoesNotInspectLocalDockerForUnavailableRemote(t *testing.T
 		t.Fatalf("command result = %v, want node unavailable", msgs)
 	}
 }
+
+// newCommandTestHub builds a hub wired to a scripted Docker daemon so
+// handleCommand's status checks can be exercised without a real daemon.
+func newCommandTestHub(t *testing.T, inspectState string) (*Hub, *Client, *storage.Store) {
+	t.Helper()
+
+	dockerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ApiVersion":"1.41","Version":"test","Id":"c1","State":{"Status":"` + inspectState + `","Running":` + `false` + `,"Paused":true}}`))
+	}))
+	t.Cleanup(dockerServer.Close)
+
+	cfg := &config.Config{Database: config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "ws-cmd-test.db"), AutoMigrate: true}}
+	store, err := storage.NewSQLiteStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	enforcer, err := rbac.NewEnforcer(store.DB())
+	if err != nil {
+		t.Fatalf("NewEnforcer: %v", err)
+	}
+	if err := enforcer.SeedDefaultPolicies(false); err != nil {
+		t.Fatalf("SeedDefaultPolicies: %v", err)
+	}
+	localDocker, err := docker.NewClient(dockerServer.URL, logger.New())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = localDocker.Close() })
+
+	h := &Hub{
+		store: store, enforcer: enforcer, docker: localDocker,
+		pool: docker.NewClientPool(nil, localDocker, logger.New()),
+	}
+	c := &Client{
+		hub: h, authenticated: true, user: &auth.AuthenticatedUser{Roles: []string{"admin"}},
+		send: make(chan []byte, 4), subscriptions: make(map[string]*subscription),
+	}
+	return h, c, store
+}
+
+func TestHandleCommand_StatusAwareRejections(t *testing.T) {
+	cases := []struct {
+		name       string
+		dbStatus   storage.ServerStatus
+		inspect    string
+		wantErrHas string
+	}{
+		{
+			name:       "frozen server names the resume action",
+			dbStatus:   storage.StatusPaused,
+			inspect:    "running",
+			wantErrHas: "server is frozen (paused); resume the server before sending commands",
+		},
+		{
+			name:       "deep sleep server names the wake action",
+			dbStatus:   storage.StatusDeepSleep,
+			inspect:    "exited",
+			wantErrHas: "server is in deep sleep; it wakes when a player connects - wake it first to run commands",
+		},
+		{
+			name:       "a container paused outside the panel is frozen the same way",
+			dbStatus:   storage.StatusRunning,
+			inspect:    "paused",
+			wantErrHas: "server is frozen (paused); resume the server before sending commands",
+		},
+		{
+			name:       "a plainly stopped server keeps the generic message",
+			dbStatus:   storage.StatusRunning,
+			inspect:    "exited",
+			wantErrHas: "server is not running",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c, store := newCommandTestHub(t, tc.inspect)
+			if err := store.CreateServer(context.Background(), &storage.Server{
+				ID: "s1", Name: "S", ModLoader: storage.ModLoaderVanilla,
+				MCVersion: "1.21", ContainerID: "c1", DataPath: t.TempDir(),
+			}); err != nil {
+				t.Fatalf("CreateServer: %v", err)
+			}
+			if err := store.DB().Model(&storage.Server{}).Where("id = ?", "s1").
+				Update("status", tc.dbStatus).Error; err != nil {
+				t.Fatalf("set status: %v", err)
+			}
+
+			c.handleCommand(&v1.CommandMessage{ServerId: "s1", Command: "list"})
+			msgs := drainClient(t, c)
+			if len(msgs) != 1 {
+				t.Fatalf("messages = %v, want one command result", msgs)
+			}
+			result := msgs[0].GetCommandResult()
+			if result == nil || result.GetSuccess() {
+				t.Fatalf("command result = %v, want a failure", msgs)
+			}
+			if !strings.Contains(result.GetError(), tc.wantErrHas) {
+				t.Fatalf("error = %q, want it to contain %q", result.GetError(), tc.wantErrHas)
+			}
+		})
+	}
+}

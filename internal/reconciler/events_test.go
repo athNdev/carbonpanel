@@ -635,6 +635,43 @@ func TestFullEventBufferDoesNotStallTheWatcher(t *testing.T) {
 	}
 }
 
+func TestDroppedEventsAreCountedAndAggregated(t *testing.T) {
+	watcher := &blockingWatcher{out: make(chan ContainerEvent), sent: make(chan struct{})}
+	sup := &Supervisor{
+		merged:  make(chan ContainerEvent, 1),
+		running: map[string]*supervisedNode{},
+		factory: func(string) (eventWatcher, error) { return watcher, nil },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.Sync([]string{"node-a"}); err != nil {
+		t.Fatal(err)
+	}
+	// The watcher pushes two events into a one-slot merged buffer with no
+	// consumer: one lands, the next is dropped — counted, not silent.
+	select {
+	case <-watcher.sent:
+	case <-time.After(time.Second):
+		t.Fatal("watcher stalled while the merged event buffer was full")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sup.DroppedEvents() < 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := sup.DroppedEvents(); got != 1 {
+		t.Fatalf("dropped events = %d, want 1", got)
+	}
+	// The aggregated batch was flushed into the warning (lastDropLog was 0,
+	// so the first drop logs immediately).
+	if got := sup.droppedBatch.Load(); got != 0 {
+		t.Fatalf("unlogged drop batch = %d, want 0 after the warning", got)
+	}
+}
+
 type blockingWatcher struct {
 	out  chan ContainerEvent
 	sent chan struct{}

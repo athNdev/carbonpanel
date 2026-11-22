@@ -6,6 +6,7 @@
 package minecraft
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,75 @@ func TestDetectBootFailureIgnoresNoise(t *testing.T) {
 	}
 	if reason, ok := DetectBootFailure(lines, bootStart); ok {
 		t.Fatalf("warnings and stack traces are not boot failures: %q", reason)
+	}
+}
+
+func TestDetectBootFailureJVMOOM(t *testing.T) {
+	lines := []string{
+		ts(2, 51) + " [init] Starting the Minecraft server...",
+		ts(3, 0) + " [main/ERROR]: java.lang.OutOfMemoryError: Java heap space",
+	}
+	reason, ok := DetectBootFailure(lines, bootStart)
+	if !ok {
+		t.Fatal("a JVM out-of-memory error must be detected")
+	}
+	if !strings.Contains(reason, "OutOfMemoryError") {
+		t.Fatalf("reason = %q, want the OOM named", reason)
+	}
+}
+
+func TestDetectBootFailureTickLoopWatchdog(t *testing.T) {
+	lines := []string{
+		ts(2, 51) + " [init] Starting the Minecraft server...",
+		ts(3, 0) + " [main/ERROR]: Description: Exception in server tick loop",
+	}
+	reason, ok := DetectBootFailure(lines, bootStart)
+	if !ok {
+		t.Fatal("a tick-loop watchdog crash must be detected")
+	}
+	if !strings.Contains(reason, "tick loop") {
+		t.Fatalf("reason = %q, want the tick loop named", reason)
+	}
+}
+
+func TestDetectBootFailureRepeatedIdenticalStack(t *testing.T) {
+	header := "[main/ERROR]: java.lang.NullPointerException: Cannot invoke \"net.minecraft.world.level.Level.dimension()\" because \"this.level\" is null"
+	frame := "[main/ERROR]: \tat net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1234)"
+	lines := []string{
+		ts(2, 51) + " [init] Starting the Minecraft server...",
+	}
+	for i := 0; i < 3; i++ {
+		lines = append(lines, ts(3, i)+" "+header, ts(3, i)+" "+frame)
+	}
+	reason, ok := DetectBootFailure(lines, bootStart)
+	if !ok {
+		t.Fatal("the same stack repeating three times in one boot must be detected")
+	}
+	if !strings.Contains(reason, "NullPointerException") || !strings.Contains(reason, "3x") {
+		t.Fatalf("reason = %q, want the repeated stack with its count", reason)
+	}
+}
+
+func TestDetectBootFailureToleratesOneOffAndDistinctStacks(t *testing.T) {
+	header := "[main/ERROR]: java.lang.IllegalStateException: incompatible mod set"
+	frame := "[main/ERROR]: \tat net.minecraftforge.fml.ModLoader.gatherAndInitializeMods(ModLoader.java:56)"
+
+	two := []string{ts(2, 51) + " [init] Starting the Minecraft server..."}
+	for i := 0; i < 2; i++ {
+		two = append(two, ts(3, i)+" "+header, ts(3, i)+" "+frame)
+	}
+	if reason, ok := DetectBootFailure(two, bootStart); ok {
+		t.Fatalf("two identical stacks are not yet a loop: %q", reason)
+	}
+
+	distinct := []string{ts(2, 51) + " [init] Starting the Minecraft server..."}
+	for i := 0; i < 3; i++ {
+		distinct = append(distinct,
+			ts(3, i)+" [main/ERROR]: java.lang.IllegalStateException: failure "+strconv.Itoa(i),
+			ts(3, i)+" "+frame,
+		)
+	}
+	if reason, ok := DetectBootFailure(distinct, bootStart); ok {
+		t.Fatalf("three distinct stacks are not a repeated identical stack: %q", reason)
 	}
 }

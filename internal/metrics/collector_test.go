@@ -7,9 +7,15 @@ package metrics
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/command"
 	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
@@ -272,5 +278,83 @@ func TestTPSBackoffCache(t *testing.T) {
 	}
 	if _, ok := c.tpsFailedAt["s1"]; ok {
 		t.Errorf("expected tpsFailedAt for s1 to be cleared")
+	}
+}
+
+// recordingExec counts docker-exec round-trips so tests can prove which
+// servers the RCON collector actually polled.
+type recordingExec struct {
+	calls atomic.Int32
+}
+
+func (r *recordingExec) ExecCommand(_ context.Context, _, _ string) (string, error) {
+	r.calls.Add(1)
+	return "There are 0 of a max of 20 players online", nil
+}
+
+func TestCollectRCONDataSkipsFrozenAndDeepSleepServers(t *testing.T) {
+	// A scripted daemon that reports every container as running: any poll
+	// that got past the frozen/deep-sleep checks would reach the sender.
+	dockerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/containers/") && strings.HasSuffix(r.URL.Path, "/json") {
+			_, _ = w.Write([]byte(`{"Id":"c1","State":{"Status":"running","Running":true}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ApiVersion":"1.41","Version":"test"}`))
+	}))
+	defer dockerServer.Close()
+	dockerCli, err := docker.NewClient(dockerServer.URL, logger.New())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer func() { _ = dockerCli.Close() }()
+
+	store, err := db.NewSQLiteStore(&config.Config{
+		Database: config.DatabaseConfig{
+			Path:           filepath.Join(t.TempDir(), "metrics-rcon.db"),
+			AutoMigrate:    true,
+			MaxConnections: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, s := range []struct {
+		id     string
+		status db.ServerStatus
+	}{
+		{"s-running", db.StatusRunning},
+		{"s-paused", db.StatusPaused},
+		{"s-deepsleep", db.StatusDeepSleep},
+	} {
+		if err := store.DB().Create(&db.Server{
+			ID: s.id, Name: s.id, ContainerID: "c1", Status: s.status, DataPath: t.TempDir(),
+		}).Error; err != nil {
+			t.Fatalf("create %s: %v", s.id, err)
+		}
+	}
+
+	cfg := &config.Config{}
+	exec := &recordingExec{}
+	sender := command.NewSender(store, cfg, exec, nil)
+	c := NewCollectorWithPool(store, dockerCli, nil, sender, cfg, nil, logger.New())
+
+	// Seed last-known player counts for the frozen server: skipping the poll
+	// must keep them readable (stale), not block or zero them.
+	c.updateMetrics("s-paused", func(m *ServerMetrics) { m.PlayersOnline = 2 })
+
+	c.collectRCONData()
+
+	if got := exec.calls.Load(); got != 1 {
+		t.Fatalf("docker exec calls = %d, want 1 (only the running server is polled)", got)
+	}
+	if m := c.GetMetrics("s-paused"); m == nil || m.PlayersOnline != 2 {
+		t.Fatalf("paused server metrics = %+v, want the last-known player count preserved", m)
 	}
 }

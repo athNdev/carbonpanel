@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	dockerevents "github.com/moby/moby/api/types/events"
@@ -48,6 +49,22 @@ var forwardedActions = map[dockerevents.Action]bool{
 	dockerevents.ActionHealthStatus: true,
 	dockerevents.ActionOOM:          true,
 }
+
+// Event channel sizing. The merged channel fans one stream per node into the
+// reconciler's consumer. Burst churn (a node flapping, a mass restart) used
+// to fill the merged buffer and the per-node pumps then silently dropped the
+// overflow, leaving statuses stale until the periodic sweep. The merged
+// buffer is sized at 4x the per-watcher buffer to absorb those bursts, and
+// whatever still does not fit is counted and logged (see noteDroppedEvents).
+const (
+	watcherOutBuffer  = 256
+	mergedEventBuffer = 4 * watcherOutBuffer
+)
+
+// dropLogInterval is the minimum spacing between "events dropped" warnings.
+// Drops in between are aggregated into the next warning so a sustained burst
+// stays observable without flooding the log.
+const dropLogInterval = time.Minute
 
 // ContainerEvent is the normalized representation of a Docker container
 // lifecycle event, translated from the raw Docker Events API message. It is
@@ -174,7 +191,7 @@ func NewWatcher(nodeID string, cli *docker.Client, log *logger.Logger) *Watcher 
 		nodeID: nodeID,
 		client: cli.GetDockerClient(),
 		log:    log,
-		out:    make(chan ContainerEvent, 256),
+		out:    make(chan ContainerEvent, watcherOutBuffer),
 	}
 }
 
@@ -307,6 +324,16 @@ type Supervisor struct {
 	// stale is the last resolve error for a desired node that has no watcher.
 	stale map[string]string
 	wg    sync.WaitGroup
+
+	// droppedTotal counts events the merged buffer could not absorb, since
+	// the supervisor was built. The periodic sweep remains the status source
+	// of truth, but the drops are counted and logged (aggregated per
+	// dropLogInterval) so burst churn is observable instead of silent.
+	droppedTotal atomic.Int64
+	// droppedBatch counts drops not yet included in a warning.
+	droppedBatch atomic.Int64
+	// lastDropLog is the unix-nano time of the last drop warning.
+	lastDropLog atomic.Int64
 }
 
 // NewSupervisor constructs a Supervisor for an explicit set of node IDs,
@@ -320,7 +347,7 @@ func NewSupervisor(nodeIDs []string, resolve func(nodeID string) (*docker.Client
 	return &Supervisor{
 		log:     log,
 		nodeIDs: ids,
-		merged:  make(chan ContainerEvent, 256),
+		merged:  make(chan ContainerEvent, mergedEventBuffer),
 		running: map[string]*supervisedNode{},
 		factory: func(nodeID string) (eventWatcher, error) {
 			cli, err := resolve(nodeID)
@@ -366,6 +393,34 @@ func NewSupervisorFromNodeStore(ctx context.Context, pool *docker.ClientPool, st
 // across all watched nodes. Valid after Start has been called.
 func (s *Supervisor) Events() <-chan ContainerEvent {
 	return s.merged
+}
+
+// DroppedEvents reports how many container events were dropped because the
+// merged buffer was full, since the supervisor was built. A non-zero value
+// means event churn exceeded the consumer's rate at least once; the
+// periodic sweep covered the gap.
+func (s *Supervisor) DroppedEvents() int64 {
+	return s.droppedTotal.Load()
+}
+
+// noteDroppedEvents records one event the merged buffer could not absorb and
+// logs an aggregated warning at most once per dropLogInterval, so a burst
+// stays observable without flooding the log.
+func (s *Supervisor) noteDroppedEvents(nodeID string) {
+	total := s.droppedTotal.Add(1)
+	batch := s.droppedBatch.Add(1)
+	now := time.Now().UnixNano()
+	last := s.lastDropLog.Load()
+	if last != 0 && time.Duration(now-last) < dropLogInterval {
+		return
+	}
+	if !s.lastDropLog.CompareAndSwap(last, now) {
+		return // another pump logged this window
+	}
+	s.droppedBatch.Add(-batch)
+	if s.log != nil {
+		s.log.Warn("reconciler: merged event buffer full; dropped %d container events from node %q (%d dropped total); the periodic sweep covers the gap", batch, nodeID, total)
+	}
 }
 
 // Start resolves a client for each configured node, launches one Watcher
@@ -639,7 +694,9 @@ func (s *Supervisor) startWatcher(node WatchedNode, w eventWatcher) {
 					return
 				default:
 					// A full merged buffer must not stall this node's event
-					// stream. The periodic sweep remains the status source.
+					// stream. The periodic sweep remains the status source;
+					// the drop is counted and warned about in aggregate.
+					s.noteDroppedEvents(node.ID)
 				}
 			case <-nodeCtx.Done():
 				return

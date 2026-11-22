@@ -56,6 +56,17 @@ const slowTransitionWarnAt = 2 * time.Minute
 // can capture warnings and the server process can install its logger.
 var transitionWarner = func(string, ...any) {}
 
+// transitionEndNotifier receives the server ID of every released lifecycle
+// transition. The reconciler uses it to converge status immediately instead of
+// waiting for the next sweep. Nil until a process installs a notifier.
+var transitionEndNotifier func(serverID string)
+
+// SetTransitionEndNotifier installs the callback fired when a lifecycle
+// transition is released. Passing nil restores the silent default.
+func SetTransitionEndNotifier(fn func(serverID string)) {
+	transitionEndNotifier = fn
+}
+
 // SetTransitionWarner installs the callback used to warn about long-held
 // lifecycle transitions. Passing nil restores the silent default.
 func SetTransitionWarner(fn func(format string, args ...any)) {
@@ -119,6 +130,9 @@ func (t *Transition) Release() {
 		}
 		close(t.done)
 		serverTransitions.Unlock()
+		if transitionEndNotifier != nil {
+			transitionEndNotifier(t.serverID)
+		}
 	})
 }
 

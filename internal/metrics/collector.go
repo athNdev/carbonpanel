@@ -360,6 +360,12 @@ func (c *Collector) collectDiskUsageLoop(stop <-chan struct{}) {
 	}
 }
 
+// rconCallTimeout bounds each RCON/exec round-trip inside a collection pass.
+// The passes are sequential: without a per-call deadline, one container that
+// never answers (a freeze that raced the status check, a wedged rcon-cli)
+// would stall the whole pass and hang every server's player counts with it.
+const rconCallTimeout = 3 * time.Second
+
 // Collects CPU and memory stats from Docker
 func (c *Collector) collectDockerStats() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -427,6 +433,15 @@ func (c *Collector) collectRCONData() {
 			continue
 		}
 
+		// A frozen (paused) or deep-sleep server cannot answer RCON: docker
+		// exec into a paused container is rejected or queues on the frozen
+		// cgroup, and a deep-sleep server has no live JVM. Skip the poll so
+		// the last-known player counts stay readable (stale) instead of
+		// hanging the collection pass.
+		if server.Status == storage.StatusPaused || server.Status == storage.StatusDeepSleep {
+			continue
+		}
+
 		dockerCli, dockerErr := c.resolveDocker(server.NodeID)
 		if dockerErr != nil {
 			continue
@@ -445,7 +460,9 @@ func (c *Collector) collectRCONData() {
 
 		// Get player count and roster from RCON
 		if !slpHasPlayerData {
-			output, err := c.sender.SendCommand(ctx, server.ID, "list")
+			listCtx, listCancel := context.WithTimeout(ctx, rconCallTimeout)
+			output, err := c.sender.SendCommand(listCtx, server.ID, "list")
+			listCancel()
 			if err == nil && output != "" {
 				count, players := minecraft.ParsePlayerListFromOutput(output)
 				c.updateMetrics(server.ID, func(m *ServerMetrics) {
@@ -486,7 +503,9 @@ func (c *Collector) collectRCONData() {
 				if cmd == "" {
 					continue
 				}
-				output, err := c.sender.SendCommand(ctx, server.ID, cmd)
+				tpsCtx, tpsCancel := context.WithTimeout(ctx, rconCallTimeout)
+				output, err := c.sender.SendCommand(tpsCtx, server.ID, cmd)
+				tpsCancel()
 				if err == nil && output != "" {
 					tps := minecraft.ParseTPSFromOutput(output)
 					if tps > 0 {

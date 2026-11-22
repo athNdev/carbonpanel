@@ -368,6 +368,81 @@ func TestSendCommand_NilConfigHandledGracefully(t *testing.T) {
 	}
 }
 
+// checkerExecutor is a fakeExecutor that also reports a container status,
+// the way *docker.Client does.
+type checkerExecutor struct {
+	fakeExecutor
+	status storage.ServerStatus
+	err    error
+}
+
+func (c *checkerExecutor) GetContainerStatus(_ context.Context, _ string) (storage.ServerStatus, error) {
+	return c.status, c.err
+}
+
+func TestSendCommand_PausedServerIsRefused(t *testing.T) {
+	store := testStore(t)
+	if err := store.DB().Create(&storage.Server{
+		ID: "s-paused", Name: "p", DataPath: t.TempDir(), ContainerID: "c1",
+		Status: storage.StatusPaused,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	exec := &fakeExecutor{output: "must-not-run"}
+	s := testSender(store, exec, nil)
+
+	_, err := s.SendCommand(context.Background(), "s-paused", "list")
+	if !errors.Is(err, ErrServerPaused) {
+		t.Fatalf("error = %v, want ErrServerPaused", err)
+	}
+	if !strings.Contains(err.Error(), "resume the server before sending commands") {
+		t.Fatalf("error = %v, want the actionable resume hint", err)
+	}
+	if exec.calls != 0 {
+		t.Fatalf("exec calls = %d, want 0 (refused before any I/O)", exec.calls)
+	}
+}
+
+func TestSendCommand_ContainerPausedOutsideThePanelIsRefused(t *testing.T) {
+	store := testStore(t)
+	makeServer(t, store, "s-ext-paused", "c1")
+	// RCON disabled so the local path would otherwise reach the exec fallback.
+	off := false
+	if err := store.SaveServerConfig(context.Background(), &storage.ServerConfig{
+		ID: "cfg1", ServerID: "s-ext-paused", EnableRCON: &off,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exec := &checkerExecutor{fakeExecutor: fakeExecutor{output: "must-not-run"}, status: storage.StatusPaused}
+	s := testSender(store, exec, nil)
+
+	_, err := s.SendCommand(context.Background(), "s-ext-paused", "list")
+	if !errors.Is(err, ErrServerPaused) {
+		t.Fatalf("error = %v, want ErrServerPaused for a docker-paused container", err)
+	}
+	if exec.calls != 0 {
+		t.Fatalf("exec calls = %d, want 0", exec.calls)
+	}
+}
+
+func TestSendCommand_InspectFailureFailsOpen(t *testing.T) {
+	store := testStore(t)
+	makeServer(t, store, "s-inspect-err", "c1")
+	off := false
+	if err := store.SaveServerConfig(context.Background(), &storage.ServerConfig{
+		ID: "cfg1", ServerID: "s-inspect-err", EnableRCON: &off,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exec := &checkerExecutor{fakeExecutor: fakeExecutor{output: "ok"}, err: errors.New("daemon down")}
+	s := testSender(store, exec, nil)
+
+	out, err := s.SendCommand(context.Background(), "s-inspect-err", "list")
+	if err != nil || out != "ok" {
+		t.Fatalf("out=%q err=%v, want the usability guard to fail open", out, err)
+	}
+}
+
 func TestSendCommandRemoteNodeWithoutPoolFailsClosed(t *testing.T) {
 	store := testStore(t)
 	// Create a remote node
