@@ -363,12 +363,32 @@ function sortValue(summary: PlayerSummary, sortBy: SortOption): string | number 
 		case 'presence':
 			return presenceRank(summary.presence);
 		case 'lastSeen':
-			return summary.lastSeen ? Number(summary.lastSeen.seconds) : Number.NEGATIVE_INFINITY;
+			// Handled by the dedicated branch in filterAndSortPlayers: a
+			// never-observed identity has no timestamp at all and must not
+			// inherit a fake sentinel.
+			return 0;
 		case 'access':
 			return accessRank(summary);
 		default:
 			return '';
 	}
+}
+
+/**
+ * Last-seen ordering keeps identities with a real observation ahead of
+ * never-observed ones in BOTH directions of the sort, then orders observed
+ * rows by timestamp. A nil lastSeen is "no observation exists", not a time.
+ */
+function compareLastSeenObserved(a: PlayerSummary, b: PlayerSummary): number {
+	const aObserved = Boolean(a.lastSeen);
+	const bObserved = Boolean(b.lastSeen);
+	if (aObserved !== bObserved) return aObserved ? -1 : 1;
+	if (!aObserved) return 0;
+	const aSec = Number(a.lastSeen?.seconds ?? 0);
+	const bSec = Number(b.lastSeen?.seconds ?? 0);
+	if (aSec < bSec) return -1;
+	if (aSec > bSec) return 1;
+	return 0;
 }
 
 function compare(left: string | number, right: string | number): number {
@@ -395,8 +415,22 @@ export function filterAndSortPlayers(
 	);
 
 	matched.sort((a, b) => {
-		const primary = compare(sortValue(a, filter.sortBy), sortValue(b, filter.sortBy));
-		if (primary !== 0) return filter.sortDescending ? -primary : primary;
+		let primary: number;
+		if (filter.sortBy === 'lastSeen') {
+			// Never-observed identities stay after observed ones regardless of
+			// the sort direction; only observed rows flip with the arrow.
+			const aObserved = Boolean(a.lastSeen);
+			const bObserved = Boolean(b.lastSeen);
+			if (aObserved !== bObserved) return aObserved ? -1 : 1;
+			primary = compare(
+				Number(a.lastSeen?.seconds ?? 0),
+				Number(b.lastSeen?.seconds ?? 0)
+			);
+			if (primary !== 0) return filter.sortDescending ? -primary : primary;
+		} else {
+			primary = compare(sortValue(a, filter.sortBy), sortValue(b, filter.sortBy));
+			if (primary !== 0) return filter.sortDescending ? -primary : primary;
+		}
 		// Stable tie-break independent of input order.
 		return compare(identityKey(a), identityKey(b));
 	});

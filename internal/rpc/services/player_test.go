@@ -107,10 +107,19 @@ func (f *fakeNegotiator) Negotiate(context.Context, *storage.Server, *storage.Se
 
 type fakeSkin struct {
 	refreshed int
-	lookup    func(query string) identityLookup
+	// lastUUID/lastKind/getCalls record what the service asked for, so tests
+	// can assert which UUID a skin request was resolved to (a real online
+	// UUID from the server usercache, or the local placeholder).
+	lastUUID string
+	lastKind string
+	getCalls int
+	lookup   func(query string) identityLookup
 }
 
-func (f *fakeSkin) Get(context.Context, string, string) (skinAsset, error) {
+func (f *fakeSkin) Get(_ context.Context, uuid, kind string) (skinAsset, error) {
+	f.lastUUID = uuid
+	f.lastKind = kind
+	f.getCalls++
 	return skinAsset{Data: []byte("png"), ContentType: "image/png", Source: "identity_service", Confidence: "detected", ObservedAt: time.Now().UTC()}, nil
 }
 func (f *fakeSkin) Refresh(context.Context, string, string) (skinAsset, error) {

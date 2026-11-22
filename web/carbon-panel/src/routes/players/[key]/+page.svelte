@@ -89,6 +89,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let deepFieldsByTab = $state<Record<string, PlayerField[]>>({});
 	let deepNoteByTab = $state<Record<string, string>>({});
 	let skinRef = $state('');
+	// Whether the server reported a resolvable skin for this identity; while it
+	// is false the avatar skips the request instead of caching a placeholder.
+	let skinAvailable = $state(false);
 
 	let sectionLoading = $state<Record<string, boolean>>({});
 	let sectionError = $state<Record<string, string | null>>({});
@@ -109,6 +112,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		deepNoteByTab = {};
 		capabilities = [];
 		skinRef = '';
+		skinAvailable = false;
 		sectionLoading = {};
 		sectionError = {};
 		loadedSections = {};
@@ -156,8 +160,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (generation !== detailGeneration) return;
 			const match = response.players.find((p) => p.ref?.identityKey === key);
 			skinRef = match?.skinRef ?? '';
+			skinAvailable = match?.skinAvailable ?? false;
 		} catch {
-			if (generation === detailGeneration) skinRef = '';
+			if (generation === detailGeneration) {
+				skinRef = '';
+				skinAvailable = false;
+			}
 		}
 	}
 
@@ -317,6 +325,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					serverId={primaryServerId}
 					size="md"
 					refreshable
+					{skinAvailable}
+					showFullSkin
 				/>
 			{/if}
 		{/snippet}
@@ -390,12 +400,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<PlayerProvenance observation={detail.presenceObservation} compact />
 								</div>
 								<div>
-									<p class="mono-label">First / last seen</p>
+									<p class="mono-label">First recorded / last observed</p>
 									<p class="font-mono text-xs text-foreground">
-										{formatTimestamp(detail.firstSeen, 'unavailable')} · {formatTimestamp(
-											detail.lastSeen,
-											'unavailable'
-										)}
+										{formatTimestamp(detail.firstSeen, 'unavailable')} ·
+										{#if detail.lastSeen}
+											{formatTimestamp(detail.lastSeen, 'unavailable')}
+										{:else}
+											<span class="text-muted-foreground">Never observed</span>
+										{/if}
+									</p>
+									<p class="mt-1 text-xs text-muted-foreground">
+										First recorded is when this panel first learned of the identity; it is not a
+										presence claim.
 									</p>
 								</div>
 							</div>
