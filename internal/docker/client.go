@@ -1026,15 +1026,19 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// A remote daemon owns the bind source path. Creating it in the panel
 	// process would only create an unrelated local directory with the same
 	// name; CreateMountpoint asks Docker to create it on the target node.
-	// Work temp is a subdirectory of this bind. A local panel creates it
-	// with the sticky mode the game user can write. A remote daemon creates
-	// the same directory from the container mount, on the node that holds
-	// the world.
-	if !c.IsRemote() {
-		if err := os.MkdirAll(dataPath, 0755); err != nil {
+	// Work temp is a subdirectory of this bind. A panel whose filesystem can
+	// see the server data (same host, or a translated mapping such as a
+	// \\wsl.localhost UNC view of the daemon's filesystem) pre-creates the
+	// directory with the sticky mode the game user can write, using the
+	// panel-side path: dataPath is the daemon-side translation and is not a
+	// valid path in this process's filesystem. A node that declares its own
+	// storage layout has no panel-visible path at all, so the container
+	// mount creates the directory on the node that holds the world.
+	if c.nodeStorage.IsLocal || c.nodeStorage.StorageRoot == "" {
+		if err := os.MkdirAll(server.DataPath, 0755); err != nil {
 			return "", fmt.Errorf("failed to create server data directory: %w", err)
 		}
-		if err := ensureServerWorkTemp(dataPath); err != nil {
+		if err := ensureServerWorkTemp(server.DataPath); err != nil {
 			return "", fmt.Errorf("failed to create server work temp directory: %w", err)
 		}
 	}
