@@ -43,8 +43,9 @@ func readAt(r io.ReaderAt, buf []byte, offset int64) error {
 
 // readSurfaceInSpan reads the selected sector range only. The first region
 // sector contains the 1024 packed locations and the second their Unix
-// timestamps.
-func readSurfaceInSpan(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget, span worldlib.JavaDimensionSpan) (worldlib.JavaChunkSurface, error) {
+// timestamps. surfaceUnderRoof passes the dimension's bedrock-roof policy to
+// the surface scan.
+func readSurfaceInSpan(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget, span worldlib.JavaDimensionSpan, surfaceUnderRoof bool) (worldlib.JavaChunkSurface, error) {
 	var result worldlib.JavaChunkSurface
 	location := binary.BigEndian.Uint32(entry)
 	first, count := int64(location>>8), int(location&0xff)
@@ -81,7 +82,7 @@ func readSurfaceInSpan(ctx context.Context, r io.ReaderAt, entry []byte, budget 
 	if err != nil {
 		return result, err
 	}
-	return worldlib.ParseJavaChunkSurfaceInSpan(raw, span)
+	return worldlib.ParseJavaChunkSurfaceInSpan(raw, span, surfaceUnderRoof)
 }
 
 func unpackChunk(ctx context.Context, compression byte, packed []byte, budget *readBudget) ([]byte, error) {

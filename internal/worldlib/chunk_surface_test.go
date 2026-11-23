@@ -65,14 +65,14 @@ func TestSupportsJavaDataVersionBoundaries(t *testing.T) {
 // a chunk whose yPos does not match the span, or whose heightmap packing does
 // not match the span's bit width, is refused instead of misrendered.
 func TestParseJavaChunkSurfaceInSpanChecksLayout(t *testing.T) {
-	if _, err := ParseJavaChunkSurfaceInSpan(nil, JavaDimensionSpan{MinY: 3, MaxY: 200}); err == nil || !strings.Contains(err.Error(), "span") {
+	if _, err := ParseJavaChunkSurfaceInSpan(nil, JavaDimensionSpan{MinY: 3, MaxY: 200}, false); err == nil || !strings.Contains(err.Error(), "span") {
 		t.Fatalf("unaligned span accepted: %v", err)
 	}
-	if _, err := ParseJavaChunkSurfaceInSpan(nil, JavaDimensionSpan{MinY: 100, MaxY: 64}); err == nil || !strings.Contains(err.Error(), "span") {
+	if _, err := ParseJavaChunkSurfaceInSpan(nil, JavaDimensionSpan{MinY: 100, MaxY: 64}, false); err == nil || !strings.Contains(err.Error(), "span") {
 		t.Fatalf("inverted span accepted: %v", err)
 	}
 	overworld := buildSurfaceChunk(0, 0, 3955, JavaOverworldSpan)
-	if _, err := ParseJavaChunkSurfaceInSpan(overworld, JavaNetherSpan); !errors.Is(err, ErrJavaChunkUnsupported) {
+	if _, err := ParseJavaChunkSurfaceInSpan(overworld, JavaNetherSpan, false); !errors.Is(err, ErrJavaChunkUnsupported) {
 		t.Fatalf("overworld layout accepted as nether: %v", err)
 	}
 	if _, err := ParseJavaChunkSurface(overworld); err != nil {

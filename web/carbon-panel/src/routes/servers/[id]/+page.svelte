@@ -122,17 +122,20 @@ one at https://mozilla.org/MPL/2.0/.
 		subViewTabs.find((tab) => tab.id === detailUrl.searchParams.get('tab'))?.id ?? 'overview'
 	);
 
-	// OSS-464: the editable sections (Overview → Server Settings, Configuration)
-	// stay mounted once visited so unsaved edits — and their registry entries —
-	// survive tab switches. Deep links start with their target already visited.
-	const persistentTabs: ReadonlySet<string> = new Set(['overview', 'configuration']);
+	// OSS-464: the editable sections (Overview → Server Settings, Configuration,
+	// Routing) stay mounted once visited so unsaved edits — and their registry
+	// entries — survive tab switches. Deep links start with their target
+	// already visited.
+	const persistentTabs: ReadonlySet<string> = new Set(['overview', 'configuration', 'routing']);
 	// The on-demand placeholder panels only cover the tabs that mount on demand.
 	const transientTabs = subViewTabs.filter((tab) => !persistentTabs.has(tab.id));
 	let visitedOverview = $state(activeTab === 'overview');
 	let visitedConfiguration = $state(activeTab === 'configuration');
+	let visitedRouting = $state(activeTab === 'routing');
 	$effect(() => {
 		if (activeTab === 'overview') visitedOverview = true;
 		else if (activeTab === 'configuration') visitedConfiguration = true;
+		else if (activeTab === 'routing') visitedRouting = true;
 	});
 
 	// Older copied Configuration links contained only a category or property fragment.
@@ -757,6 +760,38 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 
 			<!--
+					OSS-464: CarbonInactiveTabPanels only covers the transient tabs, so
+					a persistent tab that has never been visited would leave its tab
+					button's aria-controls pointing at a nonexistent panel id. Inert
+					placeholder panels hold the id until the keep-mounted panel below
+					takes it over on first visit.
+				-->
+			{#if !visitedOverview}
+				<div
+					id="server-detail-tabs-panel-overview"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-overview"
+					hidden
+				></div>
+			{/if}
+			{#if !visitedConfiguration}
+				<div
+					id="server-detail-tabs-panel-configuration"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-configuration"
+					hidden
+				></div>
+			{/if}
+			{#if !visitedRouting}
+				<div
+					id="server-detail-tabs-panel-routing"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-routing"
+					hidden
+				></div>
+			{/if}
+
+			<!--
 					OSS-464: the editable sections stay mounted once visited so unsaved
 					edits — and their dirty-section registry entries — survive tab
 					switches. Inactive visits keep them in the DOM behind the hidden
@@ -803,6 +838,26 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="flex h-full min-h-0 flex-1 flex-col">
 						<svelte:boundary>
 							<ServerConfiguration {server} />
+							{#snippet failed(error, reset)}
+								{@render tabFailed(error, reset)}
+							{/snippet}
+						</svelte:boundary>
+					</div>
+				</div>
+			{/if}
+
+			{#if visitedRouting}
+				<div
+					id="server-detail-tabs-panel-routing"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-routing"
+					hidden={activeTab !== 'routing'}
+					class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+					tabindex="0"
+				>
+					<div class="flex h-full min-h-0 flex-1 flex-col">
+						<svelte:boundary>
+							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
 							{#snippet failed(error, reset)}
 								{@render tabFailed(error, reset)}
 							{/snippet}
@@ -864,12 +919,6 @@ one at https://mozilla.org/MPL/2.0/.
 										{/key}
 									</div>
 								</ServerTabPanel>
-							{:else if activeTab === 'routing'}
-								<ServerRouting
-									{server}
-									bind:router={routingInfo}
-									active={activeTab === 'routing'}
-								/>
 							{/if}
 
 							{#snippet failed(error, reset)}
@@ -915,7 +964,7 @@ one at https://mozilla.org/MPL/2.0/.
 		message={deleteDisposition === 'export'
 			? 'A zip of the world downloads now. The container, the world, and this server stay in the panel.'
 			: deleteDisposition === 'detach'
-				? 'The container keeps running and the world stays on disk. The panel forgets this server. Its host port stays reserved. A proxy name is dropped the next time the panel starts.'
+				? 'The container keeps running and the world stays on disk. The server is removed from the panel. Its host port stays reserved; the proxy name is dropped at the next panel start.'
 				: deleteDisposition === 'keep'
 					? 'This stops and removes the container and drops the server from the panel. The world directory stays on disk.'
 					: 'This will stop and remove the container, delete all files and data, and remove mods and configurations. This action cannot be undone.'}

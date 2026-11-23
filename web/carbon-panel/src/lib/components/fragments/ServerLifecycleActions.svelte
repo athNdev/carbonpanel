@@ -49,7 +49,7 @@ one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={() => onaction('stop')}
 			disabled={actionLoading}
-			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[var(--button-danger-hover)] disabled:opacity-50"
 		>
 			<Square class="h-4 w-4 fill-current" />
 			<span>Stop</span>
@@ -59,7 +59,7 @@ one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={() => onaction('start')}
 			disabled={actionLoading}
-			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-primary px-4 font-sans text-sm text-white transition-colors hover:bg-[#0353e9] disabled:opacity-50"
+			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-primary px-4 font-sans text-sm text-white transition-colors hover:bg-[var(--button-primary-hover)] disabled:opacity-50"
 		>
 			{#if actionLoading}
 				<Loader2 class="h-4 w-4 animate-spin" />
@@ -72,7 +72,7 @@ one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={() => onaction('stop')}
 			disabled={actionLoading}
-			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[var(--button-danger-hover)] disabled:opacity-50"
 		>
 			<Square class="h-4 w-4 fill-current" />
 			<span>Stop</span>
@@ -109,7 +109,7 @@ one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={() => onaction('stop')}
 			disabled={actionLoading}
-			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[var(--button-danger-hover)] disabled:opacity-50"
 		>
 			<Square class="h-4 w-4 fill-current" />
 			<span>Stop</span>
@@ -119,7 +119,7 @@ one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={() => onaction('stop')}
 			disabled={actionLoading}
-			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+			class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-destructive px-4 font-sans text-sm text-white transition-colors hover:bg-[var(--button-danger-hover)] disabled:opacity-50"
 		>
 			{#if actionLoading}
 				<Loader2 class="h-4 w-4 animate-spin" />

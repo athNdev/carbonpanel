@@ -105,26 +105,56 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let formData = $state<UpdateServerRequest>(serverFormValues(server));
 
-	let isDirty = $derived(
-		formData.name !== server.name ||
-			formData.description !== (server.description || '') ||
-			formData.port !== server.port ||
-			formData.maxPlayers !== server.maxPlayers ||
-			formData.memory !== server.memory ||
-			formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
-			formData.mcVersion !== server.mcVersion ||
-			formData.dockerImage !== server.dockerImage ||
-			formData.detached !== server.detached ||
-			formData.autoStart !== server.autoStart ||
-			formData.tpsCommand !== (server.tpsCommand || '') ||
-			formData.autoHibernate !== server.autoHibernate ||
-			formData.idleTimeoutMinutes !== server.idleTimeoutMinutes ||
-			formData.autoDeepSleep !== server.autoDeepSleep ||
-			formData.deepSleepTimeoutMinutes !== server.deepSleepTimeoutMinutes ||
-			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-			safeToString($state.snapshot(formData.dockerOverrides)) !==
-				safeToString(server.dockerOverrides)
-	);
+	/**
+	 * OSS-464: the dirty baseline — a deep snapshot of the form captured at
+	 * load and re-captured to the sent values after each successful save.
+	 * Comparing against this baseline instead of the live `server` store keeps
+	 * background inventory polls and a failed post-save refresh from sticking
+	 * the gate: the section is clean the moment its save resolves.
+	 */
+	let baseline = $state<UpdateServerRequest>(serverFormValues(server));
+
+	/**
+	 * Deep plain snapshot of the form state. `$typeName` is dropped so that
+	 * rebuilding a message from a snapshot always compiles a fresh, independent
+	 * form object instead of aliasing the snapshot it came from.
+	 */
+	function snapshotForm(source: UpdateServerRequest): UpdateServerRequest {
+		return create(
+			UpdateServerRequestSchema,
+			JSON.parse(
+				JSON.stringify($state.snapshot(source), (key, value) =>
+					key === '$typeName' ? undefined : value
+				)
+			)
+		);
+	}
+
+	/** Field-by-field comparison of the form against its captured baseline. */
+	function formDiffersFromBaseline(form: UpdateServerRequest): boolean {
+		return (
+			form.name !== baseline.name ||
+			form.description !== baseline.description ||
+			form.port !== baseline.port ||
+			form.maxPlayers !== baseline.maxPlayers ||
+			form.memory !== baseline.memory ||
+			form.modLoader !== baseline.modLoader ||
+			form.mcVersion !== baseline.mcVersion ||
+			form.dockerImage !== baseline.dockerImage ||
+			form.detached !== baseline.detached ||
+			form.autoStart !== baseline.autoStart ||
+			form.tpsCommand !== baseline.tpsCommand ||
+			form.autoHibernate !== baseline.autoHibernate ||
+			form.idleTimeoutMinutes !== baseline.idleTimeoutMinutes ||
+			form.autoDeepSleep !== baseline.autoDeepSleep ||
+			form.deepSleepTimeoutMinutes !== baseline.deepSleepTimeoutMinutes ||
+			safeToString(form.additionalPorts) !== safeToString(baseline.additionalPorts) ||
+			safeToString($state.snapshot(form.dockerOverrides)) !==
+				safeToString($state.snapshot(baseline.dockerOverrides))
+		);
+	}
+
+	let isDirty = $derived(formDiffersFromBaseline(formData));
 
 	// Available options
 	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
@@ -172,8 +202,10 @@ one at https://mozilla.org/MPL/2.0/.
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 
-			// Reset form data to match new server
+			// Reset form data to match new server; the baseline resets with it so
+			// the previous server's edits cannot gate this server's actions.
 			formData = serverFormValues(server);
+			baseline = serverFormValues(server);
 			saving = false;
 			// Reload options for new server
 			loadOptions();
@@ -359,14 +391,20 @@ one at https://mozilla.org/MPL/2.0/.
 	 * Shared save path for the section button and the floating action bar
 	 * (OSS-464). Shows the section's own toasts either way; `rethrow` lets the
 	 * bar aggregate failures while the button path keeps swallowing them. On
-	 * failure the baseline never moves, so the section stays dirty.
+	 * success the baseline moves to the sent values (before the fire-and-forget
+	 * store refresh lands), so the section is clean immediately; on failure the
+	 * baseline never moves, so the section stays dirty.
 	 */
 	async function saveSettings(rethrow: boolean): Promise<void> {
 		if (!isDirty) return;
 		saving = true;
+		// Capture what this request sends before awaiting it: edits typed while
+		// the request is in flight stay dirty against the sent baseline.
+		const sent = snapshotForm(formData);
 		try {
 			const request = create(UpdateServerRequestSchema, formData);
 			await rpcClient.server.updateServer(request);
+			baseline = sent;
 			toast.success('Server settings updated. Restart the server to apply changes.');
 			onUpdate?.();
 		} catch (error) {
@@ -386,7 +424,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// OSS-464: the floating bar and the lifecycle gate read this section's
 	// dirty state, save and undo through the registry. The closures keep the
 	// reactivity: the bar's $derived tracks isDirty/saving through them, and
-	// undo rebuilds the form from the live server values (client-side only).
+	// undo reverts the form to the captured baseline (client-side only).
 	onMount(() => {
 		dirtySections.register({
 			id: 'overview',
@@ -394,7 +432,7 @@ one at https://mozilla.org/MPL/2.0/.
 			isDirty: () => isDirty,
 			save: () => saveSettings(true),
 			undo: () => {
-				formData = serverFormValues(server);
+				formData = snapshotForm(baseline);
 			},
 			saving: () => saving
 		});

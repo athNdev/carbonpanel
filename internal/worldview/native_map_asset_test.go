@@ -123,7 +123,7 @@ func TestNativeAssetServesDimensionsAndFreshnessFixture(t *testing.T) {
 	writeFixtureRegion(t, service, serverID, filepath.Join(level, "region", "r.0.0.mca"),
 		fixtureRegion(t, map[[2]int32][]byte{{0, 0}: fixtureChunkNBT(0, 0, 3953, "full", -64, 319)}))
 	writeFixtureRegion(t, service, serverID, filepath.Join(level, "DIM-1", "region", "r.0.0.mca"),
-		fixtureRegion(t, map[[2]int32][]byte{{0, 0}: fixtureChunkNBT(0, 0, 4903, "full", 0, 127)}))
+		fixtureRegion(t, map[[2]int32][]byte{{0, 0}: fixtureChunkNBT(0, 0, 4903, "full", 0, 255)}))
 
 	native := service.deps.Native
 	scope, err := resolveNativeScope(ctx, f, server, nil)

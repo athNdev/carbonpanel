@@ -18,6 +18,7 @@ const css = read('../../app.css');
 const registry = read('./dirty-sections.svelte.ts');
 const settings = read('../components/server-settings.svelte');
 const configuration = read('../components/server-configuration.svelte');
+const routing = read('../components/server-routing.svelte');
 
 test('the bar anchors to the bottom center and never overflows the viewport', () => {
 	assert.match(bar, /data-carbon-floating-action-bar/, 'stable mount marker');
@@ -57,6 +58,24 @@ test('the bar re-fires the shake and announces state to screen readers', () => {
 	assert.match(bar, /motionDuration\(/, 'JS-triggered state honors the reduced-motion gate');
 	assert.match(bar, /role="status"/, 'aria-live announcements for dirty and save/undo states');
 	assert.match(bar, /aria-live="polite"/);
+});
+
+test('a refusal moves focus to the bar without stealing focus from inside it', () => {
+	assert.match(bar, /tabindex="-1"/, 'the bar container is programmatically focusable');
+	assert.match(
+		bar,
+		/!barHost\.contains\(document\.activeElement\)/,
+		'focus already inside the bar is not stolen'
+	);
+	assert.match(bar, /barHost\.focus\(/, 'focus moves to the bar when the shake tick fires');
+});
+
+test('save all skips sections that became clean mid-run', () => {
+	assert.match(
+		bar,
+		/if \(!entry\.isDirty\(\)\) continue;/,
+		'a section whose chip save completed while Save all runs is not re-saved'
+	);
 });
 
 test('the registry exposes the brief entry shape and is idempotent by id', () => {
@@ -104,11 +123,32 @@ test('start, restart and force recreate are gated on unsaved edits; stop and del
 test('dirty sections stay mounted across tab switches', () => {
 	assert.match(page, /visitedOverview/);
 	assert.match(page, /visitedConfiguration/);
+	assert.match(page, /visitedRouting/);
 	assert.match(page, /hidden=\{activeTab !== 'overview'\}/);
 	assert.match(page, /hidden=\{activeTab !== 'configuration'\}/);
+	assert.match(page, /hidden=\{activeTab !== 'routing'\}/);
 	assert.match(page, /server-detail-tabs-panel-overview/);
 	assert.match(page, /server-detail-tabs-panel-configuration/);
+	assert.match(page, /server-detail-tabs-panel-routing/);
+	assert.match(
+		page,
+		/new Set\(\['overview', 'configuration', 'routing'\]\)/,
+		'routing is registered, persistent and keep-mounted with the other editable sections'
+	);
 	assert.match(page, /persistentTabs/, 'transient tabs keep mounting on demand');
+});
+
+test('unvisited persistent tabs render placeholder panels so aria-controls resolves', () => {
+	// CarbonInactiveTabPanels only covers the transient tabs, so a deep link to
+	// ?tab=configuration would leave the Overview/Configuration tab buttons
+	// referencing nonexistent panel ids until first visit.
+	const placeholder = (id: string) =>
+		new RegExp(
+			`id="server-detail-tabs-panel-${id}"\\s+role="tabpanel"\\s+aria-labelledby="server-detail-tabs-tab-${id}"\\s+hidden\\s*>`
+		);
+	assert.match(page, placeholder('overview'), 'inert placeholder until first visit');
+	assert.match(page, placeholder('configuration'), 'inert placeholder until first visit');
+	assert.match(page, placeholder('routing'), 'inert placeholder until first visit');
 });
 
 test('the page mounts the bar and deep-links chips through tab selection', () => {
@@ -131,5 +171,52 @@ test('settings and configuration register and keep their existing save semantics
 		configuration,
 		/rpcClient\.config\.updateServerConfig\(/,
 		'the save RPC is unchanged'
+	);
+
+	assert.match(routing, /id: 'routing'/);
+	assert.match(routing, /label: 'Routing'/);
+	assert.match(routing, /save: \(\) => saveRouting\(true\)/);
+	assert.match(routing, /unregister\('routing'\)/, 'unmount cleanup cannot leave a dead gate');
+	assert.match(routing, /rpcClient\.proxy\.updateServerRouting\(/, 'the save RPC is unchanged');
+});
+
+test('settings dirty state uses a captured baseline, not the live server store', () => {
+	assert.match(
+		settings,
+		/let baseline = \$state<UpdateServerRequest>\(serverFormValues\(server\)\)/,
+		'the baseline is captured at load'
+	);
+	assert.match(
+		settings,
+		/let isDirty = \$derived\(formDiffersFromBaseline\(formData\)\)/,
+		'isDirty compares the form against the baseline'
+	);
+	assert.doesNotMatch(
+		settings,
+		/formData\.name !== server\.name/,
+		'the live-store comparison is gone'
+	);
+	assert.match(
+		settings,
+		/baseline = sent;/,
+		'a successful save re-baselines to the sent values, before the store refresh lands'
+	);
+	assert.match(
+		settings,
+		/formData = snapshotForm\(baseline\);/,
+		'undo reverts to the captured baseline'
+	);
+});
+
+test('configuration keeps edits typed during an in-flight save', () => {
+	assert.match(
+		configuration,
+		/const inFlightValues = new SvelteMap\(currentValues\);/,
+		'the in-flight form is captured before the request'
+	);
+	assert.match(
+		configuration,
+		/rebaselineAfterSave\(sent, inFlightValues, inFlightEnabled\);/,
+		'the response refresh re-baselines to the sent values and restores concurrent edits'
 	);
 });

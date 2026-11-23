@@ -409,7 +409,9 @@ func newSafeHTTPClient(timeout time.Duration, allowPrivate bool, checkRedirectUR
 	}
 
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		// SSRF-safe clients must not inherit env proxies: a CONNECT tunnel makes
+		// DialContext see the proxy address, bypassing the dial-time IP guard.
+		Proxy:                 nil,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,

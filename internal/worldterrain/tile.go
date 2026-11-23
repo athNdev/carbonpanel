@@ -156,7 +156,7 @@ func RenderDimensionTile(ctx context.Context, store ReadStorage, level string, d
 				tile.MissingChunks++
 				continue
 			}
-			chunk, err := readSurfaceInSpan(ctx, source, entry, &budget, dimension.Span)
+			chunk, err := readSurfaceInSpan(ctx, source, entry, &budget, dimension.Span, dimension.SurfaceUnderRoof)
 			if ctx.Err() != nil {
 				return Tile{}, ctx.Err()
 			}
@@ -322,9 +322,6 @@ func shadeGrid(dimension Dimension, noSurface int16, grid []int16, blocks []stri
 	for z := 0; z < TileBlocks; z++ {
 		for x := 0; x < TileBlocks; x++ {
 			index := z*TileBlocks + x
-			if dimension.HideBedrockSurface && blocks[index] == "minecraft:bedrock" {
-				continue
-			}
 			height := int(grid[index])
 			if height == int(noSurface) {
 				continue

@@ -9,7 +9,8 @@
 	reports the first failure; "Undo" reverts each section to its loaded
 	snapshot without an RPC. The server page refuses gated lifecycle actions
 	while sections are dirty and calls dirtySections.requestShake(), which
-	re-fires the carbon-shake animation through the data-shake attribute.
+	re-fires the carbon-shake animation through the data-shake attribute and
+	moves focus to the bar (brief B3: "the bar shakes, focus moves to it").
 -->
 
 <script lang="ts">
@@ -33,6 +34,7 @@
 	let savingAll = $state(false);
 	let shaking = $state(false);
 	let announcement = $state('');
+	let barHost = $state<HTMLDivElement | null>(null);
 
 	// Reading isDirty()/saving() inside a $derived tracks each section's own
 	// Svelte 5 state through the registered closure, so the bar follows edits
@@ -54,12 +56,17 @@
 	// The page refuses a gated action and bumps the shake counter. Re-firing
 	// the attribute from a clean frame keeps repeated refusals visible; under
 	// reduced motion the duration snaps to zero and no reset timer is armed.
+	// B3: the refusal also moves focus to the bar so keyboard users land on
+	// the unsaved-changes context. Focus already inside the bar is kept.
 	$effect(() => {
 		if (!$dirtySectionShakeTick) return;
 		announcement = 'Unsaved changes must be saved or undone first.';
 		shaking = false;
 		const frame = requestAnimationFrame(() => {
 			shaking = true;
+			if (barHost && !barHost.contains(document.activeElement)) {
+				barHost.focus({ preventScroll: true });
+			}
 		});
 		const duration = motionDuration(shakeMs);
 		const timer = duration > 0 ? window.setTimeout(() => (shaking = false), duration) : undefined;
@@ -78,6 +85,11 @@
 			// Sequential by design: the first failure stops the run and reports.
 			for (const entry of dirtyList) {
 				if (failure) break;
+				// dirtyList is the snapshot from when Save all started: a section
+				// that became clean mid-run (its own chip's save completed while
+				// this run goes) must be skipped — re-saving it would reject with
+				// "No changes to save" and toast a spurious failure.
+				if (!entry.isDirty()) continue;
 				// A save already in flight from the section itself is skipped, not
 				// double-submitted; it stays dirty until its own request settles.
 				if (entry.saving()) continue;
@@ -127,10 +139,12 @@
 		transition:fly={{ y: 8, duration: motionDuration(200), easing: cubicOut }}
 	>
 		<div
+			bind:this={barHost}
 			data-carbon-floating-action-bar="true"
 			data-shake={shaking ? 'true' : undefined}
 			role="group"
 			aria-label="Unsaved changes"
+			tabindex="-1"
 			class="carbon-floating-action-bar mx-3 mb-3 max-w-full border border-border bg-card p-3 shadow-lg sm:mx-0 sm:mb-0 sm:max-w-2xl"
 		>
 			<p class="sr-only" role="status" aria-live="polite">{announcement}</p>

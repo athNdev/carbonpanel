@@ -8,17 +8,17 @@ components before claiming that a product surface uses or conforms to them.
 
 ## Timing
 
-| Token | Value | Intended use |
-| --- | --- | --- |
-| `--motion-instant` | 100 ms | Frequent hover, press and focus-adjacent feedback. |
-| `--motion-page` | 140 ms | Short route crossfades where supported. |
-| `--motion-fast` | 150 ms | Small state and indicator changes. |
-| `--motion-base` | 200 ms | Brief entrance of a new element. |
-| `--motion-slow` | 300 ms | Deliberate, infrequent feedback. |
-| `--motion-surface` | 500 ms | Infrequent larger surface changes; avoid blocking input. |
-| `--motion-stagger-step` | 40 ms | Optional short stagger for a small group, never for routine data updates. |
-| `--carbon-motion-pulse-duration` | 1600 ms | Optional loading/status pulse with a persistent text cue. |
-| `--carbon-motion-shimmer-duration` | 1400 ms | Optional loading skeleton shimmer. |
+| Token                              | Value   | Intended use                                                              |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------- |
+| `--motion-instant`                 | 100 ms  | Frequent hover, press and focus-adjacent feedback.                        |
+| `--motion-page`                    | 140 ms  | Short route crossfades where supported.                                   |
+| `--motion-fast`                    | 150 ms  | Small state and indicator changes.                                        |
+| `--motion-base`                    | 200 ms  | Brief entrance of a new element.                                          |
+| `--motion-slow`                    | 300 ms  | Deliberate, infrequent feedback.                                          |
+| `--motion-surface`                 | 500 ms  | Infrequent larger surface changes; avoid blocking input.                  |
+| `--motion-stagger-step`            | 40 ms   | Optional short stagger for a small group, never for routine data updates. |
+| `--carbon-motion-pulse-duration`   | 1600 ms | Optional loading/status pulse with a persistent text cue.                 |
+| `--carbon-motion-shimmer-duration` | 1400 ms | Optional loading skeleton shimmer.                                        |
 
 `--ease-out-quart` (`cubic-bezier(0.25, 1, 0.5, 1)`) is the default for
 responsive changes. The shared source also defines out-quint, out-expo,
@@ -39,12 +39,13 @@ inventing new easing curves for routine interactions.
 
 ## Animation contracts
 
-| Token | Behavior | When to use |
-| --- | --- | --- |
-| `--carbon-animation-fade-in` | Opacity from 0 to 1 over 200 ms. | A new, infrequent piece of feedback. |
-| `--carbon-animation-rise-in` | Fade in while moving up 6 px over 200 ms. | A new surface or result where entrance adds orientation. |
-| `--carbon-animation-pulse` | Opacity cycles between 1 and 0.35 over 1600 ms. | Loading or ongoing status with a visible label. |
-| `--carbon-animation-shimmer` | Background position moves across a skeleton over 1400 ms. | A short-lived placeholder for content that is actually loading. |
+| Token                              | Behavior                                                                                                           | When to use                                                                                                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--carbon-animation-fade-in`       | Opacity from 0 to 1 over 200 ms.                                                                                   | A new, infrequent piece of feedback.                                                                                                                                                                                         |
+| `--carbon-animation-rise-in`       | Fade in while moving up 6 px over 200 ms.                                                                          | A new surface or result where entrance adds orientation.                                                                                                                                                                     |
+| `--carbon-animation-pulse`         | Opacity cycles between 1 and 0.35 over 1600 ms.                                                                    | Loading or ongoing status with a visible label.                                                                                                                                                                              |
+| `--carbon-animation-shimmer`       | Background position moves across a skeleton over 1400 ms.                                                          | A short-lived placeholder for content that is actually loading.                                                                                                                                                              |
+| `carbon-shake` (app.css, no token) | TranslateX oscillation, ±4 px decaying to ±2 px, two cycles of `--motion-slow`, re-fired by toggling `data-shake`. | A refused gated action on the floating action bar only. Always paired with a live-region announcement and a toast naming the blocked action; both reduced-motion paths zero the duration and the pairing carries the reason. |
 
 The tokens refer to `carbon-ds-*` keyframes in the canonical CSS source.
 No animation is applied automatically. Avoid staging routine content or repeated polling
@@ -63,11 +64,11 @@ understandable and operable.
 
 ## Elevation and shadows
 
-| Role | Token | Use |
-| --- | --- | --- |
-| Flat | `--carbon-shadow-none` | Page sections, standard cards and dense data. |
-| Raised | `--carbon-shadow-raised` | A non-modal floating menu or popover that needs separation. |
-| Overlay | `--carbon-shadow-overlay` | A dialog or similarly prominent floating surface. |
+| Role    | Token                     | Use                                                         |
+| ------- | ------------------------- | ----------------------------------------------------------- |
+| Flat    | `--carbon-shadow-none`    | Page sections, standard cards and dense data.               |
+| Raised  | `--carbon-shadow-raised`  | A non-modal floating menu or popover that needs separation. |
+| Overlay | `--carbon-shadow-overlay` | A dialog or similarly prominent floating surface.           |
 
 The light and dark themes define layered, translucent black shadows with
 stronger opacity in dark mode. Use a structural border when a boundary,

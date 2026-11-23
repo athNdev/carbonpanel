@@ -363,6 +363,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 
 		store.beginInstall();
+		// Identity captured before any await: a close/reopen or a re-selection
+		// while the RPC is in flight makes this continuation stale. It must
+		// then not toast, flip installed flags, close the version view or
+		// release the installing flag of a newer install (E7 — the same
+		// re-check the wizard path keeps).
+		const versionId = selectedVersion.id;
+		const staleAfter = (): boolean =>
+			!open || store.selectedResult !== mod || store.selectedVersion?.id !== versionId;
+		let currentInstall = true;
 		try {
 			const { loader: loaderVal, mcVersion: versionVal } = browseTarget();
 			const platform = mod.platform;
@@ -385,6 +394,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				versionVal,
 				visited
 			);
+			if (staleAfter()) {
+				currentInstall = false;
+				return;
+			}
 			items.push(...depItems);
 
 			const unresolved = lastDependencyPlan?.unresolved ?? [];
@@ -399,6 +412,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				},
 				unresolvedCount: unresolved.length
 			});
+			if (staleAfter()) {
+				currentInstall = false;
+				return;
+			}
 			// Unresolved dependencies become outcome rows, never a silent skip (E9).
 			store.appendOutcomes(
 				unresolved.map((dep) => ({
@@ -424,12 +441,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				);
 			}
 		} catch (err) {
+			if (staleAfter()) {
+				currentInstall = false;
+				return;
+			}
 			console.error('Failed to install mod:', err);
 			toast.error(
 				(err instanceof Error ? err.message : undefined) || 'Installation request failed'
 			);
 		} finally {
-			store.endInstall();
+			// Only the live invocation may release the region: a stale one must
+			// not clear installing while a newer install is still in flight.
+			if (currentInstall) store.endInstall();
 		}
 	}
 

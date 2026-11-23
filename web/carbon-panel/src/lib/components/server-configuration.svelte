@@ -310,6 +310,65 @@ one at https://mozilla.org/MPL/2.0/.
 	class ConfigurationSaveError extends Error {}
 
 	/**
+	 * OSS-464: after a successful save, move the baseline to exactly what was
+	 * sent and restore any entry the user edited while the request was in
+	 * flight as a dirty edit against that baseline — nothing typed during a
+	 * save is silently dropped by the response refresh (same convention as
+	 * Server Settings).
+	 */
+	function rebaselineAfterSave(
+		sent: Record<string, string>,
+		inFlightValues: ReadonlyMap<string, string | null>,
+		inFlightEnabled: ReadonlySet<string>
+	): void {
+		const baselineValues = new SvelteMap(originalValues);
+		const baselineEnabled = new SvelteSet(originalEnabled);
+		const editedValues = new SvelteMap(currentValues);
+		const editedEnabled = new SvelteSet(currentEnabled);
+
+		for (const [key, value] of Object.entries(sent)) {
+			const sentValue = value === '' ? null : value;
+			const sentOn = value !== '';
+			baselineValues.set(key, sentValue);
+			if (sentOn) baselineEnabled.add(key);
+			else baselineEnabled.delete(key);
+
+			const editedValue = inFlightValues.get(key) ?? null;
+			const editedOn = inFlightEnabled.has(key);
+			if (editedValue === sentValue && editedOn === sentOn) {
+				// The entry still matches what was sent: it is clean now.
+				editedValues.set(key, sentValue);
+				if (sentOn) editedEnabled.add(key);
+				else editedEnabled.delete(key);
+			} else {
+				// Edited while the save ran: keep it as a dirty edit.
+				editedValues.set(key, editedValue);
+				if (editedOn) editedEnabled.add(key);
+				else editedEnabled.delete(key);
+			}
+		}
+
+		// Entries outside the sent batch: an edit typed mid-flight for a key
+		// that was not dirty when the save started must also survive.
+		for (const [key, value] of inFlightValues) {
+			if (key in sent) continue;
+			if (
+				value !== (baselineValues.get(key) ?? null) ||
+				inFlightEnabled.has(key) !== baselineEnabled.has(key)
+			) {
+				editedValues.set(key, value ?? null);
+				if (inFlightEnabled.has(key)) editedEnabled.add(key);
+				else editedEnabled.delete(key);
+			}
+		}
+
+		originalValues = baselineValues;
+		originalEnabled = baselineEnabled;
+		currentValues = editedValues;
+		currentEnabled = editedEnabled;
+	}
+
+	/**
 	 * Shared save core: validates, persists and refreshes. Throws on failure —
 	 * the callers own the toasts so the section buttons and the floating bar
 	 * keep identical feedback.
@@ -343,6 +402,11 @@ one at https://mozilla.org/MPL/2.0/.
 		if (onSave) {
 			await onSave(updates);
 		} else if (server) {
+			// Capture the form as the user sees it while the request is in
+			// flight; the response refresh must not drop concurrent edits.
+			const inFlightValues = new SvelteMap(currentValues);
+			const inFlightEnabled = new SvelteSet(currentEnabled);
+			const sent = { ...updates };
 			const response = await rpcClient.config.updateServerConfig({
 				serverId: server.id,
 				updates,
@@ -355,6 +419,7 @@ one at https://mozilla.org/MPL/2.0/.
 				idleMinutes: stageUpdate && applyWindow === 'idle' ? idleMinutes : 0
 			});
 			processConfig(response.categories);
+			rebaselineAfterSave(sent, inFlightValues, inFlightEnabled);
 			await loadBatch();
 		}
 	}

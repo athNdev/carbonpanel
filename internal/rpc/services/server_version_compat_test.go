@@ -216,3 +216,45 @@ func TestCommandBlockedReason(t *testing.T) {
 		t.Fatalf("observe failure reason = %q", got)
 	}
 }
+
+// TestUpdateServerRefusesIncompatibleDatapackDowngradeInCustomLevel guards the
+// A20 regression: datapacks live under the active level-name save folder, not
+// always "world", so the version gate must scan the configured level.
+func TestUpdateServerRefusesIncompatibleDatapackDowngradeInCustomLevel(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	log := logger.New()
+	dockerClient, err := docker.NewClient("tcp://127.0.0.1:1", log)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dockerClient.Close() })
+
+	dataPath := t.TempDir()
+	datapacks := filepath.Join(dataPath, "customworld", "datapacks")
+	require.NoError(t, os.MkdirAll(datapacks, 0o755))
+	writeTestZip(t, filepath.Join(datapacks, "fancy-pack.zip"), map[string]string{
+		"pack.mcmeta": `{"pack":{"pack_format":48}}`,
+	})
+
+	server := &storage.Server{
+		ID: "srv-compat-datapack-custom", Name: "Compat Datapack Custom", NodeID: "local",
+		Port: 25594, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderVanilla, MCVersion: "1.21.1",
+		ContainerID: "tracked", Status: storage.StatusStopped,
+		DataPath: dataPath,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	level := "customworld"
+	cfg.Level = &level
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	svc := newVersionCompatService(t, store, dockerClient, log)
+	_, err = svc.UpdateServer(ctx, connect.NewRequest(&v1.UpdateServerRequest{
+		Id: server.ID, McVersion: "1.20.1",
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "error = %v", err)
+	assert.Contains(t, err.Error(), "fancy-pack.zip")
+	assert.True(t, strings.Contains(err.Error(), "1.21"), "message should name the pack's target: %s", err.Error())
+}

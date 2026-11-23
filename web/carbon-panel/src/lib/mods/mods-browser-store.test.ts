@@ -302,6 +302,85 @@ describe('mods browser store — install region', () => {
 		assert.equal(store.installing, false);
 	});
 
+	test('a stale install response after close+reopen cannot touch a newer install', async () => {
+		const first = deferred<{
+			success: boolean;
+			installed: string[];
+			errors: string[];
+			message: string;
+		}>();
+		const second = deferred<{
+			success: boolean;
+			installed: string[];
+			errors: string[];
+			message: string;
+		}>();
+		const queue = [first.promise, second.promise];
+		const store = makeStore({
+			install: () =>
+				queue.shift() as Promise<{
+					success: boolean;
+					installed: string[];
+					errors: string[];
+					message: string;
+				}>
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
+		const runA = store.installServerItems({
+			items: [{ name: 'a', file_name: 'a.jar', download_url: 'u' }],
+			root: { platform: 'modrinth', id: 'a', title: 'a', version: '1', depCount: 0 }
+		});
+		store.closeDialog();
+		store.openDialog();
+		const runB = store.installServerItems({
+			items: [{ name: 'b', file_name: 'b.jar', download_url: 'u' }],
+			root: { platform: 'modrinth', id: 'b', title: 'b', version: '2', depCount: 0 }
+		});
+		assert.equal(store.installing, true, 'install B owns the region');
+		first.resolve({ success: true, installed: ['a.jar'], errors: [], message: 'ok' });
+		await runA;
+		assert.equal(
+			store.installing,
+			true,
+			'the stale response must not release the region while B is in flight'
+		);
+		assert.equal(store.installOutcomes.length, 0, "A's outcomes must be dropped");
+		assert.equal(store.sessionCount, 0, 'A must not append a session entry');
+		second.resolve({ success: true, installed: ['b.jar'], errors: [], message: 'ok' });
+		await runB;
+		assert.equal(store.installing, false, 'installing reflects B');
+		assert.deepEqual(
+			store.installOutcomes.map((row) => [row.label, row.tone]),
+			[['b', 'green']]
+		);
+		assert.equal(store.sessionCount, 1);
+		assert.equal(store.sessionInstalled[0].key, 'modrinth:b');
+		assert.equal(store.sessionInstalled[0].version, '2');
+	});
+
+	test('multi-item failures attribute each error to its own item (E10)', async () => {
+		const store = makeStore({
+			install: async () => ({
+				success: false,
+				installed: [],
+				errors: ['failed to download root-mod: HTTP 404', 'failed to save dep-mod: disk full'],
+				message: 'Failed to install selected mods'
+			})
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
+		await store.installServerItems({
+			items: [
+				{ name: 'root-mod', file_name: 'root.jar', download_url: 'u1' },
+				{ name: 'dep-mod', file_name: 'dep.jar', download_url: 'u2' }
+			],
+			root: { platform: 'modrinth', id: 'root-mod', title: 'root-mod', version: '1', depCount: 1 }
+		});
+		assert.match(store.installOutcomes[0].detail ?? '', /HTTP 404/);
+		assert.match(store.installOutcomes[1].detail ?? '', /disk full/);
+	});
+
 	test('closing keeps the query so a reopen re-runs it intentionally (E12)', async () => {
 		const store = await openWithResults();
 		store.query = 'sodium';

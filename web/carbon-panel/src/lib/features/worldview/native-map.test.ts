@@ -265,6 +265,18 @@ test('live mode revalidates complete tiles with the region validator and keeps a
 		loader.setLive(false);
 		await flush();
 		assert.equal(requests.length, afterUnchanged);
+
+		// A live toggle only changes the cadence: the cached tile and its
+		// validator survive, so the next revalidation stays conditional
+		// instead of refetching the tile unconditionally.
+		assert.equal(result, saved);
+		loader.setLive(true);
+		await flush();
+		assert.equal(requests.length, afterUnchanged + 1);
+		assert.deepEqual(requests[afterUnchanged].request, {
+			dimension: 'overworld',
+			ifNoneMatch: '"123-456"'
+		});
 	} finally {
 		loader.dispose();
 	}

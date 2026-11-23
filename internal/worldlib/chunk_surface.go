@@ -40,7 +40,7 @@ type JavaDimensionSpan struct {
 // aligned: a negative MinY must stay a multiple of 16.
 var (
 	JavaOverworldSpan = JavaDimensionSpan{MinY: -64, MaxY: 319}
-	JavaNetherSpan    = JavaDimensionSpan{MinY: 0, MaxY: 127}
+	JavaNetherSpan    = JavaDimensionSpan{MinY: 0, MaxY: 255}
 	JavaEndSpan       = JavaDimensionSpan{MinY: 0, MaxY: 255}
 )
 
@@ -70,16 +70,20 @@ func SupportsJavaOverworldDataVersion(version int64) bool {
 
 // ParseJavaChunkSurface reads saved terrain heights and surface blocks from
 // one decompressed modern Java Overworld chunk. It shares the World Library's
-// bounded NBT decoder.
+// bounded NBT decoder. The Overworld has no bedrock roof: a bedrock
+// WORLD_SURFACE is the column's visible surface.
 func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
-	return ParseJavaChunkSurfaceInSpan(raw, JavaOverworldSpan)
+	return ParseJavaChunkSurfaceInSpan(raw, JavaOverworldSpan, false)
 }
 
 // ParseJavaChunkSurfaceInSpan reads saved terrain heights and surface blocks
 // from one decompressed modern Java Anvil chunk belonging to the given
 // dimension span. A chunk saved under any other layout is refused rather
-// than misrendered.
-func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan) (JavaChunkSurface, error) {
+// than misrendered. With surfaceUnderRoof, a bedrock WORLD_SURFACE is an
+// opaque roof (the Nether's) instead of the visible surface: the column's
+// surface becomes the first terrain block under the roof, and a column that
+// holds only roof bedrock and air keeps no surface.
+func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan, surfaceUnderRoof bool) (JavaChunkSurface, error) {
 	var surface JavaChunkSurface
 	if span.MaxY <= span.MinY || span.MinY%javaChunkWidth != 0 {
 		return surface, errors.New("unsupported Java dimension span")
@@ -149,7 +153,7 @@ func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan) (JavaChunkS
 		}
 		surface.Heights[i] = int16(span.MinY + relative - 1)
 	}
-	surface.readSurfaceBlocks(root["sections"], span)
+	surface.readSurfaceBlocks(root["sections"], span, surfaceUnderRoof)
 	return surface, nil
 }
 
@@ -196,7 +200,7 @@ func (s javaBlockSection) block(index int) string {
 	return s.names[state]
 }
 
-func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan) {
+func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan, surfaceUnderRoof bool) {
 	minSection := span.MinY / javaChunkWidth
 	sectionCount := span.MaxY/javaChunkWidth - minSection + 1
 	var sections [24]javaBlockSection
@@ -225,22 +229,63 @@ func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan) 
 		relativeY := y - span.MinY
 		return sections[relativeY/javaChunkWidth].block((relativeY%javaChunkWidth)*len(s.Heights) + column)
 	}
-	for column, y := range s.Heights {
-		if y < int16(span.MinY) {
+	for column, top := range s.Heights {
+		if top < int16(span.MinY) {
 			continue
 		}
-		s.Blocks[column] = blockAt(column, int(y))
-		if !javaWaterBlock(s.Blocks[column]) {
+		y := int(top)
+		block := blockAt(column, y)
+		if surfaceUnderRoof && javaBedrockBlock(block) {
+			// A roofed dimension (the Nether) saves WORLD_SURFACE as the
+			// bedrock sheet at the top of the span, so every column's
+			// surface block is bedrock. The visible surface is the first
+			// terrain block under the roof: the walk passes roof bedrock,
+			// air and unsaved sections, and a column that holds only roof
+			// and air keeps no surface. Like the water scan below, the
+			// walk is bounded by the span.
+			block = ""
+			for scan := y - 1; scan >= span.MinY; scan-- {
+				if found := blockAt(column, scan); !javaAirBlock(found) && !javaBedrockBlock(found) {
+					y, block = scan, found
+					break
+				}
+			}
+			if block == "" {
+				s.Heights[column] = int16(span.MinY - 1)
+				s.Blocks[column] = ""
+				continue
+			}
+			s.Heights[column] = int16(y)
+		}
+		s.Blocks[column] = block
+		if !javaWaterBlock(block) {
 			continue
 		}
 		// Ten blocks separate the shallow and deep hues. Stop sooner
 		// when the next block has a different or unreadable state.
-		for depth := 1; depth <= 10 && int(y)-depth+1 >= span.MinY; depth++ {
-			if !javaWaterBlock(blockAt(column, int(y)-depth+1)) {
+		for depth := 1; depth <= 10 && y-depth+1 >= span.MinY; depth++ {
+			if !javaWaterBlock(blockAt(column, y-depth+1)) {
 				break
 			}
 			s.WaterDepths[column] = uint8(depth)
 		}
+	}
+}
+
+func javaBedrockBlock(name string) bool {
+	return name == "minecraft:bedrock"
+}
+
+// javaAirBlock reports whether the resolved state is air. An empty state is
+// an unsaved or unreadable section position; the heightmap already says the
+// column's blocks below its roof surface are not terrain, so the roof walk
+// and refusals treat it like air rather than an honest surface.
+func javaAirBlock(name string) bool {
+	switch name {
+	case "", "minecraft:air", "minecraft:cave_air", "minecraft:void_air":
+		return true
+	default:
+		return false
 	}
 }
 

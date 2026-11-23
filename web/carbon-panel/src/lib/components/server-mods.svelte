@@ -75,6 +75,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let hasLoaded = false;
 	let requestNumber = 0;
+	// Status-strip ownership (E5): update checks take a token and staging
+	// invalidates outstanding ones, so an older in-flight check can never
+	// overwrite a newer stage result (e.g. a refused stage) on the strip.
+	let statusNumber = 0;
 	let updateStatus = $state('');
 	let previousServerId = $state(server.id);
 
@@ -337,6 +341,9 @@ one at https://mozilla.org/MPL/2.0/.
 		const serverId = server.id;
 		const request = ++requestNumber;
 		const isCurrent = () => request === requestNumber && server.id === serverId;
+		// Only a check writes the status strip; plain refreshes never do.
+		const statusToken = checkUpdates ? ++statusNumber : 0;
+		const ownsStatus = () => statusToken !== 0 && statusToken === statusNumber;
 		// E5: checking and staging are mutually exclusive. A check never
 		// clobbers an in-flight staging summary; the stage flow owns
 		// updateStatus until it finishes.
@@ -360,7 +367,7 @@ one at https://mozilla.org/MPL/2.0/.
 			if (!isCurrent()) return;
 			mods = response.mods;
 			loadError = '';
-			if (checkUpdates && !stagingUpdates) {
+			if (checkUpdates && !stagingUpdates && ownsStatus()) {
 				const available = mods.filter((mod) => mod.updatePreview?.state === 'available').length;
 				updateStatus = `Checked ${mods.length} installed files. Compatible updates available for ${available}.`;
 			}
@@ -371,7 +378,8 @@ one at https://mozilla.org/MPL/2.0/.
 				loadError = checkUpdates
 					? 'The update check failed. The installed list was not refreshed.'
 					: 'Failed to read the installed mods from the server.';
-				if (checkUpdates && !stagingUpdates) updateStatus = 'Update check failed. Try again.';
+				if (checkUpdates && !stagingUpdates && ownsStatus())
+					updateStatus = 'Update check failed. Try again.';
 				// E2: the interceptor already toasted the formatted RPC error.
 				if (!wasRpcErrorToasted(error))
 					toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
@@ -406,6 +414,9 @@ one at https://mozilla.org/MPL/2.0/.
 			// E5: staging takes over the status strip from any running check.
 			stagingUpdates = true;
 			checkingUpdates = false;
+			// Invalidate outstanding check tokens: an older in-flight check
+			// must not overwrite this stage's result once it lands.
+			statusNumber++;
 			stagedOutcomes = [];
 			const response = await rpcClient.mod.updateMod({
 				serverId: server.id,
@@ -445,11 +456,17 @@ one at https://mozilla.org/MPL/2.0/.
 		// E4: the upload is bound to the server it was started on. A server
 		// switch aborts it and the import re-checks the target before running.
 		const targetServerId = server.id;
+		// The batch keeps its own controller reference: a server switch tears
+		// the shared state down (sets it to null), and the remaining files
+		// must see the aborted signal instead of dereferencing a nulled
+		// controller and reporting a misleading "failed to upload" toast.
+		const batchController = new AbortController();
+		uploadAbortController = batchController;
 		uploading = true;
-		uploadAbortController = new AbortController();
 
 		try {
 			for (const file of Array.from(fileList)) {
+				if (batchController.signal.aborted) break;
 				currentUploadFilename = file.name;
 				uploadProgress = null;
 
@@ -457,7 +474,7 @@ one at https://mozilla.org/MPL/2.0/.
 					onProgress: (progress) => {
 						uploadProgress = progress;
 					},
-					signal: uploadAbortController.signal
+					signal: batchController.signal
 				});
 
 				if (server.id !== targetServerId || uploadAbortController === null) {
@@ -471,7 +488,7 @@ one at https://mozilla.org/MPL/2.0/.
 					description: ''
 				});
 			}
-			if (server.id === targetServerId) {
+			if (server.id === targetServerId && !batchController.signal.aborted) {
 				toast.success(`Uploaded ${fileList.length} mod(s)`);
 				await loadMods();
 			}

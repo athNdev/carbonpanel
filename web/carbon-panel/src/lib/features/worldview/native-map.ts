@@ -170,13 +170,14 @@ function failure(response: Response): NativeMapFailure {
 	}
 }
 
-function request(path: string, signal: AbortSignal): Promise<Response> {
+function request(path: string, signal: AbortSignal, headers?: HeadersInit): Promise<Response> {
 	return fetch(path, {
 		signal,
 		mode: 'same-origin',
 		credentials: 'same-origin',
 		redirect: 'error',
-		cache: 'no-store'
+		cache: 'no-store',
+		...(headers ? { headers } : {})
 	});
 }
 
@@ -258,7 +259,7 @@ export async function loadNativeTile(
 	const url = root + 'native/' + dimension + '/' + tile.x + '/' + tile.z + '.png';
 	const conditional = tileRequest.ifNoneMatch || null;
 	const fetchTile = async (): Promise<Response | TileResult> => {
-		const response = await request(url, signal);
+		const response = await request(url, signal, conditional ? { 'If-None-Match': conditional } : undefined);
 		// A live client revalidates a fully rendered tile by echoing the
 		// region freshness validator; 304 keeps the cached image.
 		if (conditional && response.status === 304) return { status: 'unchanged' };

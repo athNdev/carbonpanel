@@ -371,3 +371,83 @@ test('refusals shake the bar through the registry counter and re-fire', async ()
 		ui.unmount();
 	}
 });
+
+test('a refusal moves focus to the bar, and focus inside it is kept', async () => {
+	makeSection('overview', 'Server Settings');
+	const ui = mountUi(CarbonFloatingActionBar, { onSelectSection: () => {} });
+	try {
+		await flush(0);
+		const bar = barElement();
+		assert.ok(bar);
+		assert.equal(bar?.getAttribute('tabindex'), '-1', 'the bar is programmatically focusable');
+
+		dirtySections.requestShake();
+		await flush();
+		assert.equal(document.activeElement, bar, 'focus lands on the bar after a refusal');
+
+		// A repeat refusal while the user works inside the bar must not steal
+		// focus away from the control they are on.
+		const chip = findButton(bar, 'Server Settings');
+		chip?.focus();
+		assert.equal(document.activeElement, chip);
+		dirtySections.requestShake();
+		await flush();
+		assert.equal(
+			document.activeElement,
+			findButton(barElement(), 'Server Settings'),
+			'focus inside the bar is not stolen'
+		);
+	} finally {
+		dirtySections.unregister('overview');
+		ui.unmount();
+	}
+});
+
+test('save all skips a section that became clean while the run is in flight', async () => {
+	const settings = makeSection('overview', 'Server Settings');
+	const configuration = makeSection('configuration', 'Server Configuration');
+	// The chip's own save completing mid-run is modeled by the slow settings
+	// save clearing configuration's dirty flag; configuration's save mirrors
+	// the real contract and throws when asked to save with no changes.
+	dirtySections.register({
+		id: settings.id,
+		label: settings.label,
+		isDirty: () => settings.flags.dirty,
+		saving: () => settings.flags.saving,
+		save: async () => {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			settings.saves += 1;
+			configuration.flags.dirty = false;
+			publish(configuration);
+		},
+		undo: () => {
+			settings.undos += 1;
+		}
+	});
+	dirtySections.register({
+		id: configuration.id,
+		label: configuration.label,
+		isDirty: () => configuration.flags.dirty,
+		saving: () => configuration.flags.saving,
+		save: async () => {
+			if (!configuration.flags.dirty) throw new Error('No changes to save');
+			configuration.saves += 1;
+		},
+		undo: () => {
+			configuration.undos += 1;
+		}
+	});
+	const ui = mountUi(CarbonFloatingActionBar, { onSelectSection: () => {} });
+	try {
+		await flush(0);
+		findButton(barElement(), 'Save all')?.click();
+		await flush(150);
+		assert.equal(configuration.saves, 0, 'the clean section was skipped, not re-saved');
+		assert.doesNotMatch(announcement(), /failed/i, 'no spurious double error toast');
+		assert.match(announcement(), /Saved Server Settings\./);
+	} finally {
+		dirtySections.unregister('overview');
+		dirtySections.unregister('configuration');
+		ui.unmount();
+	}
+});

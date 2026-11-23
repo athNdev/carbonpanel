@@ -16,17 +16,18 @@ type Dimension struct {
 	ID     string
 	Folder string
 	Span   worldlib.JavaDimensionSpan
-	// HideBedrockSurface drops columns whose WORLD_SURFACE block is bedrock.
-	// The Nether's roof is a solid bedrock sheet; without this it would hide
-	// every column behind an opaque ceiling. Legitimate surface-level bedrock
-	// is rare in the Nether and the manual refresh still shows the raw
-	// heightmap data through the standard unsupported-column checks.
-	HideBedrockSurface bool
+	// SurfaceUnderRoof reports that WORLD_SURFACE can be an opaque bedrock
+	// roof instead of the visible surface. The Nether saves a full bedrock
+	// sheet at y=127 (with partial layers down to y=123) across the whole
+	// dimension, so every column's WORLD_SURFACE block is bedrock; the
+	// surface scan descends to the first terrain block under the roof, and
+	// a column that holds only roof bedrock and air stays empty.
+	SurfaceUnderRoof bool
 }
 
 var (
 	Overworld = Dimension{ID: "overworld", Folder: "region", Span: worldlib.JavaOverworldSpan}
-	Nether    = Dimension{ID: "nether", Folder: "DIM-1/region", Span: worldlib.JavaNetherSpan, HideBedrockSurface: true}
+	Nether    = Dimension{ID: "nether", Folder: "DIM-1/region", Span: worldlib.JavaNetherSpan, SurfaceUnderRoof: true}
 	End       = Dimension{ID: "end", Folder: "DIM1/region", Span: worldlib.JavaEndSpan}
 )
 

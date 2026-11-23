@@ -1360,6 +1360,52 @@ func TestDeferredStopAnnouncementIsDroppedWhenTheServerStartsAgain(t *testing.T)
 	}
 }
 
+type fakeJournalStore struct {
+	*fakeStore
+	assertErr error
+}
+
+func (f *fakeJournalStore) AssertNoServerOperation(_ context.Context, _ string) error {
+	return f.assertErr
+}
+
+// A21: a journal read failure means ownership is unknown. The stop
+// announcement must be deferred (not suppressed as owned) and re-emitted if the
+// stop evidence persists past one sweep.
+func TestJournalReadFailureDefersStopAnnouncement(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopping}
+	base := newFakeStore(server)
+	store := &fakeJournalStore{fakeStore: base, assertErr: errors.New("journal unavailable")}
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 0},
+	}
+	bus := &fakeBus{}
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, bus, nil, nil, Config{
+		SweepInterval: 20 * time.Millisecond,
+	})
+
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	got, _ := store.GetServer(context.Background(), "s1")
+	if got.Status != db.StatusStopped {
+		t.Fatalf("status = %q, want the stop converged", got.Status)
+	}
+	if types := bus.types(); len(types) != 0 {
+		t.Fatalf("events = %v, want the stop announcement deferred on read failure", types)
+	}
+
+	time.Sleep(40 * time.Millisecond)
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	types := bus.types()
+	if len(types) != 1 || types[0] != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP {
+		t.Fatalf("events = %v, want the deferred SERVER_STOP after journal read failure", types)
+	}
+}
+
 // --- blind-window reduction around lifecycle transitions --------------------
 
 func TestTransitionEndTriggersConvergenceWithoutTheSweep(t *testing.T) {

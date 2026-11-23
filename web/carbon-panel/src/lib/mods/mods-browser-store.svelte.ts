@@ -10,12 +10,16 @@
 //   reopen during an in-flight install never shows a silently disabled
 //   button (E7). Closing does not drop the query (E12, intentional).
 // - `setTarget` is the TARGET_CHANGED event: a hard reset that also
-//   invalidates both in-flight sequences (E22).
+//   invalidates every in-flight sequence (E22).
 // - `selectResult` is refused while an install is running, keeping the
 //   selection for the retryable installError state.
 // - Install outcomes are per item (E10); unresolved dependencies from
 //   provider outages are surfaced through `appendOutcomes` instead of being
 //   silently dropped (E9).
+// - Install responses carry their own sequence token: a response that
+//   resolves after a close/reopen or once a newer install started is
+//   dropped wholesale, so it can never overwrite the newer install's
+//   outcomes, session entry or `installing` flag.
 //
 // Only `$state` runes are used inside the factory (no `$derived`/`$effect`)
 // so tests can mock the rune as an identity and drive the machine directly.
@@ -145,6 +149,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 
 	const searchSequence = createSequenceGuard();
 	const versionsSequence = createSequenceGuard();
+	const installSequence = createSequenceGuard();
 
 	const sessionKeyFor = (result: { platform: string; id: string }): string =>
 		`${result.platform}:${result.id}`;
@@ -305,6 +310,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 			sessionSummaryOpen = true;
 			searchSequence.invalidate();
 			versionsSequence.invalidate();
+			installSequence.invalidate();
 		},
 
 		/** OPEN: refresh the catalog for the current target. */
@@ -324,6 +330,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 			installOutcomes = [];
 			sessionSummaryOpen = true;
 			versionsSequence.invalidate();
+			installSequence.invalidate();
 		},
 
 		/** SUBMIT_SEARCH — the sequence guard drops superseded responses (E15). */
@@ -408,6 +415,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 			root: { platform: string; id: string; title: string; version: string; depCount: number };
 			unresolvedCount?: number;
 		}): Promise<{ success: boolean; message: string; errors: string[] }> {
+			const seq = installSequence.next();
 			installing = true;
 			try {
 				const response = await ports.install({
@@ -418,8 +426,26 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 						downloadUrl: item.download_url
 					}))
 				});
+				if (!installSequence.isCurrent(seq)) {
+					// A close/reopen or a newer install owns the install region;
+					// the stale response is dropped wholesale instead of
+					// overwriting its outcomes, session entry or installing flag.
+					return {
+						success: response.success,
+						message: response.message,
+						errors: response.errors
+					};
+				}
 				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Local non-reactive lookup, discarded after mapping outcomes.
 				const installedFiles = new Set(response.installed);
+				// The server names each failed item inside its error strings
+				// ("skipped <name>: …"); attribute per item when possible and
+				// keep the blanket errors[0] only for a single failed item.
+				const failedItems = options.items.filter((item) => !installedFiles.has(item.file_name));
+				const detailFor = (item: InstallItem): string =>
+					response.errors.find((message) => message.includes(item.name)) ??
+					(failedItems.length === 1 ? response.errors[0] : undefined) ??
+					'Not installed';
 				installOutcomes = options.items.map((item) =>
 					installedFiles.has(item.file_name)
 						? { key: item.file_name, label: item.name, tone: 'green' as const }
@@ -427,7 +453,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 								key: item.file_name,
 								label: item.name,
 								tone: 'red' as const,
-								detail: response.errors[0] || 'Not installed'
+								detail: detailFor(item)
 							}
 				);
 				if (response.success) {
@@ -450,7 +476,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 					errors: response.errors
 				};
 			} finally {
-				installing = false;
+				if (installSequence.isCurrent(seq)) installing = false;
 			}
 		},
 

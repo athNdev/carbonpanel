@@ -4,8 +4,11 @@ package worldterrain
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"image/color"
 	"image/png"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,26 +89,148 @@ func TestRenderDimensionTileRefusals(t *testing.T) {
 	}
 }
 
-// TestShadeGridNetherRoofStaysTransparent pins the Nether roof policy: the
-// bedrock sheet at the top of the dimension must not paint the map opaque.
-func TestShadeGridNetherRoofStaysTransparent(t *testing.T) {
-	grid := make([]int16, TileBlocks*TileBlocks)
-	blocks := make([]string, len(grid))
-	for i := range grid {
-		grid[i] = 120
-		blocks[i] = "minecraft:bedrock"
+// netherRoofChunk builds one full Nether chunk whose WORLD_SURFACE is the
+// vanilla bedrock roof: a complete bedrock sheet at y=127 over alternating
+// partial layers at y=123-126, air below, and — with terrain — netherrack
+// at y=64-70. Palette index 0 is air, so unset data nibbles stay air.
+func netherRoofChunk(x, z, version int32, terrain bool) []byte {
+	var b bytes.Buffer
+	write := func(v any) { _ = binary.Write(&b, binary.BigEndian, v) }
+	str := func(s string) {
+		write(uint16(len(s)))
+		b.WriteString(s)
 	}
-	var provisional [chunksPerTile * chunksPerTile]bool
-	nether := shadeGrid(Nether, int16(Nether.Span.MinY-1), grid, blocks, make([]uint8, len(grid)), provisional)
-	if _, _, _, alpha := nether.At(0, 0).RGBA(); alpha != 0 {
-		t.Fatal("nether bedrock roof rendered opaque")
+	tag := func(kind byte, name string) {
+		b.WriteByte(kind)
+		str(name)
 	}
-	overworld := shadeGrid(Overworld, int16(Overworld.Span.MinY-1), grid, blocks, make([]uint8, len(grid)), provisional)
-	if _, _, _, alpha := overworld.At(0, 0).RGBA(); alpha == 0 {
-		t.Fatal("overworld bedrock column lost its surface")
+	section := func(y byte, palette []string, states []uint64) {
+		tag(1, "Y")
+		b.WriteByte(y)
+		tag(10, "block_states")
+		tag(9, "palette")
+		b.WriteByte(10)
+		write(int32(len(palette)))
+		for _, name := range palette {
+			tag(8, "Name")
+			str(name)
+			b.WriteByte(0)
+		}
+		tag(12, "data")
+		write(int32(len(states)))
+		for _, value := range states {
+			write(value)
+		}
+		b.Write([]byte{0, 0}) // end block_states, end section compound
 	}
-	end := shadeGrid(End, int16(End.Span.MinY-1), grid, blocks, make([]uint8, len(grid)), provisional)
-	if _, _, _, alpha := end.At(0, 0).RGBA(); alpha == 0 {
-		t.Fatal("end bedrock column lost its surface")
+	tag(10, "")
+	for _, field := range []struct {
+		name  string
+		value int32
+	}{{"DataVersion", version}, {"xPos", x}, {"yPos", int32(worldlib.JavaNetherSpan.MinY / 16)}, {"zPos", z}} {
+		tag(3, field.name)
+		write(field.value)
+	}
+	tag(8, "Status")
+	str("full")
+	tag(10, "Heightmaps")
+	tag(12, "WORLD_SURFACE")
+	// The roof is the highest block in every column: each stored height is
+	// one above y=127 relative to MinY 0, packed at the Nether span's bit
+	// width (9 bits for the vanilla 0-255 storage span).
+	bitsPerValue := bits.Len(uint(worldlib.JavaNetherSpan.MaxY - worldlib.JavaNetherSpan.MinY + 1))
+	perLong := 64 / bitsPerValue
+	packed := make([]uint64, (256+perLong-1)/perLong)
+	for column := range 256 {
+		packed[column/perLong] |= uint64(128) << ((column % perLong) * bitsPerValue)
+	}
+	write(int32(len(packed)))
+	for _, value := range packed {
+		write(value)
+	}
+	b.WriteByte(0) // end Heightmaps; the section list follows inside the root
+	// Section Y=7 saves the roof: a complete bedrock sheet at y=127 over
+	// partial alternating layers at y=123-126.
+	roof := make([]uint64, 256)
+	for localY := 11; localY <= 15; localY++ {
+		pattern := uint64(0x0101010101010101) // bedrock on every other column
+		if localY == 15 {
+			pattern = 0x1111111111111111 // the sheet at 127 is complete
+		}
+		for long := localY * 16; long < (localY+1)*16; long++ {
+			roof[long] = pattern
+		}
+	}
+	// Section Y=4 saves terrain: netherrack at y=64-70 over air.
+	terrainStates := make([]uint64, 256)
+	for localY := 0; localY <= 6; localY++ {
+		for long := localY * 16; long < (localY+1)*16; long++ {
+			terrainStates[long] = 0x1111111111111111
+		}
+	}
+	tag(9, "sections")
+	b.WriteByte(10) // list item type: compound
+	if terrain {
+		write(int32(2))
+		section(7, []string{"minecraft:air", "minecraft:bedrock"}, roof)
+		section(4, []string{"minecraft:air", "minecraft:netherrack"}, terrainStates)
+	} else {
+		write(int32(1))
+		section(7, []string{"minecraft:air", "minecraft:bedrock"}, roof)
+	}
+	b.WriteByte(0) // end root compound
+	return b.Bytes()
+}
+
+// TestRenderDimensionTileNetherRoofShowsTerrainBelow pins the roofed-Nether
+// surface scan. The Nether's roof spans the whole dimension, so every
+// column's WORLD_SURFACE block is bedrock: the renderer must descend to the
+// terrain below the roof instead of dropping every column as transparent
+// while still reporting the chunks as rendered.
+func TestRenderDimensionTileNetherRoofShowsTerrainBelow(t *testing.T) {
+	// The parser replaces the roofed surface with the terrain under it and
+	// keeps genuinely roof-only columns honestly empty.
+	surface, err := worldlib.ParseJavaChunkSurfaceInSpan(netherRoofChunk(0, 0, 3955, true), worldlib.JavaNetherSpan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []int{0, 42, 255} {
+		if surface.Heights[column] != 70 || surface.Blocks[column] != "minecraft:netherrack" {
+			t.Fatalf("column %d surfaced at %d as %q; want netherrack at y=70 below the roof", column, surface.Heights[column], surface.Blocks[column])
+		}
+	}
+	roofOnly, err := worldlib.ParseJavaChunkSurfaceInSpan(netherRoofChunk(0, 0, 3955, false), worldlib.JavaNetherSpan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roofOnly.Heights[0] != int16(worldlib.JavaNetherSpan.MinY-1) || roofOnly.Blocks[0] != "" {
+		t.Fatalf("a roof-and-air-only column surfaced at %d as %q; want no surface", roofOnly.Heights[0], roofOnly.Blocks[0])
+	}
+
+	store := dimensionRegionStore(t, Nether.Folder, "r.0.0.mca",
+		regionData(t, savedChunk{0, 0, netherRoofChunk(0, 0, 3955, true), 2, testSave}))
+	tile, err := RenderDimensionTile(t.Context(), store, "fixture_world", Nether, TileCoord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tile.RenderedChunks != 1 {
+		t.Fatalf("unexpected nether roof coverage: %+v", tile)
+	}
+	img, err := png.Decode(bytes.NewReader(tile.PNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The saved chunk covers the tile's first 16x16 blocks: the whole patch
+	// must show the netherrack below the roof, not stay transparent.
+	want := color.NRGBAModel.Convert(terrainColor(70, 0, netherElevation[:]))
+	for z := 0; z < chunkBlocks; z++ {
+		for x := 0; x < chunkBlocks; x++ {
+			if got := color.NRGBAModel.Convert(img.At(x, z)); got != want {
+				t.Fatalf("pixel %d, %d = %v; want the terrain below the roof %v", x, z, got, want)
+			}
+		}
+	}
+	if _, _, _, alpha := img.At(chunkBlocks, 0).RGBA(); alpha != 0 {
+		t.Fatal("a missing chunk must stay transparent")
 	}
 }

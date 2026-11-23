@@ -10,7 +10,7 @@ qualify. A successful tile reports how many chunks were rendered, missing,
 unsupported, or unreadable.
 
 The renderer supports vanilla-height Overworld chunks from Java 1.18
-through 26.3 (DataVersion 2860–5023), the Nether (0–127) and the End (0–255)
+through 26.3 (DataVersion 2860–5023), the Nether (storage span 0–255, rendered below the bedrock roof) and the End (0–255)
 from the same versions. Fully generated chunks use the saved
 `Heightmaps.WORLD_SURFACE` array to locate the visible block in each column's
 section palette. Late generation stages can also contain
@@ -24,8 +24,11 @@ external `.mcc` chunk payloads. Gzip, zlib, uncompressed, and LZ4 records
 (the 1.20.5+ `region-file-compression=lz4` option) are supported. Older
 formats, DataVersions above 26.3, nonstandard (modded) dimension heights,
 modded dimension folders, Bukkit-style sibling worlds, and Bedrock are outside
-this renderer's format scope. The Nether map treats the bedrock roof as
-transparent so terrain below it stays visible.
+this renderer's format scope. The Nether's saved `WORLD_SURFACE` is its full
+bedrock roof (a complete sheet at y=127 with partial layers down to y=123),
+so the Nether map looks under the roof: each column renders the first saved
+terrain block below it, and a column that holds only roof bedrock and air
+stays transparent.
 
 Each request reads one 128 × 128 block tile at one pixel per block. X increases
 right and Z increases down. It reads at most 64 selected chunks from a single

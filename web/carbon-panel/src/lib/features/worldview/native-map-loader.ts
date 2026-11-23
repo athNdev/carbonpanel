@@ -26,6 +26,9 @@ function recheckAt(result: TileResult, live: boolean, liveRecheckDelayMs: number
 	if (result.status === 'saved' && !incomplete) {
 		return live ? Date.now() + liveRecheckDelayMs : Infinity;
 	}
+	if (result.status === 'saved' && incomplete) {
+		return live ? Date.now() + liveRecheckDelayMs : Infinity;
+	}
 	return result.status === 'empty' ||
 		result.status === 'busy' ||
 		result.status === 'unavailable' ||

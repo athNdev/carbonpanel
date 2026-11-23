@@ -53,6 +53,7 @@ within the same budgets; `.mcc` external chunks stay unsupported. Tiles carry
 an opaque region-file freshness validator (size + mtime); the transport
 answers conditional revalidation with 304 before spending render budget, and
 the client's live toggle paces rechecks without changing the shared worker
-budget. The Nether's bedrock roof renders transparent so terrain below it
-stays visible. Bukkit sibling worlds and modded dimension folders are out of
-scope.
+budget or invalidating the tile cache. The Nether's WORLD_SURFACE is its full
+bedrock roof, so the surface scan descends to the first terrain block under
+the roof; columns that hold only roof bedrock and air stay transparent.
+Bukkit sibling worlds and modded dimension folders are out of scope.

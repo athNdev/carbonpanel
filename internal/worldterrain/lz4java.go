@@ -94,7 +94,9 @@ func decodeLZ4JavaBlockStream(payload []byte, limit int) ([]byte, error) {
 				return nil, errLZ4StreamCorrupt
 			}
 		}
-		if xxh32(out[start:], lz4JavaDefaultSeed) != check {
+		// Java's LZ4BlockOutputStream stores XXH32 masked to the low 28 bits
+		// (StreamingXXHash32.asChecksum), so accept the masked value.
+		if xxh32(out[start:], lz4JavaDefaultSeed)&0x0FFFFFFF != check {
 			return nil, errLZ4StreamCorrupt
 		}
 		offset += compressedLen

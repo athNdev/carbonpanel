@@ -37,8 +37,12 @@ func (s *ServerService) refuseVersionIncompatibleContent(ctx context.Context, se
 		}
 		return nil
 	}
+	levelName := ""
+	if cfg, cfgErr := s.store.GetServerConfig(ctx, server.ID); cfgErr == nil && cfg != nil {
+		levelName = cfg.ActualLevelName()
+	}
 
-	incompatible := incompatibleInstalledContent(root, server.ModLoader, targetVersion)
+	incompatible := incompatibleInstalledContent(root, server.ModLoader, targetVersion, levelName)
 	if len(incompatible) == 0 {
 		return nil
 	}
@@ -64,15 +68,16 @@ func (s *ServerService) refuseVersionIncompatibleContent(ctx context.Context, se
 
 // incompatibleInstalledContent collects the incompatible verdicts from
 // installed loader content (mods/ or plugins/ per the current loader) and
-// from the world's datapacks directory.
-func incompatibleInstalledContent(dataRoot string, loader storage.ModLoader, targetVersion string) []minecraft.ModCompatReport {
+// from the world's datapacks directory. levelName resolves the active save
+// folder; an empty value falls back to the default world name.
+func incompatibleInstalledContent(dataRoot string, loader storage.ModLoader, targetVersion string, levelName string) []minecraft.ModCompatReport {
 	var out []minecraft.ModCompatReport
 	for _, report := range minecraft.ScanContentCompatibility(dataRoot, loader, targetVersion) {
 		if report.Status == minecraft.ModCompatIncompatible {
 			out = append(out, report)
 		}
 	}
-	for _, report := range minecraft.ScanDatapackCompatibility(minecraft.GetDatapacksPath(dataRoot, ""), targetVersion) {
+	for _, report := range minecraft.ScanDatapackCompatibility(minecraft.GetDatapacksPath(dataRoot, levelName), targetVersion) {
 		if report.Status == minecraft.ModCompatIncompatible {
 			out = append(out, report)
 		}

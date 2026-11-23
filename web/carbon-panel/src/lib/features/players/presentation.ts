@@ -374,23 +374,6 @@ function sortValue(summary: PlayerSummary, sortBy: SortOption): string | number 
 	}
 }
 
-/**
- * Last-seen ordering keeps identities with a real observation ahead of
- * never-observed ones in BOTH directions of the sort, then orders observed
- * rows by timestamp. A nil lastSeen is "no observation exists", not a time.
- */
-function compareLastSeenObserved(a: PlayerSummary, b: PlayerSummary): number {
-	const aObserved = Boolean(a.lastSeen);
-	const bObserved = Boolean(b.lastSeen);
-	if (aObserved !== bObserved) return aObserved ? -1 : 1;
-	if (!aObserved) return 0;
-	const aSec = Number(a.lastSeen?.seconds ?? 0);
-	const bSec = Number(b.lastSeen?.seconds ?? 0);
-	if (aSec < bSec) return -1;
-	if (aSec > bSec) return 1;
-	return 0;
-}
-
 function compare(left: string | number, right: string | number): number {
 	if (left < right) return -1;
 	if (left > right) return 1;

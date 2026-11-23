@@ -79,7 +79,7 @@ func lz4JavaEncode(t *testing.T, data []byte) []byte {
 	if payload == nil {
 		method, payload = lz4JavaMethodRaw, data
 	}
-	stream = append(stream, lz4JavaBlock(method, payload, data, xxh32(data, lz4JavaDefaultSeed))...)
+	stream = append(stream, lz4JavaBlock(method, payload, data, xxh32(data, lz4JavaDefaultSeed)&0x0FFFFFFF)...)
 	stream = append(stream, lz4JavaBlock(lz4JavaMethodRaw, nil, nil, 0)...)
 	return stream
 }
@@ -125,9 +125,9 @@ func TestDecodeLZ4JavaBlockStreamMultiBlockAndPadding(t *testing.T) {
 			t.Fatalf("lz4 compress: %v", err)
 		}
 		if n > 0 && n < len(block) {
-			stream = append(stream, lz4JavaBlock(lz4JavaMethodLZ4, compressed[:n], block, xxh32(block, lz4JavaDefaultSeed))...)
+			stream = append(stream, lz4JavaBlock(lz4JavaMethodLZ4, compressed[:n], block, xxh32(block, lz4JavaDefaultSeed)&0x0FFFFFFF)...)
 		} else {
-			stream = append(stream, lz4JavaBlock(lz4JavaMethodRaw, block, block, xxh32(block, lz4JavaDefaultSeed))...)
+			stream = append(stream, lz4JavaBlock(lz4JavaMethodRaw, block, block, xxh32(block, lz4JavaDefaultSeed)&0x0FFFFFFF)...)
 		}
 		start = end
 	}

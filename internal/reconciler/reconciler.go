@@ -1164,7 +1164,18 @@ func (r *Reconciler) emitTransition(ctx context.Context, server *db.Server, from
 // never silently swallowed.
 func (r *Reconciler) suppressStopAnnouncement(ctx context.Context, serverID string, to db.ServerStatus, reason string) bool {
 	if journal, ok := r.store.(OperationJournal); ok {
-		return journal.AssertNoServerOperation(ctx, serverID) != nil
+		err := journal.AssertNoServerOperation(ctx, serverID)
+		if err == nil {
+			return false
+		}
+		if errors.Is(err, db.ErrServerOperationActive) {
+			return true
+		}
+		// A journal read failure means ownership is unknown. Defer the
+		// announcement through the pending-stop path instead of suppressing it
+		// as if an active operation owned the server.
+		r.rememberPendingStop(serverID, to, reason)
+		return true
 	}
 	r.rememberPendingStop(serverID, to, reason)
 	return true

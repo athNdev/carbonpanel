@@ -95,6 +95,31 @@ class DesignSystemPageTests(unittest.TestCase):
             self.assertIn(name, section, f"{name} is not named in its section")
             self.assertIn("props-table", section, f"{name} has no prop table")
 
+    def test_component_count_claims_match_the_export_list(self):
+        exports = re.findall(
+            r"export \{ default as (\w+) \} from", EXPORTS.read_text(encoding="utf-8")
+        )
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn(f"{len(exports)} components", page,
+                      "footer/hero count claim does not match the export list")
+        self.assertNotIn("nineteen", page.lower())
+
+    def test_action_bar_section_documents_the_real_api(self):
+        page = PAGE.read_text(encoding="utf-8")
+        section = page.split('id="c-floating-action-bar"', 1)[1].split("</article>", 1)[0]
+        self.assertIn("onSelectSection", section)
+        self.assertIn("dirtySections", section)
+        self.assertIn("DirtySectionEntry", section)
+        self.assertIn("carbon-shake", section)
+        for removed in ("onsaveall", "onundoall", "onopensection"):
+            self.assertNotIn(removed, section, f"stale prop {removed} still documented")
+
+    def test_page_documents_layer_scale_shake_and_mods_patterns(self):
+        page = PAGE.read_text(encoding="utf-8")
+        for documented in ("z-[60]", "carbon-shake", "Mods management patterns",
+                           "mod-update-ui.ts", "mods-browser-store.svelte.ts"):
+            self.assertIn(documented, page)
+
     def test_theme_preview_toggle_is_present(self):
         page = PAGE.read_text(encoding="utf-8")
         self.assertIn("data-theme-toggle", page)

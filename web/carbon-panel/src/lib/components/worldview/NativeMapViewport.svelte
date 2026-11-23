@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		Crosshair,
 		Copy,
@@ -162,7 +163,10 @@
 	});
 
 	// The tile loader is keyed on the session path and the active dimension;
-	// switching dimensions keeps the camera and reloads terrain.
+	// switching dimensions keeps the camera and reloads terrain. Seeding
+	// liveness is untracked so this effect never depends on `live`: toggling
+	// the checkbox must only change the cadence through the dedicated effect
+	// below, never dispose the loader or invalidate its tile cache.
 	$effect(() => {
 		const path = proxyPath;
 		const generation = revision;
@@ -172,7 +176,7 @@
 		const tileLoader = createNativeTileLoader(path, dimension, (results) => (tiles = results));
 		loader = tileLoader;
 		tiles = new Map();
-		tileLoader.setLive(live);
+		untrack(() => tileLoader.setLive(live));
 		return () => {
 			if (loader === tileLoader) loader = undefined;
 			tileLoader.dispose();
@@ -194,10 +198,6 @@
 		if (!live) return;
 		const timer = setInterval(() => (now = Date.now()), 30_000);
 		return () => clearInterval(timer);
-	});
-
-	$effect(() => {
-		loader?.setVisible(visible);
 	});
 
 	// A small spawn save stays legible. Open up one step when the first
