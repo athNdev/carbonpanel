@@ -1,7 +1,7 @@
 # PR #729 CodeRabbit Review Triage
 
 **PR:** feat: v2.1.1 improvements (#729, `feat/v2.1.1-improvements`)  
-**Source artifacts:** `C:\Users\Daybreak8458\AppData\Local\Temp\opencode\pr-reviews-clean.txt` (2 review bodies, split by `===SPLIT===`), `C:\Users\Daybreak8458\AppData\Local\Temp\opencode\pr-inline-bodies.txt` (7 extracted inline actionable comments).  
+**Source artifacts:** the CodeRabbit review bodies for PR #729 (2 bodies, split by `===SPLIT===`) and the 7 extracted inline actionable comments, fetched from the PR review API into the agent's scratch directory (not tracked, so no workstation path is recorded here).  
 **Triage date:** 2026-11-23  
 **Scope note:** The first review body explicitly states "5 more major findings are in follow-up comments..." and "48 more minor findings are in follow-up comments..." that are not present in the provided review-body artifact. This triage covers the 7 extracted inline comments, the outside-diff comment, and actionable findings visible in the provided review bodies. It does **not** fabricate dispositions for follow-up comments absent from the artifacts.
 
