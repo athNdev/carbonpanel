@@ -60,7 +60,7 @@ export async function checkFieldAppearance(page, base) {
     await page.goto(base + "/servers/ready");
     const text = page.getByLabel("Server Name", { exact: true });
     const number = page.getByLabel("Memory (MB)", { exact: true });
-    const select = page.locator("#mod_loader");
+    const select = page.locator("#modLoader");
     await text.waitFor();
     assert.equal(
       await page.locator("html").getAttribute("data-carbon-theme"),
@@ -118,7 +118,7 @@ export async function checkFieldAppearance(page, base) {
     assert.equal((await appearance(search)).fill, idle.fill);
     assert.equal((await appearance(search)).width, "2px");
     await page.goto(base + "/servers/new");
-    const loaderSelect = page.locator("#mod_loader");
+    const loaderSelect = page.locator("#modLoader");
     await loaderSelect.waitFor();
     const loaderStyle = await appearance(loaderSelect);
     assert.equal(loaderStyle.fill, idle.fill);
