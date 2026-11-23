@@ -99,7 +99,7 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 
 			globalConfig = response.categories;
-			toast.success('Global settings saved successfully');
+			toast.success('Global settings saved');
 		} catch (error) {
 			toast.error('Failed to save global settings');
 			console.error(error);
@@ -137,7 +137,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="motion-fade-in space-y-4">
 					{#if loading}
 						<div class="flex items-center justify-center border border-border bg-card p-16">
-							<CarbonInlineLoading description="Loading settings..." />
+							<CarbonInlineLoading description="Loading settings…" />
 						</div>
 					{:else if globalSettingsError}
 						<CarbonErrorState
@@ -184,7 +184,7 @@ one at https://mozilla.org/MPL/2.0/.
 			{:else}
 				<CarbonErrorState
 					title="Settings unavailable"
-					message="This section needs permissions that are not loaded, or the page data failed to load. Retry, or contact an administrator if you lack access."
+					message="This section needs permissions that are not loaded, or its data failed to load. Retry, or contact an administrator."
 					onretry={() => window.location.reload()}
 				/>
 			{/if}

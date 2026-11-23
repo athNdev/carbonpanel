@@ -221,7 +221,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 	{:else if loading}
 		<div class="flex items-center justify-center py-8" role="status">
-			<CarbonSpinner size="md" label="Loading" description="Loading operations..." />
+			<CarbonSpinner size="md" label="Loading" description="Loading operations…" />
 		</div>
 	{:else if !loadError}
 		<p role="status" class="py-6 text-sm text-muted-foreground">

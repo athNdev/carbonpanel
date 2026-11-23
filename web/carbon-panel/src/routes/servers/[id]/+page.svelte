@@ -562,25 +562,27 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<dl class="mt-3 divide-y divide-border text-xs">
 					<div class="flex items-center justify-between gap-3 py-2">
-						<dt class="font-mono text-xs uppercase text-muted-foreground">Minecraft</dt>
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Minecraft</dt>
 						<dd class="text-right font-mono font-medium text-foreground">
 							{server.mcVersion || 'Latest'}
 						</dd>
 					</div>
 					{#if isModpackPlatform(server.modLoader)}
 						<div class="flex items-center justify-between gap-3 py-2">
-							<dt class="font-mono text-xs uppercase text-muted-foreground">Modpack</dt>
+							<dt class="font-mono text-xs text-muted-foreground uppercase">Modpack</dt>
 							<dd class="text-right font-mono text-foreground">
 								{enumToString(ModLoader, server.modLoader)}
 							</dd>
 						</div>
 					{/if}
 					<div class="flex items-center justify-between gap-3 py-2">
-						<dt class="font-mono text-xs uppercase text-muted-foreground">Loader</dt>
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Loader</dt>
 						<dd class="flex flex-wrap items-center justify-end gap-1.5 text-right">
 							<CarbonTag type="teal" size="sm"
-								>{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
-									'vanilla'}</CarbonTag
+								>{enumToString(
+									ModLoader,
+									effectiveLoader(server.modLoader, server.modpackLoader)
+								) || 'vanilla'}</CarbonTag
 							>
 							{#if server.loaderVersion}<span class="font-mono break-all text-foreground"
 									>{server.loaderVersion}</span
@@ -588,7 +590,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</dd>
 					</div>
 					<div class="flex items-center justify-between gap-3 py-2">
-						<dt class="font-mono text-xs uppercase text-muted-foreground">Java</dt>
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Java</dt>
 						<dd class="text-right font-mono text-foreground">
 							{#if server.javaVersion}
 								JDK {server.javaVersion}
@@ -598,11 +600,11 @@ one at https://mozilla.org/MPL/2.0/.
 						</dd>
 					</div>
 					<div class="flex items-center justify-between gap-3 py-2">
-						<dt class="font-mono text-xs uppercase text-muted-foreground">Port</dt>
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Port</dt>
 						<dd class="text-right font-mono text-foreground">{server.port}</dd>
 					</div>
 					<div class="flex items-center justify-between gap-3 py-2">
-						<dt class="font-mono text-xs uppercase text-muted-foreground">Max players</dt>
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Max players</dt>
 						<dd class="text-right font-mono text-foreground">{server.maxPlayers}</dd>
 					</div>
 				</dl>

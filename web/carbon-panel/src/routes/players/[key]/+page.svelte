@@ -410,7 +410,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										{/if}
 									</p>
 									<p class="mt-1 text-xs text-muted-foreground">
-										First recorded is when this panel first learned of the identity; it is not a
+										First recorded is when this panel first observed the identity; it is not a
 										presence claim.
 									</p>
 								</div>

@@ -14,7 +14,7 @@
 	}
 
 	let {
-		title = 'Nothing here yet',
+		title = 'Nothing to show',
 		description = '',
 		icon,
 		actionLabel,

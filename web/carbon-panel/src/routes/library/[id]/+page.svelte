@@ -270,7 +270,7 @@ SPDX-License-Identifier: MPL-2.0
 <div class="space-y-6 font-sans text-foreground" data-testid="showcase-library-detail-content">
 	<CarbonPageHeader
 		title={entry?.name || shortId(entryId)}
-		description="Immutable revision history, provenance, bindings and read-only compatibility findings."
+		description="Revision history, provenance, bindings, and read-only compatibility findings."
 	>
 		{#snippet tag()}
 			{#if entry}
@@ -311,7 +311,7 @@ SPDX-License-Identifier: MPL-2.0
 	/>
 
 	{#if loadingDetail}
-		<CarbonInlineLoading description="Loading world entry..." />
+		<CarbonInlineLoading description="Loading world entry…" />
 	{:else if detailError}
 		<CarbonErrorState
 			title="Could not load this world entry"
@@ -489,7 +489,7 @@ SPDX-License-Identifier: MPL-2.0
 						{#if bindings.length === 0}
 							<CarbonEmptyState
 								title="No active bindings"
-								description="Binding a revision journals a stop-based swap and gives the server a private writable clone."
+								description="Binding stops the server, swaps in the revision, and gives the server its own writable copy."
 							/>
 						{:else}
 							<div class="overflow-x-auto">
@@ -712,7 +712,7 @@ SPDX-License-Identifier: MPL-2.0
 						{:else}
 							<CarbonEmptyState
 								title="No compatibility report yet"
-								description="The check is read-only. It reports detected, inferred and unknown findings with reasons; unknown results block binding."
+								description="Read-only check. Findings are detected, inferred, or unknown; unknown findings block binding."
 							>
 								{#snippet icon()}
 									<ShieldCheck class="h-6 w-6" />
@@ -782,8 +782,8 @@ SPDX-License-Identifier: MPL-2.0
 <CarbonConfirm
 	bind:open={bindOpen}
 	title="Bind this revision?"
-	message="Binding journals a stop-based swap. A running server is stopped, the level family is staged, published atomically, then restarted with a private writable clone. The immutable revision is never written to."
-	confirmLabel="Journal bind"
+	message="The server is stopped, the revision is published as the new level, and the server restarts with its own writable copy. The stored revision is never modified."
+	confirmLabel="Bind revision"
 	confirming={bindBusy}
 	onconfirm={() => void confirmBind()}
 	onclose={() => (bindOpen = false)}

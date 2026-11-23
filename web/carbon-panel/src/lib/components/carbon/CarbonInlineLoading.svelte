@@ -14,7 +14,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		class?: string;
 	}
 
-	let { description = 'Loading...', status = 'active', class: className = '' }: Props = $props();
+	let { description = 'Loading…', status = 'active', class: className = '' }: Props = $props();
 </script>
 
 <div class="inline-flex items-center gap-2 font-sans text-xs text-muted-foreground {className}">

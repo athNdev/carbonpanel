@@ -71,7 +71,7 @@ one at https://mozilla.org/MPL/2.0/.
 			},
 			onSaved() {
 				if (!isDisplayedSession()) return;
-				toast.success('File saved successfully');
+				toast.success('File saved');
 				onSave?.();
 			}
 		},
@@ -419,7 +419,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmDiscardOpen}
 	title="Discard unsaved changes?"
 	message="Your edits will be lost."
-	confirmLabel="Discard Changes"
+	confirmLabel="Discard changes"
 	danger
 	onconfirm={closeDialog}
 />

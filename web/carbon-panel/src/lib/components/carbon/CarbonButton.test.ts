@@ -28,17 +28,19 @@ function mountButton(props: Record<string, unknown>) {
 
 for (const state of ['disabled', 'loading'] as const) {
 	test(`a ${state} link button cannot navigate or enter the tab order`, () => {
-		const ui = mountButton({ href: '/destination', [state]: true, tabindex: 0, 'aria-disabled': 'false' });
+		const ui = mountButton({
+			href: '/destination',
+			[state]: true,
+			tabindex: 0,
+			'aria-disabled': 'false'
+		});
 		try {
 			assert.ok(ui.anchor, 'Expected a rendered link button');
 			assert.ok(!ui.anchor.hasAttribute('href'), 'a disabled link button must not navigate');
 			assert.equal(ui.anchor.getAttribute('aria-disabled'), 'true');
 			assert.equal(ui.anchor.getAttribute('role'), 'link');
 			assert.equal(ui.anchor.getAttribute('tabindex'), '-1');
-			assert.ok(
-				ui.anchor.classList.contains('opacity-50'),
-				'disabled link button must dim'
-			);
+			assert.ok(ui.anchor.classList.contains('opacity-50'), 'disabled link button must dim');
 		} finally {
 			ui.unmount();
 		}

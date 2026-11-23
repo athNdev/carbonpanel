@@ -153,7 +153,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="overflow-hidden rounded-none border border-border bg-background">
 			{#if loading}
 				<div class="flex h-96 items-center justify-center">
-					<CarbonInlineLoading description="Loading logs..." />
+					<CarbonInlineLoading description="Loading logs…" />
 				</div>
 			{:else if !logs}
 				<div class="flex h-96 flex-col items-center justify-center gap-2 text-center">

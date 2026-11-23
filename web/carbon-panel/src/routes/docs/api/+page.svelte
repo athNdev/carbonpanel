@@ -221,10 +221,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<CarbonBreadcrumbs items={[{ label: 'Docs' }, { label: 'API Reference' }]} />
 
 	<!-- Carbon Page Header -->
-	<CarbonPageHeader
-		title="API Reference"
-		description="Live ConnectRPC + OpenAPI reference. Spec served from /api/v1/openapi.yaml (regenerated via make gen)"
-	>
+	<CarbonPageHeader title="API Reference" description="Generated from the service OpenAPI spec.">
 		{#snippet tag()}
 			<CarbonTag type="blue" size="sm">ConnectRPC</CarbonTag>
 			<CarbonTag type="gray" size="sm">15 services · 155 methods</CarbonTag>
@@ -269,7 +266,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="absolute inset-0 z-10 flex items-center justify-center bg-background">
 					<div class="w-full max-w-md px-8">
 						<div class="mb-4 text-center">
-							<p class="mono-label">Loading API Documentation...</p>
+							<p class="mono-label">Loading API documentation…</p>
 						</div>
 						<div class="h-1.5 w-full overflow-hidden bg-secondary">
 							<div

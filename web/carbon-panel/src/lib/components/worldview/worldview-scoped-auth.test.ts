@@ -6,10 +6,7 @@ import { readFileSync } from 'node:fs';
 // The world detail route separates read access (world_view/read) from action
 // scopes (update, observe_players, servers/command). Read-only users must keep a
 // usable map view, while action failures and denials stay local to that action.
-const source = readFileSync(
-	new URL('./WorldViewWorkspace.svelte', import.meta.url),
-	'utf8'
-);
+const source = readFileSync(new URL('./WorldViewWorkspace.svelte', import.meta.url), 'utf8');
 
 function blockFor(marker: string): string {
 	const start = source.indexOf(marker);

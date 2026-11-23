@@ -112,7 +112,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <ServerTabPanel
 	title="Datapacks"
-	description="World data packs in datapacks/. They run on Vanilla servers with no mod loader."
+	description="Datapacks in the world's datapacks/ folder. They run on vanilla servers without a mod loader."
 >
 	{#snippet actions()}
 		<input
@@ -148,7 +148,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		{#if loading}
 			<div class="flex items-center justify-center py-8">
-				<CarbonSpinner size="md" label="Loading" description="Loading datapacks..." />
+				<CarbonSpinner size="md" label="Loading" description="Loading datapacks…" />
 			</div>
 		{:else if datapacks.length === 0}
 			<Card class="border-border bg-card">

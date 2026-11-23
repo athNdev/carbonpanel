@@ -188,7 +188,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
 		{:else if loading}
 			<div class="flex items-center justify-center py-8">
-				<CarbonSpinner size="md" label="Loading" description="Loading backups..." />
+				<CarbonSpinner size="md" label="Loading" description="Loading backups…" />
 			</div>
 		{:else if backups.length === 0}
 			<p class="py-8 text-center font-mono text-xs text-muted-foreground">
@@ -256,7 +256,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	bind:open={restoreConfirmOpen}
 	title="Restore backup?"
 	message="Restoring overwrites server data with this archive. The server container will be stopped and restarted if it was running."
-	confirmLabel="Restore Backup"
+	confirmLabel="Restore backup"
 	danger
 	onconfirm={confirmRestore}
 	onclose={() => (pendingRestore = null)}
@@ -270,7 +270,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	bind:open={deleteConfirmOpen}
 	title="Delete backup?"
 	message="The backup archive will be permanently deleted. This cannot be undone."
-	confirmLabel="Delete Backup"
+	confirmLabel="Delete backup"
 	danger
 	onconfirm={confirmDelete}
 	onclose={() => (pendingDelete = null)}

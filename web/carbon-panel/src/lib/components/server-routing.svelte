@@ -215,7 +215,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="p-4 sm:p-6">
 		{#if loading}
 			<div class="flex items-center justify-center py-8">
-				<CarbonSpinner size="md" label="Loading" description="Loading routing..." />
+				<CarbonSpinner size="md" label="Loading" description="Loading routing…" />
 			</div>
 		{:else if !routingInfo?.proxyEnabled}
 			<Alert>
@@ -374,7 +374,7 @@ one at https://mozilla.org/MPL/2.0/.
 											<p class="text-xs text-muted-foreground">
 												{route.serverId === server.id
 													? '(This server)'
-													: `Server: ${route.serverId.slice(0, 8)}...`}
+													: `Server: ${route.serverId.slice(0, 8)}…`}
 											</p>
 										</div>
 										{#if route.active}

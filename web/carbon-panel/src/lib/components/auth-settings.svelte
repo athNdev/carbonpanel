@@ -229,7 +229,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 {#if loading}
 	<div class="flex items-center justify-center py-16">
-		<CarbonInlineLoading description="Loading authentication settings..." />
+		<CarbonInlineLoading description="Loading authentication settings…" />
 	</div>
 {:else if config}
 	<div class="grid gap-6 lg:grid-cols-2">
@@ -246,7 +246,7 @@ one at https://mozilla.org/MPL/2.0/.
 							Authentication Settings
 						</h2>
 						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
-							Manage login methods and access controls
+							Manage sign-in methods and access controls
 						</p>
 					</div>
 				</div>
@@ -258,7 +258,7 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<div class="space-y-0.5 pr-4">
 						<p class="font-sans text-sm text-foreground">Local Authentication</p>
-						<p class="text-xs text-muted-foreground">Username and password login</p>
+						<p class="text-xs text-muted-foreground">Username and password sign-in</p>
 					</div>
 					{#if canEdit}
 						<input
@@ -347,7 +347,7 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<div class="space-y-0.5">
 						<label for="session-timeout-hours" class="font-sans text-sm text-foreground"
-							>Session Timeout</label
+							>Session timeout</label
 						>
 						<p class="text-xs text-muted-foreground">How long sessions remain valid</p>
 					</div>
@@ -380,10 +380,10 @@ one at https://mozilla.org/MPL/2.0/.
 					>
 						{#if saving}
 							<Loader2 class="h-4 w-4 animate-spin" />
-							Saving...
+							Saving…
 						{:else}
 							<Save class="h-4 w-4" />
-							Save Changes
+							Save changes
 						{/if}
 					</CarbonButton>
 				{/if}

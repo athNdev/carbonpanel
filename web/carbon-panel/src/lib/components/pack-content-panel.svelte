@@ -602,7 +602,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="w-44 sm:w-56">
 				<CarbonSearch
-					placeholder="Filter {meta.title.toLowerCase()}..."
+					placeholder="Filter {meta.title.toLowerCase()}…"
 					bind:value={filter}
 					size="sm"
 				/>
@@ -850,7 +850,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<div class="min-w-0 flex-1">
 					<CarbonSearch
 						bind:value={searchQuery}
-						placeholder="Search {meta.title.toLowerCase()}..."
+						placeholder="Search {meta.title.toLowerCase()}…"
 						size="sm"
 					/>
 				</div>
@@ -858,7 +858,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					class="h-8 w-28 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={searchVersion}
 					aria-label="Minecraft version"
-					placeholder="MC version"
+					placeholder="Minecraft version"
 				/>
 				{#if kind === 'shaderpack'}
 					<select

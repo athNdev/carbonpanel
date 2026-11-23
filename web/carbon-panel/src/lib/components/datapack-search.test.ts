@@ -15,8 +15,5 @@ test('Enter in the datapack search never submits an enclosing form', () => {
 		/function onkeydown\(event: KeyboardEvent\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?search\(\);[\s\S]*?\}/,
 		'the Enter branch must preventDefault before searching'
 	);
-	assert.ok(
-		source.includes("if (event.key === 'Enter')"),
-		'the handler must stay keyed to Enter'
-	);
+	assert.ok(source.includes("if (event.key === 'Enter')"), 'the handler must stay keyed to Enter');
 });

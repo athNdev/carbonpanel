@@ -120,7 +120,7 @@ SPDX-License-Identifier: MPL-2.0
 <div class="space-y-6 font-sans text-foreground">
 	<CarbonPageHeader
 		title="Import a world"
-		description="Two distinct paths: API-backed content artifacts, or manual URL/file import of a prebuilt world."
+		description="Import from a content API, or from a URL or file upload."
 	>
 		{#snippet tag()}
 			<CarbonTag type="blue" size="sm">IMPORT</CarbonTag>
@@ -224,7 +224,7 @@ SPDX-License-Identifier: MPL-2.0
 		{#if artifacts.artifacts.length === 0}
 			<CarbonEmptyState
 				title="No artifacts searched yet"
-				description="Choose a provider and project type, then search. Results come from the API; the panel does not fabricate a world catalog."
+				description="Choose a provider and project type, then search. Results come from the provider API."
 			/>
 		{:else}
 			<div class="overflow-x-auto">

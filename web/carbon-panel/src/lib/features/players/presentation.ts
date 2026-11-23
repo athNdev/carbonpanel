@@ -422,10 +422,7 @@ export function filterAndSortPlayers(
 			const aObserved = Boolean(a.lastSeen);
 			const bObserved = Boolean(b.lastSeen);
 			if (aObserved !== bObserved) return aObserved ? -1 : 1;
-			primary = compare(
-				Number(a.lastSeen?.seconds ?? 0),
-				Number(b.lastSeen?.seconds ?? 0)
-			);
+			primary = compare(Number(a.lastSeen?.seconds ?? 0), Number(b.lastSeen?.seconds ?? 0));
 			if (primary !== 0) return filter.sortDescending ? -primary : primary;
 		} else {
 			primary = compare(sortValue(a, filter.sortBy), sortValue(b, filter.sortBy));

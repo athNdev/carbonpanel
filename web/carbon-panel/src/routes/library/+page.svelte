@@ -419,7 +419,7 @@ SPDX-License-Identifier: MPL-2.0
 		{:else}
 			<CarbonDataTable
 				title="Library entries"
-				description="Revisions are immutable; opening an entry shows its provenance, bindings and compatibility report."
+				description="Revisions are immutable; opening an entry shows its provenance, bindings, and compatibility report."
 			>
 				{#snippet header()}
 					<tr>

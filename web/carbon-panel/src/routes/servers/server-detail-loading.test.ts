@@ -30,7 +30,7 @@ test('first server load shows the Carbon spinner, not a CSS border spinner', () 
 test('engine specs render the Java row even when the daemon reports no Java version', () => {
 	assert.match(
 		detail,
-		/<dt class="font-mono text-xs uppercase text-muted-foreground">Java<\/dt>/,
+		/<dt class="font-mono text-xs text-muted-foreground uppercase">Java<\/dt>/,
 		'the engine specs list must always contain a Java row'
 	);
 	assert.doesNotMatch(
