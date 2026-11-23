@@ -1220,6 +1220,12 @@ func (s *PlayerService) GetPlayerDeepData(ctx context.Context, req *connect.Requ
 	if msg.Kind != "stats" && msg.Kind != "advancements" && msg.Kind != "character" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("kind must be stats, advancements or character"))
 	}
+	if strings.TrimSpace(msg.ServerId) == "" {
+		// The snapshot files live on a server. Without a server scope there is
+		// nothing to read, and a missing-server error would send the caller
+		// looking for a server that was never named.
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("server id is required for player deep data"))
+	}
 	identity, err := s.identity(ctx, msg.IdentityKey)
 	if err != nil {
 		return nil, err

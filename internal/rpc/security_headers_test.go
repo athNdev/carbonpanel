@@ -127,7 +127,7 @@ func TestSecurityHeadersPresent(t *testing.T) {
 		"object-src 'none'",
 		"frame-ancestors 'self'",
 		"connect-src 'self' ws: wss:",
-		"img-src 'self' data: https:",
+		"img-src 'self' data: blob: https:",
 	} {
 		if !strings.Contains(csp, want) {
 			t.Fatalf("CSP %q missing %q", csp, want)
@@ -139,11 +139,14 @@ func TestSecurityHeadersPresent(t *testing.T) {
 // vue-i18n runtime template compilation is made CSP-compatible by the pinned
 // JIT webapp build (ADR 0048), never by widening this policy. An unexpected
 // edit here is a security regression and fails the suite.
+//
+// img-src carries blob: so the same-origin player skins, rendered from an
+// object URL the page created, are not blocked. Everything else stays pinned.
 func TestSecurityHeadersCSPUnchanged(t *testing.T) {
 	const want = "default-src 'self'; " +
 		"script-src 'self' 'unsafe-inline'; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"img-src 'self' data: https:; " +
+		"img-src 'self' data: blob: https:; " +
 		"font-src 'self' data:; " +
 		"connect-src 'self' ws: wss:; " +
 		"frame-ancestors 'self'; " +

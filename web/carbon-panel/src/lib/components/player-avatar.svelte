@@ -104,7 +104,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			const asset = response.asset;
 			if (asset && asset.data.length > 0) {
 				const next = toObjectURL(new Uint8Array(asset.data), asset.contentType);
-				revoke();
+				if (currentUrl) URL.revokeObjectURL(currentUrl);
 				currentUrl = next;
 				url = next;
 			} else {
@@ -181,7 +181,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (asset && asset.data.length > 0) {
 				const next = toObjectURL(new Uint8Array(asset.data), asset.contentType);
 				const mine = generation;
-				revoke();
+				if (currentUrl) URL.revokeObjectURL(currentUrl);
 				currentUrl = next;
 				url = next;
 				failed = false;

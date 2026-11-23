@@ -48,8 +48,8 @@ journal, audit and undo, and persist only the identity the mutation needs.
 Java name/UUID entries use the negotiated Java adapter. Bedrock Gamertag/XUID
 entries require an adapter proving Bedrock support. The dialog's polling lifetime is in [allowlist dialog lifetime](../decisions/allowlist-dialog-lifetime.md).
 `internal/playerdata` reads `stats`, `advancements` and `playerdata` snapshots
-through the injected node resolver with caller contexts and bounded reads;
-live NBT is never edited.
+through the injected node resolver with bounded reads; live NBT is never
+edited. Resolution is in [snapshot resolution](player-management-snapshot-resolution.md).
 
 # Roster filters
 

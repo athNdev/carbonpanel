@@ -227,6 +227,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				case 'character':
 				case 'progress': {
 					const kind = tab === 'character' ? 'character' : 'stats';
+					if (!primaryServerId) {
+						// The snapshot files live on a server. Without a server
+						// scope there is nothing to read, and asking for it
+						// would only produce a failing request.
+						deepNoteByTab = {
+							...deepNoteByTab,
+							[tab]: 'This identity is not linked to a server, so no snapshot is available.'
+						};
+						break;
+					}
 					const response = await rpcClient.player.getPlayerDeepData(
 						create(GetPlayerDeepDataRequestSchema, {
 							identityKey: key,
@@ -243,8 +253,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				default:
 					break;
 			}
-			if (generation === sectionGenerations[tab])
-				loadedSections = { ...loadedSections, [tab]: true };
 		} catch (error) {
 			if (generation === sectionGenerations[tab])
 				sectionError = {
@@ -252,8 +260,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					[tab]: formatRpcError(error, `Could not load ${tab} data.`)
 				};
 		} finally {
-			if (generation === sectionGenerations[tab])
+			if (generation === sectionGenerations[tab]) {
+				// The section counts as attempted even when it failed. A failed
+				// section must not retry itself: the loading flag is read by the
+				// effect that starts the load, so a section that stayed
+				// un-attempted would be requested again on every state change.
+				// The error state carries an explicit retry action instead.
+				loadedSections = { ...loadedSections, [tab]: true };
 				sectionLoading = { ...sectionLoading, [tab]: false };
+			}
 		}
 	}
 

@@ -320,7 +320,7 @@ func (s *Store) ListPlayerIdentities(ctx context.Context, serverID, query string
 	}
 	if needle := strings.TrimSpace(query); needle != "" {
 		like := "%" + needle + "%"
-		q = q.Where("current_name LIKE ? OR primary_uuid LIKE ? OR xuid LIKE ? OR id IN (SELECT identity_id FROM player_aliases WHERE name LIKE ?)", like, like, like, like)
+		q = q.Where("id = ? OR current_name LIKE ? OR primary_uuid LIKE ? OR xuid LIKE ? OR id IN (SELECT identity_id FROM player_aliases WHERE name LIKE ?)", needle, like, like, like, like)
 	}
 	var out []PlayerIdentity
 	err := q.Order(playerIdentityOrder).Limit(limit).Find(&out).Error
