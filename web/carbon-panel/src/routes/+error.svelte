@@ -19,7 +19,7 @@
 		tabindex="-1"
 		class="text-2xl font-semibold text-foreground focus:outline-none"
 	>
-		{page.status === 404 ? 'Page not found' : 'Something went wrong'}
+		{page.status === 404 ? 'Page not found' : 'Page failed to load'}
 	</h1>
 	<p class="max-w-md text-sm text-muted-foreground">
 		{page.error?.message ?? 'An unexpected error occurred while loading this page.'}

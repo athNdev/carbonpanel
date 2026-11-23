@@ -1091,7 +1091,7 @@ one at https://mozilla.org/MPL/2.0/.
 							Creating…
 						{:else}
 							<TicketPlus class="h-4 w-4" />
-							Create & Copy URL
+							Create and copy URL
 						{/if}
 					</CarbonButton>
 				</div>

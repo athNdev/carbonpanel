@@ -633,7 +633,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</p>
 					<h3 class="font-sans text-base font-semibold text-foreground">No Docker nodes found</h3>
 					<p class="mx-auto max-w-md font-sans text-xs text-muted-foreground">
-						Add a remote Docker host to scale server instances across multiple physical machines, or
+						Add a remote Docker host to scale servers across multiple physical machines, or
 						auto-detect daemons listening on your local network.
 					</p>
 				</div>

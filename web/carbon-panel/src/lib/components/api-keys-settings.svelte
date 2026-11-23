@@ -170,7 +170,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<p class="font-medium text-foreground">How to get a CurseForge API Key:</p>
 				<ol class="mt-2 list-inside list-decimal space-y-1">
 					<li>
-						Log in to the
+						Sign in to the
 						<a
 							href="https://console.curseforge.com/#/api-keys"
 							target="_blank"

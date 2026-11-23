@@ -73,7 +73,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!inspection) return;
 		const exportText = exportServerManifest(inspection);
 		navigator.clipboard.writeText(exportText);
-		toast.success('Server-ready manifest copied to clipboard!');
+		toast.success('Server-ready manifest copied to clipboard');
 	}
 
 	function downloadServerManifest() {

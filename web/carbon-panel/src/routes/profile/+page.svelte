@@ -570,7 +570,7 @@ one at https://mozilla.org/MPL/2.0/.
 <!-- Create API Token Modal with Carbon Design System Fidelity -->
 <CarbonModal
 	bind:open={showCreateTokenDialog}
-	title={createdToken ? 'Token created' : 'Create New API Token'}
+	title={createdToken ? 'Token created' : 'Create new API token'}
 	description={createdToken
 		? 'Copy your token now — it will not be displayed again'
 		: 'Provision a new programmatic access token'}

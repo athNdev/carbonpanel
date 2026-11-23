@@ -125,18 +125,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<DialogHeader>
 			<DialogTitle class="flex items-center gap-2 text-xl font-bold">
 				<Rocket class="h-5 w-5 text-primary" />
-				Deploy "{packName}" to Server
+				Deploy "{packName}" to server
 			</DialogTitle>
 			<DialogDescription>
 				Deploy this Packwiz modpack ({modLoader.toUpperCase()} · MC {mcVersion}) to an existing
-				server instance.
+				server.
 			</DialogDescription>
 		</DialogHeader>
 
 		<div class="space-y-5 py-3">
 			<!-- Target Server Picker -->
 			<div class="space-y-2">
-				<Label class="text-sm font-semibold">Target Server Instance</Label>
+				<Label class="text-sm font-semibold">Target server</Label>
 				{#if loadingServers}
 					<div class="flex items-center gap-2 text-xs text-muted-foreground">
 						<Loader2 class="h-4 w-4 animate-spin text-primary" />
@@ -245,7 +245,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					Deploying…
 				{:else}
 					<Rocket class="mr-2 h-4 w-4" />
-					Deploy to Server
+					Deploy to server
 				{/if}
 			</Button>
 		</DialogFooter>

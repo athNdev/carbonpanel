@@ -794,7 +794,7 @@ one at https://mozilla.org/MPL/2.0/.
 							Saving…
 						{:else}
 							<Save class="h-4 w-4" />
-							Save Permissions
+							Save permissions
 						{/if}
 					</CarbonButton>
 				</div>
