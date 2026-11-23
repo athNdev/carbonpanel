@@ -352,7 +352,7 @@
 				<section class="section" id="components" aria-labelledby="components-title">
 					<div class="section-heading"><div><p class="eyebrow">06 / COMPONENTS</p><h2 id="components-title">Component inventory</h2></div><p>All nineteen exports from <code>components/carbon/index.ts</code>. Props are quoted from the component source; defaults are the destructured values.</p></div>
 					<nav class="component-index" aria-label="Component index">
-						<a href="#c-button">CarbonButton</a><a href="#c-page-header">CarbonPageHeader</a><a href="#c-tile">CarbonTile</a><a href="#c-tag">CarbonTag</a><a href="#c-data-table">CarbonDataTable</a><a href="#c-modal">CarbonModal</a><a href="#c-confirm">CarbonConfirm</a><a href="#c-text-input">CarbonTextInput</a><a href="#c-select">CarbonSelect</a><a href="#c-tabs">CarbonTabs</a><a href="#c-inline-loading">CarbonInlineLoading</a><a href="#c-breadcrumbs">CarbonBreadcrumbs</a><a href="#c-shell">CarbonShell</a><a href="#c-search">CarbonSearch</a><a href="#c-accordion">CarbonAccordion</a><a href="#c-accordion-item">CarbonAccordionItem</a><a href="#c-structured-list">CarbonStructuredList</a><a href="#c-error-state">CarbonErrorState</a><a href="#c-empty-state">CarbonEmptyState</a>
+						<a href="#c-button">CarbonButton</a><a href="#c-page-header">CarbonPageHeader</a><a href="#c-tile">CarbonTile</a><a href="#c-tag">CarbonTag</a><a href="#c-data-table">CarbonDataTable</a><a href="#c-modal">CarbonModal</a><a href="#c-confirm">CarbonConfirm</a><a href="#c-text-input">CarbonTextInput</a><a href="#c-select">CarbonSelect</a><a href="#c-tabs">CarbonTabs</a><a href="#c-inline-loading">CarbonInlineLoading</a><a href="#c-breadcrumbs">CarbonBreadcrumbs</a><a href="#c-shell">CarbonShell</a><a href="#c-search">CarbonSearch</a><a href="#c-accordion">CarbonAccordion</a><a href="#c-accordion-item">CarbonAccordionItem</a><a href="#c-structured-list">CarbonStructuredList</a><a href="#c-error-state">CarbonErrorState</a><a href="#c-empty-state">CarbonEmptyState</a><a href="#c-spinner">CarbonSpinner</a>
 					</nav>
 					<p class="annotation">These are independent Svelte components, not a shared package with a compatibility guarantee. Cloud imports a pinned token snapshot and carries its own component implementations; a prop name on this page is authoritative for Panel only. "Tokenised" means the component reads <code>var(--…)</code> roles; "literal" means it still contains hard-coded dark-palette hex values and will not follow a theme change.</p>
 
@@ -941,6 +941,33 @@
 							<li>Distinguish a truly empty collection from no search matches and from a failed request. The copy and the available action differ in each case.</li>
 						</ul>
 					</article>
+
+					<article class="component" id="c-spinner">
+						<header class="component-head"><div><span class="spec-label">20 / FEEDBACK</span><h3>CarbonSpinner</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">An SVG arc loading spinner for waiting states. Replaces ad-hoc border spinners; pairs with a description for page-level waits.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<span class="spec-label">Sizes</span><div class="loading-demo"><span class="inline-loading"><span class="spinner" aria-hidden="true"></span>Small, inline</span><span class="inline-loading"><span class="spinner" aria-hidden="true"></span>Medium</span></div>
+							</div>
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
+								<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+								<tbody>
+									<tr><td><code>size</code></td><td><code>'sm' | 'md' | 'lg'</code></td><td><code>'md'</code></td></tr>
+									<tr><td><code>label</code></td><td><code>string</code></td><td><code>'Loading'</code></td></tr>
+									<tr><td><code>description</code></td><td><code>string</code></td><td>—</td></tr>
+									<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+								</tbody>
+								</table></div>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The root is a <code>role="status"</code> region carrying <code>label</code>; <code>description</code> renders as trailing monospace text when supplied.</li>
+							<li>The arc draws with the inherited text colour, like <code>currentColor</code>: wrap it in <code>text-primary</code> on page backgrounds, or let buttons and muted containers colour it through inheritance.</li>
+							<li>The sweep runs on the standard motion easing; under reduced motion it collapses to a static pulsing glyph instead of spinning.</li>
+							<li>Sizes are 16, 24 and 40 px. Use <code>sm</code> inside buttons and table rows, <code>md</code> for panel loading, <code>lg</code> for page-level waiting states.</li>
+						</ul>
+					</article>
 				</section>
 
 				<section class="section" id="composition" aria-labelledby="composition-title">
@@ -1000,7 +1027,7 @@
 					</div>
 					<div class="hero-actions"><a class="button primary" href="./README.md">Read the contract <span aria-hidden="true">→</span></a><a class="button secondary" href="../../web/carbon-panel/src/lib/design-system/tokens.css">Open tokens.css <svg class="arrow-up-right" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M3 13 13 3M3 3h10v10" /></svg></a></div>
 				</section>
-				<footer><span>CARBON / DESIGN SYSTEM</span><nav aria-label="More from Carbon"><a href="../../landing/index.html">Back to Carbon Panel</a><a href="../carbon-panel/src/content/docs/index.mdx">Documentation</a><a href="https://github.com/athNdev/carbonpanel">GitHub <svg class="arrow-up-right" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M3 13 13 3M3 3h10v10" /></svg></a></nav><span>Panel + Cloud · 19 components · 2 themes</span></footer>
+				<footer><span>CARBON / DESIGN SYSTEM</span><nav aria-label="More from Carbon"><a href="../../landing/index.html">Back to Carbon Panel</a><a href="../carbon-panel/src/content/docs/index.mdx">Documentation</a><a href="https://github.com/athNdev/carbonpanel">GitHub <svg class="arrow-up-right" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><path d="M3 13 13 3M3 3h10v10" /></svg></a></nav><span>Panel + Cloud · 20 components · 2 themes</span></footer>
 			</main>
 		</div>
 	</body>
