@@ -28,8 +28,8 @@ the installed fingerprint and provider release, downloads the exact candidate
 bytes with a SHA-512 check, and stages them into the server's open batch. The
 planner never writes the live mods directory or restarts the server.
 
-JSON-backed `mod_update` policies use the same planner. Save waits for the
-task list. Policy edits preserve schedule state and opt-outs start disabled.
+JSON-backed `mod_update` policies use the same planner. Save waits for the task list. Policy edits preserve
+schedule state and opt-outs start disabled. See [Mod update safety guards](mod-update-panel-safety.md).
 
 # Consequences
 
@@ -56,5 +56,5 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   Connect refusals and records its own operation name.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
-- Mod-update dispatch requires the observed deadline and schedule. The
-  scheduler installs the planner first and refuses invalid policy windows.
+- Mod-update dispatch requires the observed deadline, schedule, and policy revision.
+  It refuses invalid policy windows and does not plan a concurrently changed policy.

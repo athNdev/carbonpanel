@@ -55,6 +55,24 @@ export interface DependencyPlanRequest {
 	maxDepth?: number;
 }
 
+export interface ModInstallContext {
+	serverId: string;
+	serverMcVersion: string;
+	serverLoader: string | number;
+	lookupLoader: string;
+	lookupMcVersion: string;
+}
+
+export function sameModInstallContext(left: ModInstallContext, right: ModInstallContext): boolean {
+	return (
+		left.serverId === right.serverId &&
+		left.serverMcVersion === right.serverMcVersion &&
+		left.serverLoader === right.serverLoader &&
+		left.lookupLoader === right.lookupLoader &&
+		left.lookupMcVersion === right.lookupMcVersion
+	);
+}
+
 export interface UnresolvedDependency {
 	projectId: string;
 	title: string;
@@ -88,6 +106,7 @@ export async function buildDependencyPlan(
 	const selection = { ...request.selection };
 	const visited = new Set<string>();
 	const unresolved: UnresolvedDependency[] = [];
+	const depthLimited = new Map<string, UnresolvedDependency>();
 	const autoIncluded: string[] = [];
 	const items: InstallItem[] = [];
 
@@ -101,13 +120,25 @@ export async function buildDependencyPlan(
 		mcVersion: string,
 		depth: number
 	): Promise<void> {
-		if (depth > maxDepth) return;
 		const wanted = (deps || []).filter(
 			(dep) =>
 				dep.project_id &&
 				dependencyType(dep) !== 'incompatible' &&
 				selection[dep.project_id] === true
 		);
+		if (depth > maxDepth) {
+			for (const dep of wanted) {
+				const depId = dep.project_id as string;
+				const key = projectKey(platform, depId);
+				if (visited.has(key)) continue;
+				depthLimited.set(key, {
+					projectId: depId,
+					title: dep.title || depId,
+					reason: 'Dependency resolution depth limit reached'
+				});
+			}
+			return;
+		}
 		for (const dep of wanted) {
 			const depId = dep.project_id as string;
 			const key = projectKey(platform, depId);
@@ -130,7 +161,17 @@ export async function buildDependencyPlan(
 					unresolved.push({ projectId: depId, title: label, reason: 'No compatible version' });
 					continue;
 				}
-				const version = versions[0];
+				const version = dep.version_id
+					? versions.find((candidate) => candidate.id === dep.version_id)
+					: versions[0];
+				if (!version) {
+					unresolved.push({
+						projectId: depId,
+						title: label,
+						reason: `Pinned version ${dep.version_id} is not compatible`
+					});
+					continue;
+				}
 				if (!version.file_name || !version.download_url) {
 					unresolved.push({
 						projectId: depId,
@@ -170,5 +211,8 @@ export async function buildDependencyPlan(
 	}
 
 	await visit(request.deps, request.platform, request.loader, request.mcVersion, 0);
+	for (const [key, dependency] of depthLimited) {
+		if (!visited.has(key)) unresolved.push(dependency);
+	}
 	return { items, unresolved, autoIncluded, selection };
 }

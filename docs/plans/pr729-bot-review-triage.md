@@ -27,10 +27,10 @@
 | A16 | Major | `internal/minecraft/modcompat.go:247` | Quilt heterogeneous dependency entries (string + object) fail whole descriptor decode; can allow incompatible downgrade. | Review body lines 612-641. |
 | A17 | Major | `internal/minecraft/modcompat.go:260-261` | Bare Quilt version interpreted as exact instead of caret/range semantics; explicit Quilt `=` and bare Fabric exact must be preserved. | Review body lines 644-674. |
 | A18 | Major | `internal/minecraft/modcompat.go:370-371` | Unknown alternative erased by later known non-match; violates fail-open/unknown-preserving behavior. | Review body lines 676-708. |
-| A19 | Major | `internal/rpc/services/server.go:1674` | Version-change compatibility gate scans with old loader when request changes loader+mcVersion in same request. | Review body lines 716-747. |
+| A19 | Major | `internal/rpc/services/server.go:1674` | Version-change compatibility gate scans with old loader when request changes loader+mcVersion in same request. | **ADDRESSED in current tree**: `UpdateServer` builds an effective server with destination loader before `refuseVersionIncompatibleContent` when MC version changes (see `server.go` around 1722-1732). |
 | A20 | Major | `internal/rpc/services/server_version_compat.go:75` | Datapack version gate scans `GetDatapacksPath(dataRoot, "")` (defaults to `world`) instead of active `ActualLevelName()`. | Confirmed current code still passes empty level name. **VALID+OPEN.** |
 | A21 | Major | `internal/reconciler/reconciler.go:1167` | `AssertNoServerOperation` error conflates active operation and journal read failure; stop announcement may be suppressed permanently after read error. | Review body lines 795-823. Code currently returns `journal.AssertNoServerOperation(ctx, serverID) != nil` for crash path; needs distinction unknown vs active owner. **VALID+OPEN.** |
-| A22 | Major (outside diff) | `scripts/manual-review/e2e/field-appearance.mjs:120-121` | Still navigates to deleted `/worlds` and waits for missing `Map status` control. | Confirmed by grep: `page.goto(base + "/worlds")` and `getByLabel("Map status")`. Not one of the two Task B scripts but is a broken e2e check. |
+| A22 | Major (outside diff) | `scripts/manual-review/e2e/field-appearance.mjs:120-121` | Still navigates to deleted `/worlds` and waits for missing `Map status` control. | **ADDRESSED in current tree** (2026-11-23): `field-appearance.mjs` now exercises `/servers/ready`, `/servers`, and `/servers/new` (no `/worlds`, no `Map status`). Confirm with CI/editor-dialog browser regression. |
 | A23 | Minor | `web/carbon-panel/src/lib/features/worldview/native-map.ts` / loader/live behavior | Any remaining minor live-revalidation/incomplete-tile/If-None-Match issues should be rechecked after fixes; see inline dispositions below. | All three specific inline minors were fixed in working tree; no additional concrete open minor extracted from bodies beyond follow-up note. |
 
 ## Inline comment dispositions (7/7)
@@ -49,7 +49,7 @@
 
 | Severity | File:line (review) | Concern | Disposition | Evidence / notes |
 |---|---|---|---|---|
-| Major (outside diff) | `scripts/manual-review/e2e/server-inventory-check.mjs:195-220` / field-appearance | Browser checks navigate to deleted `/worlds` and assert missing control; breaks e2e. | **PARTIALLY ADDRESSED / VALID+OPEN** | `native-map-viewport-check.mjs` and `worldview-scoped-denial-check.mjs` were reworked to server-detail `?map=` flow (confirmed). `field-appearance.mjs` still contains `goto(base + "/worlds")` and `getByLabel("Map status")` (confirmed). `server-inventory-check.mjs` imports/runs field appearance. |
+| Major (outside diff) | `scripts/manual-review/e2e/server-inventory-check.mjs:195-220` / field-appearance | Browser checks navigate to deleted `/worlds` and assert missing control; breaks e2e. | **ADDRESSED in current tree** (2026-11-23) | `native-map-viewport-check.mjs` and `worldview-scoped-denial-check.mjs` use server-detail `?map=` flow; `field-appearance.mjs` no longer contains `/worlds` or `Map status` and now checks `/servers/ready`, `/servers`, `/servers/new`. Reconfirm in CI. |
 | Major | `internal/db/models.go:635` | `ExpectedLiveSha512` not rechecked before publish. | **VALID+OPEN (needs verification)** | See A2. |
 | Major | `internal/rpc/services/mod_update_apply.go:381-383` | Retryable staging errors not propagated after per-file outcomes recorded. | **NEEDS-VERIFICATION** | Not inspected in this pass. |
 | Major | `internal/rpc/services/mod_update_apply.go:62-63` | Temporary release lookup failures / 429 treated as permanent refusal. | **NEEDS-VERIFICATION** | Not inspected. |
@@ -76,3 +76,20 @@
 - The second review body (after `===SPLIT===`) is a status/summary review repeating the same 7 inline actionable comments; no new actionable findings beyond them.
 - The review body reports "21 Major comments" with 5 more in follow-up comments and "48 Minor comments" in follow-up comments; those follow-ups are not in the provided artifacts. A full PR triage should fetch them from GitHub/CodeRabbit before closing the bot-review gate.
 - I did not run git commands or modify product code; this file is documentation only.
+
+## 2026-11-23 working-tree disposition update
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| A1 | **ACCEPTED (independent review)** | Nether heightmap/storage-logical split fixed in `internal/worldlib/chunk_surface.go`, `chunk_surface_test.go`, `internal/worldterrain/dimension.go`; knowledge updated. Reviewer `ses_df70b23e8ffe0CR8xiLX9uKTzg`. |
+| A2/A3/A5 | **ACCEPTED (independent review)** | Publish-time digest precheck, retryability/transient staging propagation, publish-time mod candidate recheck + server version/loader gate. Reviewer `ses_df6ce6d6cffeJ2n9EqEqJ54LuA` applied a small fix: removed `StagedContentChange.BeforeCreate` lock-regression hook and added lock-tolerant best-effort server reload in `stage_content.go`; targeted db/staging/services checks reported passing. |
+| A4 | **IN REVIEW** | SSRF/egress fix implemented by `ses_df6cd4069ffeUGERFD0L32t68e` (guarded egress client, redirect/initial validation, proxy bypass closed, regression tests). Independent review pending. |
+| A6/A11/A13/A14/A15 | **ACCEPTED (independent review)** | Frontend mod-update/dependency/install-context fixes; svelte-check 0/0, targeted browser tests 40/40, prettier/eslint/knowledge-lint pass. Reviewer `ses_df6f236d6ffez93Wy0oc2cd248`. |
+| A7/A8/A9/A10 | **ACCEPTED (independent review)** | Scheduler claim/persistence/timezone fixes; scheduler tests and knowledge-lint pass. Reviewer `ses_df753c3f7ffeZhmc4BgQh7CxoF`. |
+| A12/A16/A17/A18 | **ACCEPTED (independent re-review)** | Mod compatibility fail-closed/normalization/pre-release/dependency fixes; `ImportUploadedMod` intentionally staging-only with regression test; MCP/web descriptions updated. Reviewer `ses_df7035f4bffeFLAkM0L7KNKOCK`. Proto `mod.pb.go`/`mod_pb.ts` regenerated. |
+| A19 | **ADDRESSED in current tree** | `UpdateServer` scans with destination loader when loader+mcVersion change together (`internal/rpc/services/server.go`). |
+| A20 | **ALREADY ADDRESSED in current tree** | `server_version_compat.go` resolves `cfg.ActualLevelName()` and passes it to `incompatibleInstalledContent`/`GetDatapacksPath`; regression `TestUpdateServerRefusesIncompatibleDatapackDowngradeInCustomLevel` present. Verified by `ses_df6cd4076ffdVR3n8UWvj85zgW` (targeted tests/vet pass). |
+| A21 | **ALREADY ADDRESSED in current tree** | `suppressStopAnnouncement` returns false only on nil; defers on active-owner sentinel and on unknown/read errors via pending-stop flush; regression `TestJournalReadFailureDefersStopAnnouncement` present. Verified by `ses_df6cd4071ffeCJwMYG0GzHrXD9` (`go test ./internal/reconciler/...`, `go vet` pass). |
+| A22 | **ADDRESSED in current tree** | `field-appearance.mjs` no longer references `/worlds`/`Map status`; confirm in CI. |
+| CI a11y script regressions | **FIXED in working tree** | `scripts/manual-review/e2e/a11y-check.mjs`: SHELL_FOCUS updated for OSS-465 copy, assertTabPanels accepts OSS-464 persistent hidden tabpanels. |
+| MCP doc drift | **FIXED in working tree** | `knowledge/architecture/mcp-server-rule-2.md` count claim 241→243; `TestMCPDocsCatalogueCountsMatchSourceOfTruth` passes. |

@@ -251,11 +251,16 @@ func (m *ModOnlineManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func normalizeLoaderName(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	s = strings.TrimPrefix(s, "mod_loader_")
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.Trim(s, "-")
 	switch {
 	case strings.Contains(s, "neoforge"):
 		return "neoforge"
 	case strings.Contains(s, "forge") || strings.Contains(s, "curseforge"):
 		return "forge"
+	case s == "fabric-quilt" || s == "quilt-fabric":
+		return "fabric"
 	case strings.Contains(s, "quilt"):
 		return "quilt"
 	case strings.Contains(s, "fabric"):
@@ -536,7 +541,8 @@ func (m *ModOnlineManager) handleVersions(w http.ResponseWriter, r *http.Request
 // resolution, file/dependency mapping and provider error mapping are identical
 // for the legacy JSON adapter and the generated ModBrowseService.
 func (m *ModOnlineManager) Versions(ctx context.Context, server *storage.Server, slug string, p ModVersionParams) ([]ModVersionItem, *ModBrowseError) {
-	platform := strings.ToLower(p.Platform)
+	platform := strings.ToLower(strings.TrimSpace(p.Platform))
+	explicitProvider := platform == "hangar" || platform == "modrinth" || platform == "curseforge"
 	if platform == "" {
 		platform = "modrinth"
 	}
@@ -577,16 +583,21 @@ func (m *ModOnlineManager) Versions(ctx context.Context, server *storage.Server,
 	}
 
 	// Plugin searches merge Hangar and Modrinth, so a slug may belong to
-	// either index. The plugin-native index is tried first (a Hangar slug is
-	// meaningless to Modrinth, and vice versa); an explicit platform=hangar
-	// pins the lookup and reports misses instead of falling back.
-	if platform == "hangar" || pluginLoader(loader) {
+	// either index. The plugin-native index is tried first only when the
+	// caller did not select a provider. An explicit provider pins the lookup
+	// and reports its own misses instead of falling back to the other index.
+	if explicitProvider {
+		switch platform {
+		case "hangar":
+			return m.hangarVersions(ctx, ua, slug, mcVersion)
+		case "modrinth":
+			return m.modrinthVersions(ctx, token, ua, slug, loader, mcVersion)
+		}
+	}
+	if pluginLoader(loader) {
 		versions, browseErr := m.hangarVersions(ctx, ua, slug, mcVersion)
 		if browseErr == nil && len(versions) > 0 {
 			return versions, nil
-		}
-		if platform == "hangar" {
-			return versions, browseErr
 		}
 	}
 	return m.modrinthVersions(ctx, token, ua, slug, loader, mcVersion)

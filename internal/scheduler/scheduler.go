@@ -44,6 +44,11 @@ import (
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
 
+// errInvalidTaskSchedule distinguishes an invalid schedule definition from a
+// transient failure while persisting a valid schedule. Only the former may
+// disable a task.
+var errInvalidTaskSchedule = errors.New("invalid task schedule")
+
 // ModUpdatePlanner stages reviewed compatible releases. The concrete owner
 // lives in the RPC service layer; the scheduler keeps only this interface so
 // manual and scheduled updates use one operation without an import cycle or a
@@ -416,27 +421,35 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			continue
 		}
 
-		// Advance the schedule before dispatch. If it cannot be advanced the
-		// task must not run: a still-due row would otherwise be claimed again
-		// on every tick. Disable it with the reason in the log.
+		// Advance the schedule before dispatch. An invalid schedule definition
+		// may disable the task, but a transient persistence failure must leave
+		// it enabled and due for a later retry.
 		if err := s.updateNextRun(task); err != nil {
-			if errors.Is(err, storage.ErrModUpdateScheduleChanged) {
-				s.releaseTask(task.ID)
-				continue
-			}
-			s.log.Error("Task %s: cannot advance schedule, refusing dispatch: %v", task.Name, err)
-			var dbErr error
-			if task.TaskType == storage.TaskTypeModUpdate {
-				dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
-			} else {
-				dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
-					Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
-			}
-			if dbErr != nil {
-				s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+			switch {
+			case errors.Is(err, storage.ErrModUpdateScheduleChanged):
+				s.log.Debug("Task %s: schedule changed while claiming its due slot", task.Name)
+			case errors.Is(err, errInvalidTaskSchedule):
+				s.log.Error("Task %s: invalid schedule, refusing dispatch: %v", task.Name, err)
+				if dbErr := s.disableInvalidSchedule(ctx, task); dbErr != nil {
+					s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+				}
+			default:
+				s.log.Error("Task %s: cannot persist schedule, leaving it due: %v", task.Name, err)
 			}
 			s.releaseTask(task.ID)
 			continue
+		}
+
+		// A policy edit may win immediately after the atomic slot claim. Read
+		// the current revision before planning and refuse the stale snapshot.
+		if task.TaskType == storage.TaskTypeModUpdate {
+			claimedTask, err := s.revalidateModUpdateClaim(ctx, task)
+			if err != nil {
+				s.log.Error("Task %s: mod update policy changed after claiming its due slot, refusing dispatch: %v", task.Name, err)
+				s.releaseTask(task.ID)
+				continue
+			}
+			task = claimedTask
 		}
 
 		// Execute task asynchronously
@@ -852,7 +865,7 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	now := time.Now()
 	advance := func(nextRun *time.Time) error {
 		if task.TaskType == storage.TaskTypeModUpdate {
-			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now)
+			return s.claimModUpdateSchedule(ctx, task, nextRun, now)
 		}
 		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
@@ -867,12 +880,66 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	}
 	nextRun, err := s.CalculateNextRun(task)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errInvalidTaskSchedule, err)
 	}
 	if err := advance(nextRun); err != nil {
 		return fmt.Errorf("store next run: %w", err)
 	}
 	return nil
+}
+
+// claimModUpdateSchedule atomically advances a mod-update due slot only when
+// the schedule, deadline, status, and policy snapshot still match. The policy
+// JSON is its durable revision: a concurrent operator edit makes this update
+// match no row, so the stale policy cannot be dispatched.
+func (s *Scheduler) claimModUpdateSchedule(ctx context.Context, task *storage.ScheduledTask, nextRun *time.Time, lastRun time.Time) error {
+	result := s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+		Where("id = ? AND task_type = ? AND status = ? AND schedule = ?", task.ID, task.TaskType, task.Status, task.Schedule).
+		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
+		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt).
+		Where("COALESCE(config, '') = ?", task.Config).
+		Where("next_run IS ?", task.NextRun).
+		Updates(map[string]any{"next_run": nextRun, "last_run": lastRun})
+	if result.Error == nil && result.RowsAffected == 0 {
+		return storage.ErrModUpdateScheduleChanged
+	}
+	return result.Error
+}
+
+// revalidateModUpdateClaim reads the policy revision after the slot claim.
+// An edit that commits between the claim and this read fails closed instead
+// of reaching the planner with the stale snapshot.
+func (s *Scheduler) revalidateModUpdateClaim(ctx context.Context, claimed *storage.ScheduledTask) (*storage.ScheduledTask, error) {
+	current, err := s.store.GetScheduledTask(ctx, claimed.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.TaskType != claimed.TaskType || current.Status != claimed.Status || current.Config != claimed.Config || !sameScheduledTaskTiming(current, claimed) {
+		return nil, fmt.Errorf("%w: policy revision changed", storage.ErrModUpdateScheduleChanged)
+	}
+	return current, nil
+}
+
+func sameScheduledTaskTiming(a, b *storage.ScheduledTask) bool {
+	if a.Schedule != b.Schedule || a.CronExpr != b.CronExpr || a.Timezone != b.Timezone || a.IntervalSecs != b.IntervalSecs {
+		return false
+	}
+	if a.RunAt == nil || b.RunAt == nil {
+		return a.RunAt == nil && b.RunAt == nil
+	}
+	return a.RunAt.Equal(*b.RunAt)
+}
+
+// disableInvalidSchedule disables only the exact schedule state that failed
+// calculation. If an operator corrected the task in the meantime, the guarded
+// update matches no row and leaves the corrected schedule enabled.
+func (s *Scheduler) disableInvalidSchedule(ctx context.Context, task *storage.ScheduledTask) error {
+	return s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+		Where("id = ? AND task_type = ? AND status = ? AND schedule = ?", task.ID, task.TaskType, task.Status, task.Schedule).
+		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
+		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt).
+		Where("next_run IS ?", task.NextRun).
+		Update("status", storage.TaskStatusDisabled).Error
 }
 
 // Task type executors
@@ -1358,15 +1425,20 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		}
 		// Timezone applies only to cron slots. An interval or one-shot task
 		// must keep its absolute deadline even if a stale zone is configured.
+		// An explicit TZ=/CRON_TZ= prefix is part of the expression and takes
+		// precedence over the task-level timezone.
+		explicitTimezone := hasExplicitCronTimezone(task.CronExpr)
 		var location *time.Location
-		if zone := strings.TrimSpace(task.Timezone); zone != "" {
-			location = time.UTC
-			if !strings.EqualFold(zone, "UTC") {
-				loaded, err := time.LoadLocation(zone)
-				if err != nil {
-					return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+		if !explicitTimezone {
+			if zone := strings.TrimSpace(task.Timezone); zone != "" {
+				location = time.UTC
+				if !strings.EqualFold(zone, "UTC") {
+					loaded, err := time.LoadLocation(zone)
+					if err != nil {
+						return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+					}
+					location = loaded
 				}
-				location = loaded
 			}
 		}
 		schedule, err := s.cronParser.Parse(task.CronExpr)
@@ -1408,6 +1480,10 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 	default:
 		return nil, fmt.Errorf("unknown schedule type: %s", task.Schedule)
 	}
+}
+
+func hasExplicitCronTimezone(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
 }
 
 // ValidateCronExpr validates a cron expression

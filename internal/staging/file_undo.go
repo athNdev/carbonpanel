@@ -4,6 +4,7 @@ package staging
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -59,8 +60,47 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	return n, sum, nil
 }
 
+// fileSHA512 reads one file without loading it into memory and verifies that
+// it did not change while the digest was being calculated.
+func fileSHA512(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	before, err := acc.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if !before.Mode().IsRegular() {
+		return "", fmt.Errorf("file %s is not a regular file", target)
+	}
+	r, err := acc.OpenRead(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	h := sha512.New()
+	n, copyErr := io.CopyBuffer(h, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	closeErr := r.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return "", err
+	}
+	if n > limit {
+		return "", fmt.Errorf("file %s exceeds the %d-byte digest limit", target, limit)
+	}
+	after, err := acc.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return "", fmt.Errorf("file %s changed while its digest was checked", target)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	type pending struct{ source, target, action string }
+	type pending struct {
+		source, target, action string
+		expectedLiveSha512     string
+	}
 	var files []pending
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -79,7 +119,10 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				files = append(files, pending{source: e.stage, target: e.live, action: storage.StagedActionReplace})
 			}
 		} else {
-			files = append(files, pending{source: row.StagePath, target: row.TargetPath, action: row.Action})
+			files = append(files, pending{
+				source: row.StagePath, target: row.TargetPath, action: row.Action,
+				expectedLiveSha512: row.ExpectedLiveSha512,
+			})
 		}
 	}
 	if len(files) == 0 {
@@ -148,6 +191,24 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	}
 	if err := acc.WriteFile(path.Join(recovery, "manifest.json"), body); err != nil {
 		return abortPreparation(err)
+	}
+	// Check every live precondition before the first mutation. A reviewed
+	// replacement records the installed digest at stage time; if that file
+	// changed on disk, the whole batch is refused instead of overwriting it.
+	for _, file := range files {
+		if file.expectedLiveSha512 == "" {
+			continue
+		}
+		current, err := fileSHA512(ctx, acc, file.target, storageworker.MaxStreamBytes)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but the live file is missing", file.target, file.expectedLiveSha512))
+			}
+			return abortPreparation(fmt.Errorf("staged target %s changed after staging: %w", file.target, err))
+		}
+		if !strings.EqualFold(current, file.expectedLiveSha512) {
+			return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but found %s", file.target, file.expectedLiveSha512, current))
+		}
 	}
 	// All old contents and the recovery manifest exist before the first mutation.
 	var published int64

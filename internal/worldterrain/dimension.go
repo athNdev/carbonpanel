@@ -17,11 +17,11 @@ type Dimension struct {
 	Folder string
 	Span   worldlib.JavaDimensionSpan
 	// SurfaceUnderRoof reports that WORLD_SURFACE can be an opaque bedrock
-	// roof instead of the visible surface. The Nether saves a full bedrock
-	// sheet at y=127 (with partial layers down to y=123) across the whole
-	// dimension, so every column's WORLD_SURFACE block is bedrock; the
-	// surface scan descends to the first terrain block under the roof, and
-	// a column that holds only roof bedrock and air stays empty.
+	// roof instead of the visible surface. The Nether's storage range reaches
+	// y=255, but its logical height and full bedrock roof are at y=127 (with
+	// partial layers down to y=123), so every column's WORLD_SURFACE block is
+	// bedrock; the surface scan descends to the first terrain block under the
+	// roof, and a column that holds only roof bedrock and air stays empty.
 	SurfaceUnderRoof bool
 }
 

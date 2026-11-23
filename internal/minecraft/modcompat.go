@@ -49,6 +49,13 @@ type ModCompatReport struct {
 // contentFamily groups loaders by the jar metadata their content carries.
 type contentFamily string
 
+// declaredConstraint keeps the constraint as declared for diagnostics while
+// retaining the metadata dialect used to interpret it.
+type declaredConstraint struct {
+	display string
+	match   string
+}
+
 const (
 	familyFabric contentFamily = "fabric" // fabric.mod.json / quilt.mod.json depends
 	familyPlugin contentFamily = "plugin" // plugin.yml / paper-plugin.yml api-version
@@ -75,14 +82,34 @@ func contentFamilyFor(loader models.ModLoader) contentFamily {
 // constraint in fabric.mod.json / quilt.mod.json depends; Bukkit-family
 // plugins declare plugin.yml or paper-plugin.yml api-version, which acts as a
 // lower bound. Loaders without a content directory (vanilla, modpack
-// platforms) and missing directories report no files. Results are sorted by
-// file name so reports are deterministic.
+// platforms) and missing directories report no files. Unknown mod loaders on
+// compatibility-sensitive mod files fail closed instead of being silently
+// skipped. Results are sorted by file name so reports are deterministic.
 func ScanContentCompatibility(dataRoot string, loader models.ModLoader, targetVersion string) []ModCompatReport {
+	info := GetModLoaderInfo(loader)
+	if info.Description == "Unknown mod loader" {
+		if info.ModsDirectory == "" {
+			return nil
+		}
+		dir := filepath.Join(dataRoot, info.ModsDirectory)
+		names, err := jarNames(dir)
+		if err != nil || len(names) == 0 {
+			return nil
+		}
+		reports := make([]ModCompatReport, 0, len(names))
+		for _, name := range names {
+			reports = append(reports, ModCompatReport{
+				File:   name,
+				Status: ModCompatIncompatible,
+				Reason: "unknown mod loader: compatibility cannot be verified",
+			})
+		}
+		return reports
+	}
 	family := contentFamilyFor(loader)
 	if family == familyOther {
 		return nil
 	}
-	info := GetModLoaderInfo(loader)
 	if info.ModsDirectory == "" {
 		return nil
 	}
@@ -157,8 +184,8 @@ func scanContentJar(path, name string, family contentFamily, targetVersion strin
 		// understands is unknown, never a blocker.
 		return report
 	}
-	report.Constraint = constraint
-	ok, understood := MinecraftConstraintMatch(constraint, targetVersion)
+	report.Constraint = constraint.display
+	ok, understood := MinecraftConstraintMatch(constraint.match, targetVersion)
 	if !understood {
 		return report
 	}
@@ -167,37 +194,37 @@ func scanContentJar(path, name string, family contentFamily, targetVersion strin
 		return report
 	}
 	report.Status = ModCompatIncompatible
-	report.Reason = "requires " + constraint
+	report.Reason = "requires " + constraint.display
 	return report
 }
 
 // readJarConstraint extracts the Minecraft version constraint declared by a
 // content archive. It reads the metadata the loader family carries and
 // reports found=false when the archive declares nothing readable.
-func readJarConstraint(path string, family contentFamily) (constraint string, found bool, err error) {
+func readJarConstraint(path string, family contentFamily) (constraint declaredConstraint, found bool, err error) {
 	r, err := zip.OpenReader(path)
 	if err != nil {
-		return "", false, err
+		return declaredConstraint{}, false, err
 	}
 	defer func() { _ = r.Close() }()
 
 	switch family {
 	case familyFabric:
 		if c, ok := readFabricConstraint(&r.Reader); ok {
-			return c, true, nil
+			return declaredConstraint{display: c, match: c}, true, nil
 		}
 		if c, ok := readQuiltConstraint(&r.Reader); ok {
-			return c, true, nil
+			return declaredConstraint{display: c, match: quiltConstraintForMatching(c)}, true, nil
 		}
 	case familyPlugin:
 		if c, ok := readPluginAPIVersion(&r.Reader, "plugin.yml"); ok {
-			return c, true, nil
+			return declaredConstraint{display: c, match: c}, true, nil
 		}
 		if c, ok := readPluginAPIVersion(&r.Reader, "paper-plugin.yml"); ok {
-			return c, true, nil
+			return declaredConstraint{display: c, match: c}, true, nil
 		}
 	}
-	return "", false, nil
+	return declaredConstraint{}, false, nil
 }
 
 // readFabricConstraint reads the "minecraft" entry of fabric.mod.json
@@ -232,7 +259,9 @@ func readFabricConstraint(r *zip.Reader) (string, bool) {
 }
 
 // readQuiltConstraint reads the minecraft entry of quilt.mod.json depends.
-// Quilt depends entries are objects with id and versions.
+// Quilt dependency entries may be string identifiers or objects with id and
+// versions, so each entry is decoded independently and a malformed entry does
+// not invalidate the rest of the descriptor.
 func readQuiltConstraint(r *zip.Reader) (string, bool) {
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() || jarMemberName(f.Name) != "quilt.mod.json" {
@@ -244,7 +273,7 @@ func readQuiltConstraint(r *zip.Reader) (string, bool) {
 		}
 		var meta struct {
 			QuiltLoader struct {
-				Depends []map[string]any `json:"depends"`
+				Depends []json.RawMessage `json:"depends"`
 			} `json:"quilt_loader"`
 		}
 		decodeErr := json.NewDecoder(rc).Decode(&meta)
@@ -252,7 +281,16 @@ func readQuiltConstraint(r *zip.Reader) (string, bool) {
 		if decodeErr != nil {
 			return "", false
 		}
-		for _, dep := range meta.QuiltLoader.Depends {
+		for _, raw := range meta.QuiltLoader.Depends {
+			var identifier string
+			if err := json.Unmarshal(raw, &identifier); err == nil {
+				// A string dependency carries no version constraint.
+				continue
+			}
+			var dep map[string]any
+			if err := json.Unmarshal(raw, &dep); err != nil {
+				continue
+			}
 			id, _ := dep["id"].(string)
 			if !strings.EqualFold(strings.TrimSpace(id), "minecraft") {
 				continue
@@ -260,7 +298,6 @@ func readQuiltConstraint(r *zip.Reader) (string, bool) {
 			if c, ok := anyConstraintString(dep["versions"], " or "); ok {
 				return c, true
 			}
-			return "", false
 		}
 		return "", false
 	}
@@ -301,17 +338,46 @@ func jarMemberName(name string) string {
 	return strings.TrimPrefix(filepath.ToSlash(name), "./")
 }
 
+// quiltConstraintForMatching converts Quilt's bare-version requirement into
+// the equivalent caret range. Explicit operators (including "=") and wildcard
+// requirements retain their declared meaning.
+func quiltConstraintForMatching(constraint string) string {
+	fields := strings.Fields(constraint)
+	for i, field := range fields {
+		switch {
+		case field == "",
+			strings.EqualFold(field, "or"),
+			strings.HasPrefix(field, ">"),
+			strings.HasPrefix(field, "<"),
+			strings.HasPrefix(field, "="),
+			strings.HasPrefix(field, "~"),
+			strings.HasPrefix(field, "^"),
+			strings.ContainsAny(field, "*xX"):
+			continue
+		}
+		if bound := boundVersion(field); bound != "" {
+			fields[i] = "^" + bound
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
 // anyConstraintString renders a declared constraint value: a plain string or
-// a list of alternatives joined with joiner.
+// a list of alternatives joined with joiner. Ambiguous or unparseable values
+// are rejected so callers fail closed instead of treating them as satisfied.
 func anyConstraintString(raw any, joiner string) (string, bool) {
 	switch v := raw.(type) {
 	case string:
-		return strings.TrimSpace(v), true
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return "", false
+		}
+		return s, true
 	case []any:
 		parts := make([]string, 0, len(v))
 		for _, item := range v {
 			s, ok := scalarString(item)
-			if !ok {
+			if !ok || s == "" {
 				return "", false
 			}
 			parts = append(parts, s)
@@ -351,7 +417,8 @@ func scalarString(raw any) (string, bool) {
 // wildcard tail, or an exact dotted version. Numeric segments compare
 // numerically. Anything outside the grammar — or a non-release target such
 // as a snapshot — reports understood=false so callers treat the file as
-// unknown instead of guessing.
+// unknown instead of guessing. If no alternative matches, any unknown
+// alternative keeps the result unknown rather than proving incompatibility.
 func MinecraftConstraintMatch(constraint, version string) (ok bool, understood bool) {
 	c := strings.TrimSpace(constraint)
 	if c == "" || c == "*" || c == "x" || c == "X" {
@@ -365,9 +432,11 @@ func MinecraftConstraintMatch(constraint, version string) (ok bool, understood b
 	expr := strings.ReplaceAll(c, "||", " or ")
 	anyAlt := false
 	understoodAny := false
+	unknownAny := false
 	for _, alt := range strings.Split(expr, " or ") {
 		okAlt, understoodAlt := matchSingleConstraint(alt, target)
 		if !understoodAlt {
+			unknownAny = true
 			continue
 		}
 		understoodAny = true
@@ -375,21 +444,31 @@ func MinecraftConstraintMatch(constraint, version string) (ok bool, understood b
 			anyAlt = true
 		}
 	}
-	return anyAlt, understoodAny
+	if anyAlt {
+		return true, true
+	}
+	if unknownAny {
+		return false, false
+	}
+	return false, understoodAny
 }
 
 // matchSingleConstraint ANDs a whitespace-separated list of bounds, treating
 // a bare "or" token as an alternative boundary. One unparsable bound makes
-// that whole alternative unknown; the expression succeeds when any parsable
-// alternative matches.
+// that whole alternative unknown; a known match still succeeds, otherwise an
+// unknown alternative keeps the expression unknown.
 func matchSingleConstraint(expr, target string) (bool, bool) {
-	anyAlt, understoodAny := false, false
+	anyAlt, understoodAny, unknownAny := false, false, false
 	currentOK, currentUnderstood, sawBound := true, true, false
 	flush := func() {
-		if sawBound && currentUnderstood {
-			understoodAny = true
-			if currentOK {
-				anyAlt = true
+		if sawBound {
+			if currentUnderstood {
+				understoodAny = true
+				if currentOK {
+					anyAlt = true
+				}
+			} else {
+				unknownAny = true
 			}
 		}
 		currentOK, currentUnderstood, sawBound = true, true, false
@@ -410,7 +489,13 @@ func matchSingleConstraint(expr, target string) (bool, bool) {
 		}
 	}
 	flush()
-	return anyAlt, understoodAny
+	if anyAlt {
+		return true, true
+	}
+	if unknownAny {
+		return false, false
+	}
+	return false, understoodAny
 }
 
 // boundVersion normalizes the version side of a bound. A trailing "-" is a

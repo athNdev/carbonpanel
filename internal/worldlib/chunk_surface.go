@@ -13,6 +13,8 @@ const (
 	JavaOverworldMinY = -64
 	JavaOverworldMaxY = 319
 	javaChunkWidth    = 16
+	javaChunkColumns  = javaChunkWidth * javaChunkWidth
+	maxJavaSections   = 24
 	maxChunkNBTValues = 32_768
 	firstModernJava   = 2860 // Java 1.18
 	lastSupportedJava = 5023 // Java 26.3
@@ -28,20 +30,62 @@ var (
 )
 
 // JavaDimensionSpan is the saved vertical layout of one vanilla dimension.
-// MinY is the world Y of the chunk's bottom section; every stored chunk of
-// the dimension reports yPos = MinY/16 and only saves sections between MinY
-// and MaxY. Modded dimension types may declare other spans; those chunks stay
-// unsupported until their span is verified against a game-generated save.
+// MinY is the world Y of the chunk's bottom section, and every stored chunk
+// reports yPos = MinY/16. MaxY is the inclusive top of the storage range:
+// it determines the heightmap's bit width and packed-long count. LogicalHeight
+// is the dimension's logical block height and determines how many populated
+// sections can be indexed. The two differ in the Nether: storage spans
+// y=0..255, while logical height 128 covers eight sections ending at the
+// bedrock roof y=127. Modded dimension types may declare other spans; those
+// chunks stay unsupported until their span is verified against a
+// game-generated save.
 type JavaDimensionSpan struct {
-	MinY, MaxY int
+	MinY, MaxY    int
+	LogicalHeight int
 }
 
-// The vanilla dimension spans (dimension_type min_y/height). All are section
-// aligned: a negative MinY must stay a multiple of 16.
+type javaDimensionLayout struct {
+	storageHeight          int
+	logicalHeight          int
+	sectionCount           int
+	heightmapBits          int
+	heightmapValuesPerLong int
+	heightmapLongs         int
+}
+
+func (span JavaDimensionSpan) layout() (javaDimensionLayout, error) {
+	storageHeight := span.MaxY - span.MinY + 1
+	if span.MaxY <= span.MinY ||
+		span.MinY%javaChunkWidth != 0 ||
+		storageHeight%javaChunkWidth != 0 ||
+		span.LogicalHeight <= 0 ||
+		span.LogicalHeight%javaChunkWidth != 0 ||
+		span.LogicalHeight > storageHeight ||
+		span.LogicalHeight/javaChunkWidth > maxJavaSections {
+		return javaDimensionLayout{}, errors.New("unsupported Java dimension span")
+	}
+	// A heightmap stores one above the highest block, so the storage span's
+	// inclusive value range needs ceil(log2(storageHeight+1)) bits. Modern
+	// Java packs each value wholly within one long and leaves the unused
+	// high bits clear.
+	heightmapBits := bits.Len(uint(storageHeight))
+	valuesPerLong := 64 / heightmapBits
+	return javaDimensionLayout{
+		storageHeight:          storageHeight,
+		logicalHeight:          span.LogicalHeight,
+		sectionCount:           span.LogicalHeight / javaChunkWidth,
+		heightmapBits:          heightmapBits,
+		heightmapValuesPerLong: valuesPerLong,
+		heightmapLongs:         (javaChunkColumns + valuesPerLong - 1) / valuesPerLong,
+	}, nil
+}
+
+// The vanilla dimension spans (dimension_type min_y/height/logical_height).
+// All heights are section aligned: a negative MinY must stay a multiple of 16.
 var (
-	JavaOverworldSpan = JavaDimensionSpan{MinY: -64, MaxY: 319}
-	JavaNetherSpan    = JavaDimensionSpan{MinY: 0, MaxY: 255}
-	JavaEndSpan       = JavaDimensionSpan{MinY: 0, MaxY: 255}
+	JavaOverworldSpan = JavaDimensionSpan{MinY: -64, MaxY: 319, LogicalHeight: 384}
+	JavaNetherSpan    = JavaDimensionSpan{MinY: 0, MaxY: 255, LogicalHeight: 128}
+	JavaEndSpan       = JavaDimensionSpan{MinY: 0, MaxY: 255, LogicalHeight: 256}
 )
 
 // JavaChunkSurface is one saved dimension's top-down surface. Highest block
@@ -85,8 +129,9 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 // holds only roof bedrock and air keeps no surface.
 func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan, surfaceUnderRoof bool) (JavaChunkSurface, error) {
 	var surface JavaChunkSurface
-	if span.MaxY <= span.MinY || span.MinY%javaChunkWidth != 0 {
-		return surface, errors.New("unsupported Java dimension span")
+	layout, err := span.layout()
+	if err != nil {
+		return surface, err
 	}
 	if len(raw) > maxNBTDecompressed {
 		return surface, errors.New("chunk NBT exceeds the Java decoder limit")
@@ -136,24 +181,23 @@ func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan, surfaceUnde
 	}
 	packed, ok := heights.([]int64)
 	// The packed values are heights relative to MinY, one above the highest
-	// block. The width is the smallest bit count holding the span plus the
-	// empty value, and modern Java never straddles long boundaries.
-	const bitsPerLong = 64
-	bits := bits.Len(uint(span.MaxY - span.MinY + 1))
-	perLong := bitsPerLong / bits
+	// block. The bit width follows the storage range, while the saved value
+	// must remain inside the dimension's logical section range. Modern Java
+	// never straddles a long boundary.
+	bits := layout.heightmapBits
+	perLong := layout.heightmapValuesPerLong
 	valueMask := uint64(1<<bits) - 1
-	heightSpan := span.MaxY - span.MinY + 1
-	if !ok || len(packed) != (len(surface.Heights)+perLong-1)/perLong {
+	if !ok || len(packed) != layout.heightmapLongs {
 		return surface, ErrJavaChunkUnsupported
 	}
 	for i := range surface.Heights {
 		relative := int((uint64(packed[i/perLong]) >> ((i % perLong) * bits)) & valueMask)
-		if relative > heightSpan {
+		if relative > layout.logicalHeight {
 			return surface, fmt.Errorf("out-of-range Java surface height at column %d", i)
 		}
 		surface.Heights[i] = int16(span.MinY + relative - 1)
 	}
-	surface.readSurfaceBlocks(root["sections"], span, surfaceUnderRoof)
+	surface.readSurfaceBlocks(root["sections"], span, layout, surfaceUnderRoof)
 	return surface, nil
 }
 
@@ -200,16 +244,11 @@ func (s javaBlockSection) block(index int) string {
 	return s.names[state]
 }
 
-func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan, surfaceUnderRoof bool) {
+func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan, layout javaDimensionLayout, surfaceUnderRoof bool) {
 	minSection := span.MinY / javaChunkWidth
-	sectionCount := span.MaxY/javaChunkWidth - minSection + 1
-	var sections [24]javaBlockSection
-	if sectionCount > len(sections) {
-		// The guarded spans above keep this unreachable; refuse rather than
-		// silently misindexing an oversized span.
-		return
-	}
-	var seen [24]bool
+	sectionCount := layout.sectionCount
+	sections := make([]javaBlockSection, sectionCount)
+	seen := make([]bool, sectionCount)
 	stored, _ := value.([]any)
 	for _, item := range stored {
 		section, _ := item.(map[string]any)
@@ -237,12 +276,13 @@ func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan, 
 		block := blockAt(column, y)
 		if surfaceUnderRoof && javaBedrockBlock(block) {
 			// A roofed dimension (the Nether) saves WORLD_SURFACE as the
-			// bedrock sheet at the top of the span, so every column's
-			// surface block is bedrock. The visible surface is the first
-			// terrain block under the roof: the walk passes roof bedrock,
-			// air and unsaved sections, and a column that holds only roof
-			// and air keeps no surface. Like the water scan below, the
-			// walk is bounded by the span.
+			// bedrock sheet at the top of its logical height (y=127), not
+			// at the top of the 256-block storage range (y=255). Every
+			// column's surface block is therefore bedrock. The visible
+			// surface is the first terrain block under the roof: the walk
+			// passes roof bedrock, air and unsaved sections, and a column
+			// that holds only roof and air keeps no surface. Like the water
+			// scan below, the walk is bounded by the logical span.
 			block = ""
 			for scan := y - 1; scan >= span.MinY; scan-- {
 				if found := blockAt(column, scan); !javaAirBlock(found) && !javaBedrockBlock(found) {

@@ -70,7 +70,7 @@ func SendCommand(ctx context.Context, RCONHost string, RCONPort int, RCONPasswor
 			resultCh <- rconResult{err: authErr}
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		output, sendErr := conn.SendCommand(command)
 		resultCh <- rconResult{output: output, err: sendErr}
 	}()

@@ -300,9 +300,9 @@ const SHELL_FOCUS = [
 	'Toggle Navigation',
 	'Carbon Panel',
 	'A1 A11y Reviewer',
-	'Overview',
+	'Dashboard',
 	/^Servers\b/,
-	'Create Server'
+	'Create server'
 ];
 // Seeded roster, library and view rows. Timestamps are RFC3339 protojson, and
 // enums use their schema names, so the real generated client decodes them.
@@ -1568,7 +1568,15 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
         waitUntil: "domcontentloaded",
       });
       await page.locator("#server-detail-tabs-tab-world").click();
-      await page.locator("[data-server-tab-panel]").waitFor();		}
+      // Every visited tab mounts its own server tab panel, so the bare
+      // [data-server-tab-panel] selector matches more than one element and
+      // Playwright's strict mode refuses it. Scope the wait to the world
+      // panel that the click above opened.
+      await page
+        .locator("#server-detail-tabs-panel-world [data-server-tab-panel]")
+        .first()
+        .waitFor();
+		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await check(`route /servers ${theme}: empty state is exposed`, async () => {
@@ -1698,13 +1706,31 @@ async function assertTabPanels(tablist, selectedId) {
 		new Set(tabs.map((tab) => tab.id)).size !== tabs.length ||
 		tabs.filter((tab) => tab.selected).length !== 1 ||
 		tabs.find((tab) => tab.selected)?.tabId !== selectedId ||
-		tabs.some((tab) =>
-			tab.tabIdCount !== 1 || !tab.id || tab.count !== 1 || tab.role !== 'tabpanel' ||
-			tab.labelledBy !== tab.tabId || tab.visible !== tab.selected ||
-			tab.tabIndex !== (tab.selected ? 0 : -1) ||
-			tab.panelTabIndex !== (tab.selected ? 0 : -1) ||
-			(!tab.selected && (!tab.hidden || tab.children !== 0))
-		)
+		tabs.some((tab) => {
+			if (
+				tab.tabIdCount !== 1 ||
+				!tab.id ||
+				tab.count !== 1 ||
+				tab.role !== 'tabpanel' ||
+				tab.labelledBy !== tab.tabId ||
+				tab.visible !== tab.selected ||
+				tab.tabIndex !== (tab.selected ? 0 : -1)
+			) {
+				return true;
+			}
+			if (tab.selected) {
+				return tab.hidden || tab.panelTabIndex !== 0;
+			}
+			// Inactive panels must be hidden. Transient panels are unmounted
+			// placeholders (children 0, panelTabIndex -1); OSS-464 persistent
+			// editable panels stay mounted behind hidden with tabindex=0 so
+			// unsaved edits survive tab switches.
+			return (
+				!tab.hidden ||
+				(tab.panelTabIndex !== -1 && tab.panelTabIndex !== 0) ||
+				(tab.children !== 0 && tab.panelTabIndex !== 0)
+			);
+		})
 	) {
 		throw new Error(`Tab panels for ${selectedId}: ${JSON.stringify(tabs)}`);
 	}

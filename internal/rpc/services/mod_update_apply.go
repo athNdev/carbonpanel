@@ -21,7 +21,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/operation"
-	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 )
@@ -50,7 +50,9 @@ type modUpdateVersionLookup interface {
 // exercised against an HTTP fixture.
 type providerModCandidateFetcher struct {
 	versions modUpdateVersionLookup
-	client   *http.Client
+	// policy overrides the default public Modrinth provider egress policy.
+	// Tests use it to target a loopback fixture while keeping egress checks.
+	policy utils.EgressPolicy
 }
 
 func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, int64, string, error) {
@@ -59,7 +61,13 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 		lookup = modUpdateProvider(settings)
 	}
 	version, err := lookup.GetVersion(ctx, versionID)
-	if err != nil || version == nil || version.ID == "" {
+	if err != nil {
+		if temporaryModProviderError(err) {
+			return nil, 0, "transient_download", fmt.Errorf("provider release lookup failed for %s: %w", versionID, err)
+		}
+		return nil, 0, "refused_provider", fmt.Errorf("provider did not confirm release %s: %w", versionID, err)
+	}
+	if version == nil || version.ID == "" {
 		return nil, 0, "refused_provider", fmt.Errorf("provider did not confirm release %s", versionID)
 	}
 	if version.Status != "listed" || version.VersionType != "release" ||
@@ -81,16 +89,22 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 			target = file
 		}
 	}
-	if target == nil || !providers.DownloadURLIsAllowed(target.URL) {
+	if target == nil {
 		return nil, 0, "refused_download", errors.New("no allowed download URL for the reviewed file")
 	}
-	// Static URL validation alone is not a connection-time SSRF guard. Reuse
-	// the guarded client that World Library imports use so DNS/private targets
-	// are refused while credentials are stripped on cross-origin redirects.
-	client := f.client
-	if client == nil {
-		client = indexers.ProtectCredentialsOnRedirect(utils.NewSafeHTTPClient(2*time.Minute, false))
+	policy := f.policy
+	if policy.Class() == "" {
+		policy = utils.ProviderEgressPolicy(minecraft.DownloadAllowsPrivate(""), minecraft.ProviderDownloadHosts("")...)
 	}
+	// Enforce provider egress on the full URL lifecycle: the static allowlist
+	// check rejects unlisted hosts before any request, and the guarded client
+	// re-applies the same policy on redirects and at dial time. The transport
+	// disables env proxies so a CONNECT tunnel cannot make dial-time checks see
+	// only the proxy address.
+	if _, err := utils.ValidateURLForEgress(target.URL, policy); err != nil {
+		return nil, 0, "refused_download", errors.New("no allowed download URL for the reviewed file")
+	}
+	client := indexers.ProtectCredentialsOnRedirect(utils.NewSafeHTTPClientForEgress(2*time.Minute, policy))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 	if err != nil {
 		return nil, 0, "refused_download", err
@@ -100,11 +114,14 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if isProviderEgressRefusal(err) {
+			return nil, 0, "refused_download", err
+		}
 		return nil, 0, "transient_download", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode >= 500 {
+		if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			return nil, 0, "transient_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 		}
 		return nil, 0, "refused_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
@@ -126,6 +143,39 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 		return nil, consumed, "refused_checksum", errors.New("candidate bytes do not match the reviewed SHA-512")
 	}
 	return data, consumed, "", nil
+}
+
+// temporaryModProviderError distinguishes an unavailable provider from a
+// confirmed missing or unauthorized release. Unknown transport failures stay
+// retryable; a later retry can confirm the release without losing the batch.
+func temporaryModProviderError(err error) bool {
+	if indexers.IsNotFound(err) || indexers.IsAuthError(err) {
+		return false
+	}
+	var providerErr *indexers.IndexerError
+	if errors.As(err, &providerErr) {
+		switch providerErr.Kind {
+		case indexers.ErrNetwork, indexers.ErrRateLimit, indexers.ErrDecode:
+			return true
+		default:
+			return providerErr.StatusCode == 408 || providerErr.StatusCode == 429 || providerErr.StatusCode >= 500
+		}
+	}
+	return true
+}
+
+// isProviderEgressRefusal classifies errors raised by the provider egress
+// policy as permanent refusals. Redirect-hop and initial-request policy
+// failures must not be retried as transient download errors.
+func isProviderEgressRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, utils.ErrBlockedIP) || errors.Is(err, utils.ErrInvalidScheme) ||
+		errors.Is(err, utils.ErrMissingHost) || errors.Is(err, utils.ErrInvalidURL) {
+		return true
+	}
+	return strings.Contains(err.Error(), "egress policy")
 }
 
 func providerUserAgent(settings *storage.ServerConfig) string {
@@ -156,6 +206,7 @@ type readyModUpdate struct {
 	targetPath  string
 	liveHash    string
 	bytes       []byte
+	candidate   *staging.ModCandidateMetadata
 	resultIndex int
 }
 
@@ -338,6 +389,15 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		ready = append(ready, readyModUpdate{
 			selection: sel, targetPath: filepath.ToSlash(installed),
 			liveHash: preview.GetInstalledSha512(), bytes: data,
+			candidate: &staging.ModCandidateMetadata{
+				Provider:    "modrinth",
+				VersionID:   sel.GetCandidateVersionId(),
+				ProjectID:   preview.GetProjectId(),
+				SHA512:      sel.GetCandidateSha512(),
+				Filename:    sel.GetCandidateFilename(),
+				Loader:      loader,
+				GameVersion: server.MCVersion,
+			},
 			resultIndex: len(results),
 		})
 		results = append(results, result)
@@ -347,6 +407,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	}
 
 	var batch *storage.ServerUpdateBatch
+	var stagingFailure error
 	if err := operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
 		// Commit the window before the first staged byte becomes visible.
 		var err error
@@ -374,20 +435,26 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			}
 			row, err := stageModContentToBatch(ctx, s.store, server, s.storageResolver,
 				batch.ID, windowName, applyAt, idle,
-				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash)
+				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash, item.candidate)
 			if errors.Is(err, storage.ErrUpdateBatchConflict) {
 				return err
 			}
 			if err != nil {
 				outcome.Outcome, outcome.Reason = "error", err.Error()
+				if errors.Is(err, errStagedCandidateState) {
+					outcome.Outcome = "refused_drift"
+				}
+				if retryableStagedContentError(err) {
+					stagingFailure = errors.Join(stagingFailure, fmt.Errorf("stage %s: %w", sel.GetFileName(), err))
+				}
 				continue
 			}
 			outcome.Outcome, outcome.StagedID = "staged", row.ID
 			alreadyStaged[sel.GetFileName()] = true
 		}
-		return nil
+		return stagingFailure
 	}); err != nil {
-		return results, nil, nil, err
+		return results, batch, transient, err
 	}
 	return results, batch, transient, nil
 }

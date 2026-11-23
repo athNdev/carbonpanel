@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -347,6 +348,58 @@ func TestModOnlineManager_PaperServerVersionsPreferHangar(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	require.Len(t, versions, 1)
 	assert.Equal(t, "modrinth-only-1.2.3.jar", versions[0].FileName)
+}
+
+func TestModOnlineManager_ExplicitModrinthVersionsSkipHangarFallback(t *testing.T) {
+	log := logger.New()
+	store, server, _ := newModSearchStore(t)
+
+	var hangarCalls atomic.Int32
+	mockHangar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hangarCalls.Add(1)
+		switch r.URL.Path {
+		case "/projects/ViaVersion":
+			_, _ = w.Write([]byte(`{"id":31,"name":"ViaVersion","namespace":{"owner":"ViaVersion","slug":"ViaVersion"}}`))
+		case "/projects/ViaVersion/ViaVersion/versions":
+			_, _ = w.Write([]byte(`{
+			  "pagination": {"count": 1, "limit": 25, "offset": 0},
+			  "result": [{
+			    "id": 34580, "projectId": 31, "name": "hangar-version", "visibility": "public",
+			    "channel": {"name": "Release"},
+			    "downloads": {"PAPER": {"fileInfo": {"name": "ViaVersion-hangar.jar", "sizeBytes": 10, "sha256Hash": "abc"}, "downloadUrl": "https://hangarcdn/ViaVersion-hangar.jar"}},
+			    "platformDependencies": {"PAPER": ["1.21.1"]}
+			  }]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(mockHangar.Close)
+
+	mockModrinth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/project/ViaVersion/version" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":"mr-version","version_number":"modrinth-version","name":"modrinth-version","version_type":"release","files":[{"url":"https://modrinth.example/ViaVersion-modrinth.jar","filename":"ViaVersion-modrinth.jar","primary":true,"size":20}]}]`))
+	}))
+	t.Cleanup(mockModrinth.Close)
+
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	manager := NewModOnlineManager(store, log, authMgr, policyEnforcer, ModOnlineOptions{
+		HangarBaseURL:   mockHangar.URL,
+		ModrinthBaseURL: mockModrinth.URL,
+	})
+
+	versions, browseErr := manager.Versions(context.Background(), server, "ViaVersion", ModVersionParams{
+		Platform: "modrinth",
+		Loader:   "paper",
+	})
+	require.Nil(t, browseErr)
+	require.Len(t, versions, 1)
+	assert.Equal(t, "ViaVersion-modrinth.jar", versions[0].FileName)
+	assert.Equal(t, "https://modrinth.example/ViaVersion-modrinth.jar", versions[0].DownloadURL)
+	assert.Zero(t, hangarCalls.Load(), "an explicit Modrinth selection must not query Hangar")
 }
 
 func TestModOnlineManager_InstallWritesToPluginsDirectory(t *testing.T) {

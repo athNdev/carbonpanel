@@ -9,10 +9,13 @@
 package db
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"gorm.io/gorm"
 )
 
 type ServerStatus string
@@ -162,6 +165,60 @@ type Server struct {
 	JoinObservationKind string    `json:"join_observation_kind" gorm:"-"`
 	JoinObservedAt      time.Time `json:"join_observed_at" gorm:"-"`
 	LastGoodJoinAt      time.Time `json:"last_good_join_at" gorm:"-"`
+}
+
+// ErrStagedModVersionChange reports that a server version or effective mod
+// loader cannot change while a reviewed provider candidate is still staged.
+var ErrStagedModVersionChange = errors.New("cannot change server version or mod loader while reviewed mod updates are staged")
+
+// ErrStagedModCandidateContext reports that a reviewed candidate was not
+// admitted with the game version and loader it was prepared for.
+var ErrStagedModCandidateContext = errors.New("staged mod candidate compatibility context is missing")
+
+// BeforeUpdate keeps a reviewed mod candidate and the server it was prepared
+// for in the same version/loader context. Uploaded mods remain outside this
+// gate; a reviewed row is identified by its live digest precondition.
+func (s *Server) BeforeUpdate(tx *gorm.DB) error {
+	if s == nil || s.ID == "" {
+		return nil
+	}
+	var current Server
+	if err := tx.Session(&gorm.Session{NewDB: true}).
+		Select("id", "mc_version", "mod_loader", "modpack_loader").
+		Where("id = ?", s.ID).
+		Take(&current).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if current.MCVersion == s.MCVersion && current.effectiveModLoader() == s.effectiveModLoader() {
+		return nil
+	}
+	var rows []StagedContentChange
+	if err := tx.Session(&gorm.Session{NewDB: true}).
+		Where("server_id = ? AND kind = ? AND status = ?", s.ID, StagedKindMod, StagedStatusStaged).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		// A live-digest precondition is written only for provider-reviewed
+		// replacements. Uploaded mods remain outside this version/loader gate.
+		if row.ExpectedLiveSha512 == "" {
+			continue
+		}
+		return fmt.Errorf("%w: staged candidate %s", ErrStagedModVersionChange, row.FileName)
+	}
+	return nil
+}
+
+func (s *Server) effectiveModLoader() ModLoader {
+	switch s.ModLoader {
+	case ModLoaderAutoCurseForge, ModLoaderCurseForge, ModLoaderFTBA, ModLoaderModrinth:
+		return s.ModpackLoader
+	default:
+		return s.ModLoader
+	}
 }
 
 type ServerConfig struct {
@@ -633,11 +690,19 @@ type StagedContentChange struct {
 	// update was staged. Publish must recheck it so a later local edit cannot
 	// be silently overwritten by a delayed apply. Empty means no precondition.
 	ExpectedLiveSha512 string       `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
-	Status             StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt          time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt          *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server             *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	// CandidateGameVersion and CandidateLoader are write-only admission
+	// guards. The durable candidate context lives beside the staged payload;
+	// these fields let the insert transaction reject a stale candidate if the
+	// server version or loader changed while its bytes were being prepared.
+	CandidateGameVersion string       `json:"-" gorm:"-"`
+	CandidateLoader      string       `json:"-" gorm:"-"`
+	Status               StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt            time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt            *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server               *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
+
+
 
 // TaskType defines the type of scheduled task
 type TaskType string

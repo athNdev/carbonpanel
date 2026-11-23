@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import {
 	buildPolicyConfig,
 	buildUpdateSelections,
+	currentUpdateSelectionIds,
 	DEFAULT_POLICY_STATE,
 	policyFromPersistedTask,
 	updateOutcomeLabel,
 	updateOutcomeTagType,
 	updateStateClass,
 	updateStateTagType,
+	updateCandidateFingerprint,
 	type ModLike
 } from './mod-update-ui';
 
@@ -46,6 +48,29 @@ test('installed mod update selection only includes checked available previews', 
 		}
 	]);
 	assert.deepEqual(buildUpdateSelections(mods, ['mod-2', 'mod-3']), []);
+});
+
+test('a candidate fingerprint change invalidates the reviewed selection', () => {
+	const fingerprints = {
+		'mod-1': updateCandidateFingerprint(available.updatePreview)
+	};
+	assert.deepEqual(currentUpdateSelectionIds([available], ['mod-1'], fingerprints), ['mod-1']);
+
+	const changedCandidate: ModLike = {
+		...available,
+		updatePreview: {
+			...available.updatePreview,
+			candidateVersionId: 'version-3',
+			candidateSha512: 'new-candidate-hash',
+			candidateFilename: 'mod-3.jar'
+		}
+	};
+	assert.deepEqual(currentUpdateSelectionIds([changedCandidate], ['mod-1'], fingerprints), []);
+	assert.deepEqual(
+		buildUpdateSelections([changedCandidate], ['mod-1'], fingerprints),
+		[],
+		'a new candidate must not be submitted under the old reviewed selection'
+	);
 });
 
 test('each preview state has the intended presentation treatment', () => {
@@ -93,11 +118,26 @@ test('a disabled first save reloads unchecked and idle duration is persisted', (
 		enabled: false,
 		excluded_projects: [],
 		max_updates_per_run: 5,
-		skip_when_running: true,
 		window: 'idle',
 		idle_minutes: 30
 	});
 	assert.deepEqual(policyFromPersistedTask(null, 1), DEFAULT_POLICY_STATE);
+});
+
+test('an omitted skip_when_running setting keeps its absent meaning', () => {
+	const persisted = { enabled: true };
+	const state = policyFromPersistedTask({ config: JSON.stringify(persisted), status: 1 }, 1);
+
+	assert.equal(state.skipWhenRunning, undefined, 'the absent setting must remain distinguishable');
+	assert.equal(state.skipWhenRunning === true, false, 'the effective stored value is false');
+
+	const roundTrip = JSON.parse(buildPolicyConfig(state));
+	assert.equal(roundTrip.enabled, true);
+	assert.equal(
+		Object.hasOwn(roundTrip, 'skip_when_running'),
+		false,
+		'saving must not turn the absent setting into an explicit true value'
+	);
 });
 
 test('policy config is opt-in, excludes blank IDs and bounds the batch', () => {

@@ -120,6 +120,10 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			if accErr != nil {
 				return accErr
 			}
+			if err := validateStagedModCandidates(ctx, store, server, acc, content); err != nil {
+				_ = acc.Close()
+				return err
+			}
 			snaps, commitErr := commitFiles(ctx, acc, content)
 			_ = acc.Close()
 			restore = func() error {
@@ -206,6 +210,10 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	}
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateStagedModCandidates(ctx, store, server, acc, content); err != nil {
+		_ = acc.Close()
 		return nil, err
 	}
 	snaps, err := commitFiles(ctx, acc, content)

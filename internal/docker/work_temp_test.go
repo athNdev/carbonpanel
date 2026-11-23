@@ -116,7 +116,8 @@ func TestWorkTempMountKeepsTheDaemonPathStyle(t *testing.T) {
 			continue
 		}
 		if !strings.HasSuffix(m.Source, ".tmp") ||
-			!(strings.Contains(m.Source, `C:\panel\data\servers\one`) || strings.Contains(m.Source, "C:/panel/data/servers/one")) {
+			(!strings.Contains(m.Source, `C:\panel\data\servers\one`) &&
+				!strings.Contains(m.Source, "C:/panel/data/servers/one")) {
 			t.Fatalf("windows daemon work temp source = %q, want the drive path preserved", m.Source)
 		}
 	}

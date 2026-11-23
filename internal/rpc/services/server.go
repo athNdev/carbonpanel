@@ -295,14 +295,26 @@ type serverSleeper interface {
 }
 
 // SetHibernationManager supplies the manager that freezes a container with the
-// cgroup freezer so an operator can freeze a running server on demand.
+// cgroup freezer so an operator can freeze a running server on demand. A nil
+// manager clears the seam: the RPC then fails closed instead of calling a nil
+// receiver.
 func (s *ServerService) SetHibernationManager(m *docker.HibernationManager) {
+	if m == nil {
+		s.hibernation = nil
+		return
+	}
 	s.hibernation = m
 }
 
 // SetDeepSleepManager supplies the manager that stops a container into deep
-// sleep so an operator can park a running server on demand.
+// sleep so an operator can park a running server on demand. A nil manager
+// clears the seam: the RPC then fails closed instead of calling a nil
+// receiver.
 func (s *ServerService) SetDeepSleepManager(m *docker.DeepSleepManager) {
+	if m == nil {
+		s.deepSleep = nil
+		return
+	}
 	s.deepSleep = m
 }
 
@@ -1694,15 +1706,27 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	needsRecreation := false
 	originalMemory := server.Memory
 	originalModLoader := server.ModLoader
+	destinationModLoader := originalModLoader
+	if msg.ModLoader != "" {
+		destinationModLoader = parseModLoaderString(msg.ModLoader)
+	}
 	originalMCVersion := server.MCVersion
 	originalDockerImage := server.DockerImage
 
 	// Pre-flight compatibility gate: refuse a Minecraft version change that
 	// installed content declares incompatible BEFORE any mutation, so a
 	// failed recreation can never leave the new version behind in the
-	// database (the row is persisted before recreation is attempted).
+	// database (the row is persisted before recreation is attempted). When
+	// the loader changes too, scan the content the destination loader will
+	// load without mutating the stored server.
 	if msg.McVersion != "" && msg.McVersion != originalMCVersion {
-		if err := s.refuseVersionIncompatibleContent(ctx, server, msg.McVersion); err != nil {
+		effectiveServer := server
+		if destinationModLoader != originalModLoader {
+			effective := *server
+			effective.ModLoader = destinationModLoader
+			effectiveServer = &effective
+		}
+		if err := s.refuseVersionIncompatibleContent(ctx, effectiveServer, msg.McVersion); err != nil {
 			return nil, err
 		}
 	}
@@ -1778,7 +1802,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 	if msg.ModLoader != "" {
-		newLoader := parseModLoaderString(msg.ModLoader)
+		newLoader := destinationModLoader
 		if newLoader != originalModLoader {
 			server.ModLoader = newLoader
 			server.TPSCommand = minecraft.GetTPSCommand(server.ModLoader)

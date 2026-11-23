@@ -4,8 +4,8 @@
   "viewport": { "width": 1440, "height": 950 },
   "login": {
     "path": "/login",
-    "usernameSelector": "input[placeholder=\"Enter your username\"]",
-    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "usernameSelector": "[data-testid=\"auth-login-username\"]",
+    "passwordSelector": "[data-testid=\"auth-login-password\"]",
     "submitSelector": "button[type=\"submit\"]",
     "successSelector": "a[href^=\"/servers/\"]"
   },

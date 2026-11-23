@@ -68,8 +68,8 @@ test('staging is an explicit select, window and apply flow', () => {
 	assert.ok(content.includes('Stage this update'), 'checkboxes must carry a visible label');
 
 	assert.ok(
-		content.includes('buildUpdateSelections(mods, selectedUpdates)'),
-		'the request payload must be built by the shared helper'
+		content.includes('buildUpdateSelections(') && content.includes('currentSelectedUpdates'),
+		'the request payload must be built by the shared helper from the current selections'
 	);
 	assert.ok(content.includes('id="mod-update-window"'), 'an apply window select is offered');
 	assert.ok(
@@ -86,8 +86,30 @@ test('staging is an explicit select, window and apply flow', () => {
 		'the UpdateMod request carries selections and the window fields'
 	);
 	assert.ok(
-		content.includes('Stage {selectedUpdates.length} selected update'),
+		content.includes('Stage {currentSelectedUpdates.length} selected update'),
 		'the stage button counts the current selection'
+	);
+});
+
+test('reviewed selections are bound to the candidate fingerprint', () => {
+	assert.ok(
+		content.includes('selectedUpdateFingerprints'),
+		'the reviewed candidate fingerprint must be captured with the selection'
+	);
+	assert.ok(
+		content.includes(
+			'currentUpdateSelectionIds(mods, selectedUpdates, selectedUpdateFingerprints)'
+		),
+		'current selections must be filtered by the captured candidate fingerprint'
+	);
+	assert.ok(
+		content.includes('checked={currentSelectedUpdates.includes(mod.id)}'),
+		'a changed candidate must no longer render as checked'
+	);
+	assert.match(
+		content,
+		/buildUpdateSelections\([\s\S]*selectedUpdateFingerprints/,
+		'the staging payload must recheck the candidate fingerprint'
 	);
 });
 
@@ -137,6 +159,11 @@ test('the automatic update policy panel is present and persisted via tasks', () 
 			content.includes('Schedule (cron)') &&
 			content.includes('Timezone'),
 		'all policy knobs are operator visible'
+	);
+	assert.ok(
+		content.includes('policySkipRunning = state.skipWhenRunning ?? false') &&
+			content.includes('policySkipRunningExplicit ? policySkipRunning : undefined'),
+		'an omitted skip_when_running setting must render false and remain omitted on save'
 	);
 	assert.ok(
 		content.includes('Retry loading policy'),

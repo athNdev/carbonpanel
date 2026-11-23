@@ -9,6 +9,7 @@ code_refs:
   - internal/docker/stop.go
   - internal/docker/transition.go
   - internal/rpc/services/server_version_compat.go
+  - internal/minecraft/modcompat.go
 sources:
   - title: Server lifecycle policy
     resource: server-lifecycle-policy.md
@@ -34,8 +35,17 @@ sources:
 
 Before any mutation, a version change scans installed content for declared
 compatibility with the target (fabric/quilt depends, plugin api-version,
-datapack pack format). Incompatible files refuse the change with a per-file
-list; unknown or unparseable content fails open. ADR 0055 is the contract.
+datapack pack format). When the request changes the loader too, the scan uses
+the destination loader without mutating the stored server. Incompatible files
+refuse the change with a per-file list; unknown or unparseable content fails
+open. ADR 0055 is the contract.
+
+Fabric bare versions are exact requirements; Quilt bare versions are caret
+ranges, while an explicit Quilt `=` pin is exact. Quilt dependency entries are
+decoded independently so string identifiers and malformed unrelated entries do
+not hide a readable Minecraft constraint. If no dependency alternative matches,
+any unknown alternative keeps the result unknown; a known matching alternative
+still succeeds.
 
 # Read next
 

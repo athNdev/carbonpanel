@@ -60,7 +60,9 @@ export async function checkFieldAppearance(page, base) {
     await page.goto(base + "/servers/ready");
     const text = page.getByLabel("Server Name", { exact: true });
     const number = page.getByLabel("Memory (MB)", { exact: true });
-    const select = page.locator("#modLoader");
+    // The server detail page's settings section uses the snake_case trigger id;
+    // the create-server wizard uses the camelCase one (#modLoader).
+    const select = page.locator("#mod_loader");
     await text.waitFor();
     assert.equal(
       await page.locator("html").getAttribute("data-carbon-theme"),

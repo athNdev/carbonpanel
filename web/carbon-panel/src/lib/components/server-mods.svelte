@@ -28,11 +28,13 @@ one at https://mozilla.org/MPL/2.0/.
 	import {
 		buildPolicyConfig,
 		buildUpdateSelections,
+		currentUpdateSelectionIds,
 		DEFAULT_POLICY_STATE,
 		isCurrentServer,
 		policyFromPersistedTask,
 		updateOutcomeLabel,
 		updateOutcomeTagType,
+		updateCandidateFingerprint,
 		updateStateTagType
 	} from '$lib/mod-update-ui';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
@@ -88,6 +90,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// Reviewed update application. Selection is explicit: a preview never
 	// stages bytes on its own, and only state=available rows can be selected.
 	let selectedUpdates = $state<string[]>([]);
+	let selectedUpdateFingerprints = $state<Record<string, string>>({});
 	let updateWindow = $state<'next' | 'time' | 'idle'>('next');
 	let applyAtLocal = $state('');
 	let idleMinutes = $state(15);
@@ -105,6 +108,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let policyExcluded = $state('');
 	let policyMax = $state(5);
 	let policySkipRunning = $state(true);
+	let policySkipRunningExplicit = $state(true);
 	let policyWindow = $state<'next_restart' | 'idle'>('next_restart');
 	let policyIdleMinutes = $state(15);
 	let policyLastOutcome = $state('No runs yet');
@@ -126,11 +130,31 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	let availableUpdates = $derived(mods.filter((mod) => mod.updatePreview?.state === 'available'));
+	let currentSelectedUpdates = $derived(
+		currentUpdateSelectionIds(mods, selectedUpdates, selectedUpdateFingerprints)
+	);
+
+	$effect(() => {
+		if (currentSelectedUpdates.length === selectedUpdates.length) return;
+		selectedUpdates = currentSelectedUpdates;
+		selectedUpdateFingerprints = Object.fromEntries(
+			currentSelectedUpdates.map((id) => [id, selectedUpdateFingerprints[id]])
+		);
+	});
 
 	function toggleUpdateSelection(id: string) {
-		selectedUpdates = selectedUpdates.includes(id)
-			? selectedUpdates.filter((selected) => selected !== id)
-			: [...selectedUpdates, id];
+		const mod = mods.find((candidate) => candidate.id === id);
+		if (!mod?.updatePreview || mod.updatePreview.state !== 'available') return;
+		const fingerprint = updateCandidateFingerprint(mod.updatePreview);
+		if (currentSelectedUpdates.includes(id)) {
+			selectedUpdates = selectedUpdates.filter((selected) => selected !== id);
+			const fingerprints = { ...selectedUpdateFingerprints };
+			delete fingerprints[id];
+			selectedUpdateFingerprints = fingerprints;
+		} else {
+			selectedUpdates = [...selectedUpdates.filter((selected) => selected !== id), id];
+			selectedUpdateFingerprints = { ...selectedUpdateFingerprints, [id]: fingerprint };
+		}
 	}
 
 	function applyWindowEnum(): ConfigApplyWindow {
@@ -178,7 +202,8 @@ one at https://mozilla.org/MPL/2.0/.
 			policyTimezone = state.timezone;
 			policyExcluded = state.excludedProjects;
 			policyMax = state.maxPerRun;
-			policySkipRunning = state.skipWhenRunning;
+			policySkipRunning = state.skipWhenRunning ?? false;
+			policySkipRunningExplicit = state.skipWhenRunning !== undefined || !task;
 			policyWindow = state.window;
 			policyIdleMinutes = state.idleMinutes;
 			if (task) {
@@ -221,7 +246,7 @@ one at https://mozilla.org/MPL/2.0/.
 			enabled,
 			excludedProjects: policyExcluded,
 			maxPerRun: policyMax,
-			skipWhenRunning: policySkipRunning,
+			skipWhenRunning: policySkipRunningExplicit ? policySkipRunning : undefined,
 			window: policyWindow,
 			idleMinutes: policyIdleMinutes
 		});
@@ -282,6 +307,7 @@ one at https://mozilla.org/MPL/2.0/.
 			updateStatus = '';
 			checkingUpdates = false;
 			selectedUpdates = [];
+			selectedUpdateFingerprints = {};
 			stagedOutcomes = [];
 			mods = [];
 			loading = true;
@@ -304,7 +330,8 @@ one at https://mozilla.org/MPL/2.0/.
 			policyTimezone = DEFAULT_POLICY_STATE.timezone;
 			policyExcluded = DEFAULT_POLICY_STATE.excludedProjects;
 			policyMax = DEFAULT_POLICY_STATE.maxPerRun;
-			policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning;
+			policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning ?? true;
+			policySkipRunningExplicit = true;
 			policyWindow = DEFAULT_POLICY_STATE.window;
 			policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
 			policyLastOutcome = 'No runs yet';
@@ -393,7 +420,11 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function stageSelectedUpdates() {
-		const selections = buildUpdateSelections(mods, selectedUpdates);
+		const selections = buildUpdateSelections(
+			mods,
+			currentSelectedUpdates,
+			selectedUpdateFingerprints
+		);
 		if (selections.length === 0) return;
 
 		let applyAtUnix = 0;
@@ -435,6 +466,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const refused = response.stagedUpdates.length - staged;
 			updateStatus = `Staged ${staged} update(s) for the pending batch${refused ? `; ${refused} refused and left untouched` : ''}.`;
 			selectedUpdates = [];
+			selectedUpdateFingerprints = {};
 			if (staged > 0) {
 				toast.success(`${staged} mod update(s) staged`);
 				await loadMods(true);
@@ -487,9 +519,10 @@ one at https://mozilla.org/MPL/2.0/.
 					displayName: file.name,
 					description: ''
 				});
+				if (server.id !== targetServerId || batchController.signal.aborted) break;
 			}
 			if (server.id === targetServerId && !batchController.signal.aborted) {
-				toast.success(`Uploaded ${fileList.length} mod(s)`);
+				toast.success(`Staged ${fileList.length} mod(s) for the next apply window`);
 				await loadMods();
 			}
 		} catch (error: unknown) {
@@ -822,13 +855,15 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="primary"
 				size="sm"
-				disabled={stagingUpdates || selectedUpdates.length === 0}
+				disabled={stagingUpdates || currentSelectedUpdates.length === 0}
 				onclick={stageSelectedUpdates}
 			>
 				{#if stagingUpdates}
 					<CarbonSpinner size="sm" label="Staging mod updates" />
 				{/if}
-				Stage {selectedUpdates.length} selected update{selectedUpdates.length === 1 ? '' : 's'}
+				Stage {currentSelectedUpdates.length} selected update{currentSelectedUpdates.length === 1
+					? ''
+					: 's'}
 			</CarbonButton>
 			{#if stagedOutcomes.length > 0}
 				<ul class="w-full border-t border-border pt-2" aria-label="Staging results">
@@ -961,6 +996,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<input
 							type="checkbox"
 							bind:checked={policySkipRunning}
+							onchange={() => (policySkipRunningExplicit = true)}
 							class="h-3.5 w-3.5 accent-primary"
 						/>
 						Skip while running
@@ -1159,7 +1195,7 @@ one at https://mozilla.org/MPL/2.0/.
 												>
 													<input
 														type="checkbox"
-														checked={selectedUpdates.includes(mod.id)}
+														checked={currentSelectedUpdates.includes(mod.id)}
 														onchange={() => toggleUpdateSelection(mod.id)}
 														class="h-3.5 w-3.5 accent-primary"
 													/>

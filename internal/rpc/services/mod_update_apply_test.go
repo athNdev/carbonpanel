@@ -4,6 +4,7 @@ package services
 import (
 	"context"
 	"crypto/sha512"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/require"
@@ -660,10 +662,24 @@ func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, "installed", string(after), "manual apply must not write the live mods directory")
 
-	staged, err := os.ReadFile(filepath.Join(server.DataPath, ".carbon-panel", "staged",
-		res.Msg.GetStagedUpdates()[0].GetStagedId(), "mod.jar"))
+	stagedID := res.Msg.GetStagedUpdates()[0].GetStagedId()
+	staged, err := os.ReadFile(filepath.Join(server.DataPath, ".carbon-panel", "staged", stagedID, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "next", string(staged), "staged bytes must be the checked candidate")
+
+	metadataBody, err := os.ReadFile(filepath.Join(server.DataPath, ".carbon-panel", "staged", stagedID, staging.ModCandidateMetadataFileName))
+	require.NoError(t, err)
+	var metadata staging.ModCandidateMetadata
+	require.NoError(t, json.Unmarshal(metadataBody, &metadata))
+	require.Equal(t, staging.ModCandidateMetadata{
+		Provider:    "modrinth",
+		VersionID:   "update",
+		ProjectID:   "project",
+		SHA512:      installedModDigest("next"),
+		Filename:    "mod-2.jar",
+		Loader:      "fabric",
+		GameVersion: "1.21.1",
+	}, metadata)
 
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
@@ -676,6 +692,37 @@ func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.
 	require.Equal(t, storage.StagedKindMod, rows[0].Kind)
 	require.Equal(t, storage.StagedActionReplace, rows[0].Action)
 	require.Equal(t, filepath.ToSlash(filepath.Join("mods", "mod.jar")), rows[0].TargetPath)
+}
+
+func TestStagedReviewedModBlocksServerVersionChange(t *testing.T) {
+	ctx := context.Background()
+	store, server, _ := newContentStageFixture(t, "mod-version-gate", storage.StatusStopped)
+	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ServerID:           server.ID,
+		Kind:               storage.StagedKindMod,
+		Action:             storage.StagedActionReplace,
+		TargetPath:           "mods/mod.jar",
+		StagePath:            ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:             "mod.jar",
+		ExpectedLiveSha512:   installedModDigest("installed"),
+		CandidateGameVersion: server.MCVersion,
+		CandidateLoader:      string(server.ModLoader),
+	})
+	require.NoError(t, err)
+
+	server.MCVersion = "1.21.4"
+	err = store.UpdateServer(ctx, server)
+	require.ErrorIs(t, err, storage.ErrStagedModVersionChange)
+	stored, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, "1.21.1", stored.MCVersion, "the refused version change must not be persisted")
+
+	_, err = store.DiscardStagedContent(ctx, row.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.UpdateServer(ctx, server))
+	stored, err = store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, "1.21.4", stored.MCVersion)
 }
 
 func TestStageReviewedModUpdateRefusesInstalledDrift(t *testing.T) {
@@ -909,6 +956,50 @@ func TestScheduledInventoryReadFailureIsRetryable(t *testing.T) {
 	svc := NewModService(store, nil, um, logger.New())
 	_, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
 	require.ErrorContains(t, err, "read installed mods directory")
+}
+
+func TestRetryableStagingFailurePropagatesAfterPerFileOutcomes(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-staging-retry", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	failed := false
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register("fixture:fail-second-mod-stage", func(tx *gorm.DB) {
+		row, ok := tx.Statement.Dest.(*storage.StagedContentChange)
+		if !ok || row.FileName != "b.jar" || failed {
+			return
+		}
+		failed = true
+		_ = tx.AddError(errors.New("temporary staged write failure"))
+	}))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(&modUpdateFetchByFileFixture{
+		data: map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
+	})
+
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.ErrorContains(t, err, "temporary staged write failure")
+	require.Equal(t, 1, staged, "the successful file outcome must be preserved")
+	require.Equal(t, 1, refused)
+	require.NotEmpty(t, reasons)
+	rows, listErr := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, listErr)
+	require.Len(t, rows, 1)
+	require.Equal(t, "a.jar", rows[0].FileName)
+
+	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.NoError(t, err, "the retry must resume without restaging the successful file")
+	require.Equal(t, 1, staged)
+	require.Zero(t, refused)
+	require.Empty(t, reasons)
+	rows, listErr = store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, listErr)
+	require.Len(t, rows, 2)
 }
 
 func TestTransientProviderFailureReturnsRetryableError(t *testing.T) {

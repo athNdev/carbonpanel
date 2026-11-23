@@ -62,7 +62,7 @@ func TestSendCommand_TimeoutClosesTheConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	accepted := make(chan net.Conn, 1)
 	go func() {
@@ -92,9 +92,12 @@ func TestSendCommand_TimeoutClosesTheConnection(t *testing.T) {
 			close(closed)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		buf := make([]byte, 64)
-		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			close(closed)
+			return
+		}
 		for {
 			if _, readErr := conn.Read(buf); readErr != nil {
 				break // EOF or reset: our side closed the connection

@@ -45,12 +45,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		ModVersion as RpcModVersion,
 		ModDependency as RpcModDependency
 	} from '$lib/proto/carbonpanel/v1/mod_browse_pb';
-	import type {
-		DependencyPlanResult,
-		InstallItem,
-		PlanDependency
+	import {
+		MAX_DEPENDENCY_DEPTH,
+		sameModInstallContext,
+		type DependencyPlanResult,
+		type InstallItem,
+		type ModInstallContext,
+		type PlanDependency
 	} from '$lib/mods/dependency-plan';
-	import { MAX_DEPENDENCY_DEPTH } from '$lib/mods/dependency-plan';
 	import ModsCatalogSearchBar from '$lib/mods/ModsCatalogSearchBar.svelte';
 	import ModsCatalogResultCard from '$lib/mods/ModsCatalogResultCard.svelte';
 	import ModsInstallOutcomeList from '$lib/mods/ModsInstallOutcomeList.svelte';
@@ -282,6 +284,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	}
 
+	function installContextFor(lookupLoader: string, lookupMcVersion: string): ModInstallContext {
+		return {
+			serverId: server.id,
+			serverMcVersion: server.mcVersion,
+			serverLoader: gameLoader,
+			lookupLoader,
+			lookupMcVersion
+		};
+	}
+
 	function searchMods() {
 		const target = browseTarget();
 		void store.submitSearch({
@@ -374,6 +386,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		let currentInstall = true;
 		try {
 			const { loader: loaderVal, mcVersion: versionVal } = browseTarget();
+			const installContext = installContextFor(loaderVal, versionVal);
+			if (store.target.id !== installContext.serverId) {
+				toast.error('The install target changed. Reopen the mod browser and try again.');
+				return;
+			}
 			const platform = mod.platform;
 
 			const items: InstallItem[] = [
@@ -396,6 +413,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			);
 			if (staleAfter()) {
 				currentInstall = false;
+				return;
+			}
+			const currentTarget = browseTarget();
+			const currentContext = installContextFor(currentTarget.loader, currentTarget.mcVersion);
+			if (
+				!sameModInstallContext(installContext, currentContext) ||
+				store.target.id !== installContext.serverId
+			) {
+				toast.error('The server or compatibility context changed. Review the mod and try again.');
 				return;
 			}
 			items.push(...depItems);

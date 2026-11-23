@@ -19,17 +19,16 @@ sources:
 # Choice
 
 Render observations from Java Anvil files with the owning server's confined
-read accessor. The core takes an authorized caller's canonical level directory
-and serves the vanilla Overworld, Nether and End dimension spans. It exposes no
-route and supplies no authorization. The caller owns the finite worker pool,
-cache, and delivery policy.
+read accessor. The core takes an authorized caller's canonical level directory,
+serves the vanilla Overworld, Nether and End dimension spans without exposing
+a route or authorization, and leaves the finite worker pool, cache and delivery
+policy to the caller.
 
 # Alternatives
 
 A game-side plugin or external renderer would require an installation on each
 server. A textured block renderer would also need broader format coverage and
-a game asset source. Reading surface blocks directly from Anvil lets the map
-distinguish common materials using an original palette.
+a game asset source. Direct Anvil block reads distinguish common map materials.
 
 # Consequences
 
@@ -45,12 +44,14 @@ heights. The PNG fades these chunks and returns their count. The preview
 displays their observed colors with full opacity. Early generation
 records without qualified surfaces remain transparent. Viewing never generates terrain.
 Accepted chunk layouts are pinned two ways: a DataVersion ceiling (raised only
-after wiki-verified format research, game-save fixture qualification still
-runs per release) and a per-dimension span check on yPos, heightmap packing
-and section count, so unknown formats fail closed instead of misrendering.
-LZ4 region chunks (compression byte 4, the lz4-java block stream) decode
-within the same budgets; `.mcc` external chunks stay unsupported. Tiles carry
-an opaque region-file freshness validator (size + mtime); the transport
+after wiki-verified format research, with game-save qualification per release)
+and per-dimension checks of yPos, heightmap packing and logical section count,
+so unknown formats fail closed. The Nether separates its 256-block storage
+height (nine-bit, 37-long heightmaps) from its 128-block logical height (eight
+sections and the bedrock roof at y=127); the Overworld and End keep 24 and 16
+full-height sections. LZ4 region chunks (compression byte 4, the lz4-java block
+stream) decode within the same budgets; `.mcc` external chunks stay unsupported. Tiles
+carry an opaque region-file freshness validator (size + mtime); the transport
 answers conditional revalidation with 304 before spending render budget, and
 the client's live toggle paces rechecks without changing the shared worker
 budget or invalidating the tile cache. The Nether's WORLD_SURFACE is its full

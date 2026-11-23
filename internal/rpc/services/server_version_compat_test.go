@@ -98,6 +98,44 @@ func TestUpdateServerRefusesIncompatibleVersionChange(t *testing.T) {
 	assert.Equal(t, "1.21.1", updated.MCVersion)
 }
 
+func TestUpdateServerRefusesIncompatibleVersionChangeUsingDestinationLoader(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	log := logger.New()
+	dockerClient, err := docker.NewClient("tcp://127.0.0.1:1", log)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dockerClient.Close() })
+
+	dataPath := t.TempDir()
+	writeFabricJar(t, filepath.Join(dataPath, "mods"), "new-loader-mod.jar", ">=1.21 <1.22")
+
+	server := &storage.Server{
+		ID: "srv-compat-destination-loader", Name: "Compat Destination Loader", NodeID: "local",
+		Port: 25595, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderVanilla, MCVersion: "1.21.1",
+		ContainerID: "tracked", Status: storage.StatusStopped,
+		DataPath: dataPath,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+
+	svc := newVersionCompatService(t, store, dockerClient, log)
+	_, err = svc.UpdateServer(ctx, connect.NewRequest(&v1.UpdateServerRequest{
+		Id: server.ID, ModLoader: "fabric", McVersion: "1.20.1",
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "error = %v", err)
+	assert.Contains(t, err.Error(), "new-loader-mod.jar")
+
+	// The destination loader is used only for the pre-flight scan; a refused
+	// request leaves the stored loader and version untouched.
+	updated, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.ModLoaderVanilla, updated.ModLoader)
+	assert.Equal(t, "1.21.1", updated.MCVersion)
+}
+
 // TestUpdateServerVersionChangeProceedsWhenContentUnknown verifies the gate
 // fails open: no installed content means no refusal, and the version change
 // runs its normal (here Docker-failing) path.

@@ -31,7 +31,8 @@ export interface PolicyForm {
 	enabled: boolean;
 	excludedProjects: string;
 	maxPerRun: number;
-	skipWhenRunning: boolean;
+	/** Undefined preserves an omitted skip_when_running setting. */
+	skipWhenRunning?: boolean;
 	window?: 'next_restart' | 'idle';
 	idleMinutes?: number;
 }
@@ -50,9 +51,27 @@ export function updateStateClass(state: string | undefined): string {
 	}
 }
 
-export function buildUpdateSelections(mods: ModLike[], selectedIds: string[]): UpdateSelection[] {
+export function updateCandidateFingerprint(preview?: UpdatePreviewLike | null): string {
+	return JSON.stringify([
+		preview?.candidateVersionId ?? '',
+		preview?.candidateSha512 ?? '',
+		preview?.candidateFilename ?? ''
+	]);
+}
+
+export function buildUpdateSelections(
+	mods: ModLike[],
+	selectedIds: string[],
+	selectedFingerprints?: Record<string, string>
+): UpdateSelection[] {
 	return mods
-		.filter((mod) => selectedIds.includes(mod.id) && mod.updatePreview?.state === 'available')
+		.filter(
+			(mod) =>
+				selectedIds.includes(mod.id) &&
+				mod.updatePreview?.state === 'available' &&
+				(selectedFingerprints === undefined ||
+					selectedFingerprints[mod.id] === updateCandidateFingerprint(mod.updatePreview))
+		)
 		.map((mod) => ({
 			modId: mod.id,
 			fileName: mod.fileName,
@@ -63,13 +82,28 @@ export function buildUpdateSelections(mods: ModLike[], selectedIds: string[]): U
 		}));
 }
 
+export function currentUpdateSelectionIds(
+	mods: ModLike[],
+	selectedIds: string[],
+	selectedFingerprints: Record<string, string>
+): string[] {
+	return selectedIds.filter((id) => {
+		const mod = mods.find((candidate) => candidate.id === id);
+		return (
+			mod?.updatePreview?.state === 'available' &&
+			selectedFingerprints[id] === updateCandidateFingerprint(mod.updatePreview)
+		);
+	});
+}
+
 export interface PolicyFormState {
 	enabled: boolean;
 	cron: string;
 	timezone: string;
 	excludedProjects: string;
 	maxPerRun: number;
-	skipWhenRunning: boolean;
+	/** Undefined means the persisted policy omitted skip_when_running. */
+	skipWhenRunning?: boolean;
 	window: 'next_restart' | 'idle';
 	idleMinutes: number;
 }
@@ -102,7 +136,12 @@ export function policyFromPersistedTask(
 				? config.excluded_projects.join(', ')
 				: '',
 			maxPerRun: Number(config.max_updates_per_run) || DEFAULT_POLICY_STATE.maxPerRun,
-			skipWhenRunning: config.skip_when_running !== false,
+			skipWhenRunning:
+				typeof config.skip_when_running === 'boolean'
+					? config.skip_when_running
+					: config.skip_when_running === undefined
+						? undefined
+						: true,
 			window: config.window === 'idle' ? 'idle' : 'next_restart',
 			idleMinutes: Number(config.idle_minutes) || DEFAULT_POLICY_STATE.idleMinutes
 		};
@@ -116,17 +155,27 @@ export function isCurrentServer(capturedServerId: string, currentServerId: strin
 }
 
 export function buildPolicyConfig(form: PolicyForm): string {
-	return JSON.stringify({
+	const config: {
+		enabled: boolean;
+		excluded_projects: string[];
+		max_updates_per_run: number;
+		skip_when_running?: boolean;
+		window: 'next_restart' | 'idle';
+		idle_minutes: number;
+	} = {
 		enabled: form.enabled,
 		excluded_projects: form.excludedProjects
 			.split(',')
 			.map((item) => item.trim())
 			.filter(Boolean),
 		max_updates_per_run: form.maxPerRun,
-		skip_when_running: form.skipWhenRunning,
 		window: form.window ?? 'next_restart',
 		idle_minutes: form.window === 'idle' ? (form.idleMinutes ?? 15) : 0
-	});
+	};
+	if (form.skipWhenRunning !== undefined) {
+		config.skip_when_running = form.skipWhenRunning;
+	}
+	return JSON.stringify(config);
 }
 
 // The preview and staging states render as CarbonTag badges so the tab keeps

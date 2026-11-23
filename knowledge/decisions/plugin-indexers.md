@@ -25,6 +25,10 @@ sources:
 - Search merges Hangar with Modrinth `project_type:plugin` results; every
   result keeps its own source label. Hangar slugs are globally unique and
   resolve through the bare project page.
+- Version lookup routes an explicit recognized provider directly to that
+  provider. Automatic Hangar-to-Modrinth fallback runs only when the request
+  omitted the provider, so a slug collision cannot replace the selected
+  provider's artifact.
 - Hangar has no server-side game-version filter: compatibility filters
   client-side from `platformDependencies`, segment-aware (1.21 matches 1.21.1,
   not 1.21.10).

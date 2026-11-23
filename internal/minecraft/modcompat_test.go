@@ -129,6 +129,71 @@ func TestScanContentCompatibility_QuiltAndPlugins(t *testing.T) {
 	}
 }
 
+func TestScanContentCompatibility_QuiltMixedDependencyEntries(t *testing.T) {
+	root := t.TempDir()
+	mods := filepath.Join(root, "mods")
+	if err := os.MkdirAll(mods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Quilt allows string dependency identifiers alongside dependency objects.
+	// A malformed entry must not prevent a later Minecraft constraint from
+	// being evaluated.
+	writeModJar(t, mods, "mixed.jar", "quilt.mod.json", `{"quilt_loader":{"depends":[123,"quilt_resource_loader",{"id":"minecraft","versions":{"invalid":true}},{"id":"minecraft","versions":">=1.21"}]}}`)
+
+	reports := ScanContentCompatibility(root, models.ModLoaderQuilt, "1.20.1")
+	if len(reports) != 1 {
+		t.Fatalf("reports = %+v, want one", reports)
+	}
+	got := reports[0]
+	if got.Status != ModCompatIncompatible {
+		t.Fatalf("mixed Quilt descriptor status = %s, want incompatible", got.Status)
+	}
+	if got.Constraint != ">=1.21" {
+		t.Fatalf("mixed Quilt descriptor constraint = %q, want %q", got.Constraint, ">=1.21")
+	}
+}
+
+func TestScanContentCompatibility_QuiltAndFabricVersionDialects(t *testing.T) {
+	quiltRoot := t.TempDir()
+	quiltMods := filepath.Join(quiltRoot, "mods")
+	if err := os.MkdirAll(quiltMods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeModJar(t, quiltMods, "quilt-bare.jar", "quilt.mod.json", `{"quilt_loader":{"depends":[{"id":"minecraft","versions":"1.21.1"}]}}`)
+	writeModJar(t, quiltMods, "quilt-pinned.jar", "quilt.mod.json", `{"quilt_loader":{"depends":[{"id":"minecraft","versions":"=1.21.1"}]}}`)
+
+	quiltReports := ScanContentCompatibility(quiltRoot, models.ModLoaderQuilt, "1.21.4")
+	quiltByName := map[string]ModCompatReport{}
+	for _, report := range quiltReports {
+		quiltByName[report.File] = report
+	}
+	if got := quiltByName["quilt-bare.jar"]; got.Status != ModCompatCompatible {
+		t.Fatalf("bare Quilt version on 1.21.4 = %+v, want compatible", got)
+	}
+	if got := quiltByName["quilt-pinned.jar"]; got.Status != ModCompatIncompatible {
+		t.Fatalf("pinned Quilt version on 1.21.4 = %+v, want incompatible", got)
+	}
+	if got := quiltByName["quilt-pinned.jar"].Constraint; got != "=1.21.1" {
+		t.Fatalf("pinned Quilt constraint = %q, want %q", got, "=1.21.1")
+	}
+
+	fabricRoot := t.TempDir()
+	fabricMods := filepath.Join(fabricRoot, "mods")
+	if err := os.MkdirAll(fabricMods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeModJar(t, fabricMods, "fabric-bare.jar", "fabric.mod.json", `{"depends":{"minecraft":"1.21.1"}}`)
+
+	fabricReports := ScanContentCompatibility(fabricRoot, models.ModLoaderFabric, "1.21.4")
+	if len(fabricReports) != 1 {
+		t.Fatalf("Fabric reports = %+v, want one", fabricReports)
+	}
+	if got := fabricReports[0]; got.Status != ModCompatIncompatible {
+		t.Fatalf("bare Fabric version on 1.21.4 = %+v, want incompatible", got)
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, item := range list {
 		if item == want {
@@ -242,8 +307,17 @@ func TestMinecraftConstraintMatch(t *testing.T) {
 		{">=1.19 && <1.23", "1.21.1", true, true},
 		{">=1.19 <1.21 || >=1.21.3", "1.21.4", true, true},
 		{">=1.19 <1.21 || >=1.21.3", "1.21.1", false, true},
+		{"1.20.1 or 1.21-RC1", "1.21.1", false, true},
+		{"1.21-RC1 or 1.20.1", "1.21.1", false, true},
+		{"1.20.1 or 1.21.1", "1.21.1", true, true},
+		{"1.21-RC1 or 1.21.1", "1.21.1", true, true},
 		{"[1.21,1.22)", "1.21.1", false, false}, // Maven ranges stay unknown
-		{"1.21-RC1", "1.21.1", false, false},    // non-numeric segments stay unknown
+		{"1.21-RC1", "1.21.1", false, true},    // dotted pre-release bound is understood but does not match
+		{">=1.21.11-pre1", "1.21.11-pre1", true, true},
+		{">=1.21.11-pre1", "1.21.11", true, true},
+		{">=1.21.11", "1.21.11-pre1", false, true},
+		{"1.21.11-pre1", "1.21.11-pre1", true, true},
+		{"1.21.11-pre1", "1.21.11-rc1", false, true},
 	}
 	for _, tc := range cases {
 		ok, known := MinecraftConstraintMatch(tc.constraint, tc.version)
@@ -254,5 +328,60 @@ func TestMinecraftConstraintMatch(t *testing.T) {
 	// Snapshots cannot be judged numerically.
 	if ok, known := MinecraftConstraintMatch(">=1.21", "24w40a"); ok || known {
 		t.Fatalf("snapshot match = (%v, %v), want (false, false)", ok, known)
+	}
+}
+
+func TestMatchSingleConstraintPreservesUnknownAlternative(t *testing.T) {
+	for _, expr := range []string{"1.20.1 or 1.21.1-beta1", "1.21.1-beta1 or 1.20.1"} {
+		ok, understood := matchSingleConstraint(expr, "1.21.1")
+		if ok || understood {
+			t.Fatalf("matchSingleConstraint(%q) = (%v, %v), want (false, false)", expr, ok, understood)
+		}
+	}
+}
+
+func TestScanContentCompatibility_AmbiguousDependencyMetadataFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	mods := filepath.Join(root, "mods")
+	if err := os.MkdirAll(mods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty/ambiguous/unparseable dependency metadata must not be treated as
+	// satisfied; fail closed.
+	writeModJar(t, mods, "empty.jar", "fabric.mod.json", `{"depends":{"minecraft":""}}`)
+	writeModJar(t, mods, "blank-list.jar", "fabric.mod.json", `{"depends":{"minecraft":["  "]}}`)
+	writeModJar(t, mods, "object.jar", "fabric.mod.json", `{"depends":{"minecraft":{"min":"1.21"}}}`)
+	writeModJar(t, mods, "empty-array.jar", "fabric.mod.json", `{"depends":{"minecraft":[]}}`)
+
+	reports := ScanContentCompatibility(root, models.ModLoaderFabric, "1.21.1")
+	byName := map[string]ModCompatReport{}
+	for _, r := range reports {
+		byName[r.File] = r
+	}
+	for _, name := range []string{"empty.jar", "blank-list.jar", "object.jar", "empty-array.jar"} {
+		got, ok := byName[name]
+		if !ok {
+			t.Fatalf("%s: no report", name)
+		}
+		if got.Status == ModCompatCompatible {
+			t.Fatalf("%s: status = %s, want fail-closed (not compatible)", name, got.Status)
+		}
+	}
+}
+
+func TestScanContentCompatibility_UnknownModLoaderFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	mods := filepath.Join(root, "mods")
+	if err := os.MkdirAll(mods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeModJar(t, mods, "some-mod.jar", "fabric.mod.json", `{"depends":{"minecraft":"*"}}`)
+
+	reports := ScanContentCompatibility(root, models.ModLoader("totally-unknown-loader"), "1.21.1")
+	for _, r := range reports {
+		if r.Status == ModCompatCompatible {
+			t.Fatalf("%s reported compatible for unknown mod loader; must fail closed: %+v", r.File, r)
+		}
 	}
 }

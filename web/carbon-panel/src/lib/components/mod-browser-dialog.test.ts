@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { sameModInstallContext, type ModInstallContext } from '../mods/dependency-plan';
 
 const dialogPath = path.resolve(import.meta.dirname, 'mod-browser-dialog.svelte');
 const content = fs.readFileSync(dialogPath, 'utf-8');
@@ -192,5 +193,49 @@ test('dialog state resets when the target server identity changes (E22)', () => 
 	assert.ok(
 		content.includes('syncedTargetKey'),
 		'the target sync is guarded so it only fires on real changes'
+	);
+});
+
+test('the install context is revalidated after dependency planning', () => {
+	const context: ModInstallContext = {
+		serverId: 'server-1',
+		serverMcVersion: '1.21.1',
+		serverLoader: 'fabric',
+		lookupLoader: 'fabric',
+		lookupMcVersion: '1.21.1'
+	};
+	assert.equal(sameModInstallContext(context, { ...context }), true);
+	assert.equal(
+		sameModInstallContext(context, { ...context, serverId: 'server-2' }),
+		false,
+		'a changed server must invalidate the plan'
+	);
+	assert.equal(
+		sameModInstallContext(context, { ...context, serverMcVersion: '1.20.6' }),
+		false,
+		'a changed Minecraft version must invalidate the plan'
+	);
+	assert.equal(
+		sameModInstallContext(context, { ...context, lookupLoader: 'neoforge' }),
+		false,
+		'a changed loader must invalidate the plan'
+	);
+	assert.equal(
+		sameModInstallContext(context, { ...context, lookupMcVersion: '1.20.6' }),
+		false,
+		'a changed lookup version must invalidate the plan'
+	);
+
+	const planning = content.indexOf('const depItems = await resolveDependencyInstallItems(');
+	const validation = content.indexOf('sameModInstallContext(installContext, currentContext)');
+	const install = content.indexOf('await store.installServerItems(');
+	assert.ok(planning > -1, 'dependency planning must be captured in the source contract');
+	assert.ok(
+		validation > planning && install > validation,
+		'the install request must be refused when the context changed after planning'
+	);
+	assert.ok(
+		content.includes('store.target.id !== installContext.serverId'),
+		'the store target must still point at the server used for planning'
 	);
 });

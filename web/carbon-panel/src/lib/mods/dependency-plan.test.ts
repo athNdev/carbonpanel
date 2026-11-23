@@ -174,5 +174,37 @@ describe('buildDependencyPlan', () => {
 		});
 		// p0's own lookup plus MAX_DEPENDENCY_DEPTH nested lookups.
 		assert.equal(plan.items.length, MAX_DEPENDENCY_DEPTH + 1);
+		assert.deepEqual(plan.unresolved, [
+			{
+				projectId: `p${MAX_DEPENDENCY_DEPTH + 1}`,
+				title: `p${MAX_DEPENDENCY_DEPTH + 1}`,
+				reason: 'Dependency resolution depth limit reached'
+			}
+		]);
+	});
+
+	test('a pinned dependency version is selected instead of the newest version', async () => {
+		const getVersions = lookup({
+			'pinned-api': [version('Newest API'), { ...version('Pinned API'), id: 'pinned-version-id' }]
+		});
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{
+					project_id: 'pinned-api',
+					version_id: 'pinned-version-id',
+					dependency_type: 'required',
+					title: 'Pinned API'
+				}
+			],
+			selection: { 'pinned-api': true },
+			getVersions
+		});
+
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Pinned API.jar']
+		);
+		assert.equal(plan.unresolved.length, 0);
 	});
 });

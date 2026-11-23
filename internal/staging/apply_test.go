@@ -7,7 +7,12 @@ package staging
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,6 +20,8 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -150,6 +157,189 @@ func TestApplyRollsBackWhenPublishFails(t *testing.T) {
 	rows, err := store.ListStagedContent(ctx, server.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
+}
+
+func TestApplyRefusesStagedFileWhenLiveDigestChanged(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "digest", Name: "digest", DataPath: data, Status: storage.StatusDeepSleep}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mod.jar")
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	expected := fmt.Sprintf("%x", sha512.Sum512([]byte("installed")))
+	stageFileWithPrecondition(t, store, data, batchID, server.ID, "mod.jar", "candidate", expected)
+	require.NoError(t, os.WriteFile(live, []byte("edited-after-staging"), 0o644))
+
+	published := false
+	err := Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		published = true
+		return nil
+	})
+	require.ErrorContains(t, err, "changed after staging")
+	require.False(t, published)
+
+	got, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "edited-after-staging", string(got), "a stale staged copy must not overwrite the edited live file")
+	staged := filepath.Join(data, ".carbon-panel", "staged", server.ID+"-mod.jar", "mod.jar")
+	require.FileExists(t, staged, "the refused candidate must remain staged")
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "the refused batch must remain open for operator action")
+}
+
+func TestApplyBatchRefusesIncompatibleStagedModCandidate(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "candidate-batch", Name: "candidate-batch", DataPath: data,
+		MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: storage.StatusDeepSleep,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageReviewedModCandidate(t, store, data, batchID, server, "candidate")
+	useModCandidateProvider(t, false)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	published := false
+	err = ApplyBatch(ctx, store, nil, server, *batch, func(context.Context, *storage.Server, Plan) error {
+		published = true
+		return nil
+	})
+	require.ErrorContains(t, err, "not compatible with loader fabric and game version 1.21.1")
+	require.False(t, published)
+
+	got, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(got), "an incompatible candidate must not replace the live file")
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "the refused candidate must remain staged for operator action")
+}
+
+func TestApplyBatchPublishesCompatibleStagedModCandidate(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "candidate-compatible", Name: "candidate-compatible", DataPath: data,
+		MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: storage.StatusDeepSleep,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageReviewedModCandidate(t, store, data, batchID, server, "candidate")
+	useModCandidateProvider(t, true)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, nil))
+
+	got, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "candidate", string(got))
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
+func TestApplyBatchRefusesStagedModWithoutCandidateMetadata(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "candidate-uncovered", Name: "candidate-uncovered", DataPath: data,
+		MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: storage.StatusDeepSleep,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	id := server.ID + "-mod.jar"
+	stageRel := ".carbon-panel/staged/" + id + "/mod.jar"
+	require.NoError(t, os.MkdirAll(filepath.Join(data, ".carbon-panel", "staged", id), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(data, ".carbon-panel", "staged", id, "mod.jar"), []byte("candidate"), 0o644))
+	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
+		ID: id, ServerID: server.ID, BatchID: batchID,
+		Kind: storage.StagedKindMod, Action: storage.StagedActionReplace,
+		TargetPath: "mods/mod.jar", StagePath: stageRel, FileName: "mod.jar",
+		ExpectedLiveSha512:   fmt.Sprintf("%x", sha512.Sum512([]byte("installed"))),
+		CandidateGameVersion: server.MCVersion,
+		CandidateLoader:      "fabric",
+		Status:               storage.StagedStatusStaged,
+	}).Error)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	err = ApplyBatch(ctx, store, nil, server, *batch, nil)
+	require.ErrorContains(t, err, "missing its compatibility metadata")
+	got, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(got))
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+}
+
+func TestCommitNextRestartFilesRefusesIncompatibleStagedModCandidate(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "candidate-next", Name: "candidate-next", DataPath: data,
+		MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: storage.StatusRunning,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageReviewedModCandidate(t, store, data, batchID, server, "candidate")
+	useModCandidateProvider(t, false)
+
+	undo, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.ErrorContains(t, err, "not compatible with loader fabric and game version 1.21.1")
+	require.Nil(t, undo)
+
+	got, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(got), "an incompatible candidate must not replace the live file")
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "the refused candidate must remain staged for operator action")
 }
 
 func TestApplyStopsBeforeRestartWhenConfigMoved(t *testing.T) {
@@ -375,6 +565,72 @@ func TestNextRestartContentIsNotAppliedByTheSweep(t *testing.T) {
 	require.Len(t, rows, 1)
 }
 
+func stageReviewedModCandidate(t *testing.T, store *storage.Store, dataRoot, batchID string, server *storage.Server, candidateBody string) {
+	t.Helper()
+	ctx := context.Background()
+	id := server.ID + "-mod.jar"
+	stageRel := ".carbon-panel/staged/" + id + "/mod.jar"
+	require.NoError(t, os.MkdirAll(filepath.Join(dataRoot, ".carbon-panel", "staged", id), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataRoot, ".carbon-panel", "staged", id, "mod.jar"), []byte(candidateBody), 0o644))
+	acc, err := nodestorage.NewLocal(dataRoot)
+	require.NoError(t, err)
+	defer func() { _ = acc.Close() }()
+	require.NoError(t, WriteModCandidateMetadata(ctx, acc, stageRel, ModCandidateMetadata{
+		Provider:    "modrinth",
+		VersionID:   "release",
+		ProjectID:   "project",
+		SHA512:      fmt.Sprintf("%x", sha512.Sum512([]byte(candidateBody))),
+		Filename:    "mod.jar",
+		Loader:      "fabric",
+		GameVersion: server.MCVersion,
+	}))
+	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
+		ID:                 id,
+		ServerID:           server.ID,
+		BatchID:            batchID,
+		Kind:               storage.StagedKindMod,
+		Action:             storage.StagedActionReplace,
+		TargetPath:         filepath.ToSlash(filepath.Join("mods", "mod.jar")),
+		StagePath:          stageRel,
+		FileName:           "mod.jar",
+		ExpectedLiveSha512:   fmt.Sprintf("%x", sha512.Sum512([]byte("installed"))),
+		CandidateGameVersion: server.MCVersion,
+		CandidateLoader:      "fabric",
+		Status:               storage.StagedStatusStaged,
+	}).Error)
+}
+
+func useModCandidateProvider(t *testing.T, compatible bool) {
+	t.Helper()
+	candidateHash := fmt.Sprintf("%x", sha512.Sum512([]byte("candidate")))
+	version := modrinth.Version{
+		ID: "release", ProjectID: "project", VersionType: "release", Status: "listed",
+		Loaders: []string{"fabric"}, GameVersions: []string{"1.21.1"},
+		Files: []modrinth.File{{Filename: "mod.jar", Primary: true, Hashes: modrinth.Hashes{SHA512: candidateHash}}},
+	}
+	if !compatible {
+		version.Loaders = []string{"forge"}
+	}
+	project := modrinth.ProjectDetails{ID: "project", ServerSide: "required"}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version/release":
+			_ = json.NewEncoder(w).Encode(version)
+		case "/projects":
+			_ = json.NewEncoder(w).Encode([]modrinth.ProjectDetails{project})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	oldBaseURL := modrinth.BaseURL
+	modrinth.BaseURL = provider.URL
+	t.Cleanup(func() {
+		modrinth.BaseURL = oldBaseURL
+		provider.Close()
+	})
+}
+
 func newStageStore(t *testing.T) (*storage.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -409,19 +665,25 @@ func openBatch(t *testing.T, store *storage.Store, serverID string, window stora
 
 func stageFile(t *testing.T, store *storage.Store, dataRoot, batchID, serverID, name, body string) {
 	t.Helper()
+	stageFileWithPrecondition(t, store, dataRoot, batchID, serverID, name, body, "")
+}
+
+func stageFileWithPrecondition(t *testing.T, store *storage.Store, dataRoot, batchID, serverID, name, body, expectedLiveSha512 string) {
+	t.Helper()
 	id := serverID + "-" + name
 	stageRel := ".carbon-panel/staged/" + id + "/" + name
 	require.NoError(t, os.MkdirAll(filepath.Join(dataRoot, ".carbon-panel", "staged", id), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dataRoot, ".carbon-panel", "staged", id, name), []byte(body), 0o644))
 	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
-		ID:         id,
-		ServerID:   serverID,
-		BatchID:    batchID,
-		Kind:       storage.StagedKindFile,
-		Action:     storage.StagedActionInstall,
-		TargetPath: name,
-		StagePath:  stageRel,
-		FileName:   name,
-		Status:     storage.StagedStatusStaged,
+		ID:                 id,
+		ServerID:           serverID,
+		BatchID:            batchID,
+		Kind:               storage.StagedKindFile,
+		Action:             storage.StagedActionInstall,
+		TargetPath:         name,
+		StagePath:          stageRel,
+		FileName:           name,
+		ExpectedLiveSha512: expectedLiveSha512,
+		Status:             storage.StagedStatusStaged,
 	}).Error)
 }

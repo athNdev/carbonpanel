@@ -326,6 +326,7 @@ one at https://mozilla.org/MPL/2.0/.
 					label="Admin username"
 					autocomplete="username"
 					placeholder="Choose admin username"
+					data-testid="auth-bootstrap-username"
 					bind:value={username}
 					required
 					disabled={loading}
@@ -344,6 +345,7 @@ one at https://mozilla.org/MPL/2.0/.
 					label="Password"
 					autocomplete="new-password"
 					placeholder="Minimum 12 characters"
+					data-testid="auth-bootstrap-password"
 					bind:value={password}
 					required
 					disabled={loading}
@@ -354,6 +356,7 @@ one at https://mozilla.org/MPL/2.0/.
 					label="Confirm password"
 					autocomplete="new-password"
 					placeholder="Repeat password"
+					data-testid="auth-bootstrap-password-confirm"
 					bind:value={confirmPassword}
 					required
 					disabled={loading}
@@ -399,6 +402,7 @@ one at https://mozilla.org/MPL/2.0/.
 								label="Username"
 								autocomplete="username"
 								placeholder="username"
+								data-testid="auth-login-username"
 								bind:value={username}
 								required
 								disabled={loading}
@@ -409,6 +413,7 @@ one at https://mozilla.org/MPL/2.0/.
 								label="Password"
 								autocomplete="current-password"
 								placeholder="••••••••"
+								data-testid="auth-login-password"
 								bind:value={password}
 								required
 								disabled={loading}

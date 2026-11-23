@@ -39,6 +39,7 @@
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
+- [Mod update safety guards](mod-update-panel-safety.md) — Policy defaults, reviewed candidate selections, and dependency plans preserve operator intent across saves and asynchronous context changes.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.

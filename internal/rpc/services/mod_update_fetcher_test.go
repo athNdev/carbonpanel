@@ -4,6 +4,7 @@ package services
 import (
 	"context"
 	"crypto/sha512"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
+	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,18 +26,6 @@ type versionLookupFixture struct {
 
 func (f versionLookupFixture) GetVersion(context.Context, string) (*modrinth.Version, error) {
 	return f.version, f.err
-}
-
-type hostRewriteTransport struct {
-	base   http.RoundTripper
-	target *url.URL
-}
-
-func (t hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.URL.Scheme = t.target.Scheme
-	clone.URL.Host = t.target.Host
-	return t.base.RoundTrip(clone)
 }
 
 func candidateVersion(downloadURL, hash string) *modrinth.Version {
@@ -51,19 +41,17 @@ func candidateVersion(downloadURL, hash string) *modrinth.Version {
 
 func candidateHash(body string) string { return fmt.Sprintf("%x", sha512.Sum512([]byte(body))) }
 
-func fetcherAgainstServer(t *testing.T, body string, version *modrinth.Version) providerModCandidateFetcher {
+func loopbackProviderFetcher(t *testing.T, version *modrinth.Version, allowedOrigins ...string) providerModCandidateFetcher {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-	target, err := url.Parse(server.URL)
-	require.NoError(t, err)
+	t.Setenv("DISCO_ALLOW_LOOPBACK_TEST", "1")
+	if len(allowedOrigins) == 0 {
+		for _, file := range version.Files {
+			allowedOrigins = append(allowedOrigins, file.URL)
+		}
+	}
 	return providerModCandidateFetcher{
 		versions: versionLookupFixture{version: version},
-		client: &http.Client{Transport: hostRewriteTransport{
-			base: http.DefaultTransport, target: target,
-		}},
+		policy:   utils.ProviderEgressPolicy(true, allowedOrigins...),
 	}
 }
 
@@ -117,20 +105,56 @@ func TestGuardedDownloadClientStripsCredentialsOnCrossOriginRedirect(t *testing.
 }
 
 func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
-	const allowedURL = "https://cdn.modrinth.test/files/mod-2.jar"
 	ctx := context.Background()
 
 	t.Run("verified download", func(t *testing.T) {
-		fetcher := fetcherAgainstServer(t, "next", candidateVersion(allowedURL, candidateHash("next")))
-		data, consumed, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		body := "next"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		defer server.Close()
+		version := candidateVersion(server.URL+"/mod-2.jar", candidateHash(body))
+		fetcher := loopbackProviderFetcher(t, version)
+		data, consumed, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash(body), "fabric", "1.21.1", maxModUpdateBytes)
 		require.NoError(t, err)
 		require.Empty(t, outcome)
-		require.Equal(t, int64(len("next")), consumed)
-		require.Equal(t, "next", string(data))
+		require.Equal(t, int64(len(body)), consumed)
+		require.Equal(t, body, string(data))
+	})
+
+	t.Run("temporary release lookup failure is retryable", func(t *testing.T) {
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{err: errors.New("provider transport unavailable")}}
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "transient_download", outcome)
+	})
+
+	t.Run("confirmed missing release is refused", func(t *testing.T) {
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{err: indexers.NewAPIError("modrinth", 404, "https://api.modrinth.test/v2/version/update", "")}}
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "refused_provider", outcome)
+	})
+
+	t.Run("rate-limited download is retryable", func(t *testing.T) {
+		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer provider.Close()
+		version := candidateVersion(provider.URL+"/mod-2.jar", candidateHash("next"))
+		fetcher := loopbackProviderFetcher(t, version)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "transient_download", outcome)
 	})
 
 	t.Run("real checksum mismatch is refused", func(t *testing.T) {
-		fetcher := fetcherAgainstServer(t, "tampered", candidateVersion(allowedURL, candidateHash("next")))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("tampered"))
+		}))
+		defer server.Close()
+		version := candidateVersion(server.URL+"/mod-2.jar", candidateHash("next"))
+		fetcher := loopbackProviderFetcher(t, version)
 		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_checksum", outcome)
@@ -145,7 +169,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	})
 
 	t.Run("unlisted or incompatible release is refused", func(t *testing.T) {
-		version := candidateVersion(allowedURL, candidateHash("next"))
+		version := candidateVersion("https://cdn.modrinth.com/files/mod-2.jar", candidateHash("next"))
 		version.Status = "draft"
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
 		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
@@ -154,7 +178,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	})
 
 	t.Run("ambiguous reviewed files are refused", func(t *testing.T) {
-		version := candidateVersion(allowedURL, candidateHash("next"))
+		version := candidateVersion("https://cdn.modrinth.com/files/mod-2.jar", candidateHash("next"))
 		version.Files = append(version.Files, version.Files[0])
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
 		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
@@ -163,9 +187,61 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	})
 
 	t.Run("reviewed checksum must be a SHA-512 digest", func(t *testing.T) {
-		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: candidateVersion(allowedURL, "short")}}
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: candidateVersion("https://cdn.modrinth.com/files/mod-2.jar", "short")}}
 		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", "short", "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.True(t, strings.Contains(outcome, "refused_provider"), outcome)
+	})
+}
+
+func TestProviderFetcherEnforcesEgressPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("download host outside provider allowlist is refused", func(t *testing.T) {
+		version := candidateVersion("https://evil.example/files/mod-2.jar", candidateHash("next"))
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "refused_download", outcome)
+	})
+
+	t.Run("redirect to host outside provider allowlist is refused", func(t *testing.T) {
+		var destinationHits int
+		destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			destinationHits++
+			_, _ = w.Write([]byte("should-not-reach"))
+		}))
+		defer destination.Close()
+		origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Same loopback IP, different hostname string: host-allowlist
+			// enforcement must reject the redirect before it is followed.
+			http.Redirect(w, r, strings.Replace(destination.URL, "127.0.0.1", "localhost", 1)+"/mod-2.jar", http.StatusFound)
+		}))
+		defer origin.Close()
+
+		version := candidateVersion(origin.URL+"/mod-2.jar", candidateHash("next"))
+		// Only the origin is allowlisted; the redirect target is another host
+		// and must be refused by the same egress policy.
+		fetcher := loopbackProviderFetcher(t, version, origin.URL)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "refused_download", outcome)
+		require.Zero(t, destinationHits, "redirect target must not receive the request")
+	})
+
+	t.Run("env proxy cannot bypass provider egress policy", func(t *testing.T) {
+		body := "next"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		defer server.Close()
+		t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+		t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+		version := candidateVersion(server.URL+"/mod-2.jar", candidateHash(body))
+		fetcher := loopbackProviderFetcher(t, version)
+		data, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash(body), "fabric", "1.21.1", maxModUpdateBytes)
+		require.NoError(t, err)
+		require.Empty(t, outcome)
+		require.Equal(t, body, string(data))
 	})
 }

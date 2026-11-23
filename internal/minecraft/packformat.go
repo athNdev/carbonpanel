@@ -219,13 +219,19 @@ func firstVersionForFormat(format float64) string {
 }
 
 // normalizeVersion trims a release string to its numeric dotted parts
-// ("v1.21.1 " -> "1.21.1"); non-release strings (snapshots) return "".
+// ("v1.21.1 " -> "1.21.1"). Dotted Minecraft pre-release forms such as
+// 1.21.11-pre1 or 1.21.11-rc2 are accepted and normalized to a comparable
+// form; other non-release strings (snapshots like 24w40a) return "".
 func normalizeVersion(v string) string {
 	v = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "v"))
 	if v == "" {
 		return ""
 	}
-	parts := strings.Split(v, ".")
+	base, pre, ok := splitVersionPreRelease(v)
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(base, ".")
 	for _, p := range parts {
 		if _, err := strconv.Atoi(p); err != nil {
 			return ""
@@ -234,13 +240,106 @@ func normalizeVersion(v string) string {
 	for len(parts) < 3 {
 		parts = append(parts, "0")
 	}
-	return strings.Join(parts, ".")
+	normalized := strings.Join(parts, ".")
+	if pre != "" {
+		normalized += "-" + pre
+	}
+	return normalized
 }
 
-// compareVersions compares dotted numeric versions (-1, 0, 1).
+func splitVersionPreRelease(v string) (base, pre string, ok bool) {
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		base = v[:i]
+		pre = strings.ToLower(v[i+1:])
+		if !isMinecraftPreRelease(pre) {
+			return "", "", false
+		}
+		return base, pre, true
+	}
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		// Build metadata is not used by Minecraft release identifiers and
+		// would make comparisons ambiguous; treat as not understood.
+		return "", "", false
+	}
+	return v, "", true
+}
+
+func isMinecraftPreRelease(pre string) bool {
+	switch {
+	case strings.HasPrefix(pre, "pre"):
+		n := strings.TrimPrefix(pre, "pre")
+		return n != "" && isDigits(n)
+	case strings.HasPrefix(pre, "rc"):
+		n := strings.TrimPrefix(pre, "rc")
+		return n != "" && isDigits(n)
+	default:
+		return false
+	}
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func splitNormalizedVersion(v string) (base string, pre string) {
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		return v[:i], v[i+1:]
+	}
+	return v, ""
+}
+
+func comparePreRelease(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a == "" {
+		return 1
+	}
+	if b == "" {
+		return -1
+	}
+	rank := func(pre string) (int, int) {
+		switch {
+		case strings.HasPrefix(pre, "pre"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(pre, "pre"))
+			return 0, n
+		case strings.HasPrefix(pre, "rc"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(pre, "rc"))
+			return 1, n
+		default:
+			return -1, 0
+		}
+	}
+	ar, an := rank(a)
+	br, bn := rank(b)
+	if ar != br {
+		if ar < br {
+			return -1
+		}
+		return 1
+	}
+	if an < bn {
+		return -1
+	}
+	if an > bn {
+		return 1
+	}
+	return 0
+}
+
+// compareVersions compares dotted numeric versions (-1, 0, 1). A release is
+// newer than its own pre-release (1.21.11 > 1.21.11-pre1), and pre-release
+// identifiers compare by kind (pre < rc) then numeric suffix.
 func compareVersions(a, b string) int {
-	ap := strings.Split(a, ".")
-	bp := strings.Split(b, ".")
+	abase, apre := splitNormalizedVersion(a)
+	bbase, bpre := splitNormalizedVersion(b)
+	ap := strings.Split(abase, ".")
+	bp := strings.Split(bbase, ".")
 	for i := 0; i < len(ap) || i < len(bp); i++ {
 		av, bv := 0, 0
 		if i < len(ap) {
@@ -256,5 +355,5 @@ func compareVersions(a, b string) int {
 			return 1
 		}
 	}
-	return 0
+	return comparePreRelease(apre, bpre)
 }

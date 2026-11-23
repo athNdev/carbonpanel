@@ -137,11 +137,15 @@ function main() {
 	try {
 		const output = relative(root, stage).replaceAll('\\', '/');
 		if (args.includes('--docker')) {
+			const dockerRoot =
+				process.platform === 'win32'
+					? root.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`)
+					: root;
 			const dockerArgs = [
 				'run',
 				'--rm',
 				'--volume',
-				`${root}:/workspace`,
+				`${dockerRoot}:/workspace`,
 				'--workdir',
 				'/workspace'
 			];
