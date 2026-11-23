@@ -50,7 +50,9 @@ one at https://mozilla.org/MPL/2.0/.
 		Users,
 		Archive,
 		Database,
-		Globe2
+		Globe2,
+		Snowflake,
+		Moon
 	} from '@lucide/svelte';
 	import {
 		DropdownMenu,
@@ -302,7 +304,9 @@ one at https://mozilla.org/MPL/2.0/.
 	 */
 	const gatedServerActions: ReadonlySet<string> = new Set(['start', 'restart', 'recreate']);
 
-	function refuseGatedAction(action: 'start' | 'stop' | 'restart' | 'recreate'): boolean {
+	function refuseGatedAction(
+		action: 'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep'
+	): boolean {
 		const labels = dirtySectionLabels();
 		if (labels.length === 0) return true;
 		dirtySections.requestShake();
@@ -316,7 +320,9 @@ one at https://mozilla.org/MPL/2.0/.
 		return false;
 	}
 
-	async function handleServerAction(action: 'start' | 'stop' | 'restart' | 'recreate') {
+	async function handleServerAction(
+		action: 'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep'
+	) {
 		if (!server) return;
 
 		if (gatedServerActions.has(action) && !refuseGatedAction(action)) return;
@@ -328,7 +334,17 @@ one at https://mozilla.org/MPL/2.0/.
 			const outcome = await serverActions.perform(target.id, action);
 			if (outcome.kind === 'superseded') return;
 			toast.success(
-				`Server is ${action === 'recreate' ? 'recreating' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'starting'}...`
+				action === 'recreate'
+					? 'Server is recreating...'
+					: action === 'stop'
+						? 'Server is stopping...'
+						: action === 'restart'
+							? 'Server is restarting...'
+							: action === 'pause'
+								? 'Server is freezing...'
+								: action === 'deepsleep'
+									? 'Server is going into deep sleep...'
+									: 'Server is starting...'
 			);
 		} catch (error) {
 			toast.error(
@@ -509,6 +525,22 @@ one at https://mozilla.org/MPL/2.0/.
 									<RefreshCcw class="h-3.5 w-3.5" />
 									<span>Force Recreate</span>
 								</DropdownMenuItem>
+								{#if server.status === ServerStatus.RUNNING}
+									<DropdownMenuItem
+										class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
+										onclick={() => handleServerAction('pause')}
+									>
+										<Snowflake class="h-3.5 w-3.5" />
+										<span>Freeze Server</span>
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
+										onclick={() => handleServerAction('deepsleep')}
+									>
+										<Moon class="h-3.5 w-3.5" />
+										<span>Deep Sleep</span>
+									</DropdownMenuItem>
+								{/if}
 								<DropdownMenuItem
 									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-destructive-text hover:bg-destructive/20"
 									onclick={() => handleDeleteServer()}

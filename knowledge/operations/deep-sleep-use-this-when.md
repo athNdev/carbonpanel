@@ -36,6 +36,17 @@ opt-out clears it. The wake runs on a bounded background budget; the gate is
 released inside the single `WakeServer` call, never held by an unbounded detached
 owner.
 
+# Manual operator modes
+
+`PauseServer` and `DeepSleepServer` are the operator-driven entries into the
+same two managers the idle policies use: `PauseServer` freezes a running
+container with the cgroup freezer (`HibernateServer`), `DeepSleepServer` parks
+it with `SleepServer`. Both refuse a server that is not running, both refuse
+while another lifecycle operation is journaled for that server, and both fail
+closed with `UNAVAILABLE` when the composition root wired no manager. Both are
+authorized as `servers/stop` scoped to the server id, so a scoped role may park
+only its own server. `StartServer` unwakes a frozen or deeply asleep server.
+
 # Known gap
 
 Hibernation and deep sleep share `internal/docker/idle.go`. Each manager still

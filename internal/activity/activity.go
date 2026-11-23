@@ -25,6 +25,8 @@ const (
 	EventServerStart               = "server.start"
 	EventServerStop                = "server.stop"
 	EventServerRestart             = "server.restart"
+	EventServerPause               = "server.pause"
+	EventServerDeepSleep           = "server.deep_sleep"
 	EventServerCreate              = "server.create"
 	EventServerUpdate              = "server.update"
 	EventServerImage               = "server.image"

@@ -124,3 +124,25 @@ func TestStopServerRemainsObjectScoped(t *testing.T) {
 		t.Fatalf("StopServer ObjectIDField = %q, want %q", perm.ObjectIDField, "id")
 	}
 }
+
+// TestPowerModeProceduresRemainObjectScoped proves the manual freeze and deep
+// sleep RPCs stay inside the servers/stop permission and are scoped to the
+// server id: a scoped role may park its own server without gaining the power
+// to park any other server.
+func TestPowerModeProceduresRemainObjectScoped(t *testing.T) {
+	for _, proc := range []string{
+		"/carbonpanel.v1.ServerService/PauseServer",
+		"/carbonpanel.v1.ServerService/DeepSleepServer",
+	} {
+		perm, ok := ProcedurePermissions[proc]
+		if !ok {
+			t.Fatalf("%s has no permission mapping", proc)
+		}
+		if perm.Resource != ResourceServers || perm.Action != ActionStop {
+			t.Fatalf("%s mapping = %s/%s, want servers/stop", proc, perm.Resource, perm.Action)
+		}
+		if perm.ObjectIDField != "id" {
+			t.Fatalf("%s ObjectIDField = %q, want %q", proc, perm.ObjectIDField, "id")
+		}
+	}
+}

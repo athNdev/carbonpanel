@@ -2,7 +2,7 @@
 import { beginLifecycleRequest } from '../../lifecycle-request';
 import type { createServerInventory } from './inventory.svelte';
 
-export type LifecycleAction = 'start' | 'stop' | 'restart' | 'recreate';
+export type LifecycleAction = 'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep';
 export type DeleteDisposition = 'delete' | 'keep' | 'detach' | 'export';
 type Request = { id: string; requestId: string };
 interface Requests {
@@ -10,6 +10,8 @@ interface Requests {
 	stopServer(request: Request): Promise<unknown>;
 	restartServer(request: Request): Promise<unknown>;
 	recreateServer(request: { id: string }): Promise<unknown>;
+	pauseServer(request: Request): Promise<unknown>;
+	deepSleepServer(request: Request): Promise<unknown>;
 	deleteServer(request: Request & { keepData: boolean; detach: boolean }): Promise<unknown>;
 	exportWorld(request: { serverId: string }): Promise<{ sessionId: string; filename: string }>;
 }
@@ -57,6 +59,12 @@ export function createServerActions(
 						break;
 					case 'restart':
 						await requests.restartServer(request);
+						break;
+					case 'pause':
+						await requests.pauseServer(request);
+						break;
+					case 'deepsleep':
+						await requests.deepSleepServer(request);
 						break;
 					case 'recreate':
 						await requests.recreateServer({ id });

@@ -559,6 +559,7 @@ func main() {
 	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
 	rpcServer.SetAdmissionCoordinator(admission)
 	rpcServer.SetHibernationManager(hibernationMgr)
+	rpcServer.SetDeepSleepManager(deepSleepMgr)
 
 	// The RPC server installs the shared mod-update planner; start the
 	// scheduler only afterwards so its first due check sees the real planner

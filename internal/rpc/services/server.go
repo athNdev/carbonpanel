@@ -95,6 +95,13 @@ type ServerService struct {
 	// entrypoints. Nil fails closed at the acquire helper.
 	admission *serverruntime.AdmissionCoordinator
 
+	// hibernation and deepSleep are the managers that own the freeze and the
+	// stop-to-zero lifecycles. They are supplied by the composition root so an
+	// operator can move a running server into either mode on demand. Nil fails
+	// closed: the RPC reports that the mode is not configured.
+	hibernation serverFreezer
+	deepSleep   serverSleeper
+
 	daemonInfoMu sync.Mutex
 	daemonInfo   map[string]daemonEnforcementCache
 }
@@ -273,6 +280,30 @@ func (s *ServerService) checkNodeMemoryCapacity(ctx context.Context, nodeID stri
 // SetAdmissionCoordinator supplies the shared in-process admission gate.
 func (s *ServerService) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
 	s.admission = c
+}
+
+// serverFreezer freezes a running server container with the cgroup freezer.
+// The hibernation manager satisfies it.
+type serverFreezer interface {
+	HibernateServer(ctx context.Context, serverID string) error
+}
+
+// serverSleeper parks a running server container into deep sleep. The deep
+// sleep manager satisfies it.
+type serverSleeper interface {
+	SleepServer(ctx context.Context, serverID string) error
+}
+
+// SetHibernationManager supplies the manager that freezes a container with the
+// cgroup freezer so an operator can freeze a running server on demand.
+func (s *ServerService) SetHibernationManager(m *docker.HibernationManager) {
+	s.hibernation = m
+}
+
+// SetDeepSleepManager supplies the manager that stops a container into deep
+// sleep so an operator can park a running server on demand.
+func (s *ServerService) SetDeepSleepManager(m *docker.DeepSleepManager) {
+	s.deepSleep = m
 }
 
 // acquireNodeAdmission claims the per-node gate before a capacity check. The
@@ -2846,6 +2877,90 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 
 	return connect.NewResponse(&v1.StopServerResponse{
 		Status: "stopped",
+	}), nil
+}
+
+// PauseServer freezes a running server with the cgroup freezer. The server
+// keeps its container and its world: only the JVM processes are frozen, so
+// the operator can resume it without a boot. Starting a paused server
+// unfreezes it (see StartServer).
+func (s *ServerService) PauseServer(ctx context.Context, req *connect.Request[v1.PauseServerRequest]) (*connect.Response[v1.PauseServerResponse], error) {
+	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
+	if reqErr != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, reqErr)
+	}
+	transition, err := beginServerLifecycleTransition(req.Msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
+
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
+	if s.hibernation == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("server freeze is not configured"))
+	}
+	if server.ContainerID == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server has no container"))
+	}
+	if server.Status != storage.StatusRunning {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server is %s; only a running server can be frozen", server.Status))
+	}
+	if err := s.hibernation.HibernateServer(ctx, server.ID); err != nil {
+		s.log.Error("Failed to freeze server %s: %v", server.ID, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to freeze server: %w", err))
+	}
+	// Audit trail (MINE-141): never break the op on audit failure.
+	s.auditPower(ctx, req.Peer().Addr, activity.EventServerPause, server.ID, requestID)
+	return connect.NewResponse(&v1.PauseServerResponse{
+		Status: "paused",
+	}), nil
+}
+
+// DeepSleepServer stops a running server into deep sleep. The container is
+// stopped, so the server uses no CPU or RAM, and the proxy route is kept so a
+// login wakes it again. Starting a deeply asleep server wakes it (see
+// StartServer).
+func (s *ServerService) DeepSleepServer(ctx context.Context, req *connect.Request[v1.DeepSleepServerRequest]) (*connect.Response[v1.DeepSleepServerResponse], error) {
+	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
+	if reqErr != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, reqErr)
+	}
+	transition, err := beginServerLifecycleTransition(req.Msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
+
+	server, err := s.store.GetServer(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
+	if s.deepSleep == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("server deep sleep is not configured"))
+	}
+	if server.ContainerID == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server has no container"))
+	}
+	if server.Status != storage.StatusRunning {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server is %s; only a running server can be put into deep sleep", server.Status))
+	}
+	if err := s.deepSleep.SleepServer(ctx, server.ID); err != nil {
+		s.log.Error("Failed to deep sleep server %s: %v", server.ID, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to put server into deep sleep: %w", err))
+	}
+	// Audit trail (MINE-141): never break the op on audit failure.
+	s.auditPower(ctx, req.Peer().Addr, activity.EventServerDeepSleep, server.ID, requestID)
+	return connect.NewResponse(&v1.DeepSleepServerResponse{
+		Status: "deepsleep",
 	}), nil
 }
 
