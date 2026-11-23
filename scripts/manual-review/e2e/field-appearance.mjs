@@ -120,6 +120,8 @@ export async function checkFieldAppearance(page, base) {
     assert.equal((await appearance(search)).fill, idle.fill);
     assert.equal((await appearance(search)).width, "2px");
     await page.goto(base + "/servers/new");
+    await page.locator("#name").fill("Field Appearance Check");
+    await page.getByRole("button", { name: "Next Step" }).click();
     const loaderSelect = page.locator("#modLoader");
     await loaderSelect.waitFor();
     const loaderStyle = await appearance(loaderSelect);

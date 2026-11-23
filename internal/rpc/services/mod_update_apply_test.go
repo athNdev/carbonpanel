@@ -698,9 +698,9 @@ func TestStagedReviewedModBlocksServerVersionChange(t *testing.T) {
 	ctx := context.Background()
 	store, server, _ := newContentStageFixture(t, "mod-version-gate", storage.StatusStopped)
 	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
-		ServerID:           server.ID,
-		Kind:               storage.StagedKindMod,
-		Action:             storage.StagedActionReplace,
+		ServerID:             server.ID,
+		Kind:                 storage.StagedKindMod,
+		Action:               storage.StagedActionReplace,
 		TargetPath:           "mods/mod.jar",
 		StagePath:            ".carbon-panel/staged/reviewed/mod.jar",
 		FileName:             "mod.jar",
