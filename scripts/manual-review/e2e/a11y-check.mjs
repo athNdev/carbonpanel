@@ -1632,7 +1632,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByLabel('Username', { exact: true }).waitFor();
 				await page.getByLabel('Password', { exact: true }).waitFor();
 				await page.getByRole('button', { name: 'Show password' }).waitFor();
-				await page.getByRole('button', { name: 'Sign In', exact: true }).waitFor();
+				await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
 				const metrics = await page.evaluate(() => ({
 					scrollWidth: document.documentElement.scrollWidth,
 					innerWidth: window.innerWidth
@@ -1768,14 +1768,14 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			for (const tab of ['Browse', 'Imported', 'Favorites']) {
 				await page.getByRole('tab', { name: new RegExp(tab) }).first().waitFor({ timeout: 10000 });
 			}
-			await page.getByPlaceholder('Search modpacks by name or description...').waitFor();
+			await page.getByPlaceholder('Search modpacks by name or description…').waitFor();
 			return 'description, content area, three tabs and search control visible';
 		});
 
 		await check(`modpacks @${width} ${theme}: library and import tab targets, keyboard switching and lazy controls`, async () => {
 			const browse = page.getByTestId('tab-browse');
 			const library = page.getByRole('tablist').filter({ has: browse });
-			const search = page.getByPlaceholder('Search modpacks by name or description...');
+			const search = page.getByPlaceholder('Search modpacks by name or description…');
 			await assertTabPanels(library, 'modpacks-tab-browse');
 			await browse.focus();
 			await page.keyboard.press('ArrowRight');
@@ -1852,7 +1852,7 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 
 		await check(`modpacks @${width} ${theme}: refused search exposes the error state and Retry`, async () => {
 			state.modpacks = 'refused';
-			await page.getByPlaceholder('Search modpacks by name or description...').fill('refusal-probe');
+			await page.getByPlaceholder('Search modpacks by name or description…').fill('refusal-probe');
 			await page.getByRole('button', { name: 'Search', exact: true }).first().click();
 			await page.getByText('Failed to search modpacks').first().waitFor({ timeout: 10000 });
 			await page.getByRole('button', { name: 'Retry', exact: true }).first().waitFor();
