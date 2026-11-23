@@ -1650,7 +1650,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				if (!(await announced.first().evaluate((node) => node === document.activeElement))) {
 					throw new Error('Failed sign-in did not focus the error message');
 				}
-				const recovery = page.getByRole('button', { name: 'Forgot access? Recovery' });
+				const recovery = page.getByRole('button', { name: 'Lost access? Use a recovery key' });
 				await recovery.click();
 				if (!(await page.getByLabel('Recovery Key', { exact: true }).evaluate((node) => node === document.activeElement))) {
 					throw new Error('Opening recovery did not focus the recovery key field');
@@ -1792,8 +1792,8 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			await search.waitFor();
 			await tabIntoPanel(page, 'modpacks-panel-browse');
 
-			await page.getByRole('button', { name: 'Import Modpack', exact: true }).click();
-			const dialog = page.getByRole('dialog', { name: 'Import Modpack' });
+			await page.getByRole('button', { name: 'Import modpack', exact: true }).click();
+			const dialog = page.getByRole('dialog', { name: 'Import modpack' });
 			try {
 				await page.waitForFunction(() =>
 					document.activeElement?.matches('[role="dialog"] button[aria-label="Close modal"]')
@@ -1873,7 +1873,7 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			await page.getByRole('heading', { name: 'Modpack Studio', level: 1 }).waitFor();
 			await page.getByText('Visual workspace for custom modpacks:', { exact: false }).first().waitFor();
 			await page.getByRole('button', { name: 'Create Modpack' }).first().waitFor();
-			await page.getByRole('button', { name: 'Import Modpack' }).first().waitFor();
+			await page.getByRole('button', { name: 'Import modpack' }).first().waitFor();
 			await page.getByRole('link', { name: 'Browse Modpacks' }).first().waitFor();
 			await page.getByPlaceholder('Search modpack projects...').waitFor();
 			return 'studio heading, description, three controls and project search visible';
@@ -1997,7 +1997,7 @@ async function runNarrowSettingsJourney(browser, base) {
 						await assertHorizontallyVisible(save);
 						state.savedMotd = undefined;
 						await save.press('Enter');
-						await page.getByText('Global settings saved successfully', { exact: true }).waitFor();
+						await page.getByText('Global settings saved', { exact: true }).waitFor();
 						if (state.savedMotd !== 'Ready to save') throw new Error('Keyboard Save did not submit MOTD');
 					});
 					await check(`server configuration ${label}: find, edit and stage across categories`, async () => {

@@ -552,3 +552,75 @@ func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
 	require.NotNil(t, rows[0].ApplyAt)
 	assert.True(t, rows[0].ApplyAt.Equal(soon))
 }
+
+func TestStagedReviewedModBlocksServerConfigRuntimeVersionOrLoaderChange(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &Server{ID: "srv-config-gate", Name: "config-gate", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	cfg.Type = stringPtr("FABRIC")
+	cfg.Version = stringPtr("1.21.1")
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	_, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID:             server.ID,
+		Kind:                 StagedKindMod,
+		Action:               StagedActionReplace,
+		TargetPath:           "mods/mod.jar",
+		StagePath:            ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:             "mod.jar",
+		ExpectedLiveSha512:   "deadbeef",
+		CandidateGameVersion: "1.21.1",
+		CandidateLoader:      "fabric",
+	})
+	require.NoError(t, err)
+
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"version": "1.21.4"}, UpdateWindowNextRestart, nil, 0)
+	require.ErrorIs(t, err, ErrStagedModVersionChange)
+
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"type": "PAPER"}, UpdateWindowNextRestart, nil, 0)
+	require.ErrorIs(t, err, ErrStagedModVersionChange)
+
+	direct := store.CreateDefaultServerConfig(server.ID)
+	direct.Type = stringPtr("FABRIC")
+	direct.Version = stringPtr("1.21.4")
+	err = store.UpdateServerConfig(ctx, direct)
+	require.ErrorIs(t, err, ErrStagedModVersionChange)
+}
+
+func TestApplyStagedConfigChangeRefusesRuntimeChangeWithReviewedCandidate(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &Server{ID: "srv-config-apply-gate", Name: "config-gate", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	cfg.Type = stringPtr("FABRIC")
+	cfg.Version = stringPtr("1.21.1")
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	staged, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"version": "1.21.4"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+
+	_, err = store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID:             server.ID,
+		Kind:                 StagedKindMod,
+		Action:               StagedActionReplace,
+		TargetPath:           "mods/mod.jar",
+		StagePath:            ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:             "mod.jar",
+		ExpectedLiveSha512:   "deadbeef",
+		CandidateGameVersion: "1.21.1",
+		CandidateLoader:      "fabric",
+	})
+	require.NoError(t, err)
+
+	_, err = store.ApplyStagedConfigChange(ctx, staged.ID)
+	require.ErrorIs(t, err, ErrStagedModVersionChange)
+}
+
+func stringPtr(s string) *string { return &s }

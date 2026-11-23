@@ -30,34 +30,36 @@ type undoEntry struct {
 	SHA256  string `json:"sha256,omitempty"`
 }
 
-func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, limit int64) (int64, string, error) {
+func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, limit int64) (int64, string, string, error) {
 	r, err := acc.OpenRead(ctx, src)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	defer func() { _ = r.Close() }()
 	w, err := acc.BeginWrite(ctx, dst, max(1, limit))
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	defer func() { _ = w.Close() }()
 	h := sha256.New()
-	n, err := io.CopyBuffer(io.MultiWriter(w, h), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	h512 := sha512.New()
+	n, err := io.CopyBuffer(io.MultiWriter(w, h, h512), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
 	err = errors.Join(err, r.Close())
 	if err != nil {
-		return n, "", err
+		return n, "", "", err
 	}
 	if n > limit {
-		return n, "", fmt.Errorf("staged transfer exceeds %d bytes", limit)
+		return n, "", "", fmt.Errorf("staged transfer exceeds %d bytes", limit)
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
+	sum512 := hex.EncodeToString(h512.Sum(nil))
 	if want != nil && (n != want.Size || sum != want.SHA256) {
-		return n, sum, fmt.Errorf("staged recovery checksum mismatch for %s", want.Target)
+		return n, sum, sum512, fmt.Errorf("staged recovery checksum mismatch for %s", want.Target)
 	}
 	if err = w.Commit(); err != nil {
-		return n, sum, err
+		return n, sum, sum512, err
 	}
-	return n, sum, nil
+	return n, sum, sum512, nil
 }
 
 // fileSHA512 reads one file without loading it into memory and verifies that
@@ -165,9 +167,12 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			item.backup = path.Join(recovery, fmt.Sprintf("%06d.data", i))
 			record.Existed = true
 			record.Backup = item.backup
-			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, storageworker.MaxStreamBytes-total)
+			n, sum, sum512, err := copyStream(ctx, acc, file.target, item.backup, nil, storageworker.MaxStreamBytes-total)
 			if err != nil {
 				return abortPreparation(err)
+			}
+			if file.expectedLiveSha512 != "" && !strings.EqualFold(sum512, file.expectedLiveSha512) {
+				return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but found %s", file.target, file.expectedLiveSha512, sum512))
 			}
 			total += n
 			if total > storageworker.MaxStreamBytes {
@@ -177,6 +182,8 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			record.SHA256 = sum
 			item.size = n
 			item.sha256 = sum
+		} else if file.expectedLiveSha512 != "" {
+			return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but the live file is missing", file.target, file.expectedLiveSha512))
 		}
 		snaps = append(snaps, item)
 		manifest = append(manifest, record)
@@ -192,25 +199,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	if err := acc.WriteFile(path.Join(recovery, "manifest.json"), body); err != nil {
 		return abortPreparation(err)
 	}
-	// Check every live precondition before the first mutation. A reviewed
-	// replacement records the installed digest at stage time; if that file
-	// changed on disk, the whole batch is refused instead of overwriting it.
-	for _, file := range files {
-		if file.expectedLiveSha512 == "" {
-			continue
-		}
-		current, err := fileSHA512(ctx, acc, file.target, storageworker.MaxStreamBytes)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but the live file is missing", file.target, file.expectedLiveSha512))
-			}
-			return abortPreparation(fmt.Errorf("staged target %s changed after staging: %w", file.target, err))
-		}
-		if !strings.EqualFold(current, file.expectedLiveSha512) {
-			return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but found %s", file.target, file.expectedLiveSha512, current))
-		}
-	}
-	// All old contents and the recovery manifest exist before the first mutation.
+	// All old contents, preconditions, and the recovery manifest exist before the first mutation.
 	var published int64
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -221,7 +210,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				return snaps, err
 			}
 		} else {
-			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, storageworker.MaxStreamBytes-published)
+			n, _, _, err := copyStream(ctx, acc, file.source, file.target, nil, storageworker.MaxStreamBytes-published)
 			if err != nil {
 				return snaps, err
 			}
@@ -236,7 +225,7 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 	for i := len(snaps) - 1; i >= 0; i-- {
 		item := snaps[i]
 		if item.existed {
-			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, item.size)
+			_, _, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, item.size)
 			if err != nil {
 				failed = errors.Join(failed, fmt.Errorf("staged rollback incomplete; recovery %q: %w", item.recoveryRoot, err))
 			}

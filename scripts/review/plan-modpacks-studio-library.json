@@ -40,7 +40,7 @@
       "name": "create modpack control is present"
     },
     {
-      "assertVisible": "button:has-text(\"Import Modpack\")",
+      "assertVisible": "button:has-text(\"Import modpack\")",
       "name": "import modpack control is present"
     },
     {

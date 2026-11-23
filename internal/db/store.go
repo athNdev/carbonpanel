@@ -251,11 +251,20 @@ func (s *Store) GetServerConfig(ctx context.Context, serverID string) (*ServerCo
 }
 
 func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Save(config).Error
+	return s.saveServerConfig(ctx, config)
 }
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Save(config).Error
+	return s.saveServerConfig(ctx, config)
+}
+
+func (s *Store) saveServerConfig(ctx context.Context, config *ServerConfig) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := guardServerConfigRuntimeChangeTx(tx, config); err != nil {
+			return err
+		}
+		return tx.Save(config).Error
+	})
 }
 
 // UpdateServerConfigMemory updates memory settings in ServerConfig

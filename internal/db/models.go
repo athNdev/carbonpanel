@@ -171,8 +171,8 @@ type Server struct {
 // loader cannot change while a reviewed provider candidate is still staged.
 var ErrStagedModVersionChange = errors.New("cannot change server version or mod loader while reviewed mod updates are staged")
 
-// ErrStagedModCandidateContext reports that a reviewed candidate was not
-// admitted with the game version and loader it was prepared for.
+// ErrStagedModCandidateContext reports that a reviewed mod candidate row was
+// missing the game version and loader admission context it was prepared for.
 var ErrStagedModCandidateContext = errors.New("staged mod candidate compatibility context is missing")
 
 // BeforeUpdate keeps a reviewed mod candidate and the server it was prepared
@@ -689,7 +689,7 @@ type StagedContentChange struct {
 	// ExpectedLiveSha512 is the installed digest observed when a reviewed
 	// update was staged. Publish must recheck it so a later local edit cannot
 	// be silently overwritten by a delayed apply. Empty means no precondition.
-	ExpectedLiveSha512 string       `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
+	ExpectedLiveSha512 string `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
 	// CandidateGameVersion and CandidateLoader are write-only admission
 	// guards. The durable candidate context lives beside the staged payload;
 	// these fields let the insert transaction reject a stale candidate if the
@@ -701,8 +701,6 @@ type StagedContentChange struct {
 	AppliedAt            *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
 	Server               *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
-
-
 
 // TaskType defines the type of scheduled task
 type TaskType string

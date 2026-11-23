@@ -842,12 +842,31 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 
-	// Align Minecraft version and mod loader
+	// Align Minecraft version and mod loader. Refuse runtime changes while a
+	// reviewed mod candidate is staged so we cannot publish into a new context.
+	oldMCVersion, oldModLoader := server.MCVersion, server.ModLoader
 	server.MCVersion = pack.MCVersion
 	server.ModLoader = storage.ModLoader(strings.ToLower(pack.ModLoader))
+	runtimeChanged := oldMCVersion != server.MCVersion || oldModLoader != server.ModLoader
+	if runtimeChanged {
+		if has, checkErr := h.store.HasStagedReviewedModCandidates(r.Context(), server.ID); checkErr != nil {
+			http.Error(w, fmt.Sprintf("failed to check staged mod candidates: %v", checkErr), http.StatusInternalServerError)
+			return
+		} else if has {
+			http.Error(w, storage.ErrStagedModVersionChange.Error(), http.StatusConflict)
+			return
+		}
+	}
 
 	if req.Mode == "sync" {
-		_ = h.store.UpdateServer(r.Context(), server)
+		if err := h.store.UpdateServer(r.Context(), server); err != nil {
+			if errors.Is(err, storage.ErrStagedModVersionChange) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Error(w, fmt.Sprintf("failed to update server: %v", err), http.StatusInternalServerError)
+			return
+		}
 		// Mode A: Live Sync URL
 		host := r.Host
 		if host == "" {
@@ -860,6 +879,17 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		cfg.Version = &pack.MCVersion
 
 		if err := h.store.UpdateServerConfig(r.Context(), cfg); err != nil {
+			if runtimeChanged {
+				server.MCVersion = oldMCVersion
+				server.ModLoader = oldModLoader
+				if rbErr := h.store.UpdateServer(r.Context(), server); rbErr != nil {
+					h.log.Error("packwiz sync rollback failed after config error: %v (original: %v)", rbErr, err)
+				}
+			}
+			if errors.Is(err, storage.ErrStagedModVersionChange) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, fmt.Sprintf("failed to update config: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -896,13 +926,29 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		levelName = props.GetString("level-name", "")
 	}
 
+	if runtimeChanged {
+		if err := h.store.UpdateServer(r.Context(), server); err != nil {
+			if errors.Is(err, storage.ErrStagedModVersionChange) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Error(w, fmt.Sprintf("failed to update server: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	result, err := h.manager.BakeToServerContent(packID, modsDir, minecraft.GetDatapacksPath(dataRoot, levelName))
 	if err != nil {
+		if runtimeChanged {
+			server.MCVersion = oldMCVersion
+			server.ModLoader = oldModLoader
+			if rbErr := h.store.UpdateServer(r.Context(), server); rbErr != nil {
+				h.log.Error("packwiz bake rollback failed after bake error: %v (original: %v)", rbErr, err)
+			}
+		}
 		http.Error(w, fmt.Sprintf("failed to bake to server: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	_ = h.store.UpdateServer(r.Context(), server)
 	installed := []string{fmt.Sprintf("%d mod(s)", result.Mods)}
 	if result.Datapacks > 0 {
 		installed = append(installed, fmt.Sprintf("%d datapack(s)", result.Datapacks))

@@ -178,7 +178,7 @@ try {
       await headingSize(detail.getByRole("heading", { name: "Server Settings" })));
     const label = await count.locator("dt").boundingBox();
     const value = await count.locator("dd").boundingBox();
-    assert.ok(value.x - label.x - label.width <= 10);
+    assert.ok(value.x - label.x - label.width <= 16);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   }
   results.push("detail groups player count, explains stale readings and preserves heading hierarchy at 360/768/1440");

@@ -6,6 +6,7 @@
 package staging
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha512"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -585,14 +587,14 @@ func stageReviewedModCandidate(t *testing.T, store *storage.Store, dataRoot, bat
 		GameVersion: server.MCVersion,
 	}))
 	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
-		ID:                 id,
-		ServerID:           server.ID,
-		BatchID:            batchID,
-		Kind:               storage.StagedKindMod,
-		Action:             storage.StagedActionReplace,
-		TargetPath:         filepath.ToSlash(filepath.Join("mods", "mod.jar")),
-		StagePath:          stageRel,
-		FileName:           "mod.jar",
+		ID:                   id,
+		ServerID:             server.ID,
+		BatchID:              batchID,
+		Kind:                 storage.StagedKindMod,
+		Action:               storage.StagedActionReplace,
+		TargetPath:           filepath.ToSlash(filepath.Join("mods", "mod.jar")),
+		StagePath:            stageRel,
+		FileName:             "mod.jar",
 		ExpectedLiveSha512:   fmt.Sprintf("%x", sha512.Sum512([]byte("installed"))),
 		CandidateGameVersion: server.MCVersion,
 		CandidateLoader:      "fabric",
@@ -686,4 +688,70 @@ func stageFileWithPrecondition(t *testing.T, store *storage.Store, dataRoot, bat
 		ExpectedLiveSha512: expectedLiveSha512,
 		Status:             storage.StagedStatusStaged,
 	}).Error)
+}
+
+type byteReadHandle struct {
+	*bytes.Reader
+}
+
+func (b byteReadHandle) Close() error { return nil }
+
+type sameStreamDigestAccessor struct {
+	nodestorage.Accessor
+	target     string
+	openCount  int
+	firstBody  []byte
+	secondBody []byte
+}
+
+func (a *sameStreamDigestAccessor) OpenRead(ctx context.Context, rel string) (storageworker.ReadHandle, error) {
+	if rel == a.target {
+		a.openCount++
+		body := a.firstBody
+		if a.openCount > 1 {
+			body = a.secondBody
+		}
+		return byteReadHandle{Reader: bytes.NewReader(body)}, nil
+	}
+	return a.Accessor.OpenRead(ctx, rel)
+}
+
+func TestCommitStreamingFilesVerifiesPreconditionOnBackupStream(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "same-stream", Name: "same-stream", DataPath: data, Status: storage.StatusDeepSleep}
+	require.NoError(t, store.CreateServer(ctx, server))
+
+	reviewed := []byte("reviewed-installed-bytes")
+	tampered := []byte("tampered-on-disk-bytes!!")
+	require.Equal(t, len(reviewed), len(tampered))
+	require.NoError(t, os.WriteFile(filepath.Join(data, "mod.jar"), tampered, 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageFileWithPrecondition(t, store, data, batchID, server.ID, "mod.jar", "candidate", fmt.Sprintf("%x", sha512.Sum512(reviewed)))
+
+	rows, err := store.ListBatchContent(ctx, batchID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	base, err := nodestorage.NewLocal(data)
+	require.NoError(t, err)
+	defer func() { _ = base.Close() }()
+	acc := &sameStreamDigestAccessor{
+		Accessor:   base,
+		target:     "mod.jar",
+		firstBody:  tampered,
+		secondBody: reviewed,
+	}
+
+	snaps, err := commitStreamingFiles(ctx, acc, rows)
+	require.ErrorContains(t, err, "changed after staging")
+	require.Nil(t, snaps)
+	require.Equal(t, 1, acc.openCount, "precondition must be verified on the same stream used to create the undo snapshot")
+
+	live, err := os.ReadFile(filepath.Join(data, "mod.jar"))
+	require.NoError(t, err)
+	require.Equal(t, tampered, live, "a refused precondition must not mutate the live file")
+	require.NoDirExists(t, filepath.Join(data, ".carbon-panel", "undo", batchID), "failed preparation must not leave an unverified undo snapshot")
 }

@@ -141,14 +141,28 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 		return s.stageServerConfig(ctx, config, msg)
 	}
 
+	oldType, oldVersion := cloneStringPtr(config.Type), cloneStringPtr(config.Version)
 	// Apply updates w/ reflection
 	if err := applyConfigUpdates(config, msg.Updates); err != nil {
 		s.log.Error("Failed to apply config updates: %v", err)
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	if serverConfigRuntimeChanged(oldType, oldVersion, config.Type, config.Version) {
+		has, err := s.store.HasStagedReviewedModCandidates(ctx, msg.ServerId)
+		if err != nil {
+			s.log.Error("Failed to check staged mod candidates: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update server configuration"))
+		}
+		if has {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, storage.ErrStagedModVersionChange)
+		}
+	}
 
 	// Save updated config
 	if err := s.store.SaveServerConfig(ctx, config); err != nil {
+		if errors.Is(err, storage.ErrStagedModVersionChange) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		s.log.Error("Failed to save server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server configuration"))
 	}
@@ -380,7 +394,7 @@ func (s *ConfigService) stageServerConfig(ctx context.Context, config *storage.S
 }
 
 func stageErrorCode(err error) connect.Code {
-	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+	if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) {
 		return connect.CodeFailedPrecondition
 	}
 	if strings.Contains(err.Error(), "server not found") {
@@ -756,4 +770,23 @@ func getCategoryIndex(key string) int {
 	default:
 		return -1 // Unknown
 	}
+}
+
+func cloneStringPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
+func serverConfigRuntimeChanged(oldType, oldVersion, newType, newVersion *string) bool {
+	return !stringPtrEqual(oldType, newType) || !stringPtrEqual(oldVersion, newVersion)
+}
+
+func stringPtrEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
