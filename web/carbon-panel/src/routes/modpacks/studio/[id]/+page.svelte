@@ -87,6 +87,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		type StudioPack
 	} from '$lib/features/modpacks/studio/pack-metadata';
 	import { uploadFile } from '$lib/utils/chunked-upload';
+	import { createRequestSequence } from '$lib/utils/request-sequence';
+	import ModsCatalogSearchBar from '$lib/mods/ModsCatalogSearchBar.svelte';
+	import ModsCatalogResultCard from '$lib/mods/ModsCatalogResultCard.svelte';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
 	import DatapackBrowserDialog from '$lib/components/datapack-browser-dialog.svelte';
@@ -202,6 +205,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let searching = $state(false);
 	let searchResults = $state<SearchModResult[]>([]);
 	let searchError = $state('');
+	// E15: a slow earlier response must never overwrite newer results when the
+	// source tab switches or Enter is pressed rapidly.
+	const searchSequence = createRequestSequence();
+	// E16: per-row pending state so double-clicks cannot double-POST a mod.
+	let addingSlugs = $state<Record<string, 'both' | 'client' | 'server'>>({});
+	// E17: batch removal is destructive and needs an explicit confirmation.
+	let batchRemoveConfirmOpen = $state(false);
+	let batchRemoving = $state(false);
 
 	const addModSourceTabs = [
 		{ id: 'modrinth', label: 'Modrinth' },
@@ -479,6 +490,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		searching = true;
 		searchError = '';
 		searchResults = [];
+		const seq = searchSequence.next();
 
 		try {
 			const platform = addTab === 'curseforge' ? 'curseforge' : 'modrinth';
@@ -489,21 +501,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				pack.mc_version,
 				apiFetch
 			);
+			if (!searchSequence.isCurrent(seq)) return;
 			if (result.error) {
 				searchError = result.error;
 			} else {
 				searchResults = result.results;
 			}
 		} catch (err) {
+			if (!searchSequence.isCurrent(seq)) return;
 			console.error('Search failed:', err);
 			searchError = 'Failed to fetch online mods';
 		} finally {
-			searching = false;
+			if (searchSequence.isCurrent(seq)) searching = false;
 		}
 	}
 
 	async function addModToPack(item: SearchModResult, side: 'both' | 'client' | 'server' = 'both') {
-		if (!pack) return;
+		if (!pack || addingSlugs[item.id]) return;
+		addingSlugs = { ...addingSlugs, [item.id]: side };
 		try {
 			const versions = await findModVersions(item, pack.mod_loader, pack.mc_version, apiFetch);
 			if (versions.length === 0) {
@@ -546,6 +561,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		} catch (err) {
 			console.error('Failed to add mod:', err);
 			toast.error((err instanceof Error ? err.message : undefined) || 'Failed to add mod to pack');
+		} finally {
+			const { [item.id]: _settled, ...rest } = addingSlugs;
+			addingSlugs = rest;
+		}
+	}
+
+	async function confirmBatchRemove() {
+		batchRemoving = true;
+		try {
+			await runBatchAction('remove');
+			batchRemoveConfirmOpen = false;
+		} finally {
+			batchRemoving = false;
 		}
 	}
 
@@ -600,13 +628,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 
 	let contentBreakdown = $derived(pack ? summarizePackContent(pack.mods, packFiles.length) : null);
-
-	function formatDownloads(count: number): string {
-		if (!count) return '0';
-		if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-		if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-		return count.toString();
-	}
 
 	let prevLoadedId = $state<string | undefined>(undefined);
 	$effect(() => {
@@ -845,7 +866,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										{#if checkingUpdates}
 											<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
 										{:else}
-											<Sparkles class="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+											<Sparkles class="mr-1.5 h-3.5 w-3.5 text-warning" />
 										{/if}
 										Check Updates
 									</CarbonButton>
@@ -969,7 +990,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											size="sm"
 											kind="danger"
 											class="h-7 rounded-none text-xs"
-											onclick={() => runBatchAction('remove')}
+											onclick={() => (batchRemoveConfirmOpen = true)}
 										>
 											Remove
 										</CarbonButton>
@@ -1490,28 +1511,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			tabindex="0"
 		>
 			{#if addTab !== 'url'}
-				<div class="flex items-center gap-2">
-					<div class="flex-1">
-						<CarbonSearch
-							placeholder="Search online mods..."
-							bind:value={searchQuery}
-							onkeydown={(e) => e.key === 'Enter' && searchMods()}
-							size="md"
-						/>
-					</div>
-					<CarbonButton
-						kind="primary"
-						onclick={searchMods}
-						disabled={searching}
-						class="rounded-none"
-					>
-						{#if searching}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							Search
-						{/if}
-					</CarbonButton>
-				</div>
+				<!-- Shared search bar: same idiom as the mods browser dialog. The
+					source tabs above own the platform switch, so the bar renders
+					input + button only. -->
+				<ModsCatalogSearchBar
+					platforms={[]}
+					bind:query={searchQuery}
+					{searching}
+					placeholder="Search online mods..."
+					onsubmit={searchMods}
+				/>
 
 				<!-- Search Results List -->
 				<div class="mt-4 max-h-[460px] min-h-[300px] space-y-2.5 overflow-y-auto">
@@ -1532,49 +1541,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						/>
 					{:else}
 						{#each searchResults as item (item.id)}
-							<CarbonTile
-								class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-[var(--button-secondary-hover)]"
+							<!-- Shared result row with per-row pending state (E16). -->
+							<ModsCatalogResultCard
+								result={{
+									title: item.title,
+									description: item.description,
+									iconUrl: item.icon_url,
+									author: item.author,
+									downloads: item.downloads,
+									categories: item.categories,
+									platform: item.platform
+								}}
+								maxCategories={2}
 							>
-								<div class="flex min-w-0 flex-1 items-start gap-3">
-									{#if item.icon_url}
-										<img
-											src={item.icon_url}
-											alt={item.title}
-											class="h-10 w-10 shrink-0 rounded-none border border-border bg-background object-contain p-1"
-										/>
-									{:else}
-										<div
-											class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
-										>
-											<Package class="h-5 w-5" />
-										</div>
-									{/if}
-
-									<div class="min-w-0 flex-1 space-y-0.5">
-										<div class="flex items-center gap-2">
-											<span class="truncate text-sm font-semibold text-foreground"
-												>{item.title}</span
-											>
-											<span class="text-xs text-muted-foreground">by {item.author}</span>
-										</div>
-										<p class="line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
-										<div class="flex items-center gap-1.5 pt-1">
-											<CarbonTag type="cyan" size="sm">
-												<Download class="mr-0.5 h-2.5 w-2.5" />
-												{formatDownloads(item.downloads)}
-											</CarbonTag>
-											{#each (item.categories || []).slice(0, 2) as cat (cat)}
-												<CarbonTag type="gray" size="sm">{cat}</CarbonTag>
-											{/each}
-										</div>
-									</div>
-								</div>
-
-								<div class="flex shrink-0 items-center gap-1.5">
+								{#snippet actions()}
 									<CarbonButton
 										size="sm"
 										kind="tertiary"
 										class="rounded-none px-2 text-xs"
+										disabled={addingSlugs[item.id] !== undefined}
 										onclick={() => addModToPack(item, 'client')}
 										title="Add as client-only"
 									>
@@ -1584,6 +1569,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										size="sm"
 										kind="tertiary"
 										class="rounded-none px-2 text-xs"
+										disabled={addingSlugs[item.id] !== undefined}
 										onclick={() => addModToPack(item, 'server')}
 										title="Add as server-only"
 									>
@@ -1593,14 +1579,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										size="sm"
 										kind="primary"
 										class="rounded-none px-2.5 text-xs"
+										loading={addingSlugs[item.id] === 'both'}
+										disabled={addingSlugs[item.id] !== undefined}
 										onclick={() => addModToPack(item, 'both')}
 										title="Add for both"
 									>
 										<Plus class="mr-1 h-3.5 w-3.5" />
 										Add (Both)
 									</CarbonButton>
-								</div>
-							</CarbonTile>
+								{/snippet}
+							</ModsCatalogResultCard>
 						{/each}
 					{/if}
 				</div>
@@ -1672,6 +1660,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	description="Search and install datapacks to bundle under the pack's datapacks/ override. Datapacks run on Vanilla servers with no mod loader."
 	install={installStudioDatapack}
 	onInstalled={loadFiles}
+/>
+
+<!-- E17: batch removal is destructive; it asks before deleting. -->
+<CarbonConfirm
+	bind:open={batchRemoveConfirmOpen}
+	title="Remove selected mods?"
+	message="The selected mods are removed from the modpack. This cannot be undone."
+	confirmLabel="Remove {selectedSlugs.length} mod{selectedSlugs.length === 1 ? '' : 's'}"
+	danger
+	confirming={batchRemoving}
+	onconfirm={confirmBatchRemove}
 />
 
 <!-- Upload / Add Override File Modal -->

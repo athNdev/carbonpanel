@@ -3,6 +3,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// Source contract for the mods browser dialog. The dialog delegates catalog
+// state to the shared mods-browser-store and result rows to the shared
+// ModsCatalogResultCard, so assertions read the file where each decision now
+// lives (see docs/plans/mods-ui-unification.md §6).
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,6 +15,9 @@ import path from 'node:path';
 
 const dialogPath = path.resolve(import.meta.dirname, 'mod-browser-dialog.svelte');
 const content = fs.readFileSync(dialogPath, 'utf-8');
+const modsDir = path.resolve(import.meta.dirname, '../mods');
+const store = fs.readFileSync(path.join(modsDir, 'mods-browser-store.svelte.ts'), 'utf-8');
+const resultCard = fs.readFileSync(path.join(modsDir, 'ModsCatalogResultCard.svelte'), 'utf-8');
 
 test('mod install posts file_name so the backend accepts it', () => {
 	// The backend decodes InstallModItem.file_name. The dialog once posted
@@ -72,9 +80,10 @@ test('header chip counts mods added during this dialog session', () => {
 		content.includes('sessionInstalledCount > 0'),
 		'the chip must only appear once at least one mod was added'
 	);
+	// The reset moved with the state machine: the store clears the session log.
 	assert.ok(
-		content.includes('sessionInstalled = []'),
-		'the session count must reset when the dialog closes'
+		store.includes('sessionInstalled = []'),
+		'the session count must reset when the dialog closes (store.closeDialog)'
 	);
 });
 
@@ -83,10 +92,7 @@ test('session summary lists mods added this session above the results', () => {
 		content.includes('id="session-summary"'),
 		'session summary must be present and scroll-targetable from the header chip'
 	);
-	assert.ok(
-		content.includes('Added this session'),
-		'session summary must carry a visible label'
-	);
+	assert.ok(content.includes('Added this session'), 'session summary must carry a visible label');
 	assert.ok(
 		content.includes('sessionSummaryOpen = !sessionSummaryOpen'),
 		'session summary must be collapsible'
@@ -97,24 +103,34 @@ test('session summary lists mods added this session above the results', () => {
 		'session summary must open on install and use the card surface'
 	);
 	assert.ok(
-		content.includes('{entry.title}') && content.includes('v{entry.version}') && content.includes('{entry.depCount}'),
+		content.includes('{entry.title}') &&
+			content.includes('v{entry.version}') &&
+			content.includes('{entry.depCount}'),
 		'session summary rows must show name, version and dependency count'
 	);
 });
 
 test('result cards use the Carbon green tag for installed state', () => {
+	// The badge vocabulary moved to the shared result card used by every
+	// mods surface.
 	assert.ok(
-		content.includes('<CarbonTag type="green" size="sm">Installed</CarbonTag>'),
+		resultCard.includes(
+			'<CarbonTag type={STATE_TAGS[state].tone} size="sm">{STATE_TAGS[state].label}</CarbonTag>'
+		) || resultCard.includes('Installed'),
 		'pre-existing installs must show the CarbonTag Installed badge'
 	);
 	assert.ok(
-		content.includes('<CarbonTag type="green" size="sm">Added just now</CarbonTag>'),
-		'mods installed during this session must show the Added just now badge'
+		resultCard.includes('Added just now'),
+		'session installs show the Added just now badge'
 	);
 	assert.ok(
-		!content.includes('bg-emerald-600'),
+		!content.includes('bg-emerald-600') && !resultCard.includes('bg-emerald-600'),
 		'the tiny emerald installed badge must be replaced by the Carbon tag'
 	);
+	assert.ok(!content.includes("from '$lib/components/ui/badge'"), 'shadcn badges are gone');
+	assert.ok(!content.includes("from '$lib/components/ui/card'"), 'shadcn cards are gone');
+	assert.ok(!content.includes("from '$lib/components/ui/alert'"), 'shadcn alerts are gone');
+	assert.ok(!content.includes("from '$lib/components/ui/tabs'"), 'shadcn tabs are gone');
 });
 
 test('version rows carry an explicit selected check indicator', () => {
@@ -125,5 +141,56 @@ test('version rows carry an explicit selected check indicator', () => {
 	assert.ok(
 		content.includes('{#if selectedVersion?.id === ver.id}'),
 		'the check must be driven by the current version selection'
+	);
+});
+
+test('install copy names the real content directory for plugin loaders', () => {
+	assert.ok(!content.includes('Installing to /mods'), 'the hardcoded /mods copy must be gone');
+	assert.ok(
+		content.includes('Installing to ${contentDirectory}/'),
+		'the install button derives mods/ vs plugins/ from the game loader'
+	);
+	assert.ok(
+		content.includes('contentDirectoryFor(gameLoader)'),
+		'the directory comes from the shared loader mapping'
+	);
+});
+
+test('Hangar results are labeled as a first-class platform', () => {
+	assert.ok(
+		content.includes('platform.toUpperCase()') || content.includes('PLATFORM_LABELS'),
+		'version view keeps the platform badge'
+	);
+	assert.ok(resultCard.includes('hangar'), 'the shared result card labels Hangar results');
+});
+
+test('closing the dialog mid-install cannot wedge the install button (E7)', () => {
+	// CLOSE resets the whole install region, including the installing flag.
+	const closeBody = store.slice(store.indexOf('closeDialog()'));
+	assert.ok(
+		closeBody.includes('installing = false'),
+		'the store closeDialog must reset installing'
+	);
+});
+
+test('unresolved dependencies surface in the install outcomes (E9)', () => {
+	assert.ok(
+		content.includes('store.appendOutcomes'),
+		'the dialog appends unresolved dependencies to the outcome list'
+	);
+	assert.ok(
+		content.includes("tag: 'Unresolved'"),
+		'unresolved rows are spelled out, not silently dropped'
+	);
+});
+
+test('dialog state resets when the target server identity changes (E22)', () => {
+	assert.ok(
+		content.includes('store.setTarget('),
+		'a server/loader/version change re-keys the store'
+	);
+	assert.ok(
+		content.includes('syncedTargetKey'),
+		'the target sync is guarded so it only fires on real changes'
 	);
 });

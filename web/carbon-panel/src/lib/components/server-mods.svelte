@@ -10,18 +10,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import {
-		Upload,
-		Download,
-		Trash2,
-		Package,
-		FileText,
-		X,
-		Boxes,
-		Search,
-		Check,
-		Ban
-	} from '@lucide/svelte';
+	import { Upload, Download, Trash2, FileText, X, Boxes, Search, Check, Ban } from '@lucide/svelte';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -53,7 +42,12 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonInlineLoading,
 		CarbonButton,
 		CarbonConfirm,
-		CarbonSpinner
+		CarbonSpinner,
+		CarbonDataTable,
+		CarbonAccordion,
+		CarbonAccordionItem,
+		CarbonEmptyState,
+		CarbonErrorState
 	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
@@ -66,6 +60,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let mods = $state<Mod[]>([]);
 	let loading = $state(true);
+	// E1: a failed load must never render as the "No mods installed" success
+	// state; the error carries its own retry affordance.
+	let loadError = $state('');
 	let uploading = $state(false);
 	let uploadProgress = $state<UploadProgress | null>(null);
 	let currentUploadFilename = $state('');
@@ -81,6 +78,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let updateStatus = $state('');
 	let previousServerId = $state(server.id);
 
+	// E3: per-row pending state so double-clicks cannot double-apply.
+	let busyMods = $state<Record<string, 'toggle' | 'delete'>>({});
+
 	// Reviewed update application. Selection is explicit: a preview never
 	// stages bytes on its own, and only state=available rows can be selected.
 	let selectedUpdates = $state<string[]>([]);
@@ -90,6 +90,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let stagingUpdates = $state(false);
 	let checkingUpdates = $state(false);
 	let stagedOutcomes = $state<StagedOutcomeRow[]>([]);
+	let policyOpen = $state(false);
 
 	// Opt-in automatic policy. The policy is a typed mod_update task; TaskService
 	// owns schedule, timezone, next/last run and bounded retries.
@@ -152,6 +153,7 @@ one at https://mozilla.org/MPL/2.0/.
 					: 'Not scheduled'
 	);
 	let policyLastRun = $derived(timestampLabel(policyTask?.lastRun));
+	let policySummary = $derived(`${policyScheduleStatus} · Next run: ${policyNextRun}`);
 
 	async function loadPolicy() {
 		if (!canHaveMods() || policyLoading) return;
@@ -269,13 +271,22 @@ one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
+			// E4: an in-flight upload must not import the old file into the new
+			// server. Aborting and cancelling the session happens before the
+			// state reset; the upload flow also re-checks the target server id.
+			cancelCurrentUpload();
 			updateStatus = '';
 			checkingUpdates = false;
 			selectedUpdates = [];
 			stagedOutcomes = [];
 			mods = [];
 			loading = true;
+			loadError = '';
 			uploading = false;
+			uploadProgress = null;
+			currentUploadFilename = '';
+			uploadAbortController = null;
+			busyMods = {};
 			hasLoaded = false;
 			// Invalidate outstanding policy work even if navigation returns to
 			// the same server before an earlier response arrives.
@@ -326,7 +337,12 @@ one at https://mozilla.org/MPL/2.0/.
 		const serverId = server.id;
 		const request = ++requestNumber;
 		const isCurrent = () => request === requestNumber && server.id === serverId;
-		updateStatus = checkUpdates ? 'Checking installed files for compatible releases…' : '';
+		// E5: checking and staging are mutually exclusive. A check never
+		// clobbers an in-flight staging summary; the stage flow owns
+		// updateStatus until it finishes.
+		if (checkUpdates && !stagingUpdates) {
+			updateStatus = 'Checking installed files for compatible releases…';
+		}
 		checkingUpdates = checkUpdates;
 		// A vanilla server has no mods directory, and asking for one returns an
 		// error the RPC interceptor turns into a toast - on a tab that already
@@ -343,14 +359,22 @@ one at https://mozilla.org/MPL/2.0/.
 			const response = await rpcClient.mod.listMods({ serverId, checkUpdates });
 			if (!isCurrent()) return;
 			mods = response.mods;
-			if (checkUpdates) {
+			loadError = '';
+			if (checkUpdates && !stagingUpdates) {
 				const available = mods.filter((mod) => mod.updatePreview?.state === 'available').length;
 				updateStatus = `Checked ${mods.length} installed files. Compatible updates available for ${available}.`;
 			}
-		} catch (_e) {
+		} catch (error) {
 			if (isCurrent()) {
-				updateStatus = checkUpdates ? 'Update check failed. Try again.' : '';
-				toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
+				// E1: record the failure so the error state renders instead of the
+				// empty state, with a retry affordance.
+				loadError = checkUpdates
+					? 'The update check failed. The installed list was not refreshed.'
+					: 'Failed to read the installed mods from the server.';
+				if (checkUpdates && !stagingUpdates) updateStatus = 'Update check failed. Try again.';
+				// E2: the interceptor already toasted the formatted RPC error.
+				if (!wasRpcErrorToasted(error))
+					toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
 			}
 		} finally {
 			if (isCurrent()) {
@@ -379,7 +403,9 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 
 		try {
+			// E5: staging takes over the status strip from any running check.
 			stagingUpdates = true;
+			checkingUpdates = false;
 			stagedOutcomes = [];
 			const response = await rpcClient.mod.updateMod({
 				serverId: server.id,
@@ -416,6 +442,9 @@ one at https://mozilla.org/MPL/2.0/.
 		const fileList = input.files;
 		if (!fileList || fileList.length === 0) return;
 
+		// E4: the upload is bound to the server it was started on. A server
+		// switch aborts it and the import re-checks the target before running.
+		const targetServerId = server.id;
 		uploading = true;
 		uploadAbortController = new AbortController();
 
@@ -431,15 +460,21 @@ one at https://mozilla.org/MPL/2.0/.
 					signal: uploadAbortController.signal
 				});
 
+				if (server.id !== targetServerId || uploadAbortController === null) {
+					toast.info(`Server changed — upload of ${file.name} was discarded`);
+					continue;
+				}
 				await rpcClient.mod.importUploadedMod({
-					serverId: server.id,
+					serverId: targetServerId,
 					uploadSessionId: result.sessionId,
 					displayName: file.name,
 					description: ''
 				});
 			}
-			toast.success(`Uploaded ${fileList.length} mod(s)`);
-			await loadMods();
+			if (server.id === targetServerId) {
+				toast.success(`Uploaded ${fileList.length} mod(s)`);
+				await loadMods();
+			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message === 'Upload cancelled') {
 				toast.info('Upload cancelled');
@@ -465,6 +500,8 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function toggleMod(mod: Mod) {
+		if (busyMods[mod.id]) return;
+		busyMods = { ...busyMods, [mod.id]: 'toggle' };
 		try {
 			await rpcClient.mod.updateMod({
 				serverId: server.id,
@@ -475,8 +512,11 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
-		} catch (_e) {
-			toast.error('Failed to toggle mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to toggle mod');
+		} finally {
+			const { [mod.id]: _settled, ...rest } = busyMods;
+			busyMods = rest;
 		}
 	}
 
@@ -490,7 +530,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function confirmDeleteMod() {
 		const mod = pendingDelete;
-		if (!mod) return;
+		if (!mod || busyMods[mod.id]) return;
+		busyMods = { ...busyMods, [mod.id]: 'delete' };
 		try {
 			await rpcClient.mod.deleteMod({
 				serverId: server.id,
@@ -498,9 +539,11 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			toast.success('Mod deleted');
 			await loadMods();
-		} catch (_e) {
-			toast.error('Failed to delete mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to delete mod');
 		} finally {
+			const { [mod.id]: _settled, ...rest } = busyMods;
+			busyMods = rest;
 			pendingDelete = null;
 		}
 	}
@@ -518,8 +561,8 @@ one at https://mozilla.org/MPL/2.0/.
 			a.download = mod.fileName;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (_e) {
-			toast.error('Failed to download mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to download mod');
 		}
 	}
 
@@ -568,14 +611,14 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="secondary"
 				size="sm"
-				disabled={loading || uploading || !mods.length}
+				disabled={loading || uploading || stagingUpdates || !mods.length}
 				onclick={() => loadMods(true)}
 			>
 				Check for updates
 			</CarbonButton>
 			<CarbonButton kind="primary" size="sm" onclick={() => (browserDialogOpen = true)}>
 				<Boxes class="h-4 w-4" />
-				<span>Browse Mods</span>
+				<span>Browse & Install</span>
 			</CarbonButton>
 			<CarbonButton
 				kind="secondary"
@@ -654,8 +697,22 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 		{/if}
+	{/snippet}
+
+	<!-- Status strip: one place the eye checks after any operation. Upload
+		progress lives inline here instead of in its own floating bar. -->
+	<div class="border-y border-border bg-card px-3 py-2" role="status">
+		<div class="flex items-center gap-2 text-sm text-muted-foreground">
+			{#if checkingUpdates || stagingUpdates}
+				<CarbonSpinner
+					size="sm"
+					label={stagingUpdates ? 'Staging mod updates' : 'Checking installed mods for updates'}
+				/>
+			{/if}
+			<span class="min-w-0 flex-1">{updateStatus}</span>
+		</div>
 		{#if uploading && uploadProgress}
-			<div class="border-t border-border bg-card p-3 text-xs">
+			<div class="mt-2 text-xs">
 				<div class="mb-1 flex items-center justify-between">
 					<span class="truncate font-mono text-foreground">Uploading: {currentUploadFilename}</span>
 					<div class="flex items-center gap-2">
@@ -684,17 +741,17 @@ one at https://mozilla.org/MPL/2.0/.
 				</p>
 			</div>
 		{/if}
-	{/snippet}
-	<p role="status" class="text-sm text-muted-foreground">
-		{#if checkingUpdates}
-			<CarbonSpinner size="sm" label="Checking installed mods for updates" />
-		{/if}
-		{updateStatus}
-	</p>
+	</div>
+
+	<!-- Pending updates card: the review flow is isolated above the list so
+		update controls never interleave with installed rows. -->
 	{#if availableUpdates.length > 0}
 		<div
 			class="flex flex-col gap-3 border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-end"
 		>
+			<p class="w-full font-mono text-xs font-semibold tracking-wider text-foreground uppercase">
+				Compatible updates ({availableUpdates.length})
+			</p>
 			<div class="min-w-0">
 				<label
 					for="mod-update-window"
@@ -775,301 +832,365 @@ one at https://mozilla.org/MPL/2.0/.
 			{/if}
 		</div>
 	{/if}
+
+	<!-- Automatic update policy -->
 	{#if canHaveMods()}
-		<details class="border border-border bg-card">
-			<summary class="cursor-pointer px-3 py-2 font-mono text-xs text-foreground uppercase">
-				Automatic update policy
-			</summary>
-			<div
-				class="flex flex-col gap-3 border-t border-border p-3 sm:flex-row sm:flex-wrap sm:items-end"
+		<CarbonAccordion>
+			<CarbonAccordionItem
+				title="Automatic update policy"
+				subtitle={policySummary}
+				bind:open={policyOpen}
 			>
-				<label class="flex items-center gap-2 text-xs text-foreground">
-					<input type="checkbox" bind:checked={policyEnabled} class="h-3.5 w-3.5 accent-primary" />
-					Opt in to automatic updates
-				</label>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-cron"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Schedule (cron)
+				<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+					<label class="flex items-center gap-2 text-xs text-foreground">
+						<input
+							type="checkbox"
+							bind:checked={policyEnabled}
+							class="h-3.5 w-3.5 accent-primary"
+						/>
+						Opt in to automatic updates
 					</label>
-					<input
-						id="mod-policy-cron"
-						bind:value={policyCron}
-						class="h-8 w-40 rounded-none border border-border bg-background px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-tz"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Timezone
-					</label>
-					<input
-						id="mod-policy-tz"
-						bind:value={policyTimezone}
-						class="h-8 w-32 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-excluded"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Excluded project IDs
-					</label>
-					<input
-						id="mod-policy-excluded"
-						bind:value={policyExcluded}
-						placeholder="project-a, project-b"
-						class="h-8 w-48 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-max"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Max per run
-					</label>
-					<input
-						id="mod-policy-max"
-						type="number"
-						min="1"
-						max="50"
-						bind:value={policyMax}
-						class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-window"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Apply window
-					</label>
-					<select
-						id="mod-policy-window"
-						bind:value={policyWindow}
-						class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					>
-						<option value="next_restart">Next restart</option>
-						<option value="idle">When empty</option>
-					</select>
-				</div>
-				{#if policyWindow === 'idle'}
 					<div class="min-w-0">
 						<label
-							for="mod-policy-idle"
+							for="mod-policy-cron"
 							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
 						>
-							Idle minutes
+							Schedule (cron)
 						</label>
 						<input
-							id="mod-policy-idle"
-							type="number"
-							min="1"
-							max="10080"
-							bind:value={policyIdleMinutes}
-							class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+							id="mod-policy-cron"
+							bind:value={policyCron}
+							class="h-8 w-40 rounded-none border border-border bg-background px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 						/>
 					</div>
-				{/if}
-				<label class="flex items-center gap-2 text-xs text-foreground">
-					<input
-						type="checkbox"
-						bind:checked={policySkipRunning}
-						class="h-3.5 w-3.5 accent-primary"
-					/>
-					Skip while running
-				</label>
-				<CarbonButton
-					kind="secondary"
-					size="sm"
-					disabled={!policyReady || policyLoading || policySaving}
-					onclick={savePolicy}
-				>
-					Save policy
-				</CarbonButton>
-				{#if policyLoading && !policyReady}
-					<CarbonSpinner size="sm" label="Loading policy" description="Loading policy" />
-				{:else if !policyReady}
-					<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}
-						>Retry loading policy</CarbonButton
+					<div class="min-w-0">
+						<label
+							for="mod-policy-tz"
+							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						>
+							Timezone
+						</label>
+						<input
+							id="mod-policy-tz"
+							bind:value={policyTimezone}
+							class="h-8 w-32 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						/>
+					</div>
+					<div class="min-w-0">
+						<label
+							for="mod-policy-excluded"
+							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						>
+							Excluded project IDs
+						</label>
+						<input
+							id="mod-policy-excluded"
+							bind:value={policyExcluded}
+							placeholder="project-a, project-b"
+							class="h-8 w-48 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						/>
+					</div>
+					<div class="min-w-0">
+						<label
+							for="mod-policy-max"
+							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						>
+							Max per run
+						</label>
+						<input
+							id="mod-policy-max"
+							type="number"
+							min="1"
+							max="50"
+							bind:value={policyMax}
+							class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						/>
+					</div>
+					<div class="min-w-0">
+						<label
+							for="mod-policy-window"
+							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						>
+							Apply window
+						</label>
+						<select
+							id="mod-policy-window"
+							bind:value={policyWindow}
+							class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						>
+							<option value="next_restart">Next restart</option>
+							<option value="idle">When empty</option>
+						</select>
+					</div>
+					{#if policyWindow === 'idle'}
+						<div class="min-w-0">
+							<label
+								for="mod-policy-idle"
+								class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+							>
+								Idle minutes
+							</label>
+							<input
+								id="mod-policy-idle"
+								type="number"
+								min="1"
+								max="10080"
+								bind:value={policyIdleMinutes}
+								class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+							/>
+						</div>
+					{/if}
+					<label class="flex items-center gap-2 text-xs text-foreground">
+						<input
+							type="checkbox"
+							bind:checked={policySkipRunning}
+							class="h-3.5 w-3.5 accent-primary"
+						/>
+						Skip while running
+					</label>
+					<CarbonButton
+						kind="secondary"
+						size="sm"
+						disabled={!policyReady || policyLoading || policySaving}
+						onclick={savePolicy}
 					>
-				{/if}
-				<dl
-					class="grid w-full grid-cols-1 gap-1 font-mono text-xs text-muted-foreground sm:grid-cols-4"
-				>
-					<div>
-						<dt class="inline">Schedule:</dt>
-						<dd class="inline">{policyScheduleStatus}</dd>
-					</div>
-					<div>
-						<dt class="inline">Next run:</dt>
-						<dd class="inline">{policyNextRun}</dd>
-					</div>
-					<div>
-						<dt class="inline">Last run:</dt>
-						<dd class="inline">{policyLastRun}</dd>
-					</div>
-					<div>
-						<dt class="inline">Outcome:</dt>
-						<dd class="inline break-words">{policyLastOutcome}</dd>
-					</div>
-				</dl>
-			</div>
-		</details>
+						Save policy
+					</CarbonButton>
+					{#if policyLoading && !policyReady}
+						<CarbonSpinner size="sm" label="Loading policy" description="Loading policy" />
+					{:else if !policyReady}
+						<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}
+							>Retry loading policy</CarbonButton
+						>
+					{/if}
+					<dl
+						class="grid w-full grid-cols-1 gap-1 border-t border-border pt-2 font-mono text-xs text-muted-foreground sm:grid-cols-4"
+					>
+						<div>
+							<dt class="inline">Schedule:</dt>
+							<dd class="inline">{policyScheduleStatus}</dd>
+						</div>
+						<div>
+							<dt class="inline">Next run:</dt>
+							<dd class="inline">{policyNextRun}</dd>
+						</div>
+						<div>
+							<dt class="inline">Last run:</dt>
+							<dd class="inline">{policyLastRun}</dd>
+						</div>
+						<div>
+							<dt class="inline">Outcome:</dt>
+							<dd class="inline break-words">{policyLastOutcome}</dd>
+						</div>
+					</dl>
+				</div>
+			</CarbonAccordionItem>
+		</CarbonAccordion>
 	{/if}
+
 	<div class="min-h-0 flex-1 overflow-auto bg-background">
 		{#if !canHaveMods()}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
-				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
-				<p class="text-sm font-semibold text-foreground">Mod loader incompatible</p>
-				<p class="mt-1 max-w-sm text-xs text-muted-foreground">
-					To install mods or plugins, configure this server to use Fabric, Forge, NeoForge, Paper,
-					or Purpur.
-				</p>
+			<div class="p-6">
+				<CarbonEmptyState
+					title="This server type doesn't load mods or plugins"
+					description="To install mods or plugins, configure this server to use Fabric, Forge, NeoForge, Paper, or Purpur."
+				/>
 			</div>
 		{:else if loading}
 			<div class="flex items-center justify-center p-12">
 				<CarbonInlineLoading description="Reading {getModsDirectory()}/ directory..." />
 			</div>
+		{:else if loadError}
+			<!-- E1: a failed load is never rendered as the empty state. -->
+			<div class="p-6">
+				<CarbonErrorState
+					title="Couldn't load installed mods"
+					message={loadError}
+					retryLabel="Retry"
+					onretry={() => loadMods()}
+				/>
+			</div>
 		{:else if mods.length === 0}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
-				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
-				<p class="text-sm font-semibold text-foreground">No mods installed</p>
-				<p class="mt-1 text-xs text-muted-foreground">
-					Browse the repository or upload .jar files directly to get started.
-				</p>
+			<div class="p-6">
+				<CarbonEmptyState
+					title="No mods installed"
+					description="Browse the repository or upload .jar files directly to get started."
+					actionLabel="Browse & install"
+					onaction={() => (browserDialogOpen = true)}
+				/>
 			</div>
 		{:else if filteredMods.length === 0}
 			<div class="p-8 text-center text-xs text-muted-foreground">
 				No mods match your search query or filter.
 			</div>
 		{:else}
-			<!-- Carbon DataTable rows -->
-			<div class="divide-y divide-border border-b border-border">
-				{#each filteredMods as mod (mod.id)}
-					<div
-						class="group flex items-center justify-between gap-4 rounded-none bg-card p-3.5 transition-colors hover:bg-secondary"
-					>
-						<div class="flex min-w-0 items-center gap-3.5">
-							<!-- Enable/Disable Carbon Toggle -->
-							<button
-								type="button"
-								onclick={() => toggleMod(mod)}
-								class="flex h-7 cursor-pointer items-center gap-1 rounded-none border px-2 font-mono text-xs transition-colors select-none {mod.enabled
-									? 'border-success bg-success/20 text-success-text'
-									: 'border-border bg-background text-muted-foreground'}"
-								title={mod.enabled ? 'Click to disable' : 'Click to enable'}
+			<div class="installed-mods-table">
+				<CarbonDataTable
+					title="Installed content"
+					description="{filteredMods.length} of {mods.length} in {getModsDirectory()}/"
+				>
+					{#snippet header()}
+						<tr class="installed-mods-header">
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Name</th
 							>
-								{#if mod.enabled}
-									<Check class="h-3 w-3" />
-									<span class="text-xs uppercase">Active</span>
-								{:else}
-									<Ban class="h-3 w-3" />
-									<span class="text-xs uppercase">Disabled</span>
-								{/if}
-							</button>
-
-							<!-- Info -->
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<h4
-										class="truncate text-sm font-medium text-foreground {mod.enabled
-											? ''
-											: 'line-through opacity-70'}"
-									>
-										{mod.displayName}
-									</h4>
-									{#if mod.version}
-										<span
-											class="border border-border bg-background px-1.5 py-0 font-mono text-xs text-muted-foreground"
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Status</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase">File</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase">Size</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Updated</th
+							>
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Update</th
+							>
+							<th
+								scope="col"
+								class="px-3 py-2.5 text-right text-xs font-semibold tracking-wider uppercase"
+								>Actions</th
+							>
+						</tr>
+					{/snippet}
+					{#each filteredMods as mod (mod.id)}
+						<tr class="transition-colors hover:bg-secondary">
+							<td class="px-3 py-3 align-top">
+								<div class="flex min-w-0 flex-col gap-1">
+									<div class="flex items-center gap-2">
+										<h4
+											class="truncate text-sm font-medium text-foreground {mod.enabled
+												? ''
+												: 'line-through opacity-70'}"
 										>
-											{mod.version}
-										</span>
-									{/if}
-								</div>
-								<div
-									class="mt-0.5 flex flex-wrap items-center gap-3 font-mono text-xs text-muted-foreground"
-								>
-									<span class="flex items-center gap-1 text-muted-foreground">
-										<FileText class="h-3 w-3" />
-										{mod.fileName}
-									</span>
-									<span>{formatBytes(Number(mod.fileSize))}</span>
-									{#if mod.uploadedAt}
-										<span
-											>{new Date(Number(mod.uploadedAt.seconds) * 1000).toLocaleDateString()}</span
-										>
-									{/if}
-								</div>
-								{#if mod.updatePreview}
-									<div class="mt-1 flex flex-wrap items-center gap-2">
-										<CarbonTag
-											type={updateStateTagType(mod.updatePreview.state)}
-											size="sm"
-											title={mod.updatePreview.reason}
-										>
-											{mod.updatePreview.state.replace(/_/g, ' ')}
-										</CarbonTag>
-										{#if mod.updatePreview.state === 'available'}
-											<label
-												class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground"
+											{mod.displayName}
+										</h4>
+										{#if mod.version}
+											<span
+												class="border border-border bg-background px-1.5 py-0 font-mono text-xs text-muted-foreground"
 											>
-												<input
-													type="checkbox"
-													checked={selectedUpdates.includes(mod.id)}
-													onchange={() => toggleUpdateSelection(mod.id)}
-													class="h-3.5 w-3.5 accent-primary"
-												/>
-												Stage this update
-											</label>
+												{mod.version}
+											</span>
 										{/if}
 									</div>
-									{#if mod.updatePreview.installedVersion}
-										<p class="mt-1 text-xs break-words text-muted-foreground">
-											{mod.updatePreview.provider || 'Provider'} · Installed
-											{mod.updatePreview.installedVersion}
-											{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
-												· Candidate {mod.updatePreview.candidateVersion}
-											{/if}
+									{#if mod.description}
+										<p class="line-clamp-1 max-w-sm font-sans text-xs text-muted-foreground">
+											{mod.description}
 										</p>
 									{/if}
-									<p class="mt-1 text-sm text-muted-foreground">{mod.updatePreview.reason}</p>
-								{/if}
-								{#if mod.description}
-									<p class="mt-1 line-clamp-1 font-sans text-xs text-muted-foreground">
-										{mod.description}
-									</p>
-								{/if}
-							</div>
-						</div>
-
-						<!-- Actions -->
-						<div class="flex shrink-0 items-center border border-border bg-background">
-							<button
-								type="button"
-								onclick={() => downloadMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-								title="Download .jar"
+								</div>
+							</td>
+							<td class="px-3 py-3 align-top">
+								<button
+									type="button"
+									onclick={() => toggleMod(mod)}
+									disabled={busyMods[mod.id] !== undefined}
+									class="flex h-7 cursor-pointer items-center gap-1 rounded-none border px-2 font-mono text-xs transition-colors select-none disabled:cursor-not-allowed disabled:opacity-50 {mod.enabled
+										? 'border-success bg-success/20 text-success-text'
+										: 'border-border bg-background text-muted-foreground'}"
+									title={mod.enabled ? 'Click to disable' : 'Click to enable'}
+									aria-label="{mod.enabled ? 'Disable' : 'Enable'} {mod.displayName}"
+								>
+									{#if mod.enabled}
+										<Check class="h-3 w-3" />
+										<span class="text-xs uppercase">Active</span>
+									{:else}
+										<Ban class="h-3 w-3" />
+										<span class="text-xs uppercase">Disabled</span>
+									{/if}
+								</button>
+							</td>
+							<td
+								class="detail max-w-[180px] truncate px-3 py-3 align-top font-mono text-xs text-muted-foreground"
 							>
-								<Download class="h-3.5 w-3.5" />
-							</button>
-							<button
-								type="button"
-								onclick={() => deleteMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20"
-								title="Delete mod"
-							>
-								<Trash2 class="h-3.5 w-3.5" />
-							</button>
-						</div>
-					</div>
-				{/each}
+								<span class="flex items-center gap-1">
+									<FileText class="h-3 w-3 shrink-0" />
+									<span class="truncate">{mod.fileName}</span>
+								</span>
+							</td>
+							<td class="detail px-3 py-3 align-top font-mono text-xs text-muted-foreground">
+								{formatBytes(Number(mod.fileSize))}
+							</td>
+							<td class="detail px-3 py-3 align-top font-mono text-xs text-muted-foreground">
+								{#if mod.uploadedAt}
+									{new Date(Number(mod.uploadedAt.seconds) * 1000).toLocaleDateString()}
+								{:else}
+									—
+								{/if}
+							</td>
+							<td class="px-3 py-3 align-top">
+								{#if mod.updatePreview}
+									<div class="flex min-w-0 flex-col gap-1">
+										<div class="flex flex-wrap items-center gap-2">
+											<CarbonTag
+												type={updateStateTagType(mod.updatePreview.state)}
+												size="sm"
+												title={mod.updatePreview.reason}
+											>
+												{mod.updatePreview.state.replace(/_/g, ' ')}
+											</CarbonTag>
+											{#if mod.updatePreview.state === 'available'}
+												<label
+													class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground"
+												>
+													<input
+														type="checkbox"
+														checked={selectedUpdates.includes(mod.id)}
+														onchange={() => toggleUpdateSelection(mod.id)}
+														class="h-3.5 w-3.5 accent-primary"
+													/>
+													Stage this update
+												</label>
+											{/if}
+										</div>
+										{#if mod.updatePreview.installedVersion}
+											<p class="text-xs break-words text-muted-foreground">
+												{mod.updatePreview.provider || 'Provider'} · Installed
+												{mod.updatePreview.installedVersion}
+												{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
+													· Candidate {mod.updatePreview.candidateVersion}
+												{/if}
+											</p>
+										{/if}
+										<p class="text-xs text-muted-foreground">{mod.updatePreview.reason}</p>
+									</div>
+								{:else}
+									<span class="font-mono text-xs text-muted-foreground">—</span>
+								{/if}
+							</td>
+							<td class="px-3 py-3 text-right align-top">
+								<div class="inline-flex items-center border border-border bg-background">
+									<button
+										type="button"
+										onclick={() => downloadMod(mod)}
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+										title="Download {getModsDirectory() === 'plugins' ? 'plugin' : 'mod'} file"
+										aria-label="Download {mod.fileName}"
+									>
+										<Download class="h-3.5 w-3.5" />
+									</button>
+									<button
+										type="button"
+										onclick={() => deleteMod(mod)}
+										disabled={busyMods[mod.id] !== undefined}
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-50"
+										title="Delete {mod.displayName}"
+										aria-label="Delete {mod.displayName}"
+									>
+										<Trash2 class="h-3.5 w-3.5" />
+									</button>
+								</div>
+							</td>
+						</tr>
+					{/each}
+				</CarbonDataTable>
 			</div>
 		{/if}
 	</div>
@@ -1082,6 +1203,7 @@ one at https://mozilla.org/MPL/2.0/.
 	message="The file is removed from the server. This cannot be undone."
 	confirmLabel="Delete Mod"
 	danger
+	confirming={Boolean(pendingDelete && busyMods[pendingDelete.id] === 'delete')}
 	onconfirm={confirmDeleteMod}
 	onclose={() => (pendingDelete = null)}
 >
@@ -1089,3 +1211,52 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if pendingDelete}{pendingDelete.displayName}{/if}
 	{/snippet}
 </CarbonConfirm>
+
+<style>
+	/* Container-query collapse for the installed table: File/Size/Updated hide
+		under 800px, and narrow containers fall back to a card grid (<420px).
+		The wrapper div lives in this component, so the anchor selector matches
+		and the :global descendants survive pruning. */
+	.installed-mods-table {
+		container-type: inline-size;
+	}
+	@container (max-width: 800px) {
+		.installed-mods-table :global(.detail) {
+			display: none;
+		}
+	}
+	@container (max-width: 420px) {
+		.installed-mods-table :global(thead) {
+			display: none;
+		}
+		.installed-mods-table :global(tbody),
+		.installed-mods-table :global(tr) {
+			display: block;
+		}
+		.installed-mods-table :global(tr) {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 6px 10px;
+			padding: 12px;
+		}
+		.installed-mods-table :global(td) {
+			padding: 0;
+			min-width: 0;
+		}
+		.installed-mods-table :global(td:first-child) {
+			grid-column: 1 / 3;
+		}
+		.installed-mods-table :global(td:nth-child(2)) {
+			grid-column: 1;
+			grid-row: 2;
+		}
+		.installed-mods-table :global(td:nth-child(6)) {
+			grid-column: 2;
+			grid-row: 2;
+		}
+		.installed-mods-table :global(td:nth-child(7)) {
+			grid-column: 2;
+			grid-row: 3;
+		}
+	}
+</style>
