@@ -114,7 +114,8 @@ def check_docker_context(directory):
     for required in ("internal/backupcrypt/encrypt.go", "cmd/carbon-storage/main.go",
                      "cmd/carbon-panel/main.go", "proto/carbonpanel/v1/backup.proto",
                      "pkg/proto/carbonpanel/v1/backup.pb.go", "config.example.yaml",
-                     "web/carbon-panel/package.json", "scripts/web-build.sh", ".env.example"):
+                     "web/carbon-panel/package.json", "scripts/web-build.sh", ".env.example",
+                     "web/carbon-panel/src/routes/servers/+page.svelte"):
         if required not in outputs[0]:
             raise AssertionError(f"Required source missing from Docker context: {required}")
     print(f"PASS: clean and cluttered Docker contexts match ({len(outputs[0])} files)")

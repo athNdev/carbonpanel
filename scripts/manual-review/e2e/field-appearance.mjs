@@ -112,17 +112,17 @@ export async function checkFieldAppearance(page, base) {
     });
     await page.goto(base + "/servers");
     const search = page.getByPlaceholder(
-      "Search by name, description, version, loader, or port...",
+      "Search by name, description, version, loader, or port…",
     );
     await search.waitFor();
     assert.equal((await appearance(search)).fill, idle.fill);
     assert.equal((await appearance(search)).width, "2px");
-    await page.goto(base + "/worlds");
-    const nativeSelect = page.getByLabel("Map status", { exact: true });
-    await nativeSelect.waitFor();
-    const nativeStyle = await appearance(nativeSelect);
-    assert.equal(nativeStyle.fill, idle.fill);
-    assert.equal(nativeStyle.width, "2px");
+    await page.goto(base + "/servers/new");
+    const loaderSelect = page.locator("#mod_loader");
+    await loaderSelect.waitFor();
+    const loaderStyle = await appearance(loaderSelect);
+    assert.equal(loaderStyle.fill, idle.fill);
+    assert.equal(loaderStyle.width, "2px");
     const controls = await page.evaluate(() => {
       const box = document.createElement("div");
       document.body.append(box);
