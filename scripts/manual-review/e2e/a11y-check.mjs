@@ -1642,7 +1642,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				}
 				await page.getByLabel('Username', { exact: true }).fill('review');
 				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
-				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+				await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 				const announced = page
 					.getByRole('alert')
 					.filter({ hasText: 'Invalid username or password' });

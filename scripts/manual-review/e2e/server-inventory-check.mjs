@@ -295,7 +295,7 @@ try {
   const beforeLogin = requests.filter((r) => r.method === "ListServers").length;
   await page.getByLabel("Username", { exact: true }).fill("fixture");
   await page.getByLabel("Password", { exact: true }).fill("fixture-password");
-  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByText("Ready Server", { exact: true }).last().waitFor();
   assert.ok(
     requests.filter((r) => r.method === "ListServers").length > beforeLogin,
@@ -333,7 +333,7 @@ try {
   for (const status of [401, 400]) {
     await page.getByLabel("Username", { exact: true }).fill("fixture");
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
-    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByText("Ready Server", { exact: true }).last().waitFor();
     delayedStatus = status;
     await page.evaluate(() => {
@@ -355,7 +355,7 @@ try {
     await page.waitForURL("**/login");
     await page.getByLabel("Username", { exact: true }).fill("fixture");
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
-    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByText("Ready Server", { exact: true }).last().waitFor();
     const logoutCalls = requests.filter(
       (request) => request.method === "Logout",
