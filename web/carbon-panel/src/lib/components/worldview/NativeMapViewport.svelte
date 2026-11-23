@@ -25,7 +25,9 @@
 		loadNativeManifest,
 		MAP_SPANS,
 		NATIVE_FAILURE_MESSAGE,
+		nativeDimensionLabel,
 		parseNativeCoordinate,
+		savedAgeLabel,
 		TILE_BLOCKS,
 		tileKey,
 		visibleNativeTiles,
@@ -94,6 +96,12 @@
 	let selectedMarkerId = $state('');
 	let viewport = $state<HTMLDivElement>();
 	let markerTrigger: HTMLButtonElement | undefined;
+	// Live keeps complete tiles revalidating against the region file mtime;
+	// off is the classic behavior (manual refresh only). Live is the default:
+	// the map reads the server's live world directory.
+	let live = $state(true);
+	let now = $state(Date.now());
+	let activeDimension = $state('overworld');
 	let selectedMarker = $derived(markers.find((marker) => marker.id === selectedMarkerId));
 	let positionedPath: string | undefined;
 	let drag: { pointer: number; x: number; y: number; center: MapPoint } | undefined;
@@ -102,11 +110,16 @@
 		source?.path === proxyPath && source.revision === revision ? source.result : undefined
 	);
 	let spawn = $derived(result?.status === 'ready' ? result.manifest.spawn : null);
+	let dimensions = $derived(
+		result?.status === 'ready' ? result.manifest.dimensions : ['overworld']
+	);
 	let scale = $derived(blockScale(size, zoom));
 	let visible = $derived(visibleNativeTiles(center, size, scale));
 	let block = $derived({ x: Math.floor(center.x), z: Math.floor(center.z) });
+	// Markers and overlays are Overworld observations; other dimensions have
+	// no honest placement for them.
 	let visiblePins = $derived(
-		showMarkers
+		showMarkers && activeDimension === 'overworld'
 			? markers
 					.map((marker) => ({ marker, ...projectNativeMapPoint(marker, center, size, scale) }))
 					.filter(
@@ -123,13 +136,13 @@
 		const path = proxyPath;
 		const generation = revision;
 		const abort = new AbortController();
-		let tileLoader: typeof loader;
 		source = undefined;
 		loader = undefined;
 		tiles = new Map();
 		copyNote = '';
 		drag = undefined;
 		dragging = false;
+		activeDimension = 'overworld';
 		void loadNativeManifest(path, abort.signal)
 			.catch((): ManifestResult => ({ status: 'unavailable' }))
 			.then((manifest) => {
@@ -142,13 +155,45 @@
 					zoom = initialZoom;
 					spanChoice = 'auto';
 				}
-				tileLoader = createNativeTileLoader(path, (results) => (tiles = results));
-				loader = tileLoader;
 			});
 		return () => {
 			abort.abort();
-			tileLoader?.dispose();
 		};
+	});
+
+	// The tile loader is keyed on the session path and the active dimension;
+	// switching dimensions keeps the camera and reloads terrain.
+	$effect(() => {
+		const path = proxyPath;
+		const generation = revision;
+		const dimension = activeDimension;
+		if (source?.path !== path || source.revision !== generation) return;
+		if (source.result.status !== 'ready') return;
+		const tileLoader = createNativeTileLoader(path, dimension, (results) => (tiles = results));
+		loader = tileLoader;
+		tiles = new Map();
+		tileLoader.setLive(live);
+		return () => {
+			if (loader === tileLoader) loader = undefined;
+			tileLoader.dispose();
+		};
+	});
+
+	$effect(() => {
+		loader?.setVisible(visible);
+	});
+
+	$effect(() => {
+		loader?.setLive(live);
+	});
+
+	// The staleness age only needs minute granularity; tick while live so the
+	// indicator keeps up with revalidations without its own timer pressure
+	// when the map is closed or frozen.
+	$effect(() => {
+		if (!live) return;
+		const timer = setInterval(() => (now = Date.now()), 30_000);
+		return () => clearInterval(timer);
 	});
 
 	$effect(() => {
@@ -340,10 +385,21 @@
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
 		<div class="min-w-0">
 			<h2 id={id + '-title'} class="text-sm font-semibold text-foreground">{title}</h2>
-			<p class="mt-1 text-xs text-muted-foreground">Overworld</p>
+			<p class="mt-1 text-xs text-muted-foreground">{nativeDimensionLabel(activeDimension)}</p>
 		</div>
 		{#if result?.status === 'ready'}
 			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap items-end gap-1">
+				{#if dimensions.length > 1}
+					<CarbonSelect
+						label="Dimension"
+						value={activeDimension}
+						onchange={(event) => (activeDimension = event.currentTarget.value)}
+					>
+						{#each dimensions as dimension (dimension)}
+							<option value={dimension}>{nativeDimensionLabel(dimension)}</option>
+						{/each}
+					</CarbonSelect>
+				{/if}
 				<CarbonSelect
 					label="Map span"
 					value={spanChoice}
@@ -526,20 +582,36 @@
 					{#if summary.provisional}
 						<p class="mt-1">Faded terrain shows saved heights from chunks still generating.</p>
 					{/if}
+					{#if markers.length && activeDimension !== 'overworld'}
+						<p class="mt-1">Markers are only placed on the Overworld map.</p>
+					{/if}
 					{#if summary.savedAt}
 						<p class="mt-1">
 							Latest chunk save in this view <time datetime={summary.savedAt}
 								>{formatTime.format(new Date(summary.savedAt))}</time
-							>
+							>{#if savedAgeLabel(summary.savedAt, now)}
+								· saved {savedAgeLabel(summary.savedAt, now)}
+							{/if}
 						</p>
 					{/if}
 				</div>
-				{#if summary.failure !== 'access' && summary.failure !== 'unsupported' && !summary.loading}
-					<CarbonButton kind="tertiary" size="sm" class="gap-2" onclick={retryMap}>
-						<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
-						<span>{summary.failure ? 'Retry terrain' : 'Refresh terrain'}</span>
-					</CarbonButton>
-				{/if}
+				<div class="flex flex-wrap items-center gap-3">
+					<label class="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+						<input
+							type="checkbox"
+							bind:checked={live}
+							class="focus-ring size-4 cursor-pointer"
+							data-testid="native-map-live"
+						/>
+						Live updates
+					</label>
+					{#if summary.failure !== 'access' && summary.failure !== 'unsupported' && !summary.loading}
+						<CarbonButton kind="tertiary" size="sm" class="gap-2" onclick={retryMap}>
+							<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
+							<span>{summary.failure ? 'Retry terrain' : 'Refresh terrain'}</span>
+						</CarbonButton>
+					{/if}
+				</div>
 			</div>
 
 			<p id={id + '-controls'} class="text-xs text-muted-foreground">

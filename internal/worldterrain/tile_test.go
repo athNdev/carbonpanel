@@ -14,6 +14,7 @@ import (
 	"image/draw"
 	"image/png"
 	"io"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
+	"github.com/athNdev/carbon-panel/internal/worldlib"
 )
 
 const testSave = 1_779_000_000
@@ -33,6 +35,12 @@ type savedChunk struct {
 }
 
 func chunkData(x, z, version int32, status string) []byte {
+	return chunkDataInSpan(x, z, version, status, worldlib.JavaOverworldSpan)
+}
+
+// chunkDataInSpan builds one chunk NBT for the given dimension span. Heights
+// use distinct horizontal and vertical gradients that fit every vanilla span.
+func chunkDataInSpan(x, z, version int32, status string, span worldlib.JavaDimensionSpan) []byte {
 	var b bytes.Buffer
 	write := func(v any) { _ = binary.Write(&b, binary.BigEndian, v) }
 	str := func(s string) {
@@ -47,7 +55,7 @@ func chunkData(x, z, version int32, status string) []byte {
 	for _, field := range []struct {
 		name  string
 		value int32
-	}{{"DataVersion", version}, {"xPos", x}, {"yPos", -4}, {"zPos", z}} {
+	}{{"DataVersion", version}, {"xPos", x}, {"yPos", int32(span.MinY / 16)}, {"zPos", z}} {
 		tag(3, field.name)
 		write(field.value)
 	}
@@ -55,12 +63,14 @@ func chunkData(x, z, version int32, status string) []byte {
 	str(status)
 	tag(10, "Heightmaps")
 	tag(12, "WORLD_SURFACE")
-	var packed [37]uint64
+	heightSpan := span.MaxY - span.MinY + 1
+	bits := bits.Len(uint(heightSpan))
+	perLong := 64 / bits
+	packed := make([]uint64, (256+perLong-1)/perLong)
 	for i := range 256 {
-		// The stored height is one above the highest block relative to -64.
-		// Distinct horizontal and vertical gradients establish orientation.
-		height := uint64(1 + (i%16)*7 + (i/16)*13)
-		packed[i/7] |= height << ((i % 7) * 9)
+		// The stored height is one above the highest block relative to MinY.
+		height := uint64(1 + (i%16)*3 + (i/16)*5)
+		packed[i/perLong] |= height << ((i % perLong) * bits)
 	}
 	write(int32(len(packed)))
 	for _, value := range packed {
@@ -81,6 +91,8 @@ func regionData(t *testing.T, chunks ...savedChunk) []byte {
 			writer = gzip.NewWriter(&packed)
 		case 2:
 			writer = zlib.NewWriter(&packed)
+		case 4:
+			_, _ = packed.Write(lz4JavaEncode(t, chunk.raw))
 		default:
 			_, _ = packed.Write(chunk.raw)
 		}
@@ -242,7 +254,7 @@ func TestRenderOverworldTileUsesSavedSurfaceMaterials(t *testing.T) {
 		{4, 0, color.NRGBA{R: 51, G: 137, B: 170, A: 255}},
 		{5, 0, color.NRGBA{R: 30, G: 95, B: 142, A: 255}},
 		{8, 0, color.NRGBA{R: 69, G: 111, B: 52, A: 255}},
-		{12, 0, terrainColor(63, 0)},
+		{12, 0, terrainColor(63, 0, overworldElevation[:])},
 		{16, 0, color.NRGBA{}},
 	} {
 		if got := color.NRGBAModel.Convert(img.At(tc.x, tc.z)); got != tc.want {
@@ -258,8 +270,9 @@ func TestRenderOverworldTileRefusals(t *testing.T) {
 		want error
 	}{
 		{"no-saved-chunks", regionData(t), ErrTerrainMissing},
-		{"unsupported-version", regionData(t, savedChunk{0, 0, chunkData(0, 0, 4555, "full"), 3, 0}), ErrTerrainUnsupported},
-		{"unsupported-compression", regionData(t, savedChunk{0, 0, []byte{1}, 4, 0}), ErrTerrainUnsupported},
+		{"unsupported-version", regionData(t, savedChunk{0, 0, chunkData(0, 0, worldlib.LastSupportedJavaDataVersion+1, "full"), 3, 0}), ErrTerrainUnsupported},
+		{"unsupported-compression", regionData(t, savedChunk{0, 0, []byte{1}, 5, 0}), ErrTerrainUnsupported},
+		{"corrupt-lz4", regionData(t, savedChunk{0, 0, []byte{1}, 4, 0}), ErrTerrainUnreadable},
 		{"external-chunk", regionData(t, savedChunk{0, 0, nil, 0x82, 0}), ErrTerrainUnsupported},
 		{"malformed-NBT", regionData(t, savedChunk{0, 0, []byte{10, 0}, 3, 0}), ErrTerrainUnreadable},
 		{"truncated-header", []byte{0}, ErrTerrainUnreadable},

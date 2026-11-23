@@ -15,17 +15,38 @@ const (
 	javaChunkWidth    = 16
 	maxChunkNBTValues = 32_768
 	firstModernJava   = 2860 // Java 1.18
-	lastSupportedJava = 4554 // Java 1.21.9
+	lastSupportedJava = 5023 // Java 26.3
 )
+
+// LastSupportedJavaDataVersion is the highest chunk DataVersion accepted by
+// the surface parser. Anything above stays honestly unsupported.
+const LastSupportedJavaDataVersion = lastSupportedJava
 
 var (
-	ErrJavaChunkUnsupported = errors.New("unsupported Java Overworld chunk format")
-	ErrJavaChunkUnfinished  = errors.New("incomplete Java Overworld chunk")
+	ErrJavaChunkUnsupported = errors.New("unsupported Java chunk format")
+	ErrJavaChunkUnfinished  = errors.New("incomplete Java chunk")
 )
 
-// JavaChunkSurface is the vanilla-height Overworld's saved surface. Highest
-// block coordinates are indexed with X increasing first, then Z. A column
-// with no surface has JavaOverworldMinY - 1.
+// JavaDimensionSpan is the saved vertical layout of one vanilla dimension.
+// MinY is the world Y of the chunk's bottom section; every stored chunk of
+// the dimension reports yPos = MinY/16 and only saves sections between MinY
+// and MaxY. Modded dimension types may declare other spans; those chunks stay
+// unsupported until their span is verified against a game-generated save.
+type JavaDimensionSpan struct {
+	MinY, MaxY int
+}
+
+// The vanilla dimension spans (dimension_type min_y/height). All are section
+// aligned: a negative MinY must stay a multiple of 16.
+var (
+	JavaOverworldSpan = JavaDimensionSpan{MinY: -64, MaxY: 319}
+	JavaNetherSpan    = JavaDimensionSpan{MinY: 0, MaxY: 127}
+	JavaEndSpan       = JavaDimensionSpan{MinY: 0, MaxY: 255}
+)
+
+// JavaChunkSurface is one saved dimension's top-down surface. Highest block
+// coordinates are indexed with X increasing first, then Z. A column with no
+// surface has its dimension span's MinY - 1.
 type JavaChunkSurface struct {
 	X, Z        int32
 	Heights     [javaChunkWidth * javaChunkWidth]int16
@@ -34,16 +55,35 @@ type JavaChunkSurface struct {
 	Provisional bool
 }
 
-// SupportsJavaOverworldDataVersion reports the supported modern chunk interval.
-// The decoded chunk must also use the standard Overworld layout.
+// SupportsJavaOverworldDataVersion reports the supported modern chunk
+// interval. The decoded chunk must also use a known dimension span layout.
+// The ceiling is the fail-closed guard: 1.21.10 = 4556, 1.21.11 = 4671,
+// 26.1 = 4786, 26.2 = 4903 and 26.3 = 5023 all keep the chunk structure this
+// parser reads (yPos, Status, WORLD_SURFACE packing, section block_states),
+// so they are accepted after wiki-verified format research, and the
+// per-chunk structural checks below reject anything that drifts with the
+// honest unsupported state. Game-save qualification per release remains the
+// operator-run fixture harness (TestRenderOverworldTileGameSave).
 func SupportsJavaOverworldDataVersion(version int64) bool {
 	return version >= firstModernJava && version <= lastSupportedJava
 }
 
-// ParseJavaChunkSurface reads saved terrain heights and surface blocks from one decompressed
-// modern Java Anvil chunk. It shares the World Library's bounded NBT decoder.
+// ParseJavaChunkSurface reads saved terrain heights and surface blocks from
+// one decompressed modern Java Overworld chunk. It shares the World Library's
+// bounded NBT decoder.
 func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
+	return ParseJavaChunkSurfaceInSpan(raw, JavaOverworldSpan)
+}
+
+// ParseJavaChunkSurfaceInSpan reads saved terrain heights and surface blocks
+// from one decompressed modern Java Anvil chunk belonging to the given
+// dimension span. A chunk saved under any other layout is refused rather
+// than misrendered.
+func ParseJavaChunkSurfaceInSpan(raw []byte, span JavaDimensionSpan) (JavaChunkSurface, error) {
 	var surface JavaChunkSurface
+	if span.MaxY <= span.MinY || span.MinY%javaChunkWidth != 0 {
+		return surface, errors.New("unsupported Java dimension span")
+	}
 	if len(raw) > maxNBTDecompressed {
 		return surface, errors.New("chunk NBT exceeds the Java decoder limit")
 	}
@@ -71,7 +111,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		return surface, ErrJavaChunkUnfinished
 	}
 	minSection, ok := root["yPos"].(int32)
-	if !ok || minSection != JavaOverworldMinY/16 {
+	if !ok || int(minSection) != span.MinY/javaChunkWidth {
 		return surface, ErrJavaChunkUnsupported
 	}
 	x, hasX := root["xPos"].(int32)
@@ -91,14 +131,14 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		return surface, errors.New("missing saved surface heightmap in Java chunk")
 	}
 	packed, ok := heights.([]int64)
-	// 384 blocks plus the empty value fit in 9 bits. Modern Java never
-	// straddles long boundaries, so seven values fit in one 64-bit entry.
-	const (
-		bits       = 9
-		perLong    = 64 / bits
-		valueMask  = (1 << bits) - 1
-		heightSpan = JavaOverworldMaxY - JavaOverworldMinY + 1
-	)
+	// The packed values are heights relative to MinY, one above the highest
+	// block. The width is the smallest bit count holding the span plus the
+	// empty value, and modern Java never straddles long boundaries.
+	const bitsPerLong = 64
+	bits := bits.Len(uint(span.MaxY - span.MinY + 1))
+	perLong := bitsPerLong / bits
+	valueMask := uint64(1<<bits) - 1
+	heightSpan := span.MaxY - span.MinY + 1
 	if !ok || len(packed) != (len(surface.Heights)+perLong-1)/perLong {
 		return surface, ErrJavaChunkUnsupported
 	}
@@ -107,9 +147,9 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		if relative > heightSpan {
 			return surface, fmt.Errorf("out-of-range Java surface height at column %d", i)
 		}
-		surface.Heights[i] = int16(JavaOverworldMinY + relative - 1)
+		surface.Heights[i] = int16(span.MinY + relative - 1)
 	}
-	surface.readSurfaceBlocks(root["sections"])
+	surface.readSurfaceBlocks(root["sections"], span)
 	return surface, nil
 }
 
@@ -156,17 +196,22 @@ func (s javaBlockSection) block(index int) string {
 	return s.names[state]
 }
 
-func (s *JavaChunkSurface) readSurfaceBlocks(value any) {
-	const minSection = JavaOverworldMinY / javaChunkWidth
-	const sectionCount = JavaOverworldMaxY/javaChunkWidth - minSection + 1
-	var sections [sectionCount]javaBlockSection
-	var seen [sectionCount]bool
+func (s *JavaChunkSurface) readSurfaceBlocks(value any, span JavaDimensionSpan) {
+	minSection := span.MinY / javaChunkWidth
+	sectionCount := span.MaxY/javaChunkWidth - minSection + 1
+	var sections [24]javaBlockSection
+	if sectionCount > len(sections) {
+		// The guarded spans above keep this unreachable; refuse rather than
+		// silently misindexing an oversized span.
+		return
+	}
+	var seen [24]bool
 	stored, _ := value.([]any)
 	for _, item := range stored {
 		section, _ := item.(map[string]any)
 		y, ok := section["Y"].(int8)
 		index := int(y) - minSection
-		if !ok || index < 0 || index >= len(sections) {
+		if !ok || index < 0 || index >= sectionCount {
 			continue
 		}
 		if seen[index] {
@@ -177,11 +222,11 @@ func (s *JavaChunkSurface) readSurfaceBlocks(value any) {
 		sections[index] = parseJavaBlockSection(section["block_states"])
 	}
 	blockAt := func(column, y int) string {
-		relativeY := y - JavaOverworldMinY
+		relativeY := y - span.MinY
 		return sections[relativeY/javaChunkWidth].block((relativeY%javaChunkWidth)*len(s.Heights) + column)
 	}
 	for column, y := range s.Heights {
-		if y < JavaOverworldMinY {
+		if y < int16(span.MinY) {
 			continue
 		}
 		s.Blocks[column] = blockAt(column, int(y))
@@ -190,7 +235,7 @@ func (s *JavaChunkSurface) readSurfaceBlocks(value any) {
 		}
 		// Ten blocks separate the shallow and deep hues. Stop sooner
 		// when the next block has a different or unreadable state.
-		for depth := 1; depth <= 10 && int(y)-depth+1 >= JavaOverworldMinY; depth++ {
+		for depth := 1; depth <= 10 && int(y)-depth+1 >= span.MinY; depth++ {
 			if !javaWaterBlock(blockAt(column, int(y)-depth+1)) {
 				break
 			}
