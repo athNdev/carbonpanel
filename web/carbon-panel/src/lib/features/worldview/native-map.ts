@@ -259,7 +259,11 @@ export async function loadNativeTile(
 	const url = root + 'native/' + dimension + '/' + tile.x + '/' + tile.z + '.png';
 	const conditional = tileRequest.ifNoneMatch || null;
 	const fetchTile = async (): Promise<Response | TileResult> => {
-		const response = await request(url, signal, conditional ? { 'If-None-Match': conditional } : undefined);
+		const response = await request(
+			url,
+			signal,
+			conditional ? { 'If-None-Match': conditional } : undefined
+		);
 		// A live client revalidates a fully rendered tile by echoing the
 		// region freshness validator; 304 keeps the cached image.
 		if (conditional && response.status === 304) return { status: 'unchanged' };
