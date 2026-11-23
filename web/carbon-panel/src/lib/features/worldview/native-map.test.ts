@@ -156,13 +156,19 @@ function withFetch(body: unknown, run: () => Promise<void>): Promise<void> {
 
 test('the manifest dimension list is sanitized and always offers the overworld', async () => {
 	await withFetch(
-		{ tileBlocks: 128, dimension: 'overworld', spawn: null, dimensions: ['overworld', 'nether', 'end'] },
+		{
+			tileBlocks: 128,
+			dimension: 'overworld',
+			spawn: null,
+			dimensions: ['overworld', 'nether', 'end']
+		},
 		async () => {
 			const result = await loadNativeManifest(session, new AbortController().signal);
-			assert.deepEqual(
-				result.status === 'ready' ? result.manifest.dimensions : result.status,
-				['overworld', 'nether', 'end']
-			);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld',
+				'nether',
+				'end'
+			]);
 		}
 	);
 	await withFetch(
@@ -174,27 +180,25 @@ test('the manifest dimension list is sanitized and always offers the overworld',
 		},
 		async () => {
 			const result = await loadNativeManifest(session, new AbortController().signal);
-			assert.deepEqual(
-				result.status === 'ready' ? result.manifest.dimensions : result.status,
-				['overworld', 'nether']
-			);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld',
+				'nether'
+			]);
 		}
 	);
 	await withFetch({ tileBlocks: 128, dimension: 'overworld', spawn: null }, async () => {
 		const result = await loadNativeManifest(session, new AbortController().signal);
-		assert.deepEqual(
-			result.status === 'ready' ? result.manifest.dimensions : result.status,
-			['overworld']
-		);
+		assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+			'overworld'
+		]);
 	});
 	await withFetch(
 		{ tileBlocks: 128, dimension: 'overworld', spawn: null, dimensions: 'overworld' },
 		async () => {
 			const result = await loadNativeManifest(session, new AbortController().signal);
-			assert.deepEqual(
-				result.status === 'ready' ? result.manifest.dimensions : result.status,
-				['overworld']
-			);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld'
+			]);
 		}
 	);
 });
@@ -224,14 +228,15 @@ test('live mode revalidates complete tiles with the region validator and keeps a
 		regionModified: '"123-456"'
 	};
 	let result: TileResult | undefined;
-	const requests: { request: NativeTileRequest | undefined; finish: (result: TileResult) => void }[] =
-		[];
+	const requests: {
+		request: NativeTileRequest | undefined;
+		finish: (result: TileResult) => void;
+	}[] = [];
 	const loader = createNativeTileLoader(
 		session,
 		'overworld',
 		(next) => (result = next.get('0:0')),
-		(_root, _tile, _signal, request) =>
-			new Promise((finish) => requests.push({ request, finish })),
+		(_root, _tile, _signal, request) => new Promise((finish) => requests.push({ request, finish })),
 		{ live: false, liveRecheckDelayMs: 5 }
 	);
 	try {
@@ -267,14 +272,15 @@ test('live mode revalidates complete tiles with the region validator and keeps a
 
 test('a changed region re-renders and the tile dimension flows into the request', async () => {
 	let result: TileResult | undefined;
-	const requests: { request: NativeTileRequest | undefined; finish: (result: TileResult) => void }[] =
-		[];
+	const requests: {
+		request: NativeTileRequest | undefined;
+		finish: (result: TileResult) => void;
+	}[] = [];
 	const loader = createNativeTileLoader(
 		session,
 		'nether',
 		(next) => (result = next.get('-3:4')),
-		(_root, _tile, _signal, request) =>
-			new Promise((finish) => requests.push({ request, finish })),
+		(_root, _tile, _signal, request) => new Promise((finish) => requests.push({ request, finish })),
 		{ live: false, liveRecheckDelayMs: 5 }
 	);
 	try {
