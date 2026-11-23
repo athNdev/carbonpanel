@@ -1800,7 +1800,7 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 				);
 				const methods = dialog.getByRole('tablist');
 				await assertTabPanels(methods, 'import-method-tab-zip');
-				const urlInput = dialog.getByLabel('Modpack Archive URL *', { exact: true });
+				const urlInput = dialog.getByLabel('Modpack archive URL *', { exact: true });
 				if (await urlInput.count()) throw new Error('Inactive URL import form is mounted');
 				await methods.getByTestId('tab-zip').focus();
 				await page.keyboard.press('ArrowRight');
