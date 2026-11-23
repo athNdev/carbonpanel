@@ -77,11 +77,11 @@
       "name": "empty state refuses the unmatched query"
     },
     {
-      "assertVisible": "button:has-text(\"Clear search & filters\")",
+      "assertVisible": "button:has-text(\"Clear search and filters\")",
       "name": "reconciliation control is offered"
     },
     {
-      "click": "button:has-text(\"Clear search & filters\")",
+      "click": "button:has-text(\"Clear search and filters\")",
       "name": "reconcile by clearing search and filters"
     },
     {
