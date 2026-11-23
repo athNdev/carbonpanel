@@ -430,6 +430,37 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 }
 
+/*
+	OSS-464: refusal feedback for the floating action bar. TranslateX only, so
+	it never affects layout; it re-fires through the data-shake attribute
+	toggle (see CarbonFloatingActionBar). The global prefers-reduced-motion and
+	[data-carbon-motion='reduced'] blocks zero the duration, leaving the bar's
+	live-region announcement as the feedback channel — no reduced-motion
+	exemption is added here.
+*/
+@keyframes carbon-shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	15% {
+		transform: translateX(-4px);
+	}
+	30% {
+		transform: translateX(4px);
+	}
+	45% {
+		transform: translateX(-2px);
+	}
+	60% {
+		transform: translateX(2px);
+	}
+}
+
+.carbon-floating-action-bar[data-shake] {
+	animation: carbon-shake var(--motion-slow) var(--ease-in-out-standard) 2;
+}
+
 @layer utilities {
 	.motion-fade-in {
 		animation: var(--carbon-animation-fade-in);

@@ -15,8 +15,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
+	import { onMount } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { beginLifecycleRequest } from '$lib/lifecycle-request';
+	import { dirtySections } from '$lib/stores/dirty-sections.svelte';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
 	import { Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
@@ -74,31 +76,34 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	let formData = $state<UpdateServerRequest>(
-		create(UpdateServerRequestSchema, {
-			id: server.id,
-			name: server.name,
-			description: server.description || '',
-			port: server.port,
-			maxPlayers: server.maxPlayers,
-			memory: server.memory,
-			modLoader: enumToString(ModLoader, server.modLoader),
-			mcVersion: server.mcVersion,
-			loaderVersion: server.loaderVersion,
-			dockerImage: server.dockerImage,
-			detached: server.detached,
-			autoStart: server.autoStart,
-			tpsCommand: server.tpsCommand || '',
-			autoHibernate: server.autoHibernate,
-			idleTimeoutMinutes: server.idleTimeoutMinutes,
-			autoDeepSleep: server.autoDeepSleep,
-			deepSleepTimeoutMinutes: server.deepSleepTimeoutMinutes,
+	/** The form baseline for a server; shared by init, server changes and undo. */
+	function serverFormValues(source: Server): UpdateServerRequest {
+		return create(UpdateServerRequestSchema, {
+			id: source.id,
+			name: source.name,
+			description: source.description || '',
+			port: source.port,
+			maxPlayers: source.maxPlayers,
+			memory: source.memory,
+			modLoader: enumToString(ModLoader, source.modLoader),
+			mcVersion: source.mcVersion,
+			loaderVersion: source.loaderVersion,
+			dockerImage: source.dockerImage,
+			detached: source.detached,
+			autoStart: source.autoStart,
+			tpsCommand: source.tpsCommand || '',
+			autoHibernate: source.autoHibernate,
+			idleTimeoutMinutes: source.idleTimeoutMinutes,
+			autoDeepSleep: source.autoDeepSleep,
+			deepSleepTimeoutMinutes: source.deepSleepTimeoutMinutes,
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
-			additionalPorts: server.additionalPorts || [],
-			dockerOverrides: server.dockerOverrides
-		})
-	);
+			additionalPorts: source.additionalPorts || [],
+			dockerOverrides: source.dockerOverrides
+		});
+	}
+
+	let formData = $state<UpdateServerRequest>(serverFormValues(server));
 
 	let isDirty = $derived(
 		formData.name !== server.name ||
@@ -168,29 +173,7 @@ one at https://mozilla.org/MPL/2.0/.
 			previousServerId = server.id;
 
 			// Reset form data to match new server
-			formData = create(UpdateServerRequestSchema, {
-				id: server.id,
-				name: server.name,
-				description: server.description || '',
-				port: server.port,
-				maxPlayers: server.maxPlayers,
-				memory: server.memory,
-				modLoader: enumToString(ModLoader, server.modLoader),
-				mcVersion: server.mcVersion,
-				loaderVersion: server.loaderVersion,
-				dockerImage: server.dockerImage,
-				detached: server.detached,
-				autoStart: server.autoStart,
-				tpsCommand: server.tpsCommand || '',
-				autoHibernate: server.autoHibernate,
-				idleTimeoutMinutes: server.idleTimeoutMinutes,
-				autoDeepSleep: server.autoDeepSleep,
-				deepSleepTimeoutMinutes: server.deepSleepTimeoutMinutes,
-				modpackId: '', // Not used in this context
-				modpackVersionId: '', // Not used in this context
-				additionalPorts: server.additionalPorts || [],
-				dockerOverrides: server.dockerOverrides
-			});
+			formData = serverFormValues(server);
 			saving = false;
 			// Reload options for new server
 			loadOptions();
@@ -372,21 +355,51 @@ one at https://mozilla.org/MPL/2.0/.
 		};
 	}
 
-	async function handleSave() {
+	/**
+	 * Shared save path for the section button and the floating action bar
+	 * (OSS-464). Shows the section's own toasts either way; `rethrow` lets the
+	 * bar aggregate failures while the button path keeps swallowing them. On
+	 * failure the baseline never moves, so the section stays dirty.
+	 */
+	async function saveSettings(rethrow: boolean): Promise<void> {
 		if (!isDirty) return;
-
 		saving = true;
 		try {
 			const request = create(UpdateServerRequestSchema, formData);
 			await rpcClient.server.updateServer(request);
 			toast.success('Server settings updated. Restart the server to apply changes.');
 			onUpdate?.();
-		} catch (_e) {
+		} catch (error) {
 			toast.error('Failed to update server settings');
+			if (rethrow) {
+				throw error instanceof Error ? error : new Error('Failed to update server settings');
+			}
 		} finally {
 			saving = false;
 		}
 	}
+
+	async function handleSave() {
+		await saveSettings(false);
+	}
+
+	// OSS-464: the floating bar and the lifecycle gate read this section's
+	// dirty state, save and undo through the registry. The closures keep the
+	// reactivity: the bar's $derived tracks isDirty/saving through them, and
+	// undo rebuilds the form from the live server values (client-side only).
+	onMount(() => {
+		dirtySections.register({
+			id: 'overview',
+			label: 'Server Settings',
+			isDirty: () => isDirty,
+			save: () => saveSettings(true),
+			undo: () => {
+				formData = serverFormValues(server);
+			},
+			saving: () => saving
+		});
+		return () => dirtySections.unregister('overview');
+	});
 
 	function getCompatibleModLoaders(_mcVersion: string) {
 		// The proto doesn't include version compatibility info, so all loaders are shown

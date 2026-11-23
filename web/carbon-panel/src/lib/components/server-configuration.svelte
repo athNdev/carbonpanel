@@ -20,6 +20,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { Save, RefreshCw, Loader2, Link, Send, ChevronRight, Wand2 } from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { dirtySections } from '$lib/stores/dirty-sections.svelte';
 	import { CarbonButton, CarbonSearch, CarbonSelect, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -305,20 +306,22 @@ one at https://mozilla.org/MPL/2.0/.
 		void tick().then(checkUrlHash);
 	}
 
-	async function handleSave(stage = true) {
-		if (!hasChanges) {
-			toast.info('No changes to save');
-			return;
-		}
+	/** Error whose message is already user-facing; the callers toast it verbatim. */
+	class ConfigurationSaveError extends Error {}
 
+	/**
+	 * Shared save core: validates, persists and refreshes. Throws on failure —
+	 * the callers own the toasts so the section buttons and the floating bar
+	 * keep identical feedback.
+	 */
+	async function stageChanges(stage: boolean): Promise<void> {
+		if (!hasChanges) throw new ConfigurationSaveError('No changes to save');
 		const stageUpdate = !!server && stage;
 		if (stageUpdate && applyWindow === 'time' && !applyAtLocal) {
-			toast.error('Choose when the batch should apply');
-			return;
+			throw new ConfigurationSaveError('Choose when the batch should apply');
 		}
 		if (stageUpdate && applyWindow === 'idle' && idleMinutes < 1) {
-			toast.error('Idle minutes must be at least 1');
-			return;
+			throw new ConfigurationSaveError('Idle minutes must be at least 1');
 		}
 		const windowValue =
 			applyWindow === 'time'
@@ -326,37 +329,58 @@ one at https://mozilla.org/MPL/2.0/.
 				: applyWindow === 'idle'
 					? ConfigApplyWindow.IDLE
 					: ConfigApplyWindow.NEXT_RESTART;
+		const updates: Record<string, string> = {};
+
+		for (const key of modifiedFields) {
+			if (currentEnabled.has(key)) {
+				const value = currentValues.get(key);
+				updates[key] = value ?? '';
+			} else {
+				updates[key] = '';
+			}
+		}
+
+		if (onSave) {
+			await onSave(updates);
+		} else if (server) {
+			const response = await rpcClient.config.updateServerConfig({
+				serverId: server.id,
+				updates,
+				stage: stageUpdate,
+				window: stageUpdate ? windowValue : ConfigApplyWindow.UNSPECIFIED,
+				applyAtUnix:
+					stageUpdate && applyWindow === 'time'
+						? BigInt(Math.floor(new Date(applyAtLocal).getTime() / 1000))
+						: 0n,
+				idleMinutes: stageUpdate && applyWindow === 'idle' ? idleMinutes : 0
+			});
+			processConfig(response.categories);
+			await loadBatch();
+		}
+	}
+
+	function toastStageFailure(stage: boolean, error: unknown): string {
+		const stageUpdate = !!server && stage;
+		if (error instanceof ConfigurationSaveError) {
+			toast.error(error.message);
+		} else {
+			toast.error(stageUpdate ? 'Failed to stage configuration' : 'Failed to save configuration');
+			console.error(error);
+		}
+		return error instanceof Error ? error.message : 'Unknown error';
+	}
+
+	/**
+	 * One save path for the section buttons and the floating action bar
+	 * (OSS-464): identical toasts; `rethrow` lets the bar aggregate failures
+	 * while the buttons keep swallowing them. On failure the loaded snapshot is
+	 * untouched, so the section stays dirty.
+	 */
+	async function runStage(stage: boolean, rethrow: boolean): Promise<void> {
+		const stageUpdate = !!server && stage;
 		saving = true;
 		try {
-			const updates: Record<string, string> = {};
-
-			for (const key of modifiedFields) {
-				if (currentEnabled.has(key)) {
-					const value = currentValues.get(key);
-					updates[key] = value ?? '';
-				} else {
-					updates[key] = '';
-				}
-			}
-
-			if (onSave) {
-				await onSave(updates);
-			} else if (server) {
-				const response = await rpcClient.config.updateServerConfig({
-					serverId: server.id,
-					updates,
-					stage: stageUpdate,
-					window: stageUpdate ? windowValue : ConfigApplyWindow.UNSPECIFIED,
-					applyAtUnix:
-						stageUpdate && applyWindow === 'time'
-							? BigInt(Math.floor(new Date(applyAtLocal).getTime() / 1000))
-							: 0n,
-					idleMinutes: stageUpdate && applyWindow === 'idle' ? idleMinutes : 0
-				});
-				processConfig(response.categories);
-				await loadBatch();
-			}
-
+			await stageChanges(stage);
 			toast.success(stageUpdate ? 'Configuration staged' : 'Configuration saved');
 			if (stageUpdate) {
 				const when =
@@ -368,11 +392,19 @@ one at https://mozilla.org/MPL/2.0/.
 				toast.info(`The server was not restarted. These changes apply ${when}.`);
 			}
 		} catch (error) {
-			toast.error(stageUpdate ? 'Failed to stage configuration' : 'Failed to save configuration');
-			console.error(error);
+			const reason = toastStageFailure(stage, error);
+			if (rethrow) throw error instanceof Error ? error : new Error(reason);
 		} finally {
 			saving = false;
 		}
+	}
+
+	async function handleSave(stage = true) {
+		if (!hasChanges) {
+			toast.info('No changes to save');
+			return;
+		}
+		await runStage(stage, false);
 	}
 
 	async function handleSyncToAllServers(opsAndWhitelistOnly: boolean) {
@@ -398,6 +430,25 @@ one at https://mozilla.org/MPL/2.0/.
 		currentValues = new SvelteMap(originalValues);
 		currentEnabled = new SvelteSet(originalEnabled);
 	}
+
+	// OSS-464: registered only for a server's configuration — the global
+	// defaults page passes no server and is not part of the server-view bar.
+	// Reset maps to the bar's undo affordance (revert to the loaded snapshot,
+	// client-side only), and the bar's save keeps the staged (Stage button)
+	// semantics. Closures keep the reactivity: the bar's $derived tracks
+	// hasChanges/isSaving through them.
+	onMount(() => {
+		if (!server) return;
+		dirtySections.register({
+			id: 'configuration',
+			label: 'Server Configuration',
+			isDirty: () => hasChanges,
+			save: () => runStage(true, true),
+			undo: handleReset,
+			saving: () => isSaving
+		});
+		return () => dirtySections.unregister('configuration');
+	});
 
 	function toggleFieldEnabled(key: string, enabled: boolean, prop: ConfigProperty) {
 		const newEnabled = new SvelteSet(currentEnabled);
