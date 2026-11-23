@@ -27,6 +27,7 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 var _ carbonpanelv1connect.PlayerServiceHandler = (*PlayerService)(nil)
@@ -279,19 +280,22 @@ func (s *PlayerService) aliasesFor(ctx context.Context, identityID string) []sto
 }
 
 // newestPlayerSessionJoinedAt returns the newest session evidence for an
-// identity: (joinedAt, true) when session rows exist, (nil, false) when there
-// are none. Any read failure is treated as "no evidence" so presence never
-// invents data from an error. A returned zero time means rows exist but carry
-// no usable join timestamp (legacy rows).
-func (s *PlayerService) newestPlayerSessionJoinedAt(ctx context.Context, identityID string) (*time.Time, bool) {
+// identity: (joinedAt, true, nil) when session rows exist, (nil, false, nil)
+// when there are none. Read failures are returned separately so callers do not
+// confuse a query error with never-observed evidence. A returned zero time means
+// rows exist but carry no usable join timestamp (legacy rows).
+func (s *PlayerService) newestPlayerSessionJoinedAt(ctx context.Context, identityID string) (*time.Time, bool, error) {
 	var session storage.PlayerSession
 	err := s.store.DB().WithContext(ctx).
 		Where("identity_id = ?", identityID).
 		Order("joined_at DESC").First(&session).Error
 	if err != nil {
-		return nil, false
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
-	return &session.JoinedAt, true
+	return &session.JoinedAt, true, nil
 }
 
 // presenceFor classifies presence for one identity. Only a real in-game
@@ -329,8 +333,17 @@ func (s *PlayerService) presenceFor(ctx context.Context, identity *storage.Playe
 	}
 	if presence == v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED {
 		if lastSeen == nil {
-			joined, hasSessions := s.newestPlayerSessionJoinedAt(ctx, identity.ID)
+			joined, hasSessions, err := s.newestPlayerSessionJoinedAt(ctx, identity.ID)
 			switch {
+			case err != nil:
+				s.log.Debug("Failed to load newest player session for %s: %v", identity.ID, err)
+				o := observation(
+					v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
+					v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN,
+					time.Time{},
+					"Session lookup failed; absence of data is not offline.",
+				)
+				return v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED, o, nil
 			case joined != nil && !joined.IsZero():
 				// Session rows prove the panel observed the player in game at
 				// this time even without a stamped last_seen_at.

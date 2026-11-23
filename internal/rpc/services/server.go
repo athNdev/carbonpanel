@@ -2938,7 +2938,14 @@ func (s *ServerService) PauseServer(ctx context.Context, req *connect.Request[v1
 	if server.Status != storage.StatusRunning {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server is %s; only a running server can be frozen", server.Status))
 	}
-	if err := s.hibernation.HibernateServer(ctx, server.ID); err != nil {
+	if err := s.runJournaledMutation(ctx, server, "pause", requestID, func() error {
+		if h, ok := s.hibernation.(interface {
+			HibernateServerHeld(context.Context, string) error
+		}); ok {
+			return h.HibernateServerHeld(ctx, server.ID)
+		}
+		return s.hibernation.HibernateServer(ctx, server.ID)
+	}); err != nil {
 		s.log.Error("Failed to freeze server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to freeze server: %w", err))
 	}
@@ -2980,7 +2987,14 @@ func (s *ServerService) DeepSleepServer(ctx context.Context, req *connect.Reques
 	if server.Status != storage.StatusRunning {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("server is %s; only a running server can be put into deep sleep", server.Status))
 	}
-	if err := s.deepSleep.SleepServer(ctx, server.ID); err != nil {
+	if err := s.runJournaledMutation(ctx, server, "deep_sleep", requestID, func() error {
+		if h, ok := s.deepSleep.(interface {
+			SleepServerHeld(context.Context, string) error
+		}); ok {
+			return h.SleepServerHeld(ctx, server.ID)
+		}
+		return s.deepSleep.SleepServer(ctx, server.ID)
+	}); err != nil {
 		s.log.Error("Failed to deep sleep server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to put server into deep sleep: %w", err))
 	}

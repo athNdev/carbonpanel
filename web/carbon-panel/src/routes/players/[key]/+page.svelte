@@ -105,6 +105,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	const activeDeepNote = $derived(deepNoteByTab[activeTab] ?? '');
 
 	function resetSections() {
+		for (const tab of TABS) sectionGenerations[tab.id] = (sectionGenerations[tab.id] ?? 0) + 1;
 		sessions = [];
 		accessStates = [];
 		history = [];

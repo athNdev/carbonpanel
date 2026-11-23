@@ -55,9 +55,10 @@ type Result struct {
 
 // Reader resolves node-owned storage and reads bounded snapshots from it.
 type Reader struct {
-	store    *db.Store
-	resolver *nodestorage.Resolver
-	bases    map[string]string
+	store        *db.Store
+	resolver     *nodestorage.Resolver
+	bases        map[string]string
+	baseExplicit map[string]bool
 }
 
 // Source values reported on fields.
@@ -124,6 +125,7 @@ func NewReader(store *db.Store, resolver *nodestorage.Resolver) *Reader {
 			KindAdvancements: DefaultAdvancementsBase,
 			KindCharacter:    DefaultPlayerDataBase,
 		},
+		baseExplicit: map[string]bool{},
 	}
 }
 
@@ -140,6 +142,7 @@ func (r *Reader) SetBase(kind, rel string) error {
 		return err
 	}
 	r.bases[kind] = clean
+	r.baseExplicit[kind] = true
 	return nil
 }
 
@@ -224,10 +227,13 @@ func (r *Reader) candidatePaths(ctx context.Context, server *db.Server, base, ki
 	return candidates
 }
 
-// usesDefaultBase reports whether a kind still uses its built-in base. An
+// usesDefaultBase reports whether a kind still uses implicit discovery. An
 // explicit SetBase override is used verbatim and never re-prefixed with the
-// level folder.
+// level folder, even if it matches the default base name.
 func (r *Reader) usesDefaultBase(kind, base string) bool {
+	if r.baseExplicit[kind] {
+		return false
+	}
 	switch kind {
 	case KindStats:
 		return base == DefaultStatsBase

@@ -396,8 +396,8 @@ func TestReadCharacterAcceptsUndashedFileName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(res.Fields) == 0 {
-		t.Fatal("Read() returned no fields for an undashed player snapshot")
+	if f, ok := fieldNamed(res.Fields, "dimension"); !ok || f.Value != "minecraft:overworld" {
+		t.Fatalf("undashed snapshot dimension field = %+v, ok=%v", f, ok)
 	}
 }
 
