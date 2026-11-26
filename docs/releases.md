@@ -569,8 +569,11 @@ byte-bounded Docker-focused view generated from `README.md` sections and the
 published Stable identity in `docs/version-index.json`; the generator
 (`scripts/dockerhub_description.py`) fails rather than emit a body over Docker
 Hub's 25,000 UTF-8 byte limit. The workflow reconciles on affected main merges,
-once daily and on manual `workflow_dispatch` recovery, then verifies the public
-body by reading it back from the unauthenticated Docker Hub API.
+once daily, after a successful Stable release run and on manual
+`workflow_dispatch` recovery, then verifies the public body by reading it back
+from the unauthenticated Docker Hub API. It joins the same non-cancelling
+`pages-deploy` concurrency group as Stable/CD publication, so a description
+PATCH cannot interleave with a docs or moving-alias write.
 
 A Stable promotion only has to update the version contract
 (`docs/website-source.json`, regenerated `docs/version-index.json`). Do not add
