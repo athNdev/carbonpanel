@@ -369,23 +369,11 @@ func (s *Store) GetServerConfig(ctx context.Context, serverID string) (*ServerCo
 }
 
 func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.saveServerConfig(ctx, config)
+	return s.db.WithContext(ctx).Save(config).Error
 }
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.saveServerConfig(ctx, config)
-}
-
-// saveServerConfig refuses a direct runtime target change while a reviewed mod
-// candidate is still staged. The check and the write share one SQLite
-// transaction so a concurrent admission cannot slip between them.
-func (s *Store) saveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := guardServerConfigRuntimeChangeTx(tx, config); err != nil {
-			return err
-		}
-		return tx.Save(config).Error
-	})
+	return s.db.WithContext(ctx).Save(config).Error
 }
 
 // SaveSyncedServerConfig updates only the fields propagated by global sync.
