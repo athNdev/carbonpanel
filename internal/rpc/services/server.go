@@ -2593,6 +2593,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		}
 		// Unpause lands on running inside this RPC, so it announces here.
 		// Create and StartServer announce from the reconciler when it records running.
+		publication.RuntimeAccepted = true
 		if s.bus != nil {
 			s.bus.Emit(ctx, events.Event{
 				Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START,
