@@ -738,4 +738,3 @@ the pinned arm64 image, boots two distinct instance IDs at the base virtual
 size and uploads only the allowlisted `receipt.json`. Serial logs, seeds and
 overlays stay in the runner. The workflow was not dispatched or run for this
 report; it is a prepared path, not hosted CI evidence.
-
