@@ -488,3 +488,69 @@ disabled.
 This qualifies these two boots on the disposable amd64 QEMU/TCG fixture.
 Managed controller enrollment, mTLS, heartbeat, node daemon health, arm64
 and the Proxmox/libvirt host matrix still need separate evidence.
+
+## 17. Controller/agent fixture for managed enrollment and health (2026-11-26)
+
+This section is **not** a VM-variant qualification and does not extend the QEMU
+boot evidence above. It is a Linux-only controller/agent fixture that exercises
+the shared ADR 0019 enrollment authority and the real managed node agent over
+loopback TLS. The production control-plane RPCs remain deliberately unmounted;
+the fixture's post-enrollment control surface is test-owned.
+
+Fixture: `internal/rpc/oss377_managed_fixture_test.go`
+(`//go:build linux`, `TestOSS377ManagedControllerAgentFixture`).
+
+What is real in the fixture:
+
+- `enroll.NewProductionAuthority` with a version-checked durable state store and
+  an owned CA, reached through `begin`/`claim` on the dedicated enrollment TLS
+  surface.
+- The node's bundle and live claim from `internal/nodeinstall`; TLS 1.3 exporter
+  channel binding; Ed25519 proof over the shared `ClaimContextRaw`.
+- The real `agent.Run`: challenge, claim, persisted public credential, scoped
+  mTLS session, preflight, periodic heartbeat and the pinned private-daemon
+  probe through a Unix socket.
+- `NodeCredentialForCertificateContext` plus `Boundary.AuthorizeNodeOperation`
+  for `node:report` and `node:heartbeat`; anonymous, unenrolled, cross-node and
+  revoked certificates are refused.
+- Controller-owned endpoint generation is supplied by the fixture controller's
+  node record; the enrollment authority itself does not own that field.
+
+Exact isolated run used for this evidence (Windows host, static Linux test
+binary, disposable container with networking disabled):
+
+```sh
+# compile from the checkout (C scratch output, not committed)
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c ./internal/rpc -o oss377-fixture.test
+
+# run in a disposable runner; /tmp is the only writable path
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,exec,nosuid,size=512m \
+  -v "$PWD/oss377-fixture.test:/fixture.test:ro" \
+  alpine:3.20 /fixture.test \
+  -test.run '^TestOSS377ManagedControllerAgentFixture$' -test.v -test.count=1
+```
+
+Result at the head carrying this report: **PASS** (`--- PASS:
+TestOSS377ManagedControllerAgentFixture`). On a normal disposable Linux runner
+the equivalent direct command is:
+
+```sh
+go test ./internal/rpc -run '^TestOSS377ManagedControllerAgentFixture$' -count=1 -v
+```
+
+Coverage limits, stated plainly:
+
+| Aspect | Fixture result | Not proven |
+| --- | --- | --- |
+| Challenge + TLS-bound claim | PASS over loopback TLS 1.3 | Claim from a booted VM guest over a real network |
+| Scoped mTLS | PASS: issued cert maps to one active grant; anonymous, unenrolled, cross-node and revoked are refused | A production-mounted NodeControlService endpoint |
+| Heartbeat / preflight | PASS with report-hash and envelope-generation checks | Controller persistence of heartbeats into the panel database |
+| Daemon health | PASS against a fake Docker HTTP API on a test Unix socket, pinned by engine ID and data root | A real dockerd, rootless engine, cgroup limits or real host data |
+| Restart | PASS: persisted credential reused, no second claim | Full VM reboot (covered separately in section 16) |
+| Architecture / host matrix | amd64 Linux container only | arm64, Proxmox VE, generic KVM/libvirt and bare-metal hosts |
+
+This fixture does not claim that a VM guest enrolled against a live controller,
+that a production controller exposes the control RPCs, that a real daemon was
+managed, or that network isolation holds. Those remain open beyond the recorded
+amd64 QEMU boots. No live host, VM, registry, release or user service was used.

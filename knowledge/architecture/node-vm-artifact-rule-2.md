@@ -4,7 +4,7 @@ title: "Node VM artifact — Rule (part 2)"
 description: "Disposable boot and enrollment proof checks for the planned QCOW2 artifact."
 status: draft
 owners: [oss-runtime]
-code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
+code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, internal/rpc/oss377_managed_fixture_test.go, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
 sources:
   - title: Parent concept
     resource: node-vm-artifact.md
@@ -39,6 +39,10 @@ failure report when QEMU cannot launch. Measure network and identity persistence
 in the guest. The disposable amd64 20 GiB q35 run covers disk expansion and
 identity persistence across a clean second boot. The arm64 and supported-host
 matrix remain open. Shared enrollment authority checks validate
-proof and credential scope. Live mTLS enrollment, heartbeat and daemon health
-require an installed node agent and a mounted controller service. See
+proof and credential scope. `internal/rpc/oss377_managed_fixture_test.go` runs
+the real shared authority and `agent.Run` on Linux over loopback TLS 1.3 for
+challenge, scoped mTLS, heartbeat and a fake-daemon health probe. That is a
+controller/agent fixture, not VM evidence: the guest-to-controller claim, a real
+dockerd, a production-mounted control RPC, arm64 and the host matrix remain
+open. See
 [disposable VM qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).

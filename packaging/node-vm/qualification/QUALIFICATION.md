@@ -1,13 +1,15 @@
 # Disposable owned-VM qualification design (fixtures plus disposable guest runs)
 
-Status: **DESIGN + OFFLINE FIXTURES + DISPOSABLE QEMU GUEST RUNS, plus directly
-retrieved upstream base-image provenance.** No live host VM has been created,
-altered, provisioned or deleted by this lane. No global host configuration was
-changed. No live enrollment, daemon, game server, registry push or release was
-run. Disposable overlays booted twice under UEFI/TCG; effective isolation,
-controller mTLS, heartbeat and daemon health remain unqualified. Exact run
-digests and limits are in
-[`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md).
+Status: **DESIGN + OFFLINE FIXTURES + DISPOSABLE QEMU GUEST RUNS + A LINUX
+CONTROLLER/AGENT FIXTURE, plus directly retrieved upstream base-image
+provenance.** No live host VM has been created, altered, provisioned or deleted
+by this lane. No global host configuration was changed. No live enrollment,
+daemon, game server, registry push or release was run. Disposable overlays
+booted twice under UEFI/TCG. A separate Linux-only fixture now covers challenge,
+scoped mTLS, heartbeat and a fake-daemon health probe against the real shared
+enrollment authority and agent; effective isolation, a real managed daemon and
+guest-to-controller enrollment remain unqualified. Exact run digests and limits
+are in [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md).
 
 ## Real base-image provenance (direct official-source retrieval, 2026-11-18)
 
@@ -32,6 +34,7 @@ used only by offline tests; artifact mode fails closed on them.
 | Persistent volume safety | Copy-only planner fixtures | Real volume import/recovery |
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids + observed first-boot bundle for the qualified instance | Two concurrently live VMs with completed out-of-band registration |
 | Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
+| Controller mTLS, heartbeat and health | Linux-only controller/agent fixture: real production enrollment authority + real `agent.Run`, TLS 1.3 channel binding, scoped certificate, preflight/heartbeat, restart reuse, anonymous/unenrolled/cross-node/revoked refusals, fake-daemon pin | Guest-to-controller claim over a real VM network, a production-mounted control RPC and a real dockerd |
 | Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. | arm64 boot, Proxmox/libvirt host deployment and live standby recovery |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
@@ -56,8 +59,14 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
 - A fresh 20 GiB q35 overlay booted twice with UEFI/TCG. The first boot grew
   the root partition and ext4. The second retained the byte-identical bundle
   and private file modes, emitted no new enrollment identity, and shut down
-  cleanly through ACPI. Live guest-to-authority registration over SSH,
-  controller mTLS, heartbeat, daemon health, arm64 and the Proxmox/libvirt
+  cleanly through ACPI.
+- A Linux-only controller/agent fixture ran the real shared enrollment
+  authority and `agent.Run` over loopback TLS 1.3. It passed challenge,
+  TLS-bound claim, scoped mTLS, preflight/heartbeat, persisted-credential reuse
+  and refusal cases. Its daemon is a fake Docker HTTP API on a test Unix socket.
+  This is controller/agent protocol evidence, not a VM-variant qualification.
+- Live guest-to-controller registration over a real VM network, a real managed
+  daemon, a production-mounted control RPC, arm64 and the Proxmox/libvirt
   deployment matrix remain open.
 - `scripts/node_vm_boot_qual.py` now resolves OVMF/edk2 for UEFI (failing closed
   instead of falling back to BIOS), copies a fresh private variable store per

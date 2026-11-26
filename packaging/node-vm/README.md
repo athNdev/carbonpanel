@@ -87,6 +87,25 @@ Ethernet interface names (`en*`). Attach the VM only to the intended private
 network. Override the network seed per VM when static addresses or different
 interface matching are required.
 
+## Controller/agent fixture (not a VM qualification)
+
+`internal/rpc/oss377_managed_fixture_test.go` is a Linux-only fixture for the
+protocol seam between the shared ADR0019 authority and the real managed agent.
+It drives challenge, TLS-bound claim, scoped mTLS, preflight, heartbeat and the
+pinned private-daemon probe over loopback TLS 1.3. The daemon is a test-owned
+Docker HTTP API on a Unix socket, and the post-enrollment control RPCs are
+mounted only in the test because production keeps `NodeControlService`
+unmounted. Run it on a disposable Linux runner:
+
+```sh
+go test ./internal/rpc -run '^TestOSS377ManagedControllerAgentFixture$' -count=1 -v
+```
+
+Passing this fixture does not qualify a VM image, a real dockerd, a live
+guest-to-controller claim or any host/architecture matrix. Those boundaries are
+recorded in
+[`qualification/VM-BOOT-QUALIFICATION.md`](qualification/VM-BOOT-QUALIFICATION.md#17-controlleragent-fixture-for-managed-enrollment-and-health-2026-11-26).
+
 `SIG_CLAIM` uses the **shared** ADR0019/OSS-385 `ClaimContextRaw` byte encoding:
 NUL-delimited `carbon-panel-enroll-v1`, node/enrollment/challenge IDs, the
 **server-stored** nonce, enrollment `expires_at` (RFC3339Nano), comma-joined
