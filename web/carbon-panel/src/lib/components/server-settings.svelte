@@ -470,7 +470,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.mcVersion}
 				onValueChange={(value: string | undefined) => (formData.mcVersion = value || '')}
 			>
-				<SelectTrigger id="mc_version" class="h-10">
+				<SelectTrigger id="mc_version" class="h-10 w-full">
 					<span>{formData.mcVersion || 'Select a version'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -491,7 +491,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.modLoader}
 				onValueChange={(value: string) => (formData.modLoader = value)}
 			>
-				<SelectTrigger id="mod_loader" class="h-10">
+				<SelectTrigger id="mod_loader" class="h-10 w-full">
 					<span
 						>{modLoaders?.modloaders?.find((l) => l.name === formData.modLoader)?.displayName ||
 							_.startCase(formData.modLoader) ||
@@ -522,7 +522,7 @@ one at https://mozilla.org/MPL/2.0/.
 					onValueChange={(value: string | undefined) =>
 						(formData.loaderVersion = value === '__latest__' ? '' : value || '')}
 				>
-					<SelectTrigger id="loader_version" class="h-10">
+					<SelectTrigger id="loader_version" class="h-10 w-full">
 						<span>{formData.loaderVersion || 'Latest (recommended)'}</span>
 					</SelectTrigger>
 					<SelectContent>
@@ -550,7 +550,7 @@ one at https://mozilla.org/MPL/2.0/.
 				value={formData.dockerImage}
 				onValueChange={(value: string | undefined) => (formData.dockerImage = value || '')}
 			>
-				<SelectTrigger id="docker_image" class="h-10">
+				<SelectTrigger id="docker_image" class="h-10 w-full">
 					<span>{formData.dockerImage || 'Select Docker image'}</span>
 				</SelectTrigger>
 				<SelectContent>
@@ -740,8 +740,8 @@ one at https://mozilla.org/MPL/2.0/.
 			>
 				<div>
 					<span class="text-muted-foreground">Current Node:</span>
-					<div class="mt-1 flex items-center gap-2">
-						<span class="text-sm font-semibold text-foreground"
+					<div class="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+						<span class="min-w-0 text-sm font-semibold [overflow-wrap:anywhere] text-foreground"
 							>{server.nodeId || 'unassigned'}</span
 						>
 						{#if nodes.find((n) => n.id === server.nodeId)?.isLocal}
@@ -751,7 +751,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<div>
 					<span class="text-muted-foreground">Container Endpoint:</span>
-					<div class="mt-1 truncate font-mono text-foreground">
+					<div class="mt-1 min-w-0 font-mono [overflow-wrap:anywhere] text-foreground">
 						{nodes.find((n) => n.id === server.nodeId)?.host || 'local daemon'}
 					</div>
 				</div>
@@ -759,20 +759,32 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Target Node Migration Form -->
 			<div class="space-y-3">
-				<Label for="target_node" class="text-sm font-medium">Migrate to Target Node</Label>
+				<Label id="target_node_label" for="target_node" class="text-sm font-medium"
+					>Migrate to Target Node</Label
+				>
 				<div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
 					<div class="min-w-0 flex-1">
 						<Select type="single" bind:value={targetNodeId} disabled={migrating || loadingNodes}>
-							<SelectTrigger id="target_node" class="min-h-10 w-full py-1.5 whitespace-normal">
+							<SelectTrigger
+								id="target_node"
+								aria-labelledby="target_node_label"
+								class="h-auto min-h-10 w-full py-1.5 whitespace-normal"
+							>
 								<span class="min-w-0 text-left [overflow-wrap:anywhere]">
 									{nodes.find((n) => n.id === targetNodeId)?.name || 'Select destination node...'}
 								</span>
 							</SelectTrigger>
-							<SelectContent>
+							<SelectContent
+								class="w-(--bits-select-anchor-width) max-w-[calc(100vw-2rem)] [&_[data-select-viewport]]:min-w-0"
+							>
 								{#each nodes as node (node.id)}
 									<SelectItem value={node.id} disabled={node.id === server.nodeId || !node.enabled}>
-										<div class="flex w-full items-center justify-between gap-3">
-											<span>{node.name} {node.id === server.nodeId ? '(Current)' : ''}</span>
+										<div
+											class="flex w-full min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1"
+										>
+											<span class="min-w-0 [overflow-wrap:anywhere]"
+												>{node.name} {node.id === server.nodeId ? '(Current)' : ''}</span
+											>
 											<div
 												class="flex items-center gap-1.5 font-mono text-xs text-muted-foreground"
 											>

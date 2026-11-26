@@ -302,14 +302,16 @@ class DockerHubDescriptionTests(unittest.TestCase):
             description.stable_identity({"stable": {"tag": "v9.9.9"}}, "bad")
 
     def test_resolve_main_from_empty_working_directory_without_git(self):
-        import urllib.error
         class Response(io.BytesIO):
             def __enter__(self):
                 return self
             def __exit__(self, *args):
                 return False
-        def opener(url, timeout=None):
+        def opener(request, timeout=None):
+            url = request.full_url if hasattr(request, "full_url") else request
             self.assertIn("api.github.com/repos/athNdev/carbonpanel/git/ref/heads/main", url)
+            if hasattr(request, "header_items"):
+                self.assertNotIn("Authorization", dict(request.header_items()))
             return Response(json.dumps({"object": {"sha": "a" * 40}}).encode("utf-8"))
         previous = Path.cwd()
         with tempfile.TemporaryDirectory() as folder:
@@ -317,14 +319,46 @@ class DockerHubDescriptionTests(unittest.TestCase):
             self.assertEqual(list(empty.iterdir()), [])
             try:
                 os.chdir(empty)
-                self.assertEqual(description.resolve_main_sha(
-                    "athNdev/carbonpanel", "schedule", "", opener=opener), "a" * 40)
-                self.assertEqual(description.resolve_main_sha(
-                    "athNdev/carbonpanel", "workflow_run", "b" * 40, opener=opener), "a" * 40)
-                self.assertEqual(description.resolve_main_sha(
-                    "athNdev/carbonpanel", "push", "c" * 40, opener=opener), "c" * 40)
+                with patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("GH_TOKEN", None)
+                    self.assertEqual(description.resolve_main_sha(
+                        "athNdev/carbonpanel", "schedule", "", opener=opener), "a" * 40)
+                    self.assertEqual(description.resolve_main_sha(
+                        "athNdev/carbonpanel", "workflow_run", "b" * 40, opener=opener), "a" * 40)
+                    self.assertEqual(description.resolve_main_sha(
+                        "athNdev/carbonpanel", "push", "c" * 40, opener=opener), "c" * 40)
             finally:
                 os.chdir(previous)
+
+    def test_resolve_main_uses_gh_token_without_exposing_it(self):
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+        token = "ghs_secret_test_token"
+        def opener(request, timeout=None):
+            self.assertEqual(request.get_header("Authorization"), "Bearer " + token)
+            self.assertEqual(request.get_header("Accept"), "application/vnd.github+json")
+            self.assertEqual(request.get_header("X-github-api-version"), "2022-11-28")
+            return Response(json.dumps({"object": {"sha": "d" * 40}}).encode("utf-8"))
+        with patch.dict(os.environ, {"GH_TOKEN": token}):
+            self.assertEqual(description.resolve_main_sha(
+                "athNdev/carbonpanel", "schedule", "", opener=opener), "d" * 40)
+
+    def test_resolve_main_reports_http_error_without_leaking_token(self):
+        import urllib.error
+        token = "ghs_secret_test_token"
+        def opener(request, timeout=None):
+            self.assertEqual(request.get_header("Authorization"), "Bearer " + token)
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+        with patch.dict(os.environ, {"GH_TOKEN": token}):
+            with self.assertRaises(description.DescriptionError) as raised:
+                description.resolve_main_sha("athNdev/carbonpanel", "schedule", "", opener=opener)
+        message = str(raised.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertNotIn(token, message)
+        self.assertNotIn("Bearer", message)
 
     def test_read_back_tolerates_bounded_propagation(self):
         body = json.loads((ROOT / "docs" / "version-index.json").read_text(encoding="utf-8"))
@@ -510,6 +544,15 @@ class DockerHubDescriptionWorkflowTests(unittest.TestCase):
         self.assertIn("--repository \"${{ github.repository }}\"", source)
         self.assertIn("dockerhub_description.py verify", source)
         self.assertIn("--check-short-description", source)
+        resolve_steps = [step for step in steps if "resolve-main" in step.get("run", "")]
+        self.assertEqual(len(resolve_steps), 3)
+        for step in resolve_steps:
+            self.assertEqual(step.get("env", {}).get("GH_TOKEN"), "${{ github.token }}")
+        for step in steps:
+            if "resolve-main" not in step.get("run", ""):
+                self.assertNotIn("GH_TOKEN", step.get("env", {}))
+                self.assertNotIn("GH_TOKEN", step.get("run", ""))
+        self.assertNotIn("| tail -n 1", source)
 
     def test_cd_and_release_no_longer_overwrite_the_description(self):
         for name in ("cd.yml", "release.yml"):

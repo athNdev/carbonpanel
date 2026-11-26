@@ -211,7 +211,7 @@ func TestDiscoveryHonestStates(t *testing.T) {
 		{"wrong world mount", func(f *InstalledRenderer) { f.MountVerified = false }, v1.RendererState_RENDERER_STATE_ABSENT, "world mount does not match"},
 		{"writable world mount", func(f *InstalledRenderer) { f.ReadOnlyWorldMount = false }, v1.RendererState_RENDERER_STATE_ABSENT, "not read-only"},
 		{"web down", func(f *InstalledRenderer) { f.WebUp = false }, v1.RendererState_RENDERER_STATE_ERROR, "unreachable"},
-		{"consent missing", func(f *InstalledRenderer) { f.AcceptDownload = false }, v1.RendererState_RENDERER_STATE_ABSENT, "accept the download/license"},
+		{"consent missing", func(f *InstalledRenderer) { f.AcceptDownload = false }, v1.RendererState_RENDERER_STATE_ABSENT, "accept-download: true"},
 		{"no world configured", func(f *InstalledRenderer) { f.WorldName = "" }, v1.RendererState_RENDERER_STATE_ABSENT, "no configured map"},
 		{"world mismatch", func(f *InstalledRenderer) { f.WorldMatchesServer = false }, v1.RendererState_RENDERER_STATE_ABSENT, "actual world"},
 		{"not rendered", func(f *InstalledRenderer) { f.Rendered = false }, v1.RendererState_RENDERER_STATE_RENDERING, "first render"},
@@ -359,6 +359,48 @@ func TestDiscoveredRendererThroughSameOriginProxyFixture(t *testing.T) {
 	}
 }
 
+func TestDiscoveredProxyRechecksRuntimeForExistingSession(t *testing.T) {
+	m := installedModuleFixture()
+	store := newFakeStore()
+	store.addServer(m.serverID, m.nodeID)
+	users := &fakeAuth{users: map[string]*auth.AuthenticatedUser{
+		"tok": {ID: "user-a", Username: "alice", Roles: []string{"user"}},
+	}}
+	enforcer := &fakeEnforcer{allow: func([]string, string, string, string) (bool, error) {
+		return true, nil
+	}}
+	discovery := &fakeDiscovery{}
+	resolver := NewResolverWithDiscovery(Config{}, &fakeLocator{local: map[string]bool{m.nodeID: true}}, discovery)
+	client := &funcDoer{fn: func(*http.Request) (*http.Response, error) {
+		t.Fatal("unverified renderer received an asset request")
+		return nil, errors.New("unreachable")
+	}}
+	sessions := NewSessionRegistry()
+	handler := NewProxyHandler(ProxyDeps{
+		Auth: users, Authorizer: enforcer, Servers: store, Resolver: resolver, Sessions: sessions, Client: client,
+	})
+	key, _ := sessions.Issue(m.serverID, "world", "user-a", time.Minute)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*InstalledRenderer)
+	}{
+		{"identity", func(f *InstalledRenderer) { f.IdentityVerified = false }},
+		{"network", func(f *InstalledRenderer) { f.NetworkVerified = false }},
+		{"mount", func(f *InstalledRenderer) { f.MountVerified = false }},
+		{"writable mount", func(f *InstalledRenderer) { f.ReadOnlyWorldMount = false }},
+		{"stopped", func(f *InstalledRenderer) { f.Lifecycle = ModuleStopped }},
+		{"unverified legacy image", func(f *InstalledRenderer) { f.LegacyTag = true; f.ProvenanceVerified = false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discovery.facts = readyFacts(m, "http://127.0.0.1:1")
+			tc.mutate(discovery.facts)
+			if got := callProxy(handler, key, "tok", http.MethodGet); got.Code != http.StatusServiceUnavailable {
+				t.Fatalf("proxy status = %d, want 503", got.Code)
+			}
+		})
+	}
+}
+
 // Non-default world folder identity: explicit precedence and path-component
 // validation (OSS-388). An invalid folder never becomes a guessed "world".
 func TestConfiguredLevelNamePrecedenceAndValidationFixture(t *testing.T) {
@@ -380,7 +422,7 @@ func TestConfiguredLevelNamePrecedenceAndValidationFixture(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := configuredLevelName(tc.cfg); got != tc.want {
+			if got := tc.cfg.ActualLevelName(); got != tc.want {
 				t.Fatalf("configuredLevelName = %q, want %q", got, tc.want)
 			}
 		})

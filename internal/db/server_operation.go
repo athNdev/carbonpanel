@@ -158,6 +158,27 @@ func (s *Store) AssertNoServerOperation(ctx context.Context, serverID string) er
 	return fmt.Errorf("server operation %s (%s, phase %s) requires completion or recovery", op.ID, op.Kind, op.Phase)
 }
 
+// WorldViewOperationState takes one journal snapshot for a map scope. Any
+// active server operation prevents reads. After a restore attempt releases
+// the lock, its ID distinguishes the world even when the level name remains
+// the same. A failure or recovery can also follow a completed data swap.
+func (s *Store) WorldViewOperationState(ctx context.Context, serverID string) (restoreID string, busy bool, err error) {
+	var op ServerOperation
+	err = s.db.WithContext(ctx).Select("id", "active_server").
+		Where("active_server = ? OR (server_id = ? AND kind = ?)", serverID, serverID, "restore").
+		Order("active_server IS NOT NULL DESC, created_at DESC, id DESC").Take(&op).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if op.ActiveServer != nil {
+		return "", true, nil
+	}
+	return op.ID, false, nil
+}
+
 // GetServerOperation returns one journal row by id.
 func (s *Store) GetServerOperation(ctx context.Context, id string) (*ServerOperation, error) {
 	var op ServerOperation

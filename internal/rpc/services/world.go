@@ -27,6 +27,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -168,6 +169,13 @@ func (s *WorldService) ListBindings(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list bindings"))
 	}
 	out := &v1.ListBindingsResponse{}
+	if id := req.Msg.GetServerId(); id != "" {
+		// Level identity is supplemental. Older callers still receive their
+		// bindings if this separate configuration observation is unavailable.
+		if cfg, err := s.store.GetServerConfig(ctx, id); err == nil {
+			out.ConfiguredLevelName = worldview.ActualLevelName(cfg)
+		}
+	}
 	for _, b := range bindings {
 		out.Bindings = append(out.Bindings, bindingProto(b))
 	}

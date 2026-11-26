@@ -13,9 +13,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Blocks,
 		Boxes,
 		ChevronDown,
+		ChevronRight,
 		CirclePlus,
 		FileCode2,
-		Globe,
 		History,
 		LayoutGrid,
 		LibraryBig,
@@ -36,9 +36,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import PreferencesDialog from '../PreferencesDialog.svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { type Node } from '$lib/proto/carbonpanel/v1/node_pb';
-	import { describeNodeStatus, pickPrimaryNode } from '$lib/utils/node-status';
+	import { describeNodeStatus, summarizeNodes } from '$lib/utils/node-status';
 	import CarbonTag from './CarbonTag.svelte';
-	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
+	import { theme } from '$lib/display-preferences.svelte';
 
 	interface Props {
 		children?: Snippet;
@@ -156,15 +156,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let isMobile = $state(false);
 	let nodes = $state<Node[]>([]);
 	let nodesLoaded = $state(false);
-	let appPort = $state('');
-
-	let primaryNode = $derived(pickPrimaryNode(nodes));
-	let primaryNodeStatus = $derived(describeNodeStatus(primaryNode?.status));
+	let nodesUnavailable = $state(false);
+	let fleet = $derived(summarizeNodes(nodes));
 
 	onMount(() => {
-		// One owner hydrates and applies preferences on boot, not only when the
-		// dialog opens: stored motion/density must hold on first paint.
-		displayPreferences.hydrate();
 		const media = window.matchMedia(MOBILE_QUERY);
 		const applyBreakpoint = () => {
 			isMobile = media.matches;
@@ -174,8 +169,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		applyBreakpoint();
 		media.addEventListener('change', applyBreakpoint);
 
-		appPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-
 		// Best-effort: the shell must render even when the node list fails (e.g. anonymous access).
 		rpcClient.node
 			.listNodes({}, silentCallOptions)
@@ -183,7 +176,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				nodes = res.nodes ?? [];
 			})
 			.catch((err) => {
-				console.error('Failed to fetch nodes for shell footer:', err);
+				nodesUnavailable = true;
+				console.debug('Failed to fetch nodes for shell footer:', err);
 			})
 			.finally(() => {
 				nodesLoaded = true;
@@ -215,7 +209,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			| '/servers'
 			| '/servers/new'
 			| '/players'
-			| '/worlds'
 			| '/library'
 			| '/modpacks/studio'
 			| '/modpacks'
@@ -236,7 +229,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{ href: '/servers', label: 'Servers', icon: Server, badge: true },
 		{ href: '/servers/new', label: 'Create Server', icon: CirclePlus },
 		{ href: '/players', label: 'Players', icon: Users },
-		{ href: '/worlds', label: 'World View', icon: Globe },
 		{ href: '/library', label: 'World Library', icon: LibraryBig },
 		{ href: '/modpacks/studio', label: 'Modpack Studio', icon: Blocks },
 		{ href: '/modpacks', label: 'Modpacks', icon: Package },
@@ -391,11 +383,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<aside
 			id="carbon-sidenav"
 			inert={isMobile && !sideNavExpanded}
-			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
+			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 flex w-64 flex-col overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
 				? 'translate-x-0'
 				: '-translate-x-full'} {sideNavExpanded ? 'md:w-64' : 'md:w-12'} md:translate-x-0"
 		>
-			<nav class="motion-stagger flex flex-col py-2" aria-label="Main Navigation">
+			<nav class="motion-stagger flex shrink-0 flex-col py-2" aria-label="Main Navigation">
 				{#each navItems as item (item.href)}
 					{#if item.href !== '/settings' || showSettingsNav}
 						<!-- resolve() is typed from this app's generated routes; the sibling-epic
@@ -428,27 +420,32 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/each}
 			</nav>
 
-			<!-- SideNav Footer: live node status, links to Docker Nodes settings -->
 			{#if sideNavExpanded}
 				<a
 					href={resolve('/settings?tab=nodes')}
 					onclick={closeMobileNav}
 					title="View Docker nodes"
-					class="focus-ring absolute right-0 bottom-0 left-0 border-t border-border bg-background p-3 font-mono text-xs text-muted-foreground transition-colors hover:bg-card"
+					class="focus-ring mt-auto flex shrink-0 items-center gap-3 border-t border-border px-3.5 py-3 text-foreground transition-colors hover:bg-card"
 				>
-					<div class="flex items-center justify-between gap-2">
-						<span class="truncate"
-							>{nodesLoaded
-								? primaryNode
-									? primaryNode.name.toUpperCase()
-									: 'NO NODES'
-								: '···'}</span
-						>
-						<span class="{primaryNodeStatus.dotClass} shrink-0 font-bold"
-							>{primaryNodeStatus.label}</span
-						>
+					<Boxes class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<div class="min-w-0 flex-1">
+						<div class="text-sm font-medium">Docker nodes</div>
+						<div class="mt-0.5 text-xs text-muted-foreground">
+							{#if !nodesLoaded}Loading nodes…
+							{:else if nodesUnavailable}Node status unavailable
+							{:else if fleet.total === 0}No nodes registered
+							{:else if fleet.total === 1}
+								<span class="break-all">{nodes[0].name}</span> · {describeNodeStatus(
+									nodes[0].status
+								).label.toLowerCase()}
+							{:else}
+								<span class={fleet.offline ? 'text-warning-text' : 'text-success-text'}
+									>{fleet.online} of {fleet.total} online</span
+								>
+							{/if}
+						</div>
 					</div>
-					<div class="mt-1 text-xs text-muted-foreground">PORT {appPort || '···'} · CARBON V11</div>
+					<ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 				</a>
 			{/if}
 		</aside>
@@ -472,7 +469,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				? 'md:ml-64'
 				: 'md:ml-12'}"
 		>
-			<div class="mx-auto flex min-h-full w-full max-w-7xl flex-1 flex-col">
+			<div
+				class="mx-auto flex min-h-full w-full max-w-7xl flex-col {page.url.pathname === '/'
+					? 'shrink-0 grow'
+					: 'flex-1'}"
+			>
 				{@render children?.()}
 			</div>
 		</main>

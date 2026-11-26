@@ -103,3 +103,40 @@ func TestResolveOperationRecordsActivityWithRequestID(t *testing.T) {
 		t.Fatal("resolve activity is missing the operation request id")
 	}
 }
+
+func TestListActivityLogsIncludesOnlyModerationForTheRequestedServer(t *testing.T) {
+	service, store := newActivityTestService(t)
+	ctx := context.Background()
+	players := &PlayerService{store: store, log: logger.New()}
+	// An identity and even a request ID can occur on more than one server.
+	players.auditPlayer(ctx, "", activity.EventPlayerKick, "srv-1", "pl_shared", "req-shared", nil)
+	players.auditPlayer(ctx, "", activity.EventPlayerKick, "srv-2", "pl_shared", "req-shared", nil)
+	if err := activity.Log(store.DB(), activity.Entry{
+		Event: activity.EventPlayerKick, SubjectTyp: "player", SubjectID: "srv-1", RequestID: "legacy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := activity.Log(store.DB(), activity.Entry{
+		Event: activity.EventServerStart, SubjectTyp: "server", SubjectID: "srv-1", RequestID: "server-start",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.ListActivityLogs(ctx, connect.NewRequest(&v1.ListActivityLogsRequest{ServerId: "srv-1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moderation, lifecycle int
+	for _, row := range got.Msg.Entries {
+		switch {
+		case row.SubjectType == "player" && row.SubjectId == "pl_shared" && row.RequestId == "req-shared":
+			moderation++
+		case row.SubjectType == "server" && row.SubjectId == "srv-1" && row.RequestId == "server-start":
+			lifecycle++
+		default:
+			t.Fatalf("unexpected server activity: %v", row)
+		}
+	}
+	if moderation != 1 || lifecycle != 1 {
+		t.Fatalf("got %d moderation and %d lifecycle records, want one of each", moderation, lifecycle)
+	}
+}

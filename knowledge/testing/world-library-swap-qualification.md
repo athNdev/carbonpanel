@@ -20,15 +20,11 @@ sources:
 
 Dispatch Compose release qualification with `world_swap: true` only on the
 final candidate after the three World Library ancestry commits are present.
-The staging-artifact contract is owned by the release staging decision: the
-same successful `publish=false` run retains `verified-release-oci` and the raw
-`release-image-context` that the matrix builds from. The harness prefers that
-raw context, byte-compares it with the release bundle, and refuses a missing or
-ambiguous artifact. For earlier immutable stage runs that predate the restored
-contract, it may reconstruct the context from the verified Linux bundle only
-after checking `stage.json.commit` against the staged SHA and finding the OCI
-index blob named by `stage.json.digest`; the sample config belongs at the
-context root. Never fall back to a different run or an unstaged image.
+The staging-artifact contract is owned by the release staging decision. The
+matrix pulls the verified index by digest from the fixture registry after
+binding the archive to the trusted stage receipt. Historical runs that provide
+only a raw build context can qualify the packaged binaries separately. Never
+fall back to a different run or an unstaged image.
 
 The optional phase reuses the live candidate JVM from the upgrade leg. It
 packages a distinct disposable world from a second server, imports two
@@ -42,10 +38,6 @@ The harness asserts the new world marker, exact revision binding, exactly one
 `world.bind` event for the request key, and refusal of a replay with that key
 and a different revision. The second revision exists only so the replay cannot
 hide behind an identical revision id.
-
-The Compose leg rebuilds the candidate image from verified release binaries and
-labels that provenance explicitly; it does not claim to have exercised the
-staged OCI image digest. Exact-image evidence is a separate release gate.
 
 This is evidence for the release matrix, not a production operation. The
 fixture uses disposable hosted data and a loopback registry; the Stable lead

@@ -170,6 +170,30 @@ func TestImportedWorldCanBePreviewedAndBound(t *testing.T) {
 	}
 }
 
+func TestListBindingsReportsConfiguredWorldWithoutCreatingLibraryEntry(t *testing.T) {
+	ctx := t.Context()
+	store := newWorldRPCStore(t)
+	server := &storage.Server{ID: "existing", Name: "Running", Status: storage.StatusRunning}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	props := "level-name=survival"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{ServerID: server.ID, CustomServerProperties: &props}); err != nil {
+		t.Fatal(err)
+	}
+	s := newWorldRPCService(t, store, t.TempDir(), &worldTestLifecycle{})
+	for _, tc := range []struct{ id, want string }{{server.ID, "survival"}, {"", ""}, {"unknown", ""}} {
+		res, err := s.ListBindings(ctx, connect.NewRequest(&v1.ListBindingsRequest{ServerId: tc.id}))
+		if err != nil || res.Msg.ConfiguredLevelName != tc.want || len(res.Msg.Bindings) != 0 {
+			t.Fatalf("scope %q: got %v, %v", tc.id, res, err)
+		}
+	}
+	res, err := s.ListWorldEntries(ctx, connect.NewRequest(&v1.ListWorldEntriesRequest{}))
+	if err != nil || len(res.Msg.Entries) != 0 {
+		t.Fatalf("library changed on observation: %v %v", res, err)
+	}
+}
+
 // TestBindWorldUsesRealNodeGeneration proves a bind succeeds end to end at the
 // RPC seam: the generation comes from the Node row, not a context stub.
 func TestBindWorldUsesRealNodeGeneration(t *testing.T) {

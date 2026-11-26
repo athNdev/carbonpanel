@@ -6,8 +6,10 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/rpc/services/modpack_loader.go
+  - internal/rpc/services/modpack.go
   - internal/rpc/services/server.go
   - proto/carbonpanel/v1/common.proto
+  - proto/carbonpanel/v1/modpack.proto
   - web/carbon-panel/src/lib/utils/mod-loader.ts
   - web/carbon-panel/src/routes/servers/new/+page.svelte
 sources:
@@ -30,6 +32,9 @@ sources:
   list. A unique legacy version number can resolve to an exact release ID.
   Provider errors leave the requested runtime selector and pack-level
   display fallback in place.
+- `GetModpackVersions` carries the provider release's Minecraft versions.
+  The wizard shows the effective Minecraft version and only pins releases
+  with known compatibility metadata.
 - Older platform-loader rows converge on read: listing or opening the server
   resolves the loader from its stored pack config once and persists it.
   Resolution failures keep showing the platform, exactly as before.

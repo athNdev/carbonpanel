@@ -12,6 +12,7 @@
  */
 
 import { create } from '@bufbuild/protobuf';
+import { Code, ConnectError, type CallOptions } from '@connectrpc/connect';
 import {
 	CreateModuleRequestSchema,
 	ListModulesRequestSchema,
@@ -30,6 +31,23 @@ export const BLUEMAP_TEMPLATE_ID = 'builtin-bluemap';
  * time are added by the backend, not supplied by the browser. */
 export interface BlueMapConsent {
 	accepted: boolean;
+	reuseConfiguration?: boolean;
+}
+
+export function retainedBlueMapSetup(error: unknown) {
+	if (!(error instanceof ConnectError) || error.code !== Code.FailedPrecondition) return null;
+	switch (error.metadata.get('Carbonpanel-Bluemap-Setup')) {
+		case 'retained-config':
+			return 'retained-config';
+		case 'config-missing':
+			return 'config-missing';
+		case 'download-consent':
+			return 'download-consent';
+		case 'world-config':
+			return 'world-config';
+		default:
+			return null;
+	}
 }
 
 export interface BlueMapInstallRpc {
@@ -44,23 +62,29 @@ export interface BlueMapInstallRpc {
  * and makes the in-view install fail before any RPC is sent (OSS-388). */
 export interface GroupedBlueMapRpc {
 	module: {
-		listModules(request: ListModulesRequest): Promise<ListModulesResponse>;
-		createModule(request: CreateModuleRequest): Promise<CreateModuleResponse>;
+		listModules(request: ListModulesRequest, options?: CallOptions): Promise<ListModulesResponse>;
+		createModule(
+			request: CreateModuleRequest,
+			options?: CallOptions
+		): Promise<CreateModuleResponse>;
 	};
 	node: {
-		listNodes(request: ListNodesRequest): Promise<ListNodesResponse>;
+		listNodes(request: ListNodesRequest, options?: CallOptions): Promise<ListNodesResponse>;
 	};
 }
 
-export function adaptBlueMapRpc(grouped: GroupedBlueMapRpc): BlueMapInstallRpc {
+export function adaptBlueMapRpc(
+	grouped: GroupedBlueMapRpc,
+	options?: CallOptions
+): BlueMapInstallRpc {
 	return {
-		listModules: (request) => grouped.module.listModules(request),
+		listModules: (request) => grouped.module.listModules(request, options),
 		createModule: async (request) => {
-			const response = await grouped.module.createModule(request);
+			const response = await grouped.module.createModule(request, options);
 			if (!response.module) throw new Error('CreateModule returned no module');
 			return { module: response.module };
 		},
-		listNodes: (request) => grouped.node.listNodes(request)
+		listNodes: (request) => grouped.node.listNodes(request, options)
 	};
 }
 
@@ -100,7 +124,7 @@ export function blueMapInstallEligibility(
 	return { eligible: true, reason: '' };
 }
 
-export type InstallOutcome = 'installed' | 'adopted';
+export type InstallOutcome = 'installed' | 'adopted' | 'reused';
 
 export interface InstallResult {
 	outcome: InstallOutcome;
@@ -148,9 +172,10 @@ export async function installBlueMap(
 				// ModuleService from the authenticated principal and clock.
 				bluemap_managed: 'true',
 				bluemap_consent_accepted: 'true',
+				...(consent.reuseConfiguration && { bluemap_reuse_config: 'true' }),
 				bluemap_version: 'v5.29'
 			}
 		})
 	);
-	return { outcome: 'installed', module: created.module };
+	return { outcome: consent.reuseConfiguration ? 'reused' : 'installed', module: created.module };
 }

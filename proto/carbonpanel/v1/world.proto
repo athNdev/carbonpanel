@@ -299,6 +299,9 @@ message ListBindingsRequest {
 // ListBindingsResponse Active bindings matching the filters.
 message ListBindingsResponse {
   repeated WorldBinding bindings = 1;
+  // For a specific server, its configured save folder, including unbound worlds.
+  // Empty for fleet queries and when the configuration cannot identify the level.
+  string configured_level_name = 2;
 }
 
 // GetBindingRequest Server and level of the binding.

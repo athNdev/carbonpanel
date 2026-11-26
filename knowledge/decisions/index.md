@@ -4,16 +4,20 @@
 
 ## Concepts
 
+- [Allowlist dialog lifetime across telemetry polling](allowlist-dialog-lifetime.md) — The scoped allowlist dialog closes only on a real server switch or tab deactivation, not on every telemetry republish.
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
 - [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
+- [Channel changelog is generated presentation, not pinned prose](channel-changelog-presentation.md) — The public changelog is rendered from the one version contract plus hash-attested GitHub release notes, with a separate channel-presentation fingerprint for docs-only publication.
+- [Channel presentation integrity is proven from built bytes](channel-presentation-integrity.md) — The docs-only gate reads real presentation and changelog bytes at canonical and archive paths, omits legacy fields, and leaves channel authority with the verified promotion path.
 - [Channel promotion gates](channel-promotion.md) — Exact-revision, dual-registry and qualified-stage gates for docs and OCI channel moves.
 - [Channel promotion recovery and serialization](channel-promotion-recovery.md) — Prior-receipt rollback, exact docs restore, shared lock and target guard for channel promotion.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
+- [Dashboard telemetry coverage](dashboard-telemetry-coverage.md) — Dashboard player and RAM totals describe running servers that reported telemetry.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
 - [Explicit phase-result gate for every publication write](publication-phase-gate.md) — Every release side-effect phase checks direct results and verification outputs, and a terminal job fails an explicit publish when a required phase was skipped.
@@ -45,13 +49,16 @@
 - [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
+- [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
+- [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
+- [Publication gates run from the trusted dispatch revision](publication-gate-provenance.md) — Privileged release gates use trusted code with explicit candidate paths, and registry platform evidence has one strict validator.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
-- [Release staging keeps the raw image build context](release-staging-artifact-contract.md) — The trusted staging run publishes both the OCI archive and the raw build context because the Compose matrix consumes the context.
+- [Release qualification uses the retained OCI archive](release-staging-artifact-contract.md) — The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the

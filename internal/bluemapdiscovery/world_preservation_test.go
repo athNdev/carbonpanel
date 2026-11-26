@@ -124,7 +124,7 @@ func TestManagedRendererInstallPreservesWorldDataFixture(t *testing.T) {
 	server := &storage.Server{ID: "srv-a", DataPath: dataRoot}
 
 	resolver := nodestorage.NewResolver(nil)
-	facts, err := InspectManagedWorld(context.Background(), resolver, server, level)
+	facts, err := InspectManagedWorld(context.Background(), resolver, nodestorage.LocalNode(), server, level)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestManagedRendererInstallPreservesWorldDataFixture(t *testing.T) {
 		t.Fatal("renderer world bind must be read-only")
 	}
 
-	stager, err := StageManagedConfig(context.Background(), resolver, server, facts)
+	stager, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestManagedRendererAbortAndRemovePreserveWorldDataFixture(t *testing.T) {
 	// Aborted install: injected commit failure must roll back staging only.
 	ManagedConfigCommitHook = func() error { return errors.New("fixture commit failure") }
 	defer func() { ManagedConfigCommitHook = nil }()
-	aborted, err := StageManagedConfig(context.Background(), resolver, server, managedFactsFixture())
+	aborted, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, managedFactsFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestManagedRendererAbortAndRemovePreserveWorldDataFixture(t *testing.T) {
 
 	// Successful install, then renderer removal deletes only renderer-owned
 	// files. The world/data tree stays byte-identical.
-	installed, err := StageManagedConfig(context.Background(), resolver, server, managedFactsFixture())
+	installed, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, managedFactsFixture())
 	if err != nil {
 		t.Fatal(err)
 	}

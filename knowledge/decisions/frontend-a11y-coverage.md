@@ -37,7 +37,8 @@ world library and world view — are additionally checked in both the light and
 dark Carbon themes at each width. Theme is selected through the persisted
 `carbon-theme` preference, so the assertions observe the real
 `data-carbon-theme` attribute and painted background rather than toggling a
-class from the test. The shell skip link and profile controls restore keyboard focus to the owning trigger. Dashboard and inventory fleet tables keep the horizontal scroll region on the labelled wrapper at every width. Long KPI values and status footers wrap when the expanded navigation reduces available space.
+class from the test. The shell skip link and profile controls restore keyboard focus to the owning trigger. Dashboard and inventory fleet tables keep the horizontal scroll region on the labelled wrapper at every width. Long KPI values and status footers wrap when the expanded navigation reduces available space. Settings reflow checks measure nested control and text bounds
+with populated defaults and migration choices at both widths. The fixture holds async responses and waits for controls to enable before sending keys.
 
 # Alternatives
 
@@ -48,11 +49,11 @@ locked Playwright package and owned cache the review harness already provides.
 
 # Consequence
 
-Chromium is the primary gate. Firefox and WebKit run smoke checks. Screen
-readers, 400% zoom and mobile-device emulation are outside the coverage. Seeded
-SPA checks exercise the frontend boundary, including refused `SearchModpacks`
-and Retry. Extend DOM and page journey tests for new interactive controls.
-
+Chromium is the primary gate. Firefox and WebKit run smoke checks. Seeded SPA checks cover Modpacks filters, refusal/Retry, catalogue details and focus restoration across widths in both themes.
+Player roster shortcuts yield to dialogs and native controls. An empty cross-server filter keeps the server selector and Clear filters available.
+Dialogs preserve focus already moved inside by the user. The server route journey
+exercises keyboard access to the map and Copy Address. Screen readers, 400% zoom
+and mobile-device emulation remain outside coverage.
 On relevant PRs and main changes, the Modpacks browser review runs both plans
 against an owned authenticated controller. It checks the Modrinth-backed
 catalog, unmatched search and recovery, and the Studio library entry controls.

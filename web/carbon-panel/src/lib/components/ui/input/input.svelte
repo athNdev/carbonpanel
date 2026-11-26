@@ -34,7 +34,7 @@ one at https://mozilla.org/MPL/2.0/.
 		bind:this={ref}
 		data-slot="input"
 		class={cn(
-			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-border bg-card px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-background disabled:opacity-40',
+			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-input bg-background px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-secondary disabled:text-muted-foreground',
 			'aria-invalid:border-destructive aria-invalid:focus-visible:outline-[var(--destructive)]',
 			className
 		)}
@@ -48,7 +48,7 @@ one at https://mozilla.org/MPL/2.0/.
 		bind:this={ref}
 		data-slot="input"
 		class={cn(
-			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-border bg-card px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-background disabled:opacity-40',
+			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-input bg-background px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-secondary disabled:text-muted-foreground',
 			'aria-invalid:border-destructive aria-invalid:focus-visible:outline-[var(--destructive)]',
 			className
 		)}

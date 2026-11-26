@@ -14,5 +14,5 @@ sources:
 
 # Parts
 
-- [Player management — Identity and provenance + Sources and capabilities + Skins, identity lookup and deep data + Roster filters](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
+- [Player management - Identity, provenance and capabilities](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Player management — Authorization and audit](player-management-authorization-and-audit.md) — All PlayerService procedures are mapped to players:* permissions and

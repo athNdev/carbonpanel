@@ -45,16 +45,18 @@ func classifyServerJoin(server *storage.Server, m *metrics.ServerMetrics, now ti
 	})
 }
 
-// applyCachedMetrics copies docker resource stats always, and copies live SLP
-// / player fields only when ClassifyServer says the join probe is current
-// playable evidence. Last-good samples, MOTD and favicons stay off the live
-// fields when the reading is stale, unobserved or unjoinable.
+// applyCachedMetrics projects RAM only from current Docker evidence. SLP and
+// player fields independently require a current playable join reading.
 func applyCachedMetrics(server *storage.Server, m *metrics.ServerMetrics, now time.Time) {
 	if server == nil {
 		return
 	}
+	// Zero is the existing absent value of the legacy RAM scalar.
+	server.MemoryUsage = 0
 	if m != nil {
-		server.MemoryUsage = m.MemoryUsage
+		if m.DockerStats.CurrentFor(server.ContainerID, server.LastStarted, now) {
+			server.MemoryUsage = m.MemoryUsage
+		}
 		server.CPUPercent = m.CPUPercent
 		server.DiskUsage = m.DiskUsage
 		server.DiskTotal = m.DiskTotal
