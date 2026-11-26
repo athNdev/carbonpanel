@@ -22,9 +22,22 @@ export function uploadFile(file, options) {
 		(callIndex === 1 ? 'seeded-session' : `seeded-session-${callIndex}`);
 	delete globalThis.__wizardUploadSessionId;
 	if (mode === 'pending') {
-		return new Promise((resolve) => {
+		return new Promise((resolve, reject) => {
 			globalThis.__wizardPendingUploads.push({
 				fileName: file.name,
+				fail(message = 'seeded stale upload failure') {
+					reject(new Error(message));
+				},
+				progress(percentComplete = 42) {
+					options?.onProgress?.({
+						sessionId,
+						bytesUploaded: Math.round((file.size * percentComplete) / 100),
+						totalBytes: file.size,
+						chunksUploaded: 0,
+						totalChunks: 1,
+						percentComplete
+					});
+				},
 				release(overrideSessionId) {
 					options?.onProgress?.({
 						sessionId: overrideSessionId || sessionId,

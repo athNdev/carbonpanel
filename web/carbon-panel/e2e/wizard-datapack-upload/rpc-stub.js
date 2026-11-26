@@ -102,6 +102,30 @@ export const rpcClient = {
 			}
 			return Promise.resolve(result);
 		},
+		exportServerArchive(payload) {
+			record('exportServerArchive', payload);
+			const tar = payload.format === 2;
+			const result = {
+				sessionId: tar ? 'export-session-tar' : 'export-session-zip',
+				filename: tar ? 'fixture-server.tar.gz' : 'fixture-server.zip',
+				totalSize: 1048576n
+			};
+			const mode = globalThis.__exportMode || 'success';
+			if (mode === 'fail') {
+				return Promise.reject(
+					new ConnectError('fixture export preparation refusal', Code.Internal)
+				);
+			}
+			if (mode === 'hold') {
+				return new Promise((resolve) => {
+					globalThis.__wizardReleaseExport = () => {
+						delete globalThis.__wizardReleaseExport;
+						resolve(result);
+					};
+				});
+			}
+			return Promise.resolve(result);
+		},
 		previewServerArchive(payload) {
 			record('previewServerArchive', payload);
 			const mode = globalThis.__archivePreviewMode || 'success';
@@ -127,7 +151,7 @@ export const rpcClient = {
 						]
 					: [];
 			const result = {
-				format: 1,
+				format: globalThis.__archivePreviewFormat === 2 ? 2 : 1,
 				schemaVersion: 1,
 				exporterVersion: 'fixture-1.0.0',
 				mcVersion: '1.20.6',
@@ -148,6 +172,23 @@ export const rpcClient = {
 				return new Promise((resolve) => {
 					globalThis.__wizardReleaseArchivePreflight = () => resolve(result);
 				});
+			}
+			if (payload.nodeId && globalThis.__wizardDelayedArchiveNode === payload.nodeId) {
+				const settle = () =>
+					globalThis.__wizardDelayedArchiveNodeMode === 'fail'
+						? Promise.reject(
+								new ConnectError('stale destination preview refusal', Code.Unavailable)
+							)
+						: Promise.resolve(result);
+				if (globalThis.__wizardHoldArchiveNodePreflight) {
+					return new Promise((resolve, reject) => {
+						globalThis.__wizardReleaseArchiveNodePreflight = () => {
+							delete globalThis.__wizardReleaseArchiveNodePreflight;
+							settle().then(resolve, reject);
+						};
+					});
+				}
+				return settle();
 			}
 			return Promise.resolve(result);
 		},
@@ -377,6 +418,12 @@ export const rpcClient = {
 };
 
 export const silentCallOptions = {};
+
+// ServerArchiveExport suppresses a duplicate toast when the shared RPC client
+// already toasted the failure; this fixture never pre-toasts.
+export function wasRpcErrorToasted() {
+	return false;
+}
 
 globalThis.__wizardCalls = calls;
 globalThis.__wizardReset = () => {

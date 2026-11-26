@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
-// Seeded Chromium fixture for the create-server wizard datapack upload slice.
-// Drives the real /servers/new page through the normal UI seam with only the
-// transport and chunked-upload modules replaced by deterministic fixtures.
-// No live panel, credentials, worlds, daemon or external infrastructure.
+// Seeded Chromium fixture for the create-server wizard datapack upload slice
+// and the server archive export control.
+// Drives the real /servers/new page and the real export component through the
+// normal UI seam with only the transport and chunked-upload modules replaced by
+// deterministic fixtures. No live panel, credentials, worlds, daemon or
+// external infrastructure.
 //
 //   REVIEW_CHROME=/path/to/chrome.exe \
 //     node scripts/review/wizard-datapack-upload-check.mjs
@@ -58,6 +60,13 @@ async function waitForFixtureReady(page) {
   throw lastError;
 }
 
+async function waitForExportReady(page) {
+  await page.waitForFunction(() => Boolean(globalThis.__wizardCalls), null, {
+    timeout: 25_000,
+  });
+  await page.getByTestId("server-export-archive").waitFor({ timeout: 10_000 });
+}
+
 async function goToDatapackStep(page) {
   await page
     .getByPlaceholder("survival-smp-01")
@@ -76,11 +85,14 @@ async function uploadFixtureArchive(page) {
   });
 }
 
-async function uploadServerArchive(page) {
+async function uploadServerArchive(page, format = "zip") {
+  const tar = format === "tar.gz";
   await page.locator('[data-testid="archive-file-input"]').setInputFiles({
-    name: "fixture-server.zip",
-    mimeType: "application/zip",
-    buffer: Buffer.from("PK\x03\x04fixture-server"),
+    name: tar ? "fixture-server.tar.gz" : "fixture-server.zip",
+    mimeType: tar ? "application/gzip" : "application/zip",
+    buffer: Buffer.from(
+      tar ? "\x1f\x8bfixture-server" : "PK\x03\x04fixture-server",
+    ),
   });
 }
 
@@ -152,14 +164,19 @@ try {
               res.end();
               return;
             }
-            if (req.url !== "/wizard.html") return next();
+            const pathname = (req.url || "").split("?")[0];
+            const entries = {
+              "/wizard.html": path.join(fixture, "main.js"),
+              "/export.html": path.join(fixture, "export-main.js"),
+            };
+            const entrySource = entries[pathname];
+            if (!entrySource) return next();
             try {
-              const entry =
-                "/@fs/" + path.join(fixture, "main.js").replaceAll("\\", "/");
+              const entry = "/@fs/" + entrySource.replaceAll("\\", "/");
               res.setHeader("Content-Type", "text/html");
               res.end(
                 await vite.transformIndexHtml(
-                  "/wizard.html",
+                  pathname,
                   `<html><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`,
                 ),
               );
@@ -203,7 +220,9 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
 
-  const out = path.join(here, "../../tmp/review-output/wizard-datapack-upload");
+  const out = process.env.REVIEW_ARCHIVE_OUT
+    ? path.resolve(process.env.REVIEW_ARCHIVE_OUT)
+    : path.join(here, "../../tmp/review-output/wizard-datapack-upload");
   await fs.mkdir(out, { recursive: true });
   // Scenario 1: a successful local upload is queued and installed post-create.
   await page.goto(base);
@@ -776,6 +795,68 @@ try {
     calls,
   });
 
+  // A stale replacement upload failure must not surface after a newer upload
+  // completes and previews successfully.
+  await page.reload();
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__archivePreviewFormat = 1;
+    globalThis.__wizardUploadMode = "pending";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-stale-upload-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () => globalThis.__wizardPendingUploads.length === 1,
+  );
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () => globalThis.__wizardPendingUploads.length === 2,
+  );
+  await page.evaluate(() =>
+    globalThis.__wizardPendingUploads[1].release("stale-upload-newest"),
+  );
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.uploadId === "stale-upload-newest",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.getByTestId("archive-preview").waitFor();
+  await page.evaluate(() =>
+    globalThis.__wizardPendingUploads[0].fail(
+      "stale replacement upload failure",
+    ),
+  );
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.getByText("stale replacement upload failure").count(),
+    0,
+    "a failure from a superseded upload must not reach the operator",
+  );
+  assert.equal(
+    await page.getByTestId("archive-preview-error").count(),
+    0,
+    "a stale upload failure must not replace the current preview",
+  );
+  assert.equal(
+    await page.getByTestId("archive-preview").count(),
+    1,
+    "the newest completed upload keeps its preview",
+  );
+  summaries.push({
+    scenario: "a stale replacement upload failure is fenced",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
   // An archive whose verified runtime cannot be provisioned stays blocked.
   await page.reload();
   await waitForFixtureReady(page);
@@ -882,7 +963,11 @@ try {
   await page.waitForFunction(
     () => typeof globalThis.__wizardReleaseArchivePreflight === "function",
   );
-  assert.equal(await preflightRetry.isEnabled(), false, "a pending preflight disables retry");
+  assert.equal(
+    await preflightRetry.isEnabled(),
+    false,
+    "a pending preflight disables retry",
+  );
   await page.evaluate(() => {
     globalThis.__wizardHoldArchivePreflight = false;
     globalThis.__wizardReleaseArchivePreflight();
@@ -1091,28 +1176,32 @@ try {
       name: "desktop-dark",
       viewport: { width: 1440, height: 1000 },
       theme: "dark",
+      format: "zip",
     },
     {
       name: "desktop-light",
       viewport: { width: 1440, height: 1000 },
       theme: "light",
+      format: "tar.gz",
     },
     {
       name: "narrow-dark",
       viewport: { width: 390, height: 900 },
       theme: "dark",
+      format: "tar.gz",
     },
     {
       name: "narrow-light",
       viewport: { width: 390, height: 900 },
       theme: "light",
+      format: "zip",
     },
   ];
   for (const view of archiveViews) {
     await page.setViewportSize(view.viewport);
     await page.goto(base);
     await waitForFixtureReady(page);
-    await page.evaluate((theme) => {
+    await page.evaluate(({ theme, format }) => {
       document.documentElement.setAttribute("data-carbon-theme", theme);
       document.documentElement.classList.toggle("dark", theme === "dark");
       globalThis.__wizardDenyListNodes = true;
@@ -1121,14 +1210,19 @@ try {
         { id: "node-2", name: "Fixture Node B" },
       ];
       globalThis.__archivePreviewMode = "success";
+      globalThis.__archivePreviewFormat = format === "tar.gz" ? 2 : 1;
       globalThis.__wizardReset();
-    }, view.theme);
+    }, view);
     await page
       .getByPlaceholder("survival-smp-01")
       .fill(`archive-preview-${view.name}`);
     await page.getByTestId("create-from-archive-tile").click();
-    await uploadServerArchive(page);
+    await uploadServerArchive(page, view.format);
     await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+    await page
+      .getByTestId("archive-preview")
+      .getByText(view.format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)")
+      .waitFor();
     assert.deepEqual(
       await page.getByTestId("archive-destination-option").count(),
       0,
@@ -1207,7 +1301,10 @@ try {
       path: path.join(out, `archive-retry-${view.name}.png`),
       fullPage: true,
     });
-    summaries.push({ scenario: `archive destinations ${view.name}` });
+    summaries.push({
+      scenario: `archive destinations ${view.name}`,
+      calls: await page.evaluate(() => globalThis.__wizardCalls),
+    });
 
     if (view.name !== "desktop-dark") continue;
     // Held archive create: back navigation is cancelled and replacement
@@ -1286,6 +1383,282 @@ try {
         "held archive create cancels back navigation and disables replacement controls",
     });
   }
+  // Upload status/progress and stale destination fencing. A delayed failing
+  // preview for an abandoned destination must not overwrite the current one.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(base);
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "light");
+    document.documentElement.classList.remove("dark");
+    globalThis.__wizardDenyListNodes = true;
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-1", name: "Fixture Node" },
+      { id: "node-2", name: "Fixture Node B" },
+    ];
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__archivePreviewFormat = 2;
+    globalThis.__wizardUploadMode = "pending";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-progress-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page, "tar.gz");
+  await page.waitForFunction(
+    () => globalThis.__wizardPendingUploads.length === 1,
+  );
+  await page.evaluate(() => globalThis.__wizardPendingUploads[0].progress(42));
+  await page.getByText("Uploading… 42%").waitFor({ timeout: 15_000 });
+  await page.screenshot({
+    path: path.join(out, "archive-uploading-desktop-light.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() =>
+    globalThis.__wizardPendingUploads[0].release("seeded-session"),
+  );
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await page
+    .getByTestId("archive-preview")
+    .getByText("TAR.GZ (.tar.gz)")
+    .waitFor();
+  await page.evaluate(() => {
+    globalThis.__wizardUploadMode = "success";
+  });
+  for (let step = 0; step < 3; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  const staleOptions = page.getByTestId("archive-destination-option");
+  await page.getByTestId("archive-destination-confirmation").waitFor();
+  await page.evaluate(() => {
+    globalThis.__wizardDelayedArchiveNode = "node-2";
+    globalThis.__wizardDelayedArchiveNodeMode = "fail";
+    globalThis.__wizardHoldArchiveNodePreflight = true;
+    globalThis.__wizardReleaseArchiveNodePreflight = undefined;
+  });
+  await staleOptions.nth(1).click();
+  await page.waitForFunction(
+    () => typeof globalThis.__wizardReleaseArchiveNodePreflight === "function",
+  );
+  await staleOptions.nth(0).click();
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.nodeId === "node-1",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="archive-destination-node"]')
+        ?.textContent === "node-1",
+  );
+  await page.evaluate(() => globalThis.__wizardReleaseArchiveNodePreflight());
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.getByTestId("archive-preview-error").count(),
+    0,
+    "a delayed failure for an abandoned destination must not surface",
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-node").textContent(),
+    "node-1",
+    "the newest destination preflight must remain authoritative",
+  );
+  await page.screenshot({
+    path: path.join(out, "archive-stale-destination-desktop-light.png"),
+    fullPage: true,
+  });
+  summaries.push({
+    scenario:
+      "archive upload progress renders and a delayed stale destination failure is fenced",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
+  // Export dialog at both formats and representative viewports/themes. The
+  // preparing state is held so the status is inspectable, then released.
+  const exportBase = base.replace(/wizard\.html$/, "export.html");
+  const exportViews = [
+    {
+      name: "desktop-dark",
+      viewport: { width: 1440, height: 1000 },
+      theme: "dark",
+      formats: ["zip", "tar.gz"],
+    },
+    {
+      name: "desktop-light",
+      viewport: { width: 1440, height: 1000 },
+      theme: "light",
+      formats: ["tar.gz"],
+    },
+    {
+      name: "narrow-dark",
+      viewport: { width: 390, height: 900 },
+      theme: "dark",
+      formats: ["zip"],
+    },
+    {
+      name: "narrow-light",
+      viewport: { width: 390, height: 900 },
+      theme: "light",
+      formats: ["tar.gz"],
+    },
+  ];
+  for (const view of exportViews) {
+    await page.setViewportSize(view.viewport);
+    await page.goto(exportBase);
+    await waitForExportReady(page);
+    await page.evaluate((theme) => {
+      document.documentElement.setAttribute("data-carbon-theme", theme);
+      document.documentElement.classList.toggle("dark", theme === "dark");
+      globalThis.__exportMode = "success";
+      globalThis.__wizardReset();
+    }, view.theme);
+    for (const format of view.formats) {
+      const label = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
+      await page.evaluate(() => {
+        globalThis.__wizardReset();
+      });
+      await page.getByTestId("server-export-archive").click();
+      await page.getByTestId("archive-export-panel").waitFor();
+      await page.getByRole("radio", { name: label }).click();
+      await page.evaluate(() => {
+        globalThis.__exportMode = "hold";
+      });
+      await page.getByTestId("archive-prepare").click();
+      await page.getByText("Preparing archive…").waitFor({ timeout: 15_000 });
+      await page.screenshot({
+        path: path.join(
+          out,
+          `archive-export-preparing-${view.name}-${format}.png`,
+        ),
+        fullPage: true,
+      });
+      await page.evaluate(() => globalThis.__wizardReleaseExport());
+      await page.getByTestId("archive-export-ready").waitFor({
+        timeout: 15_000,
+      });
+      const expectedName =
+        format === "tar.gz" ? "fixture-server.tar.gz" : "fixture-server.zip";
+      await page.getByText(expectedName, { exact: true }).waitFor();
+      await page
+        .getByText(
+          "Third-party plugin and mod files are included and can contain credentials. Review the archive before sharing it.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(
+        await page.getByTestId("archive-download").isDisabled(),
+        true,
+        "download must stay disabled until the disclosure is acknowledged",
+      );
+      calls = await page.evaluate(() => globalThis.__wizardCalls);
+      const exportCall = calls.find(
+        (call) => call.method === "exportServerArchive",
+      );
+      assert.deepEqual(
+        {
+          serverId: exportCall.payload.serverId,
+          format: exportCall.payload.format,
+          consistency: exportCall.payload.consistency,
+        },
+        {
+          serverId: "fixture-server",
+          format: format === "tar.gz" ? 2 : 1,
+          consistency: 1,
+        },
+        "export must request the selected container with stopped consistency",
+      );
+      await page.screenshot({
+        path: path.join(out, `archive-export-ready-${view.name}-${format}.png`),
+        fullPage: true,
+      });
+      await page
+        .getByLabel("I have reviewed this notice before downloading.")
+        .check();
+      assert.equal(
+        await page.getByTestId("archive-download").isEnabled(),
+        true,
+        "download becomes available after acknowledgement",
+      );
+
+      await page.keyboard.press("Escape");
+      await page
+        .getByTestId("archive-export-panel")
+        .waitFor({ state: "hidden" });
+      summaries.push({
+        scenario: `archive export ${view.name} ${format}`,
+        calls: await page.evaluate(() => globalThis.__wizardCalls),
+      });
+    }
+  }
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(exportBase);
+  await waitForExportReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__exportMode = "fail";
+    globalThis.__wizardReset();
+  });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByTestId("archive-prepare").click();
+  await page
+    .getByTestId("archive-export-panel")
+    .getByText("fixture export preparation refusal")
+    .waitFor({ timeout: 15_000 });
+  await page.screenshot({
+    path: path.join(out, "archive-export-error-desktop-dark.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() => {
+    globalThis.__exportMode = "success";
+  });
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await page.getByTestId("archive-export-ready").waitFor({
+    timeout: 15_000,
+  });
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  summaries.push({
+    scenario: "archive export refusal retries in place",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${exportBase}?running=1`);
+  await waitForExportReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__wizardReset();
+  });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByTestId("archive-export-running").waitFor();
+  await page.waitForTimeout(400);
+  assert.equal(
+    await page.getByTestId("archive-prepare").isDisabled(),
+    true,
+    "a live server must disable export preparation",
+  );
+  assert.equal(
+    await page.getByRole("radio", { name: "ZIP (.zip)" }).isDisabled(),
+    true,
+    "a live server must disable format selection",
+  );
+  await page.screenshot({
+    path: path.join(out, "archive-export-running-desktop-dark.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  summaries.push({ scenario: "archive export refuses a live server" });
+
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => {
     document.documentElement.setAttribute("data-carbon-theme", "dark");
@@ -1308,7 +1681,7 @@ try {
     ),
   );
   console.log(
-    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, archive preview/create retry, empty archive preflight recovery and destination-preflight precedence",
+    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, archive ZIP/tar.gz preview and create retry, upload progress, stale upload/destination fencing, empty preflight recovery, destination-preflight precedence and ZIP/tar.gz export at desktop/narrow light/dark",
   );
 } finally {
   await browser?.close();
