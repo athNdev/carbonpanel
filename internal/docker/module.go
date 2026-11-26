@@ -428,7 +428,7 @@ func WritableModuleDataSources(module *models.Module, server *models.Server, ser
 		if volume.ReadOnly || volume.Source == "" || (volume.Type != "" && volume.Type != "bind") {
 			continue
 		}
-		if files.WithinReal(server.DataPath, volume.Source) {
+		if DataPathOverlaps(server.DataPath, volume.Source) {
 			sources = append(sources, volume.Source)
 		}
 	}
@@ -611,7 +611,7 @@ func (c *Client) ModuleDataMounts(module *models.Module, server *models.Server, 
 		if !ok || mountSpec.Type != mount.TypeBind {
 			continue
 		}
-		if files.Within(dataRoot, mountSpec.Source) {
+		if DataPathOverlaps(dataRoot, mountSpec.Source) {
 			out = append(out, ModuleBindMount{
 				Source:   filepath.Clean(mountSpec.Source),
 				Target:   mountSpec.Target,

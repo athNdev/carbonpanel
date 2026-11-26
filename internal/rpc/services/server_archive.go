@@ -352,7 +352,7 @@ func compareArchiveModuleMounts(expected []docker.ModuleBindMount, actual []dock
 }
 
 func archiveMountOverlapsDataRoot(dataRoot, source string) bool {
-	return files.Within(dataRoot, source) || files.Within(source, dataRoot)
+	return docker.DataPathOverlaps(dataRoot, source)
 }
 
 func archiveMountKey(source, target string, readOnly bool) string {
