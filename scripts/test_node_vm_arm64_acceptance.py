@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from scripts import node_vm_arm64_acceptance as acceptance
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def report(node_id="node-0123456789abcdef0123456789abcdef", status="PASS"):
@@ -108,6 +112,34 @@ class ShaTests(unittest.TestCase):
             self.assertEqual(
                 acceptance.sha256_file(path),
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+
+
+class CliTests(unittest.TestCase):
+    def test_help_runs_as_a_script_from_the_repository_root(self):
+        proc = subprocess.run(
+            [sys.executable, "scripts/node_vm_arm64_acceptance.py", "--help"],
+            cwd=str(ROOT), capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--receipt", proc.stdout)
+
+    def test_mismatched_image_writes_a_failure_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            (work / "image").write_bytes(b"not the pinned image")
+            (work / "SHA256SUMS").write_text("", encoding="utf-8")
+            receipt = work / "receipt.json"
+            proc = subprocess.run(
+                [sys.executable, "scripts/node_vm_arm64_acceptance.py",
+                 "--image", str(work / "image"),
+                 "--sha256sums", str(work / "SHA256SUMS"),
+                 "--workspace", str(work / "run"),
+                 "--head", "0" * 40,
+                 "--receipt", str(receipt)],
+                cwd=str(ROOT), capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 1)
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertFalse(data["checks"]["image_bytes_verified"])
+            self.assertIn("pinned SHA256", data["error"])
 
 
 if __name__ == "__main__":

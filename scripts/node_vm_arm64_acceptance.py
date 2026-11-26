@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 NODE_ID_RE = re.compile(r"^node-[0-9a-f]{32}$")
 FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 SECRET_RE = re.compile(
