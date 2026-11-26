@@ -155,6 +155,7 @@ type readyModUpdate struct {
 	selection   *v1.ModUpdateSelection
 	targetPath  string
 	liveHash    string
+	projectID   string
 	bytes       []byte
 	resultIndex int
 }
@@ -337,8 +338,8 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		}
 		ready = append(ready, readyModUpdate{
 			selection: sel, targetPath: filepath.ToSlash(installed),
-			liveHash: preview.GetInstalledSha512(), bytes: data,
-			resultIndex: len(results),
+			liveHash: preview.GetInstalledSha512(), projectID: preview.GetProjectId(),
+			bytes: data, resultIndex: len(results),
 		})
 		results = append(results, result)
 	}
@@ -374,7 +375,13 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			}
 			row, err := stageModContentToBatch(ctx, s.store, server, s.storageResolver,
 				batch.ID, windowName, applyAt, idle,
-				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash, sel.GetCandidateSha512())
+				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash, approvedModRelease{
+					SHA512:    sel.GetCandidateSha512(),
+					Provider:  "modrinth",
+					ProjectID: item.projectID,
+					VersionID: sel.GetCandidateVersionId(),
+					Filename:  sel.GetCandidateFilename(),
+				})
 			if errors.Is(err, storage.ErrUpdateBatchConflict) {
 				return err
 			}

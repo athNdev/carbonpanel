@@ -638,11 +638,20 @@ type StagedContentChange struct {
 	// requires this durable value to match the payload and provider
 	// revalidation; a row without it predates durable approval and must be
 	// re-reviewed instead of deriving approval from a mutable sidecar.
-	ApprovedSha512 string       `json:"approved_sha512,omitempty" gorm:"column:approved_sha512"`
-	Status         StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt      time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt      *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server         *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	ApprovedSha512 string `json:"approved_sha512,omitempty" gorm:"column:approved_sha512"`
+	// ApprovedProvider, ApprovedProjectID, ApprovedVersionID and
+	// ApprovedFilename are the durable provider release identity the operator
+	// approved at admission. Publication revalidates this identity, not the
+	// mutable sidecar, so a sidecar rewritten to a different release that
+	// happens to carry the same bytes cannot substitute its provider identity.
+	ApprovedProvider  string       `json:"approved_provider,omitempty" gorm:"column:approved_provider"`
+	ApprovedProjectID string       `json:"approved_project_id,omitempty" gorm:"column:approved_project_id"`
+	ApprovedVersionID string       `json:"approved_version_id,omitempty" gorm:"column:approved_version_id"`
+	ApprovedFilename  string       `json:"approved_filename,omitempty" gorm:"column:approved_filename"`
+	Status            StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt         time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt         *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server            *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // TaskType defines the type of scheduled task

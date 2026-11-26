@@ -117,6 +117,9 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				if !validSHA512Hex(row.ApprovedSha512) {
 					return nil, fmt.Errorf("staged mod candidate %s has an invalid durable approved SHA-512; re-review and re-stage the update: %w", row.FileName, storage.ErrStagedModApprovalInvalid)
 				}
+				if row.ApprovedProvider == "" || row.ApprovedProjectID == "" || row.ApprovedVersionID == "" || row.ApprovedFilename == "" {
+					return nil, fmt.Errorf("staged mod candidate %s has no durable approved release identity; re-review and re-stage the update: %w", row.FileName, storage.ErrStagedModApprovalIdentityMissing)
+				}
 				item.expectedStageSha512 = row.ApprovedSha512
 			}
 			files = append(files, item)

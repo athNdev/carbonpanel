@@ -44,17 +44,20 @@ request.
    rows record the live SHA-512 observed at review time; the journaled publish
    verifies it on the same stream used to create the undo snapshot before
    mutating live files. It preserves staged bytes if the digest differs. Normal
-   reviewed staging admission also records the provider release SHA-512 that
-   the operator approved, only after the bytes written to the stage directory
-   have been verified against that digest. Apply validation requires the
-   durable digest to match the staged payload and provider revalidation. Rows
-   staged before this rule have no durable approval and are refused with
-   re-review and re-stage guidance instead of deriving approval from the current
-   mutable sidecar. Ordinary unreviewed uploads carry neither precondition and
-   are unaffected. Apply validation carries the verified digest into
-   publication; the publish stream checks that carried value instead of
-   rereading the staged sidecar, so metadata rewritten between validation and
-   write cannot authorize different bytes. A mismatch refuses the publication
+   reviewed staging admission also records the provider release identity the
+   operator approved (provider, project, version and exact candidate filename)
+   together with its SHA-512, only after the bytes written to the stage
+   directory have been verified against that digest. Apply validation requires
+   that durable identity and digest to match the staged payload and file name;
+   it does not select a version or project from a mutable sidecar. Rows staged
+   before this rule have no durable approval or release identity and are
+   refused with re-review and re-stage guidance instead of deriving either from
+   the current mutable sidecar. Ordinary unreviewed uploads carry neither
+   precondition and are unaffected. Apply validation carries the verified
+   digest into publication; the publish stream checks that carried value
+   instead of rereading the staged sidecar, so metadata rewritten between
+   validation and write cannot authorize different bytes. A mismatch refuses
+   the publication
    without a live write or provider detail in the error.
 6. The apply window is committed before the first staged byte is visible, and
    the window, staged rows and target-uniqueness check run under the existing

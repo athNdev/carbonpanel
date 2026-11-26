@@ -34,12 +34,38 @@ func ensureStagedModApprovalAdmission(row *StagedContentChange) error {
 		return ErrStagedModApprovalInvalid
 	}
 	row.ApprovedSha512 = strings.ToLower(row.ApprovedSha512)
+	if err := validateStagedApprovedReleaseIdentity(row); err != nil {
+		return err
+	}
 	return nil
 }
 
 func validSHA512Hex(value string) bool {
 	raw, err := hex.DecodeString(value)
 	return err == nil && len(raw) == sha512.Size
+}
+
+// validateStagedApprovedReleaseIdentity requires the durable provider release
+// identity that admission records with an approved digest. An older reviewed
+// row may carry only the digest; publication cannot prove which release the
+// operator approved, so it is refused with re-review guidance instead of
+// trusting the mutable sidecar.
+func validateStagedApprovedReleaseIdentity(row *StagedContentChange) error {
+	if row == nil {
+		return ErrStagedModApprovalIdentityMissing
+	}
+	row.ApprovedProvider = strings.ToLower(strings.TrimSpace(row.ApprovedProvider))
+	row.ApprovedProjectID = strings.TrimSpace(row.ApprovedProjectID)
+	row.ApprovedVersionID = strings.TrimSpace(row.ApprovedVersionID)
+	row.ApprovedFilename = strings.TrimSpace(row.ApprovedFilename)
+	if row.ApprovedProvider == "" || row.ApprovedProjectID == "" || row.ApprovedVersionID == "" || row.ApprovedFilename == "" {
+		return ErrStagedModApprovalIdentityMissing
+	}
+	if strings.ContainsAny(row.ApprovedFilename, "/\\") ||
+		!strings.HasSuffix(strings.ToLower(row.ApprovedFilename), ".jar") {
+		return fmt.Errorf("%w: approved filename %q is not a bare JAR name", ErrStagedModApprovalInvalid, row.ApprovedFilename)
+	}
+	return nil
 }
 
 // AddStagedContent joins the server's one open batch and records a content

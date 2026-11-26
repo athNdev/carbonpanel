@@ -118,12 +118,23 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 	return row, nil
 }
 
+// approvedModRelease is the provider release the operator reviewed. Admission
+// records it only after the staged bytes match SHA512, so publication can rely
+// on the durable row instead of a mutable sidecar.
+type approvedModRelease struct {
+	SHA512    string
+	Provider  string
+	ProjectID string
+	VersionID string
+	Filename  string
+}
+
 // stageModContentToBatch writes candidate bytes and inserts the staged row
 // only while the reviewed batch is still open with the reviewed window. This
 // closes the window between choosing the batch and writing its payload.
 func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
 	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
-	targetRel, fileName string, data []byte, expectedLiveSha512 string, approvedSha512 string) (*storage.StagedContentChange, error) {
+	targetRel, fileName string, data []byte, expectedLiveSha512 string, approved approvedModRelease) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -132,16 +143,23 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 	if err != nil {
 		return nil, err
 	}
-	// The row records the release digest the operator approved only after the
-	// exact bytes written below have been verified against it. This is the
-	// durable approval publication later requires; it is not re-derived from a
-	// mutable sidecar.
-	if approvedSha512 != "" {
+	// The row records the release identity and digest the operator approved
+	// only after the exact bytes written below have been verified against it.
+	// This is the durable approval publication later requires; it is not
+	// re-derived from a mutable sidecar.
+	if approved.SHA512 != "" {
 		sum := sha512.Sum512(data)
-		if !strings.EqualFold(hex.EncodeToString(sum[:]), approvedSha512) {
+		if !strings.EqualFold(hex.EncodeToString(sum[:]), approved.SHA512) {
 			return nil, errors.New("candidate bytes do not match the approved SHA-512")
 		}
-		approvedSha512 = strings.ToLower(approvedSha512)
+		approved.SHA512 = strings.ToLower(approved.SHA512)
+		approved.Provider = strings.ToLower(strings.TrimSpace(approved.Provider))
+		approved.ProjectID = strings.TrimSpace(approved.ProjectID)
+		approved.VersionID = strings.TrimSpace(approved.VersionID)
+		approved.Filename = strings.TrimSpace(approved.Filename)
+		if approved.Filename != "" && (strings.ContainsAny(approved.Filename, "/\\") || !strings.HasSuffix(strings.ToLower(approved.Filename), ".jar")) {
+			return nil, errors.New("approved candidate filename is not a bare JAR name")
+		}
 	}
 	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
@@ -162,7 +180,11 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 		StagePath:          stagePath,
 		FileName:           base,
 		ExpectedLiveSha512: expectedLiveSha512,
-		ApprovedSha512:     approvedSha512,
+		ApprovedSha512:     approved.SHA512,
+		ApprovedProvider:   approved.Provider,
+		ApprovedProjectID:  approved.ProjectID,
+		ApprovedVersionID:  approved.VersionID,
+		ApprovedFilename:   approved.Filename,
 	}
 	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
 		_ = acc.RemoveAll(stagedContentRoot + "/" + id)

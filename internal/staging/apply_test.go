@@ -561,6 +561,10 @@ func stageReviewedModRow(t *testing.T, store *storage.Store, dataRoot, batchID s
 		FileName:           "mod.jar",
 		ExpectedLiveSha512: modDigest("installed"),
 		ApprovedSha512:     modDigest(candidateBody),
+		ApprovedProvider:   "modrinth",
+		ApprovedProjectID:  "project",
+		ApprovedVersionID:  "release",
+		ApprovedFilename:   "mod.jar",
 		Status:             storage.StagedStatusStaged,
 	}).Error)
 	return stageRel
@@ -742,4 +746,67 @@ func stageFileInBatch(t *testing.T, store *storage.Store, dataRoot, batchID, ser
 		FileName:   name,
 		Status:     storage.StagedStatusStaged,
 	}).Error)
+}
+
+func TestPublicationRefusesReviewedRowWithoutDurableReleaseIdentity(t *testing.T) {
+	for _, publication := range []struct {
+		name   string
+		window storage.UpdateWindow
+		status storage.ServerStatus
+		apply  func(context.Context, *testing.T, *storage.Store, *storage.Server) error
+	}{
+		{
+			name:   "timed batch",
+			window: storage.UpdateWindowAtTime,
+			status: storage.StatusDeepSleep,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				batch, err := store.OpenUpdateBatch(ctx, server.ID)
+				require.NoError(t, err)
+				require.NotNil(t, batch)
+				return ApplyBatch(ctx, store, nil, server, *batch, nil)
+			},
+		},
+		{
+			name:   "next-restart batch",
+			window: storage.UpdateWindowNextRestart,
+			status: storage.StatusRunning,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				_, err := CommitNextRestartFiles(ctx, store, server, nil)
+				return err
+			},
+		},
+	} {
+		t.Run(publication.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, data := newStageStore(t)
+			server := &storage.Server{
+				ID: "legacy-identity", Name: "legacy-identity", DataPath: data, Status: publication.status,
+			}
+			require.NoError(t, store.CreateServer(ctx, server))
+			live := filepath.Join(data, "mods", "mod.jar")
+			require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+			require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+			var at *time.Time
+			if publication.window == storage.UpdateWindowAtTime {
+				when := time.Now().Add(-time.Minute).UTC()
+				at = &when
+			}
+			batchID := openBatch(t, store, server.ID, publication.window, at, 0)
+			stageReviewedModRow(t, store, data, batchID, server, "candidate")
+			require.NoError(t, store.DB().Model(&storage.StagedContentChange{}).
+				Where("server_id = ?", server.ID).Updates(map[string]any{
+				"approved_provider": "", "approved_project_id": "",
+				"approved_version_id": "", "approved_filename": "",
+			}).Error)
+
+			err := publication.apply(ctx, t, store, server)
+			require.ErrorIs(t, err, storage.ErrStagedModApprovalIdentityMissing)
+			require.Contains(t, err.Error(), "re-review and re-stage")
+
+			got, readErr := os.ReadFile(live)
+			require.NoError(t, readErr)
+			require.Equal(t, "installed", string(got))
+		})
+	}
 }

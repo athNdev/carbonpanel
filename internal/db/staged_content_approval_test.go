@@ -50,7 +50,16 @@ func TestReviewedModAdmissionRequiresDurableApprovedDigest(t *testing.T) {
 	_, err = store.AddStagedContent(ctx, reviewed)
 	require.ErrorIs(t, err, ErrStagedModApprovalInvalid)
 
+	// A digest recorded before the durable release identity cannot prove which
+	// provider release the operator approved.
 	reviewed.ApprovedSha512 = strings.ToUpper(approvedDigest(t, "candidate"))
+	_, err = store.AddStagedContent(ctx, reviewed)
+	require.ErrorIs(t, err, ErrStagedModApprovalIdentityMissing)
+
+	reviewed.ApprovedProvider = "modrinth"
+	reviewed.ApprovedProjectID = "project"
+	reviewed.ApprovedVersionID = "release"
+	reviewed.ApprovedFilename = "mod.jar"
 	row, err := store.AddStagedContent(ctx, reviewed)
 	require.NoError(t, err)
 	require.Equal(t, strings.ToLower(reviewed.ApprovedSha512), row.ApprovedSha512)
@@ -59,6 +68,11 @@ func TestReviewedModAdmissionRequiresDurableApprovedDigest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, strings.ToLower(reviewed.ApprovedSha512), stored.ApprovedSha512,
 		"the approved digest must be durable row state, not an in-memory admission guard")
+	require.Equal(t, "modrinth", stored.ApprovedProvider)
+	require.Equal(t, "project", stored.ApprovedProjectID)
+	require.Equal(t, "release", stored.ApprovedVersionID)
+	require.Equal(t, "mod.jar", stored.ApprovedFilename,
+		"the approved provider, project, version and file identity must be durable row state")
 
 	// An ordinary upload carries no reviewed precondition and needs no approval.
 	upload := &StagedContentChange{
@@ -107,6 +121,10 @@ func TestApprovedDigestColumnIsAdditive(t *testing.T) {
 
 	require.NoError(t, store.Migrate())
 	require.True(t, store.DB().Migrator().HasColumn(&StagedContentChange{}, "approved_sha512"))
+	require.True(t, store.DB().Migrator().HasColumn(&StagedContentChange{}, "approved_provider"))
+	require.True(t, store.DB().Migrator().HasColumn(&StagedContentChange{}, "approved_project_id"))
+	require.True(t, store.DB().Migrator().HasColumn(&StagedContentChange{}, "approved_version_id"))
+	require.True(t, store.DB().Migrator().HasColumn(&StagedContentChange{}, "approved_filename"))
 
 	var approved sql.NullString
 	require.NoError(t, store.DB().Raw(
@@ -114,6 +132,14 @@ func TestApprovedDigestColumnIsAdditive(t *testing.T) {
 	).Row().Scan(&approved))
 	require.False(t, approved.Valid, "migration must not invent approval for a legacy row")
 	require.Equal(t, "", approved.String)
+
+	for _, column := range []string{"approved_provider", "approved_project_id", "approved_version_id", "approved_filename"} {
+		var value sql.NullString
+		require.NoError(t, store.DB().Raw(
+			`SELECT `+column+` FROM staged_content_changes WHERE id = ?`, "legacy-reviewed",
+		).Row().Scan(&value))
+		require.False(t, value.Valid, "migration must not invent the approved release identity: %s", column)
+	}
 
 	var expectedLive string
 	require.NoError(t, store.DB().Raw(
