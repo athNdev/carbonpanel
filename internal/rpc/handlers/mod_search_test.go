@@ -7,14 +7,21 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
+	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCurseForgePreservesIncompatibleDependencies(t *testing.T) {
@@ -129,4 +136,70 @@ func TestModOnlineManager_CurseForgeKeylessProxyAndCDN(t *testing.T) {
 		downloadURL = "https://edge.forgecdn.net/files/" + "1234/567/" + f.FileName
 	}
 	assert.Equal(t, "https://edge.forgecdn.net/files/1234/567/testmod-1.0.jar", downloadURL)
+}
+
+// TestModOnlineManager_InstallWritesToPluginsDirectory proves the REST install
+// entry point takes the shared data-write gate before touching the node's data
+// directory, and writes plugin jars for the paper loader family.
+func TestModOnlineManager_InstallWritesToPluginsDirectory(t *testing.T) {
+	log := logger.New()
+	store := setupTestStore(t)
+	dataRoot := t.TempDir()
+	server := &storage.Server{
+		ID: "srv-paper", Name: "srv-paper", ModLoader: storage.ModLoaderPaper, MCVersion: "1.21.1",
+		NodeID: "local", DataPath: dataRoot, Status: storage.StatusStopped,
+	}
+	require.NoError(t, store.CreateServer(context.Background(), server))
+
+	jarBytes := []byte("fake-plugin-jar-contents")
+	var downloads atomic.Int32
+	mockCDN := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloads.Add(1)
+		_, _ = w.Write(jarBytes)
+	}))
+	t.Cleanup(mockCDN.Close)
+
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	manager := NewModOnlineManager(store, log, authMgr, policyEnforcer)
+
+	body, err := json.Marshal(InstallModsRequest{Items: []InstallModItem{
+		{Name: "ViaVersion", FileName: "ViaVersion-5.4.2.jar", DownloadURL: mockCDN.URL + "/ViaVersion-5.4.2.jar"},
+		{Name: "evil", FileName: "../escape.jar", DownloadURL: mockCDN.URL + "/escape.jar"},
+	}})
+	require.NoError(t, err)
+
+	// A reviewed candidate publication holds the exclusive gate. The REST
+	// entry point must refuse before downloading or creating the directory.
+	owned, err := datawrite.AcquireExclusive(context.Background(), server.ID)
+	require.NoError(t, err)
+	t.Cleanup(owned.Release)
+	blocked := httptest.NewRecorder()
+	manager.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv-paper/mods/install", bytes.NewReader(body)))
+	require.Equal(t, http.StatusConflict, blocked.Code, blocked.Body.String())
+	require.Contains(t, blocked.Body.String(), datawrite.ErrExclusiveHeld.Error())
+	require.Zero(t, downloads.Load())
+	require.NoDirExists(t, filepath.Join(dataRoot, "plugins"))
+	owned.Release()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv-paper/mods/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	manager.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp InstallModsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.True(t, resp.Success)
+	// Containment contract: filenames are reduced to their base name before
+	// the write, so a traversal path cannot escape the target directory.
+	assert.Contains(t, resp.Installed, "ViaVersion-5.4.2.jar")
+	assert.Contains(t, resp.Installed, "escape.jar", "traversal segments are stripped, not rejected: %+v", resp)
+	assert.Empty(t, resp.Errors, "%+v", resp)
+
+	// The paper loader's install target is the plugins directory.
+	written, err := os.ReadFile(filepath.Join(dataRoot, "plugins", "ViaVersion-5.4.2.jar"))
+	require.NoError(t, err, "plugin jar must land in <data>/plugins")
+	assert.Equal(t, jarBytes, written)
+
+	_, err = os.Stat(filepath.Join(dataRoot, "escape.jar"))
+	assert.True(t, os.IsNotExist(err), "confined write must not escape the plugins directory")
 }

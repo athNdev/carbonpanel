@@ -57,12 +57,12 @@ request.
    before this rule have no durable approval or release identity and are
    refused with re-review and re-stage guidance instead of deriving either from
    the current mutable sidecar. Ordinary unreviewed uploads carry neither
-   precondition and are unaffected. Apply validation carries the verified
-   digest into publication; the publish stream checks that carried value
-   instead of rereading the staged sidecar, so metadata rewritten between
-   validation and write cannot authorize different bytes. A mismatch refuses
-   the publication
-   without a live write or provider detail in the error.
+   precondition and are unaffected. Publication requires the durable
+   approved digest and release identity persisted at admission; the publish
+   stream checks those stored values instead of rereading the staged sidecar,
+   so metadata rewritten between admission and write cannot authorize
+   different bytes. A mismatch refuses the publication without a live write
+   or provider detail in the error.
 6. The apply window is committed before the first staged byte is visible, and
    the window, staged rows and target-uniqueness check run under the existing
    per-server operation journal. A batch with unrelated reviewed changes under
