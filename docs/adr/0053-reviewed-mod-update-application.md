@@ -128,4 +128,8 @@ request.
   the fail-closed family gates enumerate mounted RPCs, so additive fields on
   an existing procedure avoid a new catalog/matrix/tool tuple.
 - A policy can only stage compatible, unexcluded, not-already-staged updates;
-  it cannot force an unknown or modified jar into the live tree.
+  it cannot force an unknown or modified jar into the live tree. A policy that
+  skips running servers is re-evaluated under the staging journal with a fresh
+  server row, so a start during provider retry or download skips before the
+  batch or any staged byte is written. Manual review does not consult that
+  policy.

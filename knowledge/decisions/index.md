@@ -56,6 +56,7 @@
 - [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
 - [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
+- [One data-write gate for panel writes and staged publication](data-write-gate.md) — Ordinary panel file mutations take a shared per-server lease; staged publication owns the same path exclusively from before its undo snapshot through rollback.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.

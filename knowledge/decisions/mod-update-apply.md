@@ -1,4 +1,4 @@
-﻿---
+---
 type: Decision
 title: Reviewed mod update application
 description: Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
@@ -49,6 +49,10 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   from before durable approval or release identity is refused with re-review
   and re-stage guidance rather than trusting the mutable sidecar. Unreviewed
   uploads keep their existing path.
+- Staged publication holds the per-server data-write lease exclusively from
+  before the undo snapshot through rollback. Direct panel writes take the
+  shared lease and are refused with a retryable error while publication owns
+  the path; see [Data-write gate](data-write-gate.md).
 - Reviewed content checks the complete window before work, at batch
   preparation, and at row insertion. Config targeting an open batch with
   content or an independent cron row must match its complete window. A

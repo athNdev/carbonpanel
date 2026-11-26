@@ -19,14 +19,22 @@ the time that stretch started is stored on the batch. A player joining clears
 it. Deep sleep commits the batch onto the stopped server and does not start
 the JVM. A running server is saved and restarted once. A frozen server gets a
 real stop and start and is left running. If that publish fails, the previous
-files and config are restored and the batch stays open. A refusal proven to
-happen before a reviewed writer commits, such as a staged digest mismatch,
-rolls back only targets that attempt mutated; unchanged live files are not
-rewritten. An interrupted publication or an unprovable commit outcome keeps the
-full snapshot restore. Failed publications keep rows staged and reconcile
+files and config are restored from the snapshot and the batch stays open. An
+interrupted publication or an unprovable commit outcome also keeps the full
+snapshot restore. Failed publications keep rows staged and reconcile
 rolled-back batch configs; retries after completed publication only finish
 bookkeeping. A live config field that moved after it was staged stops the
 publish before anything is written.
+
+The publisher owns the server data path exclusively from before the undo
+snapshot through publication and any rollback. Ordinary panel file writes,
+uploads, deletes, renames, copies, archive creation, extraction and remote
+archive download take a shared lease on the same path and are refused while a
+publication owns it. A next-restart commit keeps that ownership in its returned
+handle until the start/restart caller calls `Finish` or `Undo`. A reviewed
+target's live digest is checked again immediately before its writer commits;
+that guard is typed and bound to the target, but an out-of-band process is not
+an atomic compare-and-swap. See ADR 0056.
 
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same
