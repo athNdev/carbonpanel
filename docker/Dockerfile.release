@@ -4,6 +4,8 @@ FROM --platform=$BUILDPLATFORM alpine:3.24.4 AS certificates
 RUN apk add --no-cache ca-certificates
 
 FROM alpine:3.24.4
+# time.LoadLocation needs the IANA database for named task timezones.
+RUN apk add --no-cache tzdata
 ARG TARGETARCH
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}

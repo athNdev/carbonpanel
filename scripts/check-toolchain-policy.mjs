@@ -26,6 +26,19 @@ expect(
 	/const expected = process\.env\.BUF_VERSION \|\| '([^']+)'/,
 	policy.buf
 );
+// time.LoadLocation resolves named zones from the shipped runtime image, so
+// every panel runtime stage must carry the IANA database.
+function finalStage(path) {
+	const text = read(path);
+	const start = text.lastIndexOf('\nFROM ');
+	return start < 0 ? text : text.slice(start);
+}
+for (const name of ['carbon-panel', 'release']) {
+	const path = `docker/Dockerfile.${name}`;
+	if (!/^\s*RUN\s+apk\s+(?:--no-cache\s+)?add\b[^\n]*\btzdata\b/m.test(finalStage(path))) {
+		throw new Error(`${path}: runtime stage must install tzdata for named timezones`);
+	}
+}
 let bunActions = 0;
 let bufActions = 0;
 for (const name of readdirSync(join(root, '.github/workflows')).filter((name) =>

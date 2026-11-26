@@ -35,6 +35,13 @@ test('toolchain gate accepts consistent defaults and detects image and CI drift'
 		assert.notEqual(imageFailure.status, 0);
 		assert.match(imageFailure.stderr, /Dockerfile.status/);
 		writeFileSync(image, imageSource);
+		const release = join(root, 'docker/Dockerfile.release');
+		const releaseSource = readFileSync(release, 'utf8');
+		writeFileSync(release, releaseSource.replace('RUN apk add --no-cache tzdata', ''));
+		const timezoneFailure = check();
+		assert.notEqual(timezoneFailure.status, 0);
+		assert.match(timezoneFailure.stderr, /Dockerfile\.release.*tzdata/);
+		writeFileSync(release, releaseSource);
 		const workflow = join(root, '.github/workflows/toolchain-policy.yml');
 		const policy = JSON.parse(readFileSync(join(root, 'toolchain-versions.json'), 'utf8'));
 		writeFileSync(
