@@ -598,8 +598,8 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
         raise RehearsalError("controller-side remote storage does not match the fixture")
 
     config_path = fixture.get("controller_config")
-    if not config_path:
-        raise RehearsalError("fixture has no controller configuration")
+    if not config_path or Path(config_path) != workspace / "config.yaml":
+        raise RehearsalError("fixture configuration must be config.yaml in the workspace")
     _inside(config_path, workspace, "controller configuration")
     if sha256_file(config_path) != fixture.get("controller_config_sha256"):
         raise RehearsalError("controller configuration changed after the fixture was created")
@@ -619,8 +619,8 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
     if labels.get("org.opencontainers.image.revision") != commit:
         raise RehearsalError("fixture controller image revision is not the candidate commit")
     command = container_config.get("Cmd") or []
-    if str(fixture.get("controller_config")) not in [str(item) for item in command]:
-        raise RehearsalError("fixture controller was not started with the recorded config")
+    if command != ["./carbon-panel", "-config", str(workspace)]:
+        raise RehearsalError("fixture controller was not started with the config directory")
     if (observation.get("HostConfig") or {}).get("NetworkMode") != "host":
         raise RehearsalError("fixture controller does not share the runner loopback")
     if not any(mount.get("Type") == "bind" and mount.get("Source") == str(workspace) and

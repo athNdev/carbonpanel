@@ -286,7 +286,7 @@ docker run -d --cidfile "$work/controller.cid" --name "$controller" --network ho
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$work:$work" \
   -e TZ=UTC \
-  "$image" ./carbon-panel -config "$work/config.yaml" \
+  "$image" ./carbon-panel -config "$work" \
   > "$evidence/controller-id.txt"
 controller_id=$(cat "$work/controller.cid")
 owned_container "$controller" "$controller_id"
@@ -298,6 +298,7 @@ for _ in $(seq 1 120); do
     ready=1
     break
   fi
+  [[ "$(docker inspect "$controller_id" --format '{{.State.Running}}')" == true ]] || break
   sleep 1
 done
 if [[ "$ready" != 1 ]]; then

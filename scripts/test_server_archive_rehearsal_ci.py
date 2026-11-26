@@ -465,7 +465,7 @@ def fixture_inspector(fixture, commit):
             "HostConfig": {"NetworkMode": "host"},
             "Config": {
                 "Labels": {**run_labels, "org.opencontainers.image.revision": commit},
-                "Cmd": ["./carbon-panel", "-config", fixture["controller_config"]],
+                "Cmd": ["./carbon-panel", "-config", fixture["workspace"]],
             },
             "Mounts": [{
                 "Type": "bind", "Source": fixture["workspace"],
@@ -564,6 +564,18 @@ class HostedFixtureBindingTests(unittest.TestCase):
             return payload
         with self.assertRaisesRegex(rehearsal.RehearsalError, "revision"):
             self.verify(inspector=wrong_revision)
+
+    def test_controller_must_receive_directory_instead_of_config_file(self):
+        base_inspector = fixture_inspector(self.fixture, self.commit)
+
+        def inspect_file_argument(container_id, local_docker):
+            observation = base_inspector(container_id, local_docker)
+            if container_id == self.fixture["controller_id"]:
+                observation["Config"]["Cmd"][-1] = self.fixture["controller_config"]
+            return observation
+
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "config directory"):
+            self.verify(inspector=inspect_file_argument)
 
     def test_requires_local_runner_docker_socket(self):
         with self.assertRaisesRegex(rehearsal.RehearsalError, "runner socket"):
