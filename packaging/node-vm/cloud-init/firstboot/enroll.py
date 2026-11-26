@@ -165,7 +165,9 @@ def _der_tlv(data, offset, limit):
         if count == 0 or count > 4 or pos + count > limit:
             raise ValueError("invalid DER length")
         length = int.from_bytes(data[pos:pos + count], "big")
-        if length < 0x80:
+        if length < 0x80 or data[pos] == 0:
+            # DER requires the shortest long-form length: no redundant leading
+            # zero and never a long form for a value below 0x80.
             raise ValueError("non-minimal DER length")
         pos += count
     else:
@@ -195,6 +197,12 @@ def _parse_csr_pre(csr_pre):
     oid_tag, oid_content, _, oid_end = _der_tlv(csr_pre, alg_content, alg_end)
     if oid_tag != 0x06:
         raise ValueError("enrollment CSR_PRE signature algorithm is malformed")
+    if oid_end != alg_end:
+        # RFC 8410 requires absent AlgorithmIdentifier parameters for Ed25519;
+        # the shared Go authority rejects a non-empty parameters field.
+        raise ValueError(
+            "enrollment CSR_PRE signature algorithm parameters are not permitted",
+        )
     signature_algorithm = csr_pre[oid_content:oid_end]
     sig_tag, sig_content, sig_length, sig_end = _der_tlv(csr_pre, alg_end, end)
     if sig_tag != 0x03 or sig_end != end or sig_length < 2 or csr_pre[sig_content] != 0:
@@ -536,11 +544,14 @@ def write_identity(bundle, secret, out_dir):
 def first_boot_identity(instance_id, node_label, policy, keypair, rng=None,
                         rng_salt=None):
     """Pure orchestration of first-boot identity; deterministic when deps injected."""
-    scoped = policy.get("policy", policy)
-    random_bytes = generate_secret(scoped["first_boot"]["generate_secret_bits"], rng)
+    # Validate the same strict secret/salt bounds that saved-identity reuse
+    # enforces BEFORE consuming entropy, so generation can never persist a
+    # record that load_identity() rejects on the next boot.
+    secret_bytes, salt_bytes = _identity_sizes(policy)
+    random_bytes = generate_secret(secret_bytes * 8, rng)
     # The shared ClaimEnrollmentRequest carries the secret in a protobuf string.
     secret = base64.urlsafe_b64encode(random_bytes).rstrip(b"=")
-    salt = generate_salt(scoped["first_boot"]["generate_salt_bytes"], rng_salt or rng)
+    salt = generate_salt(salt_bytes, rng_salt or rng)
     node_id = derive_node_id(instance_id)
     bundle, digest, secret = build_preregistration_bundle(
         node_id, node_label, salt, secret, keypair, policy,
@@ -775,6 +786,9 @@ def ensure_identity(out, instance_id, node_label, policy):
     node_id = derive_node_id(instance_id)
     if out.exists() or out.is_symlink():
         return load_identity(out, node_id, node_label, policy)
+    # Fail before key generation or any staged write when the policy sizes are
+    # unusable; first_boot_identity repeats this check for direct callers.
+    _identity_sizes(policy)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".enrollment-", dir=out.parent) as tmp:
         # Publish the key, secret, and bundle together. A failed first boot can

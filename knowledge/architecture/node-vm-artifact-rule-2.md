@@ -16,7 +16,11 @@ complete saved preregistration record passes strict bounded base64, node/key/
 fingerprint/digest checks, policy-equal `contract_ref`, `object_id_binding` and
 bootstrap scopes, and the same `CSR_PRE` assertions as the shared authority:
 one self-signed Ed25519 PKCS#10 DER request whose SPKI equals the approved key,
-plus a detached proof made by that key. No reserialized CSR bytes are assumed.
+plus a detached proof made by that key. Der framing is canonical (no redundant
+leading zero in a long-form length) and the Ed25519 signature algorithm has no
+parameters, matching the shared Go authority. No reserialized CSR bytes are
+assumed. First-boot generation validates the strict secret/salt size bounds
+before consuming entropy, so it cannot persist a record that reuse rejects.
 Missing, malformed or inconsistent state is preserved and refused; pre-hardening
 records (raw token, missing `node.key`, signed-JSON pseudo-CSR) are refused
 read-only with no automatic migration. Use a signed PKCS#10 DER `CSR_PRE` and an

@@ -66,17 +66,21 @@ The Ed25519 key (`node.key`), opaque secret (`enrollment-secret.bin`) and bundle
 identity reuses the existing files only after every required preregistration
 field decodes within strict base64 bounds and the saved `CSR_PRE` passes the
 same assertions as the shared authority: one self-signed PKCS#10 DER request,
-Ed25519-only, whose public key equals the approved SPKI. No reserialized CSR
-bytes are compared. Its detached `csr_pre_signature` must also verify with the
-stored `node.key`, and `contract_ref`, `object_id_binding` and
+Ed25519-only, whose public key equals the approved SPKI. The DER framing is
+canonical (no redundant leading zero in a long-form length) and the Ed25519
+signature algorithm has no parameters, as the shared Go authority requires. No
+reserialized CSR bytes are compared. Its detached `csr_pre_signature` must also
+verify with the stored `node.key`, and `contract_ref`, `object_id_binding` and
 `bootstrap_scopes` must equal the checked-in enrollment policy. Missing,
 malformed or inconsistent state requires operator review and is preserved on
 failure; an existing identity is never overwritten or regenerated. A
 pre-hardening record (raw token, missing `node.key` or signed-JSON pseudo-CSR)
 is refused read-only and requires explicit operator re-provisioning; there is
-no automatic migration. The secret encodes 256 random bits as unpadded
-base64url so it can cross the shared protobuf string field. `CSR_PRE` is a
-signed PKCS#10 DER request for the same key.
+no automatic migration. First-boot generation applies the same strict
+secret/salt size bounds as reuse before consuming entropy, so an invalid policy
+is refused without writing an identity. The secret encodes the policy-defined
+random bytes as unpadded base64url so it can cross the shared protobuf string
+field. `CSR_PRE` is a signed PKCS#10 DER request for the same key.
 
 The default NoCloud network seed requests IPv4 DHCP on predictable Ubuntu
 Ethernet interface names (`en*`). Attach the VM only to the intended private

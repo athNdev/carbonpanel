@@ -587,6 +587,135 @@ class SavedIdentityTests(unittest.TestCase):
                 self.assertEqual(self._snapshot(out), before)
 
 
+class DerRefusalTests(unittest.TestCase):
+    """Direct benign DER refusals; no crypto operations or service use."""
+
+    def test_long_form_length_rejects_redundant_leading_zero(self):
+        value = b"x" * 128
+        canonical = b"\x04\x81\x80" + value
+        tag, content, length, end = enroll._der_tlv(canonical, 0, len(canonical))
+        self.assertEqual((tag, content, length, end), (0x04, 3, 128, len(canonical)))
+
+        redundant = b"\x04\x82\x00\x80" + value
+        with self.assertRaises(ValueError) as refused:
+            enroll._der_tlv(redundant, 0, len(redundant))
+        self.assertIn("non-minimal DER length", str(refused.exception))
+
+        redundant_wide = b"\x04\x83\x00\x01\x00" + b"x" * 256
+        with self.assertRaises(ValueError) as refused:
+            enroll._der_tlv(redundant_wide, 0, len(redundant_wide))
+        self.assertIn("non-minimal DER length", str(refused.exception))
+
+    def test_long_form_length_is_refused_below_short_form_threshold(self):
+        for encoded in (b"\x04\x81\x7f", b"\x04\x82\x00\x7f"):
+            with self.subTest(encoded=encoded):
+                data = encoded + b"x" * 127
+                with self.assertRaises(ValueError) as refused:
+                    enroll._der_tlv(data, 0, len(data))
+                self.assertIn("non-minimal DER length", str(refused.exception))
+
+    @staticmethod
+    def _minimal_csr(algorithm_identifier):
+        info = b"\x30\x00"  # empty CertificationRequestInfo; only framing matters
+        signature = b"\x03\x41\x00" + b"\x00" * enroll.ED25519_SIGNATURE_BYTES
+        body = info + algorithm_identifier + signature
+        return b"\x30" + bytes([len(body)]) + body
+
+    def test_csr_signature_algorithm_accepts_absent_ed25519_parameters(self):
+        csr = self._minimal_csr(b"\x30\x05\x06\x03\x2b\x65\x70")
+        tbs, oid, signature = enroll._parse_csr_pre(csr)
+        self.assertEqual(tbs, b"\x30\x00")
+        self.assertEqual(oid, enroll.ED25519_OID)
+        self.assertEqual(len(signature), enroll.ED25519_SIGNATURE_BYTES)
+
+    def test_csr_signature_algorithm_rejects_remaining_parameters(self):
+        # Ed25519 AlgorithmIdentifier with a redundant NULL parameters field.
+        csr = self._minimal_csr(b"\x30\x07\x06\x03\x2b\x65\x70\x05\x00")
+        with self.assertRaises(ValueError) as refused:
+            enroll._parse_csr_pre(csr)
+        self.assertIn("parameters are not permitted", str(refused.exception))
+
+
+class IdentityPolicyTests(unittest.TestCase):
+    """Offline first-boot policy bounds and no-write refusal."""
+
+    def setUp(self):
+        self.policy = json.loads(POLICY_PATH.read_text())
+
+    @staticmethod
+    def _bad_size_cases():
+        return {
+            "secret below minimum": ("generate_secret_bits", 128),
+            "secret above maximum": ("generate_secret_bits", enroll.MAX_SECRET_BYTES * 8 + 8),
+            "secret not byte aligned": ("generate_secret_bits", 257),
+            "salt below minimum": ("generate_salt_bytes", 8),
+            "salt above maximum": ("generate_salt_bytes", enroll.MAX_SALT_BYTES + 1),
+        }
+
+    def test_checked_in_and_qualified_identity_sizes_are_accepted(self):
+        self.assertEqual(enroll._identity_sizes(self.policy), (32, 16))
+        policy = json.loads(json.dumps(self.policy))
+        policy["policy"]["first_boot"].update(
+            generate_secret_bits=enroll.MAX_SECRET_BYTES * 8,
+            generate_salt_bytes=enroll.MAX_SALT_BYTES,
+        )
+        self.assertEqual(
+            enroll._identity_sizes(policy),
+            (enroll.MAX_SECRET_BYTES, enroll.MAX_SALT_BYTES),
+        )
+
+    def test_first_boot_refuses_invalid_policy_sizes_before_entropy(self):
+        for name, (field, value) in self._bad_size_cases().items():
+            with self.subTest(case=name):
+                policy = json.loads(json.dumps(self.policy))
+                policy["policy"]["first_boot"][field] = value
+                calls = []
+
+                def rng(n):
+                    calls.append(n)
+                    return b"\x00" * n
+
+                with self.assertRaises(ValueError):
+                    enroll.first_boot_identity(
+                        "instance-a", "fixture-a", policy,
+                        enroll.FakeKeyPair("fixture-key"), rng=rng,
+                    )
+                self.assertEqual(calls, [])
+
+    def test_invalid_policy_sizes_refuse_before_writing_identity(self):
+        for name, (field, value) in self._bad_size_cases().items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "enrollment"
+                policy = json.loads(json.dumps(self.policy))
+                policy["policy"]["first_boot"][field] = value
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError):
+                        enroll.ensure_identity(out, "instance-a", "fixture-a", policy)
+                self.assertFalse(out.exists())
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_offline_first_boot_writes_reusable_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                bundle = enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            first = snapshot_identity(out)
+            self.assertEqual(set(first), {
+                "node.key", "enrollment-bundle.json", "enrollment-secret.bin",
+            })
+            node_id = enroll.derive_node_id("instance-a")
+            with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                self.assertEqual(
+                    enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy),
+                    bundle,
+                )
+                self.assertEqual(
+                    enroll.load_identity(out, node_id, "fixture-a", self.policy),
+                    bundle,
+                )
+            self.assertEqual(snapshot_identity(out), first)
+
+
 @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("openssl"),
                      "requires Linux guest OpenSSL")
 class GuestIdentityTests(unittest.TestCase):
