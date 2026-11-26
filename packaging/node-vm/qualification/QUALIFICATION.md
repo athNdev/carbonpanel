@@ -4,12 +4,13 @@ Status: **DESIGN + OFFLINE FIXTURES + DISPOSABLE QEMU GUEST RUNS + A LINUX
 CONTROLLER/AGENT FIXTURE, plus directly retrieved upstream base-image
 provenance.** No live host VM has been created, altered, provisioned or deleted
 by this lane. No global host configuration was changed. No live enrollment,
-daemon, game server, registry push or release was run. Disposable overlays
-booted twice under UEFI/TCG. A separate Linux-only fixture now covers challenge,
-scoped mTLS, heartbeat and a fake-daemon health probe against the real shared
-enrollment authority and agent; effective isolation, a real managed daemon and
-guest-to-controller enrollment remain unqualified. Exact run digests and limits
-are in [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md).
+daemon, game server, registry push or release was run. Disposable amd64 and
+arm64 overlays booted under UEFI/TCG on QEMU; the arm64 run includes a clean
+reboot and a second instance identity. A separate Linux-only fixture covers
+challenge, scoped mTLS, heartbeat and a fake-daemon health probe against the
+real shared enrollment authority and agent; effective isolation, a real managed
+daemon and guest-to-controller enrollment remain unqualified. Exact run digests
+and limits are in [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md).
 
 ## Real base-image provenance (direct official-source retrieval, 2026-11-18)
 
@@ -35,7 +36,7 @@ used only by offline tests; artifact mode fails closed on them.
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids + observed first-boot bundle for the qualified instance | Two concurrently live VMs with completed out-of-band registration |
 | Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
 | Controller mTLS, heartbeat and health | Linux-only controller/agent fixture: real production enrollment authority + real `agent.Run`, TLS 1.3 channel binding, scoped certificate, preflight/heartbeat, restart reuse, anonymous/unenrolled/cross-node/revoked refusals, fake-daemon pin | Guest-to-controller claim over a real VM network, a production-mounted control RPC and a real dockerd |
-| Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. | arm64 boot, Proxmox/libvirt host deployment and live standby recovery |
+| Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. Disposable arm64 QEMU `virt`/UEFI boots wrote root-only enrollment files, retained them across a QMP-driven clean reboot, and produced a different node ID for a second instance-id. | arm64 20 GiB expansion, Proxmox/libvirt host deployment and live standby recovery |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
 ## Current disposable-run evidence (2026-11-19 through 2026-11-26)
@@ -60,14 +61,37 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   the root partition and ext4. The second retained the byte-identical bundle
   and private file modes, emitted no new enrollment identity, and shut down
   cleanly through ACPI.
+- The pinned arm64 image booted on QEMU `virt` with AAVMF UEFI and TCG at the
+  base 3.5 GiB virtual size. The first boot completed cloud-init and emitted
+  node ID `node-78805a9750fa9efee1fb830643f1b893`; `debugfs` showed a `0700`
+  root-owned enrollment directory with `0600` key, bundle and secret files. A
+  clean second boot completed cloud-init, was powered down through QMP, emitted
+  no new identity, and retained the byte-identical bundle. A second disposable
+  instance with a distinct instance-id emitted the different node ID
+  `node-8bd7872baf90ee073c7238d87d4f8730`. The 20 GiB arm64 expansion is not
+  qualified because the guest did not find its BOOT/UEFI labels before
+  `growpart`; the amd64 20 GiB evidence is separate.
 - A Linux-only controller/agent fixture ran the real shared enrollment
   authority and `agent.Run` over loopback TLS 1.3. It passed challenge,
   TLS-bound claim, scoped mTLS, preflight/heartbeat, persisted-credential reuse
   and refusal cases. Its daemon is a fake Docker HTTP API on a test Unix socket.
   This is controller/agent protocol evidence, not a VM-variant qualification.
+- Deployed guest enrollment still depends on the product starting its dedicated
+  TLS 1.3 enrollment listener for `nodeEnrollmentHandler`; that handler is
+  test-only in the current tree and the general mux deliberately does not mount
+  `NodeControlService`. This lane did not mount broad production RPCs to close
+  that gap.
 - Live guest-to-controller registration over a real VM network, a real managed
-  daemon, a production-mounted control RPC, arm64 and the Proxmox/libvirt
-  deployment matrix remain open.
+  daemon, a production-mounted control RPC and the Proxmox/libvirt deployment
+  matrix remain open. The QEMU arm64 guest path is covered separately from any
+  production controller listener.
+- The helper now selects `-cpu max` (TCG) or `-cpu host` (KVM) for aarch64,
+  because QEMU's `virt` default is a 32-bit ARM CPU. A checked hosted path
+  (`scripts/node_vm_arm64_acceptance.py` and
+  `.github/workflows/node-vm-arm64-acceptance.yml`) runs two distinct
+  instance-ids on an ephemeral `ubuntu-24.04-arm` runner, checks out
+  `github.sha`, and uploads only an allowlisted receipt. It was prepared but not
+  dispatched for this evidence.
 - `scripts/node_vm_boot_qual.py` now resolves OVMF/edk2 for UEFI (failing closed
   instead of falling back to BIOS), copies a fresh private variable store per
   run, and can request an expanded qcow2 overlay. Each attempt requires a fresh
@@ -88,7 +112,9 @@ worlds/backups from other installations are never touched.
    no secret appears in seed, serial console output or VM metadata. Verify a
    unique `node_id` for two VMs with different instance-ids. *Disposable amd64
    tests cover identity persistence across second boots in both disk profiles.
-   The arm64 and two concurrent VM runs remain open.*
+   Disposable arm64 tests cover a first boot, a clean reboot and a distinct
+   second instance-id at the base disk size. Concurrent VMs and the arm64 20 GiB
+   expansion remain open.*
 2. **Enrollment refusal.** With the SHARED ADR0019 contract, verify a valid
    operator-approved key + fresh post-challenge signature enrolls; a mismatched
    key, replayed nonce, caller-declared fingerprint or CSR_PRE-as-proof is

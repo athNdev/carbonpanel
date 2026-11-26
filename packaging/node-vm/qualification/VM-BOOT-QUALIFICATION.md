@@ -3,7 +3,8 @@
 Sections 1–10 record the original provenance run before a QEMU runner was
 available. Sections 12 onward record the later QEMU results. The runtime
 publication entry point still emits an offline plan. These boots use disposable
-overlays of the pinned upstream image and a generated NoCloud seed.
+overlays of the pinned upstream image and a generated NoCloud seed. Section 18
+adds the arm64 `virt`/UEFI run; it does not replace the amd64 evidence.
 
 The shipped `carbon-node` command is a preflight/doctor CLI, and the Panel's
 `NodeControlService` is deliberately unmounted. Managed-node mTLS enrollment,
@@ -551,3 +552,190 @@ Coverage limits, stated plainly:
 End-to-end VM acceptance still requires guest enrollment through the installed
 controller, a production-mounted control service, health checks against a real
 daemon and isolation checks.
+
+## 18. arm64 QEMU virt/UEFI boot, clean reboot and second identity (2026-11-26)
+
+This run adds disposable arm64 guest evidence without touching a host service,
+Proxmox, libvirt, Docker, a registry or a release. The host was a Windows
+workstation with WSL2 Ubuntu 24.04 x86_64; it had no system
+`qemu-system-aarch64`, no AAVMF firmware and no `/dev/kvm`. The arm64 emulator
+and firmware were unpacked from signed Ubuntu 24.04 packages into a task-owned
+directory and run from there. Nothing was installed system-wide:
+`dpkg -l qemu-system-arm qemu-system-common` still reported `un`, and
+`/usr/bin/qemu-system-aarch64` and `/usr/share/AAVMF` did not exist.
+
+The task-owned inputs and toolchain were:
+
+| Input | Exact version or SHA256 |
+| --- | --- |
+| Base image | pinned `ubuntu-24.04-arm64`, 616,522,752 bytes, `50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e` |
+| Published `SHA256SUMS` | `0449a33b78dddb301a3ce2b80398984bc3e1f7880e27b86a31e58bdcbd3d3816`; actual image digest equal to the pin and published row |
+| QEMU | Ubuntu `qemu-system-arm 1:8.2.2+ds-0ubuntu1.18`; extracted binary reports 8.2.2, TCG |
+| QEMU packages | `qemu-system-arm` deb `06184a21b9c8dc573ab6d255e9826cc4732df90e56bd65c52e92ad640af4d60a`; `qemu-system-common` `0a0b744f31e87d72dd0465436b8dfbb1ef9f574ecd0d5a2e9dd8c5cb7d0fef1f`; `qemu-system-data` `a14b88d864859bd61c8a3274971da4ecb7da6cec15be6c265d0d411f783d5f2e`; `ipxe-qemu` `1f1612934b6ddaf4dd633760dfe5ef2a79ea2507341fd5efe394ff589a044707`; `libfdt1` `274d20dfab9d6b216b5de85446a93f6ce5b2cd82c847b8dfdc508577f76eb96a` |
+| UEFI firmware | `qemu-efi-aarch64 2024.02-2ubuntu0.10`, deb `fad8e80e929cd00dae8c5c8e5dd3ec85f37d9a832eea776957e5e2cf86ef2ab5`; AAVMF code `545e2eda871a00dba51c0df48a34829fe3b0de6ec10ea760c75f1fc1c6a29dc5`; variable template `b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f` |
+| Seed ISO, instance A | `b5ba06c72c9eebfb07373a89577ceac6b06769cf4fa4faa037dfdc2df52232e0` |
+| Seed ISO, instance B | `9a6b4a0ae7a7b864337b8281c8c8a7574dd8945a15f29c2379a914632091dcd9` |
+| Overlay format | QCOW2, virtual size 3,758,096,384 bytes (3.5 GiB), base backing file read-only |
+
+The first-boot command was the same for both instance IDs except for the work
+directory, seed and overlay:
+
+```sh
+qemu-system-aarch64 -L "$TOOLS/usr/share/qemu" -m 2048 -smp 2 -cpu max \
+  -machine virt -accel tcg \
+  -drive "file=$WORK/boot-disk.qcow2,if=virtio,format=qcow2" \
+  -drive "file=$WORK/seed.iso,if=virtio,format=raw,readonly=on,media=cdrom" \
+  -drive "if=pflash,format=raw,readonly=on,file=$TOOLS/usr/share/AAVMF/AAVMF_CODE.fd" \
+  -drive "if=pflash,format=raw,file=$WORK/uefi-vars.fd" \
+  -device virtio-net-pci,netdev=net0 \
+  -netdev user,id=net0,restrict=on \
+  -nographic -serial "file:$WORK/serial-first.log" -monitor none -no-reboot
+```
+
+`$TOOLS` is the unpacked package tree and `$WORK` is the per-instance
+task-owned work directory. The user-mode netdev used `restrict=on` with no
+host-forward; the guest booted from the NoCloud CD-ROM at `/dev/vdb`.
+
+### 18.1 Architecture and firmware checks
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Pinned arm64 bytes | PASS | `node_vm_verify_image.py --ref ubuntu-24.04-arm64` returned `bytes_verified: true`; actual, pinned and published SHA256 all equal |
+| arm64 guest on the declared machine | PASS | QEMU `virt` with `-cpu max`; AAVMF code/vars pflash; serial reported the `armv8_pmuv3_0` PMU and ACPI `virt` devices |
+| UEFI rather than BIOS | PASS | AAVMF pflash pair only; serial reported `secureboot: Secure Boot disabled` (the non-secure-boot AAVMF code variant), no SeaBIOS |
+| Software acceleration | PASS | `-accel tcg`; `/dev/kvm` absent |
+| Clean first boot to the declared reboot | PASS | guest logged `reboot: Restarting system`; QEMU exited `0` under `-no-reboot` |
+| First boot serial | PASS, 86,274 bytes | SHA256 `f34f2b07b1faa1c0d19641233334b5e4abf2f3e2ae9885fcc99a375c9f8e2f5f` |
+
+The expanded 20 GiB arm64 profile was attempted first and is **not qualified**.
+The kernel reported the original GPT alternate header at the base image end
+(`7340031 != 41943039`), then `/dev/disk/by-label/BOOT` and
+`/dev/disk/by-label/UEFI` timed out and the guest entered emergency mode; no
+enrollment completed. That attempt's serial SHA256 was
+`b8f064df9164436cc3700713a11d15ba6b65e5a14c9e59e40da79770d8236681`. The
+successful arm64 runs therefore use the base 3.5 GiB virtual size. The expanded
+20 GiB path remains qualified on amd64 only (section 16), not on arm64.
+
+### 18.2 First-boot identity and root-only enrollment files
+
+Both instances completed cloud-init with the NoCloud datasource
+(`DataSourceNoCloud [seed=/dev/vdb]`) and emitted the public first-boot JSON to
+the serial console.
+
+| Instance | Instance ID | Public node ID | Approved key fingerprint |
+| --- | --- | --- | --- |
+| A | `oss377-arm64-qual-20261126-a` | `node-78805a9750fa9efee1fb830643f1b893` | `b34e78ec614d5dc89c120e0fabe0ad7b03f103b460b9fc6ebac6e576d4d24748` |
+| B | `oss377-arm64-qual-20261126-b` | `node-8bd7872baf90ee073c7238d87d4f8730` | `195f425da602f7e06d5b36da1f674af6a96104746f5afeba56becee33a3715a9` |
+
+Instance A's node ID equals the deterministic
+`node-` + first 32 hex characters of SHA-256 over its instance ID. Instance B's
+node ID is different and equals the same derivation for its own instance ID, so
+two distinct instance IDs produced two distinct public node IDs.
+
+Read-only ext4 inspection through a read-only loop device and `debugfs` (no
+mount, no write) found for both instances:
+
+- `/var/lib/carbon-node/enrollment` inode mode `0700`, `root:root`.
+- `node.key`, `enrollment-bundle.json`, `enrollment-secret.bin` each mode
+  `0600`, `root:root`.
+- Instance A bundle: 1,112 bytes, SHA256
+  `906ada1a954e1ef60ee5415495478549bd38afad6a37c7b8e8ce96960d690322`.
+  Instance B bundle: 1,112 bytes, SHA256
+  `796aef4d4d3a234380e8d92ddb47668f2a585884aa4c4f23a7ed54be739a7c28`.
+- Both bundles contain only public/derived enrollment material:
+  `approved_key_fingerprint`, `approved_public_key_spki`, `bootstrap_scopes`,
+  `contract_ref`, `csr_pre`, `csr_pre_signature`, `enrollment_salt`,
+  `enrollment_secret_digest`, `node_id`, `node_label`, `object_id_binding`,
+  contract flags. Neither bundle contained a secret, token, password or private
+  key field. The scopes were `BeginEnrollmentChallenge` and `ClaimEnrollment`.
+- The secret file was 43 bytes and the node key 119 bytes; neither was printed,
+  copied into the repository or uploaded. Only inode metadata (mode, owner,
+  size) was recorded for them.
+
+The serial scans found no `BEGIN PRIVATE KEY`/`BEGIN CERTIFICATE`/token
+assignment markers. This is a marker scan, not a proof that no secret exists
+anywhere in the guest.
+
+### 18.3 Clean reboot and identity persistence
+
+The second boot reused the verified byte-identical instance-A overlay, UEFI
+variable store and seed ISO. It omitted `-no-reboot` and added a private QMP
+socket:
+
+```sh
+qemu-system-aarch64 ... -qmp "unix:$WORK/qmp.sock,server=on,wait=off"
+```
+
+After cloud-init reported `finished`, the host sent the QEMU monitor
+`system_powerdown` command. The guest logged `reboot: Power down`, QEMU exited
+`0`, and the serial log was 86,104 bytes with SHA256
+`683560ce1973cb1e42b34bc30404e083c11e41037ff49da40e03f027e853d7b4`.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Second boot cloud-init | PASS | `Cloud-init v. 26.1 ... finished ... Datasource DataSourceNoCloud` |
+| Clean guest shutdown | PASS | QMP ACPI powerdown, guest `reboot: Power down`, QEMU exit `0` |
+| No repeated enrollment/identity marker | PASS | second serial has no enroll stdout JSON and no node ID; the first-boot identity step did not rerun |
+| Enrollment bundle persistence | PASS | bundle SHA256 remained `906ada1a...`; inode mode `0600`, directory `0700`, owner `root:root`, mtime unchanged |
+| Disk integrity after shutdown | PASS | `qemu-img check` reported `No errors were found on the image` after the second boot |
+
+This is a real clean reboot of the same disposable arm64 guest, not a second
+fresh VM and not a host reboot.
+
+### 18.4 Second identity
+
+Instance B was a fresh overlay of the same verified base, with a fresh
+task-owned UEFI variable store and a seed generated for
+`oss377-arm64-qual-20261126-b`. It completed cloud-init and rebooted cleanly
+(serial 92,886 bytes, SHA256
+`853883c5607fe928a71a2d7f7b0b4b442985cf01e21dc8fa047d30ee484065a6`), wrote the
+same root-only file layout, and emitted the different public node ID and
+fingerprint in 18.2. Its bundle differs from A's and its independently generated
+identity material produced a different fingerprint. This is a distinct
+disposable first boot, not two concurrently live VMs.
+
+### 18.5 Host boundary and non-claims
+
+- No host, real VM, container, Proxmox/libvirt endpoint, Docker daemon, registry,
+  release, package mirror write or controller was contacted or modified.
+- The emulator, firmware and base image are task-owned files; the debs were
+  extracted, not installed. Netdev was restricted user-mode with no host
+  forward. No private key or secret material was printed, committed or
+  uploaded.
+- Disk use stayed bounded: the task directory was 8.3 GiB before removing the
+  temporary raw inspection copies and 1.2 GiB afterwards, holding the downloaded
+  image, small overlays, seeds, serial logs and text evidence.
+- This is **QEMU arm64 virtual-machine boot/identity evidence only**. It is not
+  Proxmox VE, generic KVM/libvirt, bare-metal, Secure Boot, a production
+  enrollment or an effective network-isolation acceptance.
+- The 20 GiB arm64 disk profile, concurrent VM identity, live guest-to-controller
+  enrollment, mTLS, heartbeat, node daemon health and the host matrix remain
+  open.
+
+### 18.6 Current runtime-listener dependency for deployed enrollment
+
+The arm64 guest wrote a digest-only enrollment bundle and secret, but it did not
+contact a controller. Deployed enrollment still requires the product runtime to
+start a dedicated TLS 1.3 listener that mounts `nodeEnrollmentHandler` with the
+four enrollment procedures (`CreateEnrollment`,
+`BeginEnrollmentChallenge`, `ClaimEnrollment`, `RevokeCredential`). In the
+current tree that handler is referenced by tests only; the general panel RPC
+mux deliberately does not mount `NodeControlService`. This VM boot task did not
+mount broad production RPCs to work around that gap. The loopback
+controller/agent fixture in section 17 exercises the shared authority and agent
+separately; guest-to-controller enrollment remains blocked on the runtime
+listener.
+
+### 18.7 Hosted arm64 path prepared, not executed
+
+`scripts/node_vm_arm64_acceptance.py`,
+`scripts/test_node_vm_arm64_acceptance.py` and
+`.github/workflows/node-vm-arm64-acceptance.yml` add a checked, read-only
+hosted path for this same first-boot/two-identity check. The workflow must run
+on `ubuntu-24.04-arm`, checks out `github.sha` explicitly and asserts the head,
+keeps `contents: read`, installs QEMU/AAVMF in the ephemeral runner, verifies
+the pinned arm64 image, boots two distinct instance IDs at the base virtual
+size and uploads only the allowlisted `receipt.json`. Serial logs, seeds and
+overlays stay in the runner. The workflow was not dispatched or run for this
+report; it is a prepared path, not hosted CI evidence.
+
