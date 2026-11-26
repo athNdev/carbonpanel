@@ -41,6 +41,12 @@ export interface ModsBrowserTarget {
 	id: string;
 	loader: string;
 	mcVersion: string;
+	/**
+	 * Compatible-side filter the first catalog request must share with later
+	 * searches. Omitted for providers without client/server sides (Hangar
+	 * plugins), so the opener never invents a filter the provider cannot honor.
+	 */
+	side?: string;
 }
 
 export interface ModsCatalogResult {
@@ -170,7 +176,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 				platform,
 				loader: filters?.loader ?? target.loader,
 				mcVersion: filters?.mcVersion ?? target.mcVersion,
-				side: filters?.side
+				side: filters?.side ?? target.side
 			});
 			if (!searchSequence.isCurrent(seq)) return;
 			results = response.results;
@@ -313,9 +319,12 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 			installSequence.invalidate();
 		},
 
-		/** OPEN: refresh the catalog for the current target. */
-		openDialog(): void {
-			void runSearch();
+		/**
+		 * OPEN: refresh the catalog for the current target, using the same
+		 * compatible-side context as a manual search.
+		 */
+		openDialog(): Promise<void> {
+			return runSearch();
 		},
 
 		/** CLOSE: reset detail + install (E7); keep query/platform/results (E12). */

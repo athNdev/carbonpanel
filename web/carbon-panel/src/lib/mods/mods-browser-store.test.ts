@@ -390,6 +390,63 @@ describe('mods browser store — install region', () => {
 	});
 });
 
+describe('mods browser store — opener context', () => {
+	test('the first wizard catalog request keeps the compatible server-side filter', async () => {
+		const requests: Array<{ serverId: string; loader: string; mcVersion: string; side?: string }> =
+			[];
+		const store = makeStore({
+			search: async (request) => {
+				requests.push(request);
+				return { results: [] };
+			}
+		});
+		store.setTarget({
+			kind: 'wizard',
+			id: '',
+			loader: 'fabric',
+			mcVersion: '1.21.1',
+			side: 'server'
+		});
+		await store.openDialog();
+		assert.deepEqual(
+			[requests[0].serverId, requests[0].loader, requests[0].mcVersion, requests[0].side],
+			['', 'fabric', '1.21.1', 'server'],
+			'the opening request must match later wizard searches instead of searching unfiltered'
+		);
+	});
+
+	test('opening for a provider without sides does not invent a side filter', async () => {
+		const requests: Array<{ side?: string }> = [];
+		const store = makeStore({
+			search: async (request) => {
+				requests.push(request);
+				return { results: [] };
+			}
+		});
+		store.setTarget({ kind: 'server', id: 'srv-1', loader: 'paper', mcVersion: '1.21.1' });
+		await store.openDialog();
+		assert.equal(requests[0].side, undefined);
+	});
+
+	test('an explicit manual filter overrides the opener default', async () => {
+		const requests: Array<{ side?: string }> = [];
+		const store = makeStore({
+			search: async (request) => {
+				requests.push(request);
+				return { results: [] };
+			}
+		});
+		store.setTarget({ ...serverTarget, side: 'server' });
+		await store.openDialog();
+		await store.submitSearch({ side: 'client' });
+		assert.deepEqual(
+			requests.map((request) => request.side),
+			['server', 'client'],
+			'manual searches keep their own filter'
+		);
+	});
+});
+
 describe('mods browser store — target identity', () => {
 	test('TARGET_CHANGED resets everything and invalidates in-flight responses (E22)', async () => {
 		const pending = deferred<{ results: ReturnType<typeof result>[] }>();

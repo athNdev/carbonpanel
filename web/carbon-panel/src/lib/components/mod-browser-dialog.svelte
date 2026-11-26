@@ -183,10 +183,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	const store: ModsBrowserStore = createModsBrowserStore(ports);
 
+	// Hangar has no client/server sides, so a plugin loader never sends or
+	// suggests a side filter. Mod loaders default to server-compatible.
+	function defaultSide(): string | undefined {
+		return isPluginLoader(gameLoader) ? undefined : 'server';
+	}
+
 	// Filter bar state — key:value chips are per-dialog UI, not machine state.
 	function buildDefaultFilters(): ActiveFilter[] {
 		return [
-			{ key: 'side', value: 'server', removable: true },
+			...(isPluginLoader(gameLoader) ? [] : [{ key: 'side', value: 'server', removable: true }]),
 			{ key: 'loader', value: loaderSearchName(gameLoader), removable: false },
 			...(server.mcVersion ? [{ key: 'version', value: server.mcVersion, removable: true }] : [])
 		];
@@ -280,7 +286,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				? server.mcVersion
 				: activeFilters.find((filter) => filter.key === 'version')?.value ||
 					(filterByVersion ? server.mcVersion || '' : ''),
-			side: onQueue ? 'server' : activeFilters.find((filter) => filter.key === 'side')?.value || ''
+			side: onQueue
+				? defaultSide()
+				: activeFilters.find((filter) => filter.key === 'side')?.value || ''
 		};
 	}
 
@@ -502,7 +510,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				kind: onQueue ? 'wizard' : 'server',
 				id: server.id,
 				loader: loaderSearchName(gameLoader),
-				mcVersion: server.mcVersion
+				mcVersion: server.mcVersion,
+				side: defaultSide()
 			});
 			if (rebuildFilters) {
 				activeFilters = buildDefaultFilters();
