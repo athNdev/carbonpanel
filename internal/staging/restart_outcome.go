@@ -13,13 +13,24 @@ import (
 )
 
 // RestartPublication tracks the staged changes made by one lifecycle call.
-// Before runtime mutation a failure can be compensated immediately. Once a
-// runtime request has been sent, compensation needs a confirmed stopped process.
+// Before a runtime mutation a failure can be compensated immediately. A known
+// Docker preflight failure also proves no replacement was mutated. Any other
+// request may have been accepted, so its staged files/config are retained for
+// an explicit retry instead of being rolled back under a replacement that may
+// already contain them.
 type RestartPublication struct {
 	Commit           *NextRestartCommit
 	Configs          []*storage.StagedConfigChange
 	RuntimeAttempted bool
 	RuntimeAccepted  bool
+	// RuntimePreflight records a typed Docker failure that ended before any
+	// container mutation. The old container may still be running; that alone is
+	// not evidence about a failed replacement.
+	RuntimePreflight bool
+	// RuntimePriorState reports that an earlier attempt already applied this
+	// snapshot. Its replacement may still be the current container, so even a
+	// preflight failure cannot prove rollback is safe.
+	RuntimePriorState bool
 }
 
 func (p *RestartPublication) HasChanges() bool { return p.Commit.HasContent() || len(p.Configs) != 0 }
@@ -28,16 +39,12 @@ type restartConfigStore interface {
 	RevertStagedConfigApplyToStaged(context.Context, string) (*storage.StagedConfigChange, error)
 }
 
-type RestartObserver interface {
-	GetContainerStatus(context.Context, string) (storage.ServerStatus, error)
-}
-
 // Resolve returns additional finalization or recovery errors to the lifecycle
 // caller. It releases exclusive ownership after all observations and repairs.
-func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigStore, observer RestartObserver, containerID string, cause error) error {
+func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigStore, cause error) error {
 	defer p.Commit.Finish()
 	if cause == nil {
-		if p.Commit != nil {
+		if p.Commit != nil && p.Commit.complete != nil {
 			return p.Commit.complete()
 		}
 		return nil
@@ -45,25 +52,14 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	if !p.HasChanges() || p.RuntimeAccepted {
 		return nil
 	}
-	if p.RuntimeAttempted {
-		// A daemon can still be processing a timed-out request even if one
-		// immediate inspect reports a stopped container.
-		var transportErr net.Error
-		if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || errors.As(cause, &transportErr) || errors.Is(cause, io.EOF) || errors.Is(cause, io.ErrUnexpectedEOF) {
-			return errors.New("staged changes retained because the runtime request outcome is uncertain")
+	if p.RuntimePriorState || (p.RuntimeAttempted && !p.RuntimePreflight) {
+		if runtimeOutcomeUncertain(ctx, cause) {
+			return errors.New("staged changes retained because the runtime request outcome is uncertain; retry the lifecycle operation")
 		}
-		if observer == nil || containerID == "" {
-			return errors.New("staged changes retained because the container state is unknown")
-		}
-		observeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		status, err := observer.GetContainerStatus(observeCtx, containerID)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("staged changes retained because container inspection failed: %w", err)
-		}
-		if status != storage.StatusStopped {
-			return fmt.Errorf("staged changes retained because container status is %s", status)
-		}
+		// The replacement may have been created and may already contain the
+		// staged files/config. A stopped inspect is not proof it is the old
+		// container, so rollback would let that replacement outlive the rows.
+		return errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation")
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
@@ -75,4 +71,12 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		}
 	}
 	return errors.Join(failed, p.Commit.Undo())
+}
+
+func runtimeOutcomeUncertain(ctx context.Context, cause error) bool {
+	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || errors.Is(cause, io.EOF) || errors.Is(cause, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var transportErr net.Error
+	return errors.As(cause, &transportErr)
 }

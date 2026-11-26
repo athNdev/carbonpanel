@@ -7,6 +7,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,6 +248,24 @@ func TestRecreateContainerPullFailureLeavesOldContainerRunning(t *testing.T) {
 		if strings.HasPrefix(call, "DELETE ") || strings.Contains(call, "/rename") || strings.Contains(call, "/stop") || strings.Contains(call, "/start") {
 			t.Fatalf("old container was mutated despite failed preflight: %q", call)
 		}
+	}
+}
+
+func TestRecreateContainerMarksPreflightFailures(t *testing.T) {
+	for name, f := range map[string]*recreateFixture{
+		"image pull":        {imagePresent: false, pullFails: true},
+		"inspect transport": {imagePresent: true, inspectCode: http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dockerClient := newRecreateClient(t, f)
+			_, err := dockerClient.RecreateContainer(context.Background(), "original", testRecreateServer(t), &models.ServerConfig{})
+			if err == nil {
+				t.Fatal("RecreateContainer() error = nil, want preflight failure")
+			}
+			if !errors.Is(err, ErrRecreatePreflight) {
+				t.Fatalf("RecreateContainer() error = %v, want ErrRecreatePreflight", err)
+			}
+		})
 	}
 }
 

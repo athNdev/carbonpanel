@@ -2511,14 +2511,20 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
 	}
 	contentReady := commit.HasContent()
-	publication := staging.RestartPublication{Commit: commit}
+	publication := staging.RestartPublication{
+		Commit: commit,
+		// A prior retained attempt persists ERROR. Only then does an already
+		// applied snapshot suggest a replacement that a new preflight cannot
+		// prove is the old container.
+		RuntimePriorState: commit.HasPriorRuntimeState() && server.Status == storage.StatusError,
+	}
 	defer func() {
-		if finishErr := publication.Resolve(ctx, s.store, dockerCli, server.ContainerID, retErr); finishErr != nil {
+		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
 			out = nil
 			retErr = connect.NewError(connect.CodeInternal, errors.Join(retErr, finishErr))
 		}
 	}()
-	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
+	appliedStaged, err := commit.ApplyConfigs(ctx, s.store)
 	publication.Configs = appliedStaged
 	if err != nil {
 		s.log.Error("Failed to apply staged config changes on start for server %s: %v", server.ID, err)
@@ -2582,9 +2588,12 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		result, recreateErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
-				publication.RuntimeAccepted = true
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
+			if errors.As(recreateErr, &outcomeErr) {
+				if outcomeErr.Operation == nil {
+					publication.RuntimeAccepted = true
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
+				}
+				publication.RuntimePreflight = outcomeErr.Preflight
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
@@ -2933,14 +2942,20 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		s.log.Error("Failed to apply staged content on restart for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
 	}
-	publication := staging.RestartPublication{Commit: commit}
+	publication := staging.RestartPublication{
+		Commit: commit,
+		// A prior retained attempt persists ERROR. Only then does an already
+		// applied snapshot suggest a replacement that a new preflight cannot
+		// prove is the old container.
+		RuntimePriorState: commit.HasPriorRuntimeState() && server.Status == storage.StatusError,
+	}
 	defer func() {
-		if finishErr := publication.Resolve(ctx, s.store, dockerCli, server.ContainerID, retErr); finishErr != nil {
+		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
 			out = nil
 			retErr = connect.NewError(connect.CodeInternal, errors.Join(retErr, finishErr))
 		}
 	}()
-	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
+	appliedStaged, err := commit.ApplyConfigs(ctx, s.store)
 	publication.Configs = appliedStaged
 	if err != nil {
 		s.log.Error("Failed to apply staged config changes on restart for server %s: %v", server.ID, err)
@@ -2970,9 +2985,12 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if err != nil {
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
-				publication.RuntimeAccepted = true
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
+			if errors.As(err, &outcomeErr) {
+				if outcomeErr.Operation == nil {
+					publication.RuntimeAccepted = true
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
+				}
+				publication.RuntimePreflight = outcomeErr.Preflight
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", err))
 		}

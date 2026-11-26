@@ -14,28 +14,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type restartStatus func(context.Context, string) (storage.ServerStatus, error)
-
-func (f restartStatus) GetContainerStatus(ctx context.Context, id string) (storage.ServerStatus, error) {
-	return f(ctx, id)
-}
-
-func TestRestartPublicationCompensatesOnlyDefiniteFailures(t *testing.T) {
+func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 	for _, tc := range []struct {
-		name                          string
-		attempted, canceled, timedOut bool
-		status                        storage.ServerStatus
-		wantUndo                      bool
+		name                           string
+		attempted, accepted, preflight bool
+		timedOut                       bool
+		wantUndo                       bool
 	}{
-		{name: "canceled preflight", canceled: true, wantUndo: true},
-		{name: "confirmed stopped", attempted: true, status: storage.StatusStopped, wantUndo: true},
-		{name: "running after error", attempted: true, status: storage.StatusRunning},
-		{name: "unknown after error", attempted: true, status: storage.StatusError},
-		{name: "timeout still in flight", attempted: true, timedOut: true, status: storage.StatusStopped},
+		{name: "failure before runtime mutation", wantUndo: true},
+		{name: "typed preflight leaves old container untouched", attempted: true, preflight: true, wantUndo: true},
+		{name: "transport timeout after request", attempted: true, timedOut: true},
+		{name: "definite failure after request", attempted: true},
+		{name: "accepted operation", attempted: true, accepted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := context.Background()
 			store, data := newStageStore(t)
 			server := &storage.Server{ID: "pub", Name: "pub", DataPath: data}
 			require.NoError(t, store.CreateServer(ctx, server))
@@ -46,26 +39,17 @@ func TestRestartPublicationCompensatesOnlyDefiniteFailures(t *testing.T) {
 			commit, err := CommitNextRestartFiles(ctx, store, server, nil)
 			require.NoError(t, err)
 			t.Cleanup(commit.Finish)
-			record, err := store.ApplyStagedConfigChange(ctx, cfg.ID)
+			applied, err := commit.ApplyConfigs(ctx, store)
 			require.NoError(t, err)
-			publication := RestartPublication{Commit: commit, Configs: []*storage.StagedConfigChange{record}, RuntimeAttempted: tc.attempted}
-			if tc.canceled {
-				cancel()
+			publication := RestartPublication{
+				Commit: commit, Configs: applied,
+				RuntimeAttempted: tc.attempted, RuntimeAccepted: tc.accepted, RuntimePreflight: tc.preflight,
 			}
 			cause := errors.New("preflight or runtime failure")
 			if tc.timedOut {
 				cause = context.DeadlineExceeded
 			}
-			inspected := false
-			err = publication.Resolve(ctx, store, restartStatus(func(check context.Context, id string) (storage.ServerStatus, error) {
-				inspected = true
-				require.Equal(t, "container", id)
-				require.NoError(t, check.Err())
-				_, gateErr := datawrite.TryShared(server.ID)
-				require.ErrorIs(t, gateErr, datawrite.ErrExclusiveHeld)
-				return tc.status, nil
-			}), "container", cause)
-			require.Equal(t, tc.attempted && !tc.timedOut, inspected)
+			err = publication.Resolve(ctx, store, cause)
 			record, readErr := store.GetStagedConfigChange(context.Background(), cfg.ID)
 			require.NoError(t, readErr)
 			rows, readErr := store.ListBatchContent(context.Background(), cfg.BatchID)
@@ -76,22 +60,160 @@ func TestRestartPublicationCompensatesOnlyDefiniteFailures(t *testing.T) {
 				require.Len(t, rows, 1)
 				require.NoFileExists(t, filepath.Join(data, "file.txt"))
 			} else {
-				require.ErrorContains(t, err, "retained")
+				if !tc.accepted {
+					require.ErrorContains(t, err, "retained")
+				} else {
+					require.NoError(t, err)
+				}
 				require.Equal(t, storage.StagedStatusApplied, record.Status)
 				require.Empty(t, rows)
 				body, readErr := os.ReadFile(filepath.Join(data, "file.txt"))
 				require.NoError(t, readErr)
 				require.Equal(t, "new", string(body))
-				retry, retryErr := CommitNextRestartFiles(context.Background(), store, server, nil)
-				require.NoError(t, retryErr)
-				require.True(t, retry.HasContent(), "a retry must wait for a successful runtime outcome")
-				retry.Finish()
+				if !tc.accepted {
+					retry, retryErr := CommitNextRestartFiles(ctx, store, server, nil)
+					require.NoError(t, retryErr)
+					require.NotNil(t, retry)
+					require.True(t, retry.HasPriorRuntimeState(), "a prior attempt may have left a replacement")
+					pending, applyErr := retry.ApplyConfigs(ctx, store)
+					require.NoError(t, applyErr)
+					// Even a new preflight cannot prove the current container is
+					// the old one after a prior attempt already applied the snapshot.
+					retryPublication := RestartPublication{
+						Commit: retry, Configs: pending,
+						RuntimePreflight: true, RuntimePriorState: retry.HasPriorRuntimeState(),
+					}
+					require.ErrorContains(t, retryPublication.Resolve(ctx, store, errors.New("preflight failed")), "retained")
+					retained, readErr := store.GetStagedConfigChange(context.Background(), cfg.ID)
+					require.NoError(t, readErr)
+					require.Equal(t, storage.StagedStatusApplied, retained.Status)
+				}
 			}
 			lease, err := datawrite.TryShared(server.ID)
 			require.NoError(t, err)
 			lease.Release()
 		})
 	}
+}
+
+func TestNextRestartConfigSnapshotIncludesOwnedAndLegacyRows(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "snapshot", Name: "snapshot", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	owned, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "owned"}, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, owned.BatchID, server.ID, "file.txt", "new")
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "legacy", ServerID: server.ID, BatchID: "", Payload: `{"difficulty":"peaceful"}`,
+		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+	}).Error)
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "other-batch", ServerID: server.ID, BatchID: "not-this-restart", Payload: `{"difficulty":"hard"}`,
+		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+	}).Error)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(commit.Finish)
+	require.Equal(t, 2, commit.ConfigSnapshot(), "owned batch plus legacy unbatched row")
+
+	// A row staged after the snapshot (direct store access bypasses the gate)
+	// must not enter this restart.
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "late", ServerID: server.ID, BatchID: "", Payload: `{"difficulty":"hard"}`,
+		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+	}).Error)
+
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Len(t, applied, 2)
+	live, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, live.MOTD)
+	require.Equal(t, "owned", *live.MOTD)
+	require.NotNil(t, live.Difficulty)
+	require.Equal(t, "peaceful", *live.Difficulty)
+
+	other, err := store.GetStagedConfigChange(ctx, "other-batch")
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, other.Status)
+	late, err := store.GetStagedConfigChange(ctx, "late")
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, late.Status)
+}
+
+func TestNextRestartWithoutBatchAppliesOnlyLegacyConfig(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "legacy-only", Name: "legacy-only", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "legacy", ServerID: server.ID, BatchID: "", Payload: `{"motd":"legacy"}`,
+		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+	}).Error)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit, "legacy rows still need an owned snapshot")
+	t.Cleanup(commit.Finish)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Len(t, applied, 1)
+	live, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, live.MOTD)
+	require.Equal(t, "legacy", *live.MOTD)
+	require.NoError(t, publicationFor(commit, applied).Resolve(ctx, store, nil))
+}
+
+func publicationFor(commit *NextRestartCommit, configs []*storage.StagedConfigChange) *RestartPublication {
+	return &RestartPublication{Commit: commit, Configs: configs, RuntimeAttempted: true, RuntimeAccepted: true}
+}
+
+func TestConfigOnlyNextRestartFinalizeDoesNotOpenFileStorage(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "config-only", Name: "config-only", DataPath: data, NodeID: "missing-node"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "only"}, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(commit.Finish)
+	require.False(t, commit.HasContent())
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.NoError(t, (&RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil))
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch, "config-only batch should close without touching file storage")
+}
+
+func TestNextRestartCleanupFailureLeavesRetryableBatch(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cleanup", Name: "cleanup", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(commit.Finish)
+	// Make file recovery storage unreachable so cleanup has a real failure.
+	server.NodeID = "missing-node"
+	err = (&RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil)
+	require.Error(t, err)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "a failed cleanup must not close the batch")
+	require.Equal(t, storage.UpdateBatchOpen, open.Status)
 }
 
 func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {

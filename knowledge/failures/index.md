@@ -8,3 +8,4 @@
 - [Known gaps — Current gaps + How to use this](known-gaps-current-gaps.md) — A bind-mounted world is not quota-limited by Docker. storage.container_writable_mb
 - [Known gaps — Read next](known-gaps-read-next.md) — Detailed guidance on read next.
 - [Remote node fallback](remote-node-fallback.md) — Operations that cannot resolve a remote node must error instead of using the controller's Docker socket.
+- [Timed/idle staged publication — ambiguous runtime outcome](staged-publication-timed-outcome.md) — The timed/idle publisher records every error as definite and cannot distinguish a crash before its container mutation from one after it.

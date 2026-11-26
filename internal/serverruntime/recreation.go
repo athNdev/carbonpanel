@@ -62,6 +62,10 @@ func persistRecovery(ctx context.Context, store recreationStore, server *db.Serv
 type RecreationError struct {
 	Operation   error
 	Persistence error
+	// Preflight reports a typed Docker failure that ended before any container
+	// mutation. Only then is it safe to compensate staged changes while the old
+	// container (possibly still running) is untouched.
+	Preflight bool
 }
 
 func (e *RecreationError) Error() string { return errors.Join(e.Operation, e.Persistence).Error() }
@@ -96,7 +100,11 @@ func Recreate(ctx context.Context, store recreationStore, client ContainerRecrea
 		persistErr = fmt.Errorf("failed to persist container recreation recovery state: %w", persistErr)
 	}
 	if recreateErr != nil || persistErr != nil {
-		return result, &RecreationError{Operation: recreateErr, Persistence: persistErr}
+		return result, &RecreationError{
+			Operation:   recreateErr,
+			Persistence: persistErr,
+			Preflight:   recreateErr != nil && errors.Is(recreateErr, docker.ErrRecreatePreflight),
+		}
 	}
 	return result, nil
 }

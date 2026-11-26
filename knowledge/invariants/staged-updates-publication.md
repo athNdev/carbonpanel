@@ -38,6 +38,18 @@ target's live digest is checked again immediately before its writer commits;
 that guard is typed and bound to the target, but an out-of-band process is not
 an atomic compare-and-swap. See ADR 0056.
 
+A restart selects its file and config rows in one exclusive snapshot. When a
+next-restart batch exists, only that batch plus legacy unbatched rows are
+included; an at-time or idle batch is never published by an incidental restart.
+Rows already applied after the last start are included so a safe failure can
+return them to staged without applying them twice. A typed Docker preflight
+failure before any container mutation compensates the snapshot even if the old
+container is still running. Any other attempted runtime outcome, including a
+transport timeout or an accepted replacement, is retained: a stopped container
+is not proof that it is the old, unstaged one. Config-only finalize never opens
+file recovery storage, and cleanup runs before the batch close so a real cleanup
+failure stays retryable.
+
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same
 window commits the pack with any staged config, mods, and datapacks. A module
@@ -45,4 +57,4 @@ config or container-spec change can join the same batch. The live module row
 stays as it is until the window, which recreates that module container when
 the spec changed and still does not start a deep-sleeping server.
 
-See [storage recovery](../../docs/storage-streaming.md).
+See [timed/idle publisher limits](../failures/staged-publication-timed-outcome.md) and [storage recovery](../../docs/storage-streaming.md).

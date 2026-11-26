@@ -1241,7 +1241,6 @@ type stagedLifecycleStore interface {
 }
 
 type stagedLifecycleDocker interface {
-	staging.RestartObserver
 	RecreateContainer(ctx context.Context, oldContainerID string, server *storage.Server, serverConfig *storage.ServerConfig) (*docker.RecreateContainerResult, error)
 	StartContainer(ctx context.Context, containerID string) error
 }
@@ -1266,18 +1265,22 @@ func prepareStagedLifecycle(ctx context.Context, store stagedLifecycleStore, doc
 			return true, fmt.Errorf("failed to apply staged content: %w", err)
 		}
 		publication.Commit = commit
+		// A prior retained attempt persists ERROR. Only then does an already
+		// applied snapshot suggest a replacement that a new preflight cannot
+		// prove is the old container.
+		publication.RuntimePriorState = commit.HasPriorRuntimeState() && server.Status == storage.StatusError
 	}
 	defer func() {
 		if retErr == nil && handled && transfer != nil {
 			transfer(publication)
 			return
 		}
-		if finishErr := publication.Resolve(ctx, store, dockerClient, server.ContainerID, retErr); finishErr != nil {
+		if finishErr := publication.Resolve(ctx, store, retErr); finishErr != nil {
 			handled = true
 			retErr = errors.Join(retErr, finishErr)
 		}
 	}()
-	appliedRecords, err := ApplyOnRestartStagedConfigRecords(ctx, store, server.ID)
+	appliedRecords, err := applyNextRestartConfigs(ctx, store, server.ID, publication.Commit)
 	publication.Configs = appliedRecords
 	if err != nil {
 		return true, fmt.Errorf("failed to apply staged server configuration: %w", err)
@@ -1303,11 +1306,17 @@ func prepareStagedLifecycle(ctx context.Context, store stagedLifecycleStore, doc
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
 	if recreateErr != nil {
 		var outcomeErr *serverruntime.RecreationError
-		if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
-			publication.RuntimeAccepted = true
-			// Docker already runs the applied spec. Preserve the pending marker
-			// for retry/reconciliation rather than roll back only the database.
-			return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
+		if errors.As(recreateErr, &outcomeErr) {
+			if outcomeErr.Operation == nil {
+				publication.RuntimeAccepted = true
+				// Docker already runs the applied spec. Preserve the pending marker
+				// for retry/reconciliation rather than roll back only the database.
+				return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
+			}
+			// A typed preflight ended before any container mutation; the old
+			// container may still be running and that is not evidence about the
+			// failed replacement.
+			publication.RuntimePreflight = outcomeErr.Preflight
 		}
 		return true, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr)
 	}
@@ -1349,8 +1358,13 @@ func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Se
 	var complete docker.WakeCompletion
 	handled, err := prepareStagedLifecycle(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, func(p *staging.RestartPublication) {
 		complete = func(startAttempted bool, wakeErr error) error {
-			p.RuntimeAttempted = startAttempted
-			return p.Resolve(ctx, s.store, dockerCli, server.ContainerID, wakeErr)
+			// A successful recreate already mutated the runtime. A later start
+			// failure must not erase that fact or the stopped replacement can
+			// outlive a config rollback.
+			if startAttempted {
+				p.RuntimeAttempted = true
+			}
+			return p.Resolve(ctx, s.store, wakeErr)
 		}
 	}, s.storageResolver)
 	if err != nil {

@@ -488,6 +488,37 @@ func (s *Store) StagedConfigConflictForIDs(ctx context.Context, serverID string,
 	return nil
 }
 
+// ListNextRestartConfigSnapshot returns the on-restart config rows one restart
+// may act on. A non-empty batchID admits that owned batch plus legacy rows from
+// before batches existed (empty batch id). An empty batchID admits only those
+// legacy rows, so an at-time or idle batch is not published by an incidental
+// restart. Applied rows newer than lastStarted are included so a caller can
+// roll a crashed attempt back to staged when its container was never replaced;
+// they are not applied a second time.
+func (s *Store) ListNextRestartConfigSnapshot(ctx context.Context, serverID, batchID string, lastStarted *time.Time) ([]*StagedConfigChange, error) {
+	if serverID == "" {
+		return nil, errors.New("server id is required")
+	}
+	q := s.db.WithContext(ctx).
+		Where("server_id = ? AND apply_mode = ?", serverID, StagedApplyOnRestart)
+	if batchID != "" {
+		q = q.Where("batch_id = ? OR batch_id = ''", batchID)
+	} else {
+		q = q.Where("batch_id = ''")
+	}
+	if lastStarted == nil {
+		q = q.Where("status = ? OR status = ?", StagedStatusStaged, StagedStatusApplied)
+	} else {
+		q = q.Where(
+			"status = ? OR (status = ? AND (applied_at IS NULL OR applied_at > ?))",
+			StagedStatusStaged, StagedStatusApplied, *lastStarted,
+		)
+	}
+	var rows []*StagedConfigChange
+	err := q.Order("created_at asc").Find(&rows).Error
+	return rows, err
+}
+
 // ListBatchConfig returns staged config rows still waiting in one batch, oldest first.
 func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedConfigChange, error) {
 	var rows []*StagedConfigChange

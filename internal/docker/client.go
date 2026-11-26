@@ -1726,6 +1726,16 @@ func (c *Client) RestartContainer(ctx context.Context, containerID string, delay
 	return nil
 }
 
+// ErrRecreatePreflight marks a recreation failure that happened before any
+// stop, rename, create or remove request was sent. The old container is
+// untouched (it may still be running), so a caller may safely compensate the
+// staged changes that were about to be published.
+var ErrRecreatePreflight = errors.New("container recreation preflight failed")
+
+func recreatePreflightError(op string, err error) error {
+	return fmt.Errorf("%w: %s: %w", ErrRecreatePreflight, op, err)
+}
+
 // Result of a container recreation operation
 type RecreateContainerResult struct {
 	// NewContainerID is the canonical container identity after the operation.
@@ -1777,11 +1787,11 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 	// Preflight the replacement before touching the known-good container:
 	// configuration and image failures leave the old container running.
 	if err := validateServerPorts(server); err != nil {
-		return result, err
+		return result, recreatePreflightError("validate ports", err)
 	}
 	imageID, repoDigest, err := c.ensureServerImage(ctx, server)
 	if err != nil {
-		return result, err
+		return result, recreatePreflightError("resolve image", err)
 	}
 
 	// rollback restores the retained old container's name and run state. It is
@@ -1796,8 +1806,9 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			if !errdefs.IsNotFound(inspectErr) {
 				// An unavailable or timed-out inspect is not evidence that the
 				// old container is absent. Keep its identity and do not send a
-				// destructive call based on an unknown observation.
-				return result, fmt.Errorf("failed to inspect old container before recreation: %w", inspectErr)
+				// destructive call based on an unknown observation. The inspect
+				// is read-only, so nothing was mutated and compensation is safe.
+				return result, recreatePreflightError("inspect old container", inspectErr)
 			}
 			c.log.Debug("Container %s is already absent during recreation: %v", oldContainerID, inspectErr)
 		} else {
@@ -1805,8 +1816,8 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			if status == models.StatusError {
 				// A successful response without a usable state is still an
 				// unknown observation. Preserve the known identity and require
-				// reconciliation.
-				return result, fmt.Errorf("failed to determine old container state before recreation: status is unknown")
+				// reconciliation. Nothing has been mutated yet.
+				return result, recreatePreflightError("inspect old container", errors.New("status is unknown"))
 			}
 			if status == models.StatusRunning || status == models.StatusUnhealthy || status == models.StatusPaused {
 				// A paused container cannot be retained reliably until

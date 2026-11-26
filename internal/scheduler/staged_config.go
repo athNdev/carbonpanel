@@ -120,6 +120,16 @@ type stagedConfigStore interface {
 	RollbackStagedConfigChange(ctx context.Context, id string) (*storage.StagedConfigChange, error)
 }
 
+// applyNextRestartConfigs applies only the snapshot selected under the data
+// lease. A non-concrete store is a unit-test seam; production always reaches a
+// *storage.Store and therefore never falls back to a server-wide listing.
+func applyNextRestartConfigs(ctx context.Context, store stagedConfigStore, serverID string, commit *staging.NextRestartCommit) ([]*storage.StagedConfigChange, error) {
+	if _, ok := store.(*storage.Store); ok {
+		return commit.ApplyConfigs(ctx, store)
+	}
+	return ApplyOnRestartStagedConfigRecords(ctx, store, serverID)
+}
+
 func applyStagedByMode(ctx context.Context, store stagedConfigStore, serverID string, mode storage.StagedApplyMode) ([]*storage.StagedConfigChange, error) {
 	changes, err := store.ListStagedConfigChanges(ctx, serverID, storage.StagedStatusStaged)
 	if err != nil {

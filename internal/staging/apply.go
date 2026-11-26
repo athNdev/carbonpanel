@@ -137,6 +137,7 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err != nil {
 			return err
 		}
+		hadContent := len(content) > 0
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return err
 		}
@@ -205,6 +206,11 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			if publish == nil {
 				return errors.Join(errors.New("staged batch needs a container publish"), undoApply(ctx, store, moduleRestore(undoModules, restore), applied, nil))
 			}
+			// Known limit: RunJournaled records this publisher error as definite.
+			// A transport-ambiguous Docker outcome can therefore reach undoApply
+			// after the daemon accepted the mutation. See
+			// knowledge/failures/staged-publication-timed-outcome.md; automatic
+			// compensation is claimed only for the typed next-restart paths.
 			if pubErr := publish(ctx, server, plan); pubErr != nil {
 				return errors.Join(pubErr, undoApply(ctx, store, moduleRestore(undoModules, restore), applied, nil))
 			}
@@ -221,12 +227,20 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			if _, err := store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowNextRestart, nil, 0); err != nil {
 				return err
 			}
+			if !hadContent {
+				return nil
+			}
 			return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 		}
-		if err := store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied); err != nil {
-			return err
+		// A config-only batch has no undo tree to remove. Do not open file
+		// storage for it, and clean up before closing so a cleanup failure is
+		// retryable instead of hiding behind an already-applied batch.
+		if hadContent {
+			if err := cleanupBatchRecovery(ctx, store, server, batch.ID, resolver); err != nil {
+				return err
+			}
 		}
-		return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
+		return store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied)
 	})
 }
 
@@ -248,9 +262,46 @@ type NextRestartCommit struct {
 	complete       func() error
 	undoErr        error
 	pendingContent bool
+	configs        []*storage.StagedConfigChange
 	release        func()
 	undone         bool
 	released       bool
+}
+
+// configApplier is the config subset a next-restart commit needs to publish its
+// own snapshot. It is an interface so lifecycle tests can use a fake store.
+type configApplier interface {
+	ApplyStagedConfigChange(context.Context, string) (*storage.StagedConfigChange, error)
+}
+
+// ApplyConfigs applies only the config rows selected in this commit's snapshot.
+// Rows already applied after the last start are returned for rollback on a safe
+// failure but are not applied again.
+func (c *NextRestartCommit) ApplyConfigs(ctx context.Context, store configApplier) ([]*storage.StagedConfigChange, error) {
+	if c == nil {
+		return nil, nil
+	}
+	applied := make([]*storage.StagedConfigChange, 0, len(c.configs))
+	for _, cfg := range c.configs {
+		if cfg.Status == storage.StagedStatusApplied {
+			applied = append(applied, cfg)
+			continue
+		}
+		rec, err := store.ApplyStagedConfigChange(ctx, cfg.ID)
+		if err != nil {
+			return applied, err
+		}
+		applied = append(applied, rec)
+	}
+	return applied, nil
+}
+
+// ConfigSnapshot reports how many config rows were selected for this restart.
+func (c *NextRestartCommit) ConfigSnapshot() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.configs)
 }
 
 // Undo restores published files, module fields and staged rows, then releases
@@ -294,12 +345,14 @@ func (c *NextRestartCommit) Finish() {
 	}
 }
 
-// CommitNextRestartFiles copies content for a next-restart batch onto the live
-// tree. A batch waiting for a time or an idle window is left untouched, so an
-// incidental restart does not publish it. recreateModule runs for a staged
-// module whose container spec changed. The returned handle puts the files and
-// module fields back and returns the rows to staged, and owns the exclusive
-// data-write gate until the caller calls Undo or Finish.
+// CommitNextRestartFiles selects and copies the content and config of one
+// next-restart batch onto the live tree. A batch waiting for a time or an idle
+// window is left untouched, so an incidental restart does not publish it;
+// legacy unbatched on-restart rows are still included. recreateModule runs for
+// a staged module whose container spec changed. The returned handle owns the
+// exclusive data-write gate, and holds the selection of both content and config
+// rows, until the caller calls Undo or Finish. Config rows are applied through
+// ApplyConfigs so a row staged after this selection cannot enter the restart.
 func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (*NextRestartCommit, error) {
 	resolver := firstResolver(resolvers)
 	write, err := datawrite.AcquireExclusive(ctx, server.ID)
@@ -313,18 +366,37 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		}
 	}()
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
-	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
-		return nil, err
-	}
-	content, err := store.ListBatchContent(ctx, batch.ID)
 	if err != nil {
 		return nil, err
 	}
-	commit := &NextRestartCommit{release: write.Release, complete: func() error {
-		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-		defer cancel()
-		return finishNextRestartBatch(finishCtx, store, server, batch.ID, resolver)
-	}}
+	batchID := ""
+	var content []storage.StagedContentChange
+	if batch != nil && batch.Window == string(storage.UpdateWindowNextRestart) {
+		batchID = batch.ID
+		content, err = store.ListBatchContent(ctx, batch.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Select configs under the same lease as the content, from this batch plus
+	// legacy rows that predate batches. Another window's on-restart row is not
+	// part of this restart.
+	configs, err := store.ListNextRestartConfigSnapshot(ctx, server.ID, batchID, server.LastStarted)
+	if err != nil {
+		return nil, err
+	}
+	if batchID == "" && len(configs) == 0 {
+		return nil, nil
+	}
+	commit := &NextRestartCommit{release: write.Release, configs: configs}
+	if batchID != "" {
+		batchForFinish := batchID
+		commit.complete = func() error {
+			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+			defer cancel()
+			return finishNextRestartBatch(finishCtx, store, server, batchForFinish, resolver, commit.HasContent())
+		}
+	}
 	if len(content) > 0 {
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return nil, err
@@ -336,13 +408,13 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	} else if batchID != "" {
 		// An earlier attempt may have published files before its start outcome
 		// became uncertain. A new, successful lifecycle operation can complete
 		// that batch, but must not close it during a no-work preflight.
 		var count int64
 		err := store.DB().WithContext(ctx).Model(&storage.StagedContentChange{}).
-			Where("batch_id = ? AND status = ?", batch.ID, storage.StagedStatusApplied).Count(&count).Error
+			Where("batch_id = ? AND status = ?", batchID, storage.StagedStatusApplied).Count(&count).Error
 		if err != nil {
 			return nil, err
 		}
@@ -354,6 +426,25 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 
 // HasContent reports whether this batch has published content awaiting a start.
 func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != nil || c.pendingContent) }
+
+// HasPriorRuntimeState reports that an earlier attempt already applied content
+// or config for this snapshot. Such an attempt may have left a replacement
+// container, so a new preflight failure cannot prove the current container is
+// the old, unstaged one.
+func (c *NextRestartCommit) HasPriorRuntimeState() bool {
+	if c == nil {
+		return false
+	}
+	if c.pendingContent {
+		return true
+	}
+	for _, cfg := range c.configs {
+		if cfg.Status == storage.StagedStatusApplied {
+			return true
+		}
+	}
+	return false
+}
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.
 // The caller owns the exclusive data-write gate through the returned undo.
@@ -402,7 +493,7 @@ func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, serve
 }
 
 // The commit owns the server data gate and the original batch identity.
-func finishNextRestartBatch(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver) error {
+func finishNextRestartBatch(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver, hadContent bool) error {
 	content, err := store.ListBatchContent(ctx, batchID)
 	if err != nil {
 		return err
@@ -414,10 +505,16 @@ func finishNextRestartBatch(ctx context.Context, store *storage.Store, server *s
 	if len(content) > 0 || len(configs) > 0 {
 		return nil
 	}
-	if err := store.CloseUpdateBatch(ctx, batchID, storage.UpdateBatchApplied); err != nil {
-		return err
+	// A config-only batch never created recovery storage. Opening a node
+	// accessor here would make a successful finalize depend on file storage (and
+	// hold node admission behind that IO). Cleanup runs before the close so a
+	// real cleanup failure leaves the batch open and retryable.
+	if hadContent {
+		if err := cleanupBatchRecovery(ctx, store, server, batchID, resolver); err != nil {
+			return err
+		}
 	}
-	return cleanupBatchRecovery(ctx, store, server, batchID, resolver)
+	return store.CloseUpdateBatch(ctx, batchID, storage.UpdateBatchApplied)
 }
 
 func moduleRestore(undoModules func() error, restore func() error) func() error {

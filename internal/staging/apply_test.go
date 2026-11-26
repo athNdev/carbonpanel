@@ -910,3 +910,48 @@ func TestPublicationRefusesReviewedRowWithoutDurableReleaseIdentity(t *testing.T
 		})
 	}
 }
+
+func TestApplyBatchConfigOnlyFinalizeDoesNotOpenFileStorage(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "config-finalize", Name: "config-finalize", DataPath: data, NodeID: "missing-node", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "only"}, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, func(context.Context, *storage.Server, Plan) error { return nil }))
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open, "config-only finalize must not depend on file recovery storage")
+}
+
+func TestApplyBatchCleanupFailureLeavesBatchRetryable(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cleanup-finalize", Name: "cleanup-finalize", DataPath: data, Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "with-file"}, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "file.txt", "new")
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+
+	// Publish succeeds, then file recovery storage becomes unreachable. The
+	// cleanup failure must leave the batch open instead of hiding it behind a
+	// closed/applied batch.
+	err = ApplyBatch(ctx, store, nil, server, *batch, func(context.Context, *storage.Server, Plan) error {
+		server.NodeID = "missing-node"
+		return nil
+	})
+	require.Error(t, err)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "a real cleanup failure must leave retryable state")
+	require.Equal(t, storage.UpdateBatchOpen, open.Status)
+}

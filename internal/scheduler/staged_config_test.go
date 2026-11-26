@@ -228,13 +228,34 @@ func TestRecreateForPendingStagedConfigPersistsPartialContainerID(t *testing.T) 
 
 	handled, err := recreateForPendingStagedConfig(ctx, store, client, nil, server, true, true, nil)
 	require.True(t, handled)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "retained")
 	require.NotNil(t, store.server)
 	assert.Equal(t, "replacement-id", store.server.ContainerID)
 	assert.Equal(t, storage.StatusError, store.server.Status)
 	assert.Empty(t, client.starts)
 	assert.Nil(t, server.LastStarted, "failed recreate must leave staged recovery pending")
-	assert.Equal(t, []string{"restart-config"}, store.rolledBack, "staged configs must be auto-rolled back on recreate error")
+	assert.Empty(t, store.rolledBack, "a failed replacement may contain the staged config, so it is retained")
+}
+
+func TestRecreatePreflightFailureRestagesStagedConfig(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeLifecycleStore{
+		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
+			ID: "restart-config", ServerID: "srv-1", ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+		}}},
+		serverConfig: &storage.ServerConfig{},
+	}
+	client := &fakeLifecycleDocker{
+		result: &docker.RecreateContainerResult{NewContainerID: "old-id"},
+		err:    fmt.Errorf("%w: pull failed", docker.ErrRecreatePreflight),
+	}
+	server := &storage.Server{ID: "srv-1", ContainerID: "old-id", Status: storage.StatusRunning}
+
+	handled, err := recreateForPendingStagedConfig(ctx, store, client, nil, server, true, true, nil)
+	require.True(t, handled)
+	require.Error(t, err)
+	assert.Empty(t, client.starts)
+	assert.Equal(t, []string{"restart-config"}, store.rolledBack, "a typed preflight proves the old container was not mutated")
 }
 
 func TestPrepareDeepSleepWakeRecreatesWithoutStartingOrAdvancingLastStarted(t *testing.T) {
@@ -304,7 +325,7 @@ func TestSchedulerWakePathsRejectOvercommittedNode(t *testing.T) {
 	}
 }
 
-func TestRecreateForPendingStagedConfigRollbackOnStartFailure(t *testing.T) {
+func TestRecreateForPendingStagedConfigRetainsStartFailure(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeLifecycleStore{
 		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
@@ -323,7 +344,8 @@ func TestRecreateForPendingStagedConfigRollbackOnStartFailure(t *testing.T) {
 	require.True(t, handled)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start recreated server")
-	assert.Equal(t, []string{"restart-config-2"}, store.rolledBack, "staged configs must be auto-rolled back on start error")
+	assert.Contains(t, err.Error(), "retained")
+	assert.Empty(t, store.rolledBack, "the stopped replacement already contains the staged config")
 }
 
 type failingStartDocker struct {
@@ -364,10 +386,12 @@ func TestWakePreparationRetainsOwnershipUntilStartOutcome(t *testing.T) {
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, batch)
-	owner.RuntimeAttempted = true
-	require.NoError(t, owner.Resolve(ctx, store, client, server.ContainerID, errors.New("wake start failed")))
-	require.NoFileExists(t, live)
+	require.True(t, owner.RuntimeAttempted, "a successful recreate mutated the runtime before the wake start")
+	// Simulate a wake that failed before Start: the completion must not erase
+	// the recreate mutation, or the stopped replacement outlives the rollback.
+	require.ErrorContains(t, owner.Resolve(ctx, store, errors.New("wake start failed")), "retained")
+	require.FileExists(t, live, "the stopped replacement already contains the staged file")
 	current, err := store.GetStagedContent(ctx, row.ID)
 	require.NoError(t, err)
-	require.Equal(t, storage.StagedStatusStaged, current.Status)
+	require.Equal(t, storage.StagedStatusApplied, current.Status)
 }
