@@ -1592,13 +1592,16 @@ func matchingTaskSchedule(tx *gorm.DB, task *ScheduledTask) *gorm.DB {
 }
 
 // UpdateModUpdatePolicy saves a task definition only while the observed
-// schedule and status hold. Policy-only changes preserve scheduler deadlines.
+// schedule, status and policy config hold. The config fence keeps a
+// policy-only edit submitted from a stale snapshot from overwriting a newer
+// definition. Policy-only changes preserve scheduler deadlines.
 func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *ScheduledTask, scheduleChanged bool) (bool, error) {
 	omit := []string{"ID", "Status", "CreatedAt", "LastRun"}
 	if !scheduleChanged {
 		omit = append(omit, "NextRun")
 	}
 	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(task), previous).
+		Where("COALESCE(config, '') = ?", previous.Config).
 		Select("*").Omit(omit...).Updates(task)
 	return result.RowsAffected != 0, result.Error
 }

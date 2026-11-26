@@ -3,12 +3,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package db
 
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestInvite_UseCountAndDelete(t *testing.T) {
@@ -59,6 +59,71 @@ func TestSystemSetting_RoundTrip(t *testing.T) {
 	got, err = store.GetSystemSetting(ctx, "k")
 	if err != nil || got != "v2" {
 		t.Fatalf("after overwrite = %q, %v", got, err)
+	}
+}
+
+func TestUpdateModUpdatePolicyRejectsStaleDefinitionWrite(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	next := time.Now().Add(6 * time.Hour).UTC().Truncate(time.Second)
+	observed := &ScheduledTask{
+		ID: "policy-stale", ServerID: "srv-1", Name: "policy",
+		TaskType: TaskTypeModUpdate, Status: TaskStatusEnabled,
+		Schedule: ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "UTC",
+		NextRun: &next, Config: `{"enabled":true,"excluded_projects":["old"]}`,
+	}
+	if err := store.CreateScheduledTask(ctx, observed); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	// A concurrent policy-only edit commits after this writer observed the row.
+	concurrent := *observed
+	concurrent.Config = `{"enabled":true,"excluded_projects":["concurrent"]}`
+	if err := store.UpdateScheduledTask(ctx, &concurrent); err != nil {
+		t.Fatalf("concurrent edit failed: %v", err)
+	}
+
+	stale := *observed
+	stale.Config = `{"enabled":true,"excluded_projects":["stale"]}`
+	saved, err := store.UpdateModUpdatePolicy(ctx, observed, &stale, false)
+	if err != nil {
+		t.Fatalf("stale update failed: %v", err)
+	}
+	if saved {
+		t.Fatal("a stale definition write must lose the race")
+	}
+	stored, err := store.GetScheduledTask(ctx, observed.ID)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if stored.Config != concurrent.Config {
+		t.Fatalf("config = %q, want the concurrent definition", stored.Config)
+	}
+	if stored.NextRun == nil || !stored.NextRun.Equal(next) {
+		t.Fatalf("next_run = %v, want the scheduler-owned deadline %v", stored.NextRun, next)
+	}
+
+	// The current definition still saves and keeps the scheduler deadline.
+	current := *stored
+	current.Config = `{"enabled":true,"excluded_projects":["new"]}`
+	saved, err = store.UpdateModUpdatePolicy(ctx, stored, &current, false)
+	if err != nil {
+		t.Fatalf("current update failed: %v", err)
+	}
+	if !saved {
+		t.Fatal("the current definition must save")
+	}
+	stored, err = store.GetScheduledTask(ctx, observed.ID)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if stored.Config != current.Config {
+		t.Fatalf("config = %q, want %q", stored.Config, current.Config)
+	}
+	if stored.NextRun == nil || !stored.NextRun.Equal(next) {
+		t.Fatalf("policy-only edit changed next_run to %v", stored.NextRun)
 	}
 }
 
