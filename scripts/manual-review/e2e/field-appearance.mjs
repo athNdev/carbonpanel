@@ -33,6 +33,25 @@ function appearance(field) {
   });
 }
 
+// Server settings load their option lists after the first render and keep the
+// selects disabled until that request settles. Wait for the real control state
+// instead of sampling an intermediate loading style.
+async function waitForFieldReady(page, field) {
+  await page.waitForFunction(
+    ({ id }) => {
+      const el = document.getElementById(id);
+      return Boolean(
+        el &&
+          !el.disabled &&
+          !el.hasAttribute("data-disabled") &&
+          el.getAttribute("aria-disabled") !== "true",
+      );
+    },
+    { id: await field.getAttribute("id") },
+    { timeout: 10000 },
+  );
+}
+
 // Match the final semantic color. The hover event can reach Playwright before
 // Chromium paints the new style, especially with reduced-motion transitions.
 async function waitForFieldColor(page, field, property, token) {
@@ -67,6 +86,10 @@ export async function checkFieldAppearance(page, base) {
       theme,
     );
     await page.mouse.move(0, 0);
+    for (const control of [text, number, select]) {
+      await waitForFieldReady(page, control);
+      await waitForFieldColor(page, control, "backgroundColor", "--field-surface");
+    }
     await waitForFieldColor(page, text, "borderTopColor", "--field-edge");
     const idle = await appearance(text);
     for (const control of [number, select]) {
