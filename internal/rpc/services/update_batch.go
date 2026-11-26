@@ -53,6 +53,11 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+	release, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Mod-update staging holds the same per-server operation while it commits
 	// a window and staged rows. Sharing the ownership prevents a discard from
 	// closing the chosen batch halfway through a staging write.

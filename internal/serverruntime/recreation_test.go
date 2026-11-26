@@ -34,6 +34,11 @@ func TestRecreationPersistsObservedIdentityAfterCancellation(t *testing.T) {
 	if err := store.CreateServer(ctx, server); err != nil {
 		t.Fatal(err)
 	}
+	// A stale lifecycle projection must not overwrite independently edited
+	// settings while persisting the canonical replacement identity.
+	if err := store.UpdateServerFields(ctx, server.ID, map[string]any{"name": "Edited server"}); err != nil {
+		t.Fatal(err)
+	}
 	client := recreateFunc(func(context.Context, string, *db.Server, *db.ServerConfig) (*docker.RecreateContainerResult, error) {
 		cancel()
 		return &docker.RecreateContainerResult{NewContainerID: "partial"}, context.Canceled
@@ -43,7 +48,7 @@ func TestRecreationPersistsObservedIdentityAfterCancellation(t *testing.T) {
 		t.Fatalf("lost cancellation: %v", err)
 	}
 	got, err := store.GetServer(context.Background(), server.ID)
-	if err != nil || got.ContainerID != "partial" || got.Status != db.StatusError || got.LastStarted == nil || !got.LastStarted.Equal(started) {
+	if err != nil || got.Name != "Edited server" || got.ContainerID != "partial" || got.Status != db.StatusError || got.LastStarted == nil || !got.LastStarted.Equal(started) {
 		t.Fatalf("recovery state = %+v, error %v", got, err)
 	}
 }

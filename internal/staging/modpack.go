@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/google/uuid"
@@ -28,6 +29,11 @@ func StageModpackTree(ctx context.Context, store *storage.Store, server *storage
 	if store == nil || server == nil || server.ID == "" || server.DataPath == "" || srcDir == "" {
 		return nil, fmt.Errorf("modpack stage requires a store, a server, and a source tree")
 	}
+	write, err := datawrite.TryShared(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer write.Release()
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err

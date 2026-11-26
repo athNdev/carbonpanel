@@ -26,6 +26,7 @@ type Publisher func(ctx context.Context, server *storage.Server, plan Plan) erro
 type fileSnap struct {
 	target       string
 	existed      bool
+	mutated      bool
 	backup       string
 	recoveryRoot string
 	size         int64
@@ -99,6 +100,14 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
 	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
+		// Hold the data path from before the undo snapshot through publication
+		// and any rollback. Ordinary panel file mutations take the shared side
+		// of this gate, so they cannot straddle snapshot and commit.
+		write, err := datawrite.AcquireExclusive(ctx, server.ID)
+		if err != nil {
+			return err
+		}
+		defer write.Release()
 		// Admission can retarget the batch after Sweep decides it is due but
 		// before this journal owns it. Let the next sweep evaluate any change.
 		current, err := store.OpenUpdateBatch(ctx, server.ID)
@@ -108,14 +117,6 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if current == nil || current.ID != batch.ID || current.Window != batch.Window || !current.UpdatedAt.Equal(batch.UpdatedAt) {
 			return nil
 		}
-		// Hold the data path from before the undo snapshot through publication
-		// and any rollback. Ordinary panel file mutations take the shared side
-		// of this gate, so they cannot straddle snapshot and commit.
-		write, err := datawrite.AcquireExclusive(ctx, server.ID)
-		if err != nil {
-			return err
-		}
-		defer write.Release()
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
 			return err
 		}
@@ -242,32 +243,36 @@ func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID 
 // resolves: Undo restores the files and releases the gate, Finish keeps the
 // published bytes and releases it. Both methods are idempotent.
 type NextRestartCommit struct {
-	mu       sync.Mutex
-	undo     func()
-	release  func()
-	undone   bool
-	released bool
+	mu             sync.Mutex
+	undo           func() error
+	complete       func() error
+	undoErr        error
+	pendingContent bool
+	release        func()
+	undone         bool
+	released       bool
 }
 
 // Undo restores published files, module fields and staged rows, then releases
 // the data-write gate. It is a no-op after Finish.
-func (c *NextRestartCommit) Undo() {
+func (c *NextRestartCommit) Undo() error {
 	if c == nil {
-		return
+		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.undone || c.released {
-		return
+		return c.undoErr
 	}
 	c.undone = true
 	if c.undo != nil {
-		c.undo()
+		c.undoErr = c.undo()
 	}
 	c.released = true
 	if c.release != nil {
 		c.release()
 	}
+	return c.undoErr
 }
 
 // Finish keeps the published files and releases the data-write gate. It does
@@ -297,35 +302,62 @@ func (c *NextRestartCommit) Finish() {
 // data-write gate until the caller calls Undo or Finish.
 func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (*NextRestartCommit, error) {
 	resolver := firstResolver(resolvers)
+	write, err := datawrite.AcquireExclusive(ctx, server.ID)
+	if err != nil {
+		return nil, err
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			write.Release()
+		}
+	}()
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
 		return nil, err
 	}
 	content, err := store.ListBatchContent(ctx, batch.ID)
-	if err != nil || len(content) == 0 {
-		return nil, err
-	}
-	if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
-		return nil, err
-	}
-	if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
-		return nil, err
-	}
-	write, err := datawrite.AcquireExclusive(ctx, server.ID)
 	if err != nil {
 		return nil, err
 	}
-	undo, err := commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, resolver)
-	if err != nil {
-		write.Release()
-		return nil, err
+	commit := &NextRestartCommit{release: write.Release, complete: func() error {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		return finishNextRestartBatch(finishCtx, store, server, batch.ID, resolver)
+	}}
+	if len(content) > 0 {
+		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
+			return nil, err
+		}
+		if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
+			return nil, err
+		}
+		commit.undo, err = commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, resolver)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// An earlier attempt may have published files before its start outcome
+		// became uncertain. A new, successful lifecycle operation can complete
+		// that batch, but must not close it during a no-work preflight.
+		var count int64
+		err := store.DB().WithContext(ctx).Model(&storage.StagedContentChange{}).
+			Where("batch_id = ? AND status = ?", batch.ID, storage.StagedStatusApplied).Count(&count).Error
+		if err != nil {
+			return nil, err
+		}
+		commit.pendingContent = count > 0
 	}
-	return &NextRestartCommit{undo: undo, release: write.Release}, nil
+	owned = true
+	return commit, nil
 }
+
+// HasContent reports whether this batch has published content awaiting a start.
+func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != nil || c.pendingContent) }
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.
 // The caller owns the exclusive data-write gate through the returned undo.
-func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, resolver *nodestorage.Resolver) (func(), error) {
+func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, resolver *nodestorage.Resolver) (func() error, error) {
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
@@ -364,38 +396,28 @@ func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, serve
 		}
 		applied = append(applied, content[i].ID)
 	}
-	return func() {
-		_ = undoApply(ctx, store, moduleRestore(undoModules, restoreFilesNow), nil, applied)
+	return func() error {
+		return undoApply(ctx, store, moduleRestore(undoModules, restoreFilesNow), nil, applied)
 	}, nil
 }
 
-// FinishNextRestartBatch closes a next-restart batch once nothing in it is
-// still staged. Time and idle batches are left open.
-func FinishNextRestartBatch(ctx context.Context, store *storage.Store, serverID string, resolvers ...*nodestorage.Resolver) error {
-	resolver := firstResolver(resolvers)
-	batch, err := store.OpenUpdateBatch(ctx, serverID)
-	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
-		return err
-	}
-	content, err := store.ListBatchContent(ctx, batch.ID)
+// The commit owns the server data gate and the original batch identity.
+func finishNextRestartBatch(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver) error {
+	content, err := store.ListBatchContent(ctx, batchID)
 	if err != nil {
 		return err
 	}
-	configs, err := store.ListBatchConfig(ctx, batch.ID)
+	configs, err := store.ListBatchConfig(ctx, batchID)
 	if err != nil {
 		return err
 	}
 	if len(content) > 0 || len(configs) > 0 {
 		return nil
 	}
-	if err := store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied); err != nil {
+	if err := store.CloseUpdateBatch(ctx, batchID, storage.UpdateBatchApplied); err != nil {
 		return err
 	}
-	server, err := store.GetServer(ctx, serverID)
-	if err != nil {
-		return err
-	}
-	return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
+	return cleanupBatchRecovery(ctx, store, server, batchID, resolver)
 }
 
 func moduleRestore(undoModules func() error, restore func() error) func() error {
@@ -459,12 +481,14 @@ func requireReviewedModRuntimeConsistency(ctx context.Context, store *storage.St
 }
 
 func undoApply(ctx context.Context, store *storage.Store, restore func() error, configs []*storage.StagedConfigChange, contentIDs []string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer cancel()
 	var failed error
 	if restore != nil {
 		failed = restore()
 	}
-	for _, cfg := range configs {
-		if _, err := store.RevertStagedConfigApplyToStaged(ctx, cfg.ID); err != nil {
+	for i := len(configs) - 1; i >= 0; i-- {
+		if _, err := store.RevertStagedConfigApplyToStaged(ctx, configs[i].ID); err != nil {
 			failed = errors.Join(failed, err)
 		}
 	}

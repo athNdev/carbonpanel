@@ -31,15 +31,29 @@ type containerStarter interface {
 func Start(ctx context.Context, store recreationStore, client containerStarter, server *db.Server) error {
 	if err := client.StartContainer(ctx, server.ContainerID); err != nil {
 		server.Status = db.StatusError
-		return errors.Join(err, persistRecovery(ctx, store, server))
+		return errors.Join(err, persistRecovery(ctx, store, server, map[string]any{"status": server.Status}))
 	}
 	return nil
 }
 
-func persistRecovery(ctx context.Context, store recreationStore, server *db.Server) error {
+// PersistStarted records only the fields advanced by a successful start.
+func PersistStarted(ctx context.Context, store recreationStore, server *db.Server) error {
+	return persistFields(ctx, store, server, map[string]any{"status": server.Status, "last_started": server.LastStarted})
+}
+
+func persistFields(ctx context.Context, store recreationStore, server *db.Server, fields map[string]any) error {
+	if writer, ok := store.(interface {
+		UpdateServerFields(context.Context, string, map[string]any) error
+	}); ok {
+		return writer.UpdateServerFields(ctx, server.ID, fields)
+	}
+	return store.UpdateServer(ctx, server)
+}
+
+func persistRecovery(ctx context.Context, store recreationStore, server *db.Server, fields map[string]any) error {
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	return store.UpdateServer(recoveryCtx, server)
+	return persistFields(recoveryCtx, store, server, fields)
 }
 
 // RecreationError distinguishes a failed daemon outcome from a successful
@@ -73,7 +87,11 @@ func Recreate(ctx context.Context, store recreationStore, client ContainerRecrea
 	// Docker may already have changed identity before cancellation arrived.
 	// Recording that observed outcome must survive the initiating request, but
 	// it must not hold the lifecycle owner indefinitely.
-	persistErr := persistRecovery(ctx, store, server)
+	fields := map[string]any{"container_id": server.ContainerID}
+	if recreateErr != nil {
+		fields["status"] = server.Status
+	}
+	persistErr := persistRecovery(ctx, store, server, fields)
 	if persistErr != nil {
 		persistErr = fmt.Errorf("failed to persist container recreation recovery state: %w", persistErr)
 	}

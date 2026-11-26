@@ -27,6 +27,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/command"
 	appconfig "github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
@@ -1231,6 +1232,7 @@ func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage
 }
 
 type stagedLifecycleStore interface {
+	RevertStagedConfigApplyToStaged(context.Context, string) (*storage.StagedConfigChange, error)
 	stagedConfigStore
 	GetServerConfig(ctx context.Context, serverID string) (*storage.ServerConfig, error)
 	GetGlobalSettings(ctx context.Context) (*storage.ServerConfig, bool, error)
@@ -1239,6 +1241,7 @@ type stagedLifecycleStore interface {
 }
 
 type stagedLifecycleDocker interface {
+	staging.RestartObserver
 	RecreateContainer(ctx context.Context, oldContainerID string, server *storage.Server, serverConfig *storage.ServerConfig) (*docker.RecreateContainerResult, error)
 	StartContainer(ctx context.Context, containerID string) error
 }
@@ -1248,36 +1251,42 @@ type stagedLifecycleDocker interface {
 // change. A replacement ID is persisted even when Docker reports a partial
 // recreate failure, allowing the next attempt to recover from the right object.
 func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
+	return prepareStagedLifecycle(ctx, store, dockerClient, log, server, startReplacement, markStarted, recreateModule, nil, resolvers...)
+}
+
+func prepareStagedLifecycle(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, transfer func(*staging.RestartPublication), resolvers ...*nodestorage.Resolver) (handled bool, retErr error) {
 	var resolver *nodestorage.Resolver
 	if len(resolvers) > 0 {
 		resolver = resolvers[0]
 	}
-	undoFiles := func() {}
-	contentReady := false
+	publication := &staging.RestartPublication{}
 	if concrete, ok := store.(*storage.Store); ok {
-		commit, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
-		if fileErr != nil {
-			return true, fmt.Errorf("failed to apply staged content: %w", fileErr)
+		commit, err := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
+		if err != nil {
+			return true, fmt.Errorf("failed to apply staged content: %w", err)
 		}
-		if commit != nil {
-			// The caller is not journaled. Keep the data-write gate until the
-			// container operation succeeds (Finish) or the returned undo runs.
-			defer commit.Finish()
-			undoFiles = commit.Undo
-			contentReady = true
-		}
+		publication.Commit = commit
 	}
+	defer func() {
+		if retErr == nil && handled && transfer != nil {
+			transfer(publication)
+			return
+		}
+		if finishErr := publication.Resolve(ctx, store, dockerClient, server.ContainerID, retErr); finishErr != nil {
+			handled = true
+			retErr = errors.Join(retErr, finishErr)
+		}
+	}()
 	appliedRecords, err := ApplyOnRestartStagedConfigRecords(ctx, store, server.ID)
+	publication.Configs = appliedRecords
 	if err != nil {
-		undoFiles()
 		return true, fmt.Errorf("failed to apply staged server configuration: %w", err)
 	}
 	pending, err := HasPendingRestartStagedConfigRecreate(ctx, store, server.ID, server.LastStarted)
 	if err != nil {
-		undoFiles()
 		return true, fmt.Errorf("failed to check staged configuration recovery: %w", err)
 	}
-	if len(appliedRecords) == 0 && !pending && !contentReady {
+	if len(appliedRecords) == 0 && !pending && !publication.Commit.HasContent() {
 		return false, nil
 	}
 
@@ -1290,43 +1299,24 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	}
 	serverruntime.PrepareConfig(ctx, store, server, serverConfig)
 
+	publication.RuntimeAttempted = true
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
 	if recreateErr != nil {
 		var outcomeErr *serverruntime.RecreationError
 		if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
+			publication.RuntimeAccepted = true
 			// Docker already runs the applied spec. Preserve the pending marker
 			// for retry/reconciliation rather than roll back only the database.
 			return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
-		}
-		undoFiles()
-		// Rollback newly applied staged configs on container recreate failure (SCH-1)
-		for _, rec := range appliedRecords {
-			if _, rbErr := store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil && log != nil {
-				log.Error("Failed to auto-rollback staged config %s after scheduled recreate error: %v", rec.ID, rbErr)
-			} else if log != nil {
-				log.Warn("Auto-rolled back staged config %s due to scheduled recreate failure on server %s", rec.ID, server.ID)
-			}
 		}
 		return true, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr)
 	}
 	if startReplacement && !result.WasRunning {
 		if err := serverruntime.Start(ctx, store, dockerClient, server); err != nil {
-			server.Status = storage.StatusError
-			_ = store.UpdateServer(ctx, server)
-			undoFiles()
-			for _, rec := range appliedRecords {
-				if _, rbErr := store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil && log != nil {
-					log.Error("Failed to auto-rollback staged config %s after scheduled start failure: %v", rec.ID, rbErr)
-				} else if log != nil {
-					log.Warn("Auto-rolled back staged config %s due to scheduled start failure on server %s", rec.ID, server.ID)
-				}
-			}
 			return true, fmt.Errorf("failed to start recreated server: %w", err)
 		}
 	}
-	if concrete, ok := store.(*storage.Store); ok {
-		_ = staging.FinishNextRestartBatch(ctx, concrete, server.ID)
-	}
+	publication.RuntimeAccepted = startReplacement || result.WasRunning
 	if err := store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
 		return true, fmt.Errorf("server restarted but temporary config could not be cleared: %w", err)
 	}
@@ -1336,7 +1326,7 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	server.Status = storage.StatusStarting
 	now := time.Now()
 	server.LastStarted = &now
-	if err := store.UpdateServer(ctx, server); err != nil {
+	if err := serverruntime.PersistStarted(ctx, store, server); err != nil {
 		return true, fmt.Errorf("server restarted but status could not be saved: %w", err)
 	}
 	return true, nil
@@ -1345,20 +1335,26 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 // PrepareDeepSleepWake applies restart-only staged changes and replaces the
 // stopped container before DeepSleepManager starts it. The manager records
 // LastStarted only after Docker reports the replacement running.
-func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Server) error {
+func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Server) (docker.WakeCompletion, error) {
 	if server == nil || server.ID == "" {
-		return fmt.Errorf("server ID is required")
+		return nil, fmt.Errorf("server ID is required")
 	}
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
-		return err
+		return nil, err
 	}
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, s.storageResolver)
+	var complete docker.WakeCompletion
+	handled, err := prepareStagedLifecycle(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, func(p *staging.RestartPublication) {
+		complete = func(startAttempted bool, wakeErr error) error {
+			p.RuntimeAttempted = startAttempted
+			return p.Resolve(ctx, s.store, dockerCli, server.ContainerID, wakeErr)
+		}
+	}, s.storageResolver)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !handled && dockerCli != nil {
 		needsCreate := server.ContainerID == ""
@@ -1370,26 +1366,26 @@ func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Se
 		if needsCreate {
 			if resolved, resolveErr := dockerCli.ResolveContainer(ctx, server.ID); resolveErr == nil && resolved != nil && resolved.ID != "" {
 				server.ContainerID = resolved.ID
-				if err := s.store.UpdateServer(ctx, server); err != nil {
-					return fmt.Errorf("resolved container for deep-sleep wake but ID could not be saved: %w", err)
+				if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
+					return nil, fmt.Errorf("resolved container for deep-sleep wake but ID could not be saved: %w", err)
 				}
 			} else {
 				serverConfig, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 				if cfgErr != nil || serverConfig == nil {
-					return fmt.Errorf("failed to get server configuration for deep-sleep wake container creation: %w", cfgErr)
+					return nil, fmt.Errorf("failed to get server configuration for deep-sleep wake container creation: %w", cfgErr)
 				}
 				containerID, createErr := dockerCli.CreateContainer(ctx, server, serverConfig)
 				if createErr != nil {
-					return fmt.Errorf("failed to create missing container during deep-sleep wake: %w", createErr)
+					return nil, fmt.Errorf("failed to create missing container during deep-sleep wake: %w", createErr)
 				}
 				server.ContainerID = containerID
-				if err := s.store.UpdateServer(ctx, server); err != nil {
-					return fmt.Errorf("created container for deep-sleep wake but ID could not be saved: %w", err)
+				if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
+					return nil, fmt.Errorf("created container for deep-sleep wake but ID could not be saved: %w", err)
 				}
 			}
 		}
 	}
-	return nil
+	return complete, nil
 }
 
 func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
@@ -1944,6 +1940,11 @@ func (s *Scheduler) syncModpackFiles(ctx context.Context, server *storage.Server
 	}
 	defer transition.Release()
 
+	write, err := datawrite.TryShared(server.ID)
+	if err != nil {
+		return "", fmt.Errorf("modpack sync refused while staged publication owns the data path: %w", err)
+	}
+	defer write.Release()
 	if s.log != nil {
 		s.log.Info("Syncing updated modpack files from %s to %s", srcDir, destRoot)
 	}

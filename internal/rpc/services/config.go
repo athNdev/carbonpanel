@@ -118,6 +118,12 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	}
 	defer transition.Release()
 
+	releaseWrite, err := beginDataWrite(req.Msg.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	msg := req.Msg
 
 	// Get server info

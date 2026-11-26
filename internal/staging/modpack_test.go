@@ -169,6 +169,7 @@ func TestStageModpackPublishFailureRestoresTheTreeAndModule(t *testing.T) {
 	_ = batchID
 
 	err = Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		require.NoError(t, store.UpdateModuleContainerID(ctx, "map", "replacement"))
 		return os.ErrClosed
 	})
 	require.Error(t, err)
@@ -178,6 +179,7 @@ func TestStageModpackPublishFailureRestoresTheTreeAndModule(t *testing.T) {
 	live, err := store.GetModule(ctx, "map")
 	require.NoError(t, err)
 	require.Equal(t, "old", live.Config)
+	require.Equal(t, "replacement", live.ContainerID)
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, open)

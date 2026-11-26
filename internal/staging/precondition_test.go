@@ -65,7 +65,7 @@ func TestPublishRefusesDelayedLiveDriftAndPreservesStagedBytes(t *testing.T) {
 	require.NoError(t, err)
 	_, err = commitStreamingFiles(ctx, acc, rows)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "changed since review")
+	require.Contains(t, err.Error(), "changed after staging")
 
 	current, err := os.ReadFile(live)
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestReviewedHashCoversTheActualUndoSnapshot(t *testing.T) {
 		return os.WriteFile(filepath.Join(data, filepath.FromSlash(live)), []byte("modified!"), 0o600)
 	}}
 	_, err = commitStreamingFiles(ctx, wrapped, rows)
-	require.ErrorContains(t, err, "changed since review")
+	require.ErrorContains(t, err, "changed after staging")
 	got, err := acc.ReadFile(live)
 	require.NoError(t, err)
 	require.Equal(t, "modified!", string(got))

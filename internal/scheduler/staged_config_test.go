@@ -7,15 +7,20 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,6 +60,18 @@ type fakeLifecycleDocker struct {
 	result *docker.RecreateContainerResult
 	err    error
 	starts []string
+}
+
+func (f *fakeLifecycleDocker) GetContainerStatus(context.Context, string) (storage.ServerStatus, error) {
+	return storage.StatusStopped, nil
+}
+
+func (f *fakeLifecycleStore) RevertStagedConfigApplyToStaged(ctx context.Context, id string) (*storage.StagedConfigChange, error) {
+	record, err := f.RollbackStagedConfigChange(ctx, id)
+	if err == nil {
+		record.Status = storage.StagedStatusStaged
+	}
+	return record, err
 }
 
 func (f *fakeLifecycleDocker) RecreateContainer(context.Context, string, *storage.Server, *storage.ServerConfig) (*docker.RecreateContainerResult, error) {
@@ -279,7 +296,7 @@ func TestSchedulerWakePathsRejectOvercommittedNode(t *testing.T) {
 	defer func() { _ = dockerClient.Close() }()
 	s := NewScheduler(store, dockerClient, nil, nil, nil, logger.New())
 
-	if err := s.PrepareDeepSleepWake(ctx, server); err == nil || !strings.Contains(err.Error(), "lacks memory capacity") {
+	if _, err := s.PrepareDeepSleepWake(ctx, server); err == nil || !strings.Contains(err.Error(), "lacks memory capacity") {
 		t.Fatalf("PrepareDeepSleepWake error = %v, want memory capacity rejection", err)
 	}
 	if err := s.StartServerForBoot(ctx, server); err == nil || !strings.Contains(err.Error(), "lacks memory capacity") {
@@ -319,4 +336,38 @@ func (f *failingStartDocker) StartContainer(ctx context.Context, id string) erro
 		return fmt.Errorf("start failed for container %s", id)
 	}
 	return f.fakeLifecycleDocker.StartContainer(ctx, id)
+}
+
+func TestWakePreparationRetainsOwnershipUntilStartOutcome(t *testing.T) {
+	ctx := context.Background()
+	_, store := newTriggerTestScheduler(t)
+	server := &storage.Server{ID: "wake-staged", Name: "wake-staged", DataPath: t.TempDir(), Status: storage.StatusDeepSleep, ContainerID: "old"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	path := ".carbon-panel/staged/file/wake.txt"
+	live := filepath.Join(server.DataPath, "wake.txt")
+	staged := filepath.Join(server.DataPath, filepath.FromSlash(path))
+	require.NoError(t, os.MkdirAll(filepath.Dir(staged), 0700))
+	require.NoError(t, os.WriteFile(staged, []byte("candidate"), 0600))
+	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{ServerID: server.ID, Kind: storage.StagedKindFile, Action: storage.StagedActionInstall, TargetPath: "wake.txt", StagePath: path, FileName: "wake.txt"})
+	require.NoError(t, err)
+	client := &fakeLifecycleDocker{result: &docker.RecreateContainerResult{NewContainerID: "replacement"}}
+	var owner *staging.RestartPublication
+	handled, err := prepareStagedLifecycle(ctx, store, client, nil, server, false, false, nil, func(p *staging.RestartPublication) { owner = p })
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.NotNil(t, owner)
+	t.Cleanup(owner.Commit.Finish)
+	require.FileExists(t, live)
+	_, err = datawrite.TryShared(server.ID)
+	require.ErrorIs(t, err, datawrite.ErrExclusiveHeld)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	owner.RuntimeAttempted = true
+	require.NoError(t, owner.Resolve(ctx, store, client, server.ContainerID, errors.New("wake start failed")))
+	require.NoFileExists(t, live)
+	current, err := store.GetStagedContent(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, current.Status)
 }
