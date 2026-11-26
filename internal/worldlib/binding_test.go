@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -766,6 +768,129 @@ func (f *faultyAccessor) Rename(oldRel, newRel string) error {
 		return errors.New("injected lost rename reply")
 	}
 	return nil
+}
+
+// stagedMarkerStorage is a read-only mocked node accessor for the staged-family
+// scan. It never reads or writes a real world tree: ReadDir and Stat answer
+// from the supplied entries and per-path faults.
+type stagedMarkerStorage struct {
+	nodestorage.Accessor
+	entries []os.DirEntry
+	markers map[string]fakeMarkerInfo
+	faults  map[string]error
+}
+
+type fakeMarkerInfo struct {
+	name string
+	size int64
+	mode fs.FileMode
+}
+
+func (f fakeMarkerInfo) Name() string       { return f.name }
+func (f fakeMarkerInfo) Size() int64        { return f.size }
+func (f fakeMarkerInfo) Mode() fs.FileMode  { return f.mode }
+func (f fakeMarkerInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeMarkerInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeMarkerInfo) Sys() any           { return nil }
+
+func (s *stagedMarkerStorage) ReadDir(string) ([]os.DirEntry, error) {
+	return s.entries, nil
+}
+
+func (s *stagedMarkerStorage) Stat(rel string) (os.FileInfo, error) {
+	if err, ok := s.faults[rel]; ok {
+		return nil, err
+	}
+	if info, ok := s.markers[rel]; ok {
+		return info, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func TestStageFamiliesDistinguishesMissingMarkerFromStorageFault(t *testing.T) {
+	const stageRoot = ".world-library/stage-test/extracted"
+	valid := fakeMarkerInfo{name: "level.dat", size: 1, mode: 0o644}
+	entries := []os.DirEntry{
+		fs.FileInfoToDirEntry(fakeMarkerInfo{name: "world", mode: fs.ModeDir | 0o755}),
+		fs.FileInfoToDirEntry(fakeMarkerInfo{name: "world_nether", mode: fs.ModeDir | 0o755}),
+	}
+	fault := errors.New("injected benign stat fault")
+
+	t.Run("missing marker is skipped", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			entries: entries,
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if err != nil {
+			t.Fatalf("missing sibling marker must not fail the scan: %v", err)
+		}
+		if len(families) != 1 || families[0] != "world" {
+			t.Fatalf("families = %v; want [world] with the markerless sibling skipped", families)
+		}
+	})
+
+	t.Run("storage fault in normal iteration is returned", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			entries: entries,
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+			faults: map[string]error{
+				path.Join(stageRoot, "world_nether", "level.dat"): fault,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, fault) {
+			t.Fatalf("storage fault = %v, want the injected error rather than a silent skip", err)
+		}
+		if families != nil {
+			t.Fatalf("families on storage fault = %v; want none", families)
+		}
+	})
+
+	t.Run("storage fault in fallback is returned", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			faults: map[string]error{
+				path.Join(stageRoot, "world", "level.dat"): fault,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, fault) {
+			t.Fatalf("fallback storage fault = %v, want the injected error", err)
+		}
+		if families != nil {
+			t.Fatalf("families on fallback storage fault = %v; want none", families)
+		}
+	})
+
+	t.Run("missing marker in fallback stays an actionable layout rejection", func(t *testing.T) {
+		acc := &stagedMarkerStorage{}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, ErrUnsupportedWorldLayout) {
+			t.Fatalf("missing fallback marker = %v, want ErrUnsupportedWorldLayout", err)
+		}
+		if families != nil {
+			t.Fatalf("families for missing fallback marker = %v; want none", families)
+		}
+	})
+
+	t.Run("fallback still publishes the configured level marker", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if err != nil {
+			t.Fatalf("valid fallback marker: %v", err)
+		}
+		if len(families) != 1 || families[0] != "world" {
+			t.Fatalf("fallback families = %v; want [world]", families)
+		}
+	})
 }
 
 func multiFamilyTestArchive(t *testing.T, families []string) []byte {

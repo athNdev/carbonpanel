@@ -1041,27 +1041,45 @@ func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]str
 	if err != nil {
 		return nil, err
 	}
+	// A directory is a world family only when its actual direct marker is a
+	// regular, non-empty file. Ordinary backup companions (config/, mods/)
+	// must never be published as worlds. A missing marker simply means the
+	// directory is not a world family; any other stat failure is a storage
+	// error and must be returned so a transient node fault cannot silently
+	// drop a family or be misreported as an unsupported archive layout.
+	markerFamily := func(name string) (bool, error) {
+		marker, err := acc.Stat(path.Join(stageRoot, name, "level.dat"))
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("cannot inspect staged world family %q: %w", name, err)
+		}
+		return marker != nil && marker.Mode().IsRegular() && marker.Size() > 0, nil
+	}
 	families := []string{}
 	for _, entry := range entries {
 		if !entry.IsDir() || WorldFamilyFromMarker(path.Join(entry.Name(), "level.dat")) == "" {
 			continue
 		}
-		// A directory is a world family only when its actual direct marker is a
-		// regular, non-empty file. Ordinary backup companions (config/, mods/)
-		// must never be published as worlds.
-		marker, err := acc.Stat(path.Join(stageRoot, entry.Name(), "level.dat"))
-		if err != nil || !marker.Mode().IsRegular() || marker.Size() == 0 {
-			continue
+		publishable, err := markerFamily(entry.Name())
+		if err != nil {
+			return nil, err
 		}
-		families = append(families, entry.Name())
+		if publishable {
+			families = append(families, entry.Name())
+		}
 	}
 	if len(families) == 0 {
 		// Preserve the legacy exact-name fallback: a configured level folder
 		// with an actual direct level.dat is usable even if the directory
 		// listing was unavailable at extraction time.
 		if WorldFamilyFromMarker(path.Join(levelName, "level.dat")) != "" {
-			if marker, err := acc.Stat(path.Join(stageRoot, levelName, "level.dat")); err == nil &&
-				marker.Mode().IsRegular() && marker.Size() > 0 {
+			publishable, err := markerFamily(levelName)
+			if err != nil {
+				return nil, err
+			}
+			if publishable {
 				families = append(families, levelName)
 			}
 		}
