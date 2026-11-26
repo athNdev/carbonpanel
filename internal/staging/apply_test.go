@@ -1070,3 +1070,31 @@ func TestDueModBatchCleanupFailureKeepsTimedRetryBeforeCronPark(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusStaged, staged.Status)
 }
+
+func TestPublicationRefusesTamperedStagedBytesBeforeLiveWrite(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "tampered-stage", Name: "tampered-stage", DataPath: data, Status: storage.StatusDeepSleep}
+	server.Status = storage.StatusDeepSleep
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageRel := stageReviewedModRow(t, store, data, batchID, server, "candidate")
+	require.NoError(t, os.WriteFile(filepath.Join(data, filepath.FromSlash(stageRel)), []byte("tampered-payload"), 0o644))
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	err = ApplyBatch(ctx, store, nil, server, *batch, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "durable approved SHA-512")
+	require.NotContains(t, err.Error(), "https://", "publication refusals must not expose provider transport data")
+
+	got, readErr := os.ReadFile(live)
+	require.NoError(t, readErr)
+	require.Equal(t, "installed", string(got), "the live writer must not commit tampered staged bytes")
+}
