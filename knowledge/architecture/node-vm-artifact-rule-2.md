@@ -13,12 +13,15 @@ The build entry point emits a plan and NoCloud seed. The guest publishes
 the Ed25519 key, secret and digest-only bundle together in a root-only
 enrollment directory. Repeated first boot reuses matching state only after the
 complete saved preregistration record passes strict bounded base64, node/key/
-fingerprint/digest checks, and its `CSR_PRE` signature verifies with the stored
-key. Missing, malformed or inconsistent state is preserved and refused; no
-saved identity is overwritten or regenerated. Use a signed PKCS#10 DER
-`CSR_PRE` and an unpadded base64url secret for the shared protobuf string
-field. The default NoCloud seed enables IPv4 DHCP on Ubuntu's predictable
-Ethernet interface names.
+fingerprint/digest checks, policy-equal `contract_ref`, `object_id_binding` and
+bootstrap scopes, and the same `CSR_PRE` assertions as the shared authority:
+one self-signed Ed25519 PKCS#10 DER request whose SPKI equals the approved key,
+plus a detached proof made by that key. No reserialized CSR bytes are assumed.
+Missing, malformed or inconsistent state is preserved and refused; pre-hardening
+records (raw token, missing `node.key`, signed-JSON pseudo-CSR) are refused
+read-only with no automatic migration. Use a signed PKCS#10 DER `CSR_PRE` and an
+unpadded base64url secret for the shared protobuf string field. The default
+NoCloud seed enables IPv4 DHCP on Ubuntu's predictable Ethernet interface names.
 
 Clean boot can be checked on a disposable QEMU runner with hardware or software
 acceleration. Record the firmware, architecture, seed and base image digests.

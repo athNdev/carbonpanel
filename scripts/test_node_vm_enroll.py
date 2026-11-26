@@ -41,6 +41,53 @@ def repeating(pattern):
     return rng
 
 
+def snapshot_identity(out):
+    """Read every file in an enrollment directory for no-write assertions."""
+    return {path.name: path.read_bytes() for path in Path(out).iterdir()}
+
+
+def rewrite_bundle(out, bundle):
+    """Rewrite a saved bundle while keeping the fixture private."""
+    path = Path(out) / "enrollment-bundle.json"
+    path.write_text(json.dumps(bundle, sort_keys=True, indent=2) + "\n")
+    if os.name == "posix":
+        path.chmod(0o600)
+        Path(out).chmod(0o700)
+
+
+def read_tlv(buf, offset):
+    """Read one DER tag/length/value header; return tag, content offset, length."""
+    if offset + 2 > len(buf):
+        raise ValueError("truncated DER header")
+    tag = buf[offset]
+    first = buf[offset + 1]
+    offset += 2
+    if first & 0x80:
+        count = first & 0x7f
+        if count == 0 or offset + count > len(buf):
+            raise ValueError("unsupported DER length")
+        length = int.from_bytes(buf[offset:offset + count], "big")
+        offset += count
+    else:
+        length = first
+    if offset + length > len(buf):
+        raise ValueError("truncated DER value")
+    return tag, offset, length
+
+
+def replace_signature_algorithm_oid(der, oid):
+    """Replace the PKCS#10 signatureAlgorithm OID without touching the signed body."""
+    outer_tag, content, _ = read_tlv(der, 0)
+    info_tag, info_content, info_length = read_tlv(der, content)
+    alg_tag, alg_content, _ = read_tlv(der, info_content + info_length)
+    oid_tag, oid_content, oid_length = read_tlv(der, alg_content)
+    if outer_tag != 0x30 or info_tag != 0x30 or alg_tag != 0x30 or oid_tag != 0x06:
+        raise ValueError("unexpected PKCS#10 DER layout")
+    if oid_length != len(oid):
+        raise ValueError("replacement OID length differs")
+    return der[:oid_content] + oid + der[oid_content + oid_length:]
+
+
 class SavedFixtureKeyPair(enroll.FakeKeyPair):
     """Stand-in for the guest OpenSSL key so saved-identity tests stay offline."""
 
@@ -92,6 +139,10 @@ class IdentityTests(unittest.TestCase):
         self.assertNotIn("private_key", bundle)
         self.assertNotIn("enrollment_secret", bundle)
         self.assertEqual(bundle["bootstrap_scopes"], ["BeginEnrollmentChallenge", "ClaimEnrollment"])
+        self.assertEqual(bundle["contract_ref"], policy["contract_ref"])
+        self.assertEqual(
+            bundle["object_id_binding"], policy["policy"]["object_id_binding"],
+        )
         self.assertTrue(bundle["contract_is_shared"])
         self.assertFalse(bundle["fork_allowed"])
 
@@ -327,6 +378,151 @@ class SavedIdentityTests(unittest.TestCase):
                 self.assertIn(field, str(refused.exception))
                 self.assertEqual(self._snapshot(out), before)
 
+    def test_saved_record_requires_policy_for_reuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, node_id, _, _ = self._save_identity(tmp)
+            before = self._snapshot(out)
+            with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                with self.assertRaises(ValueError) as refused:
+                    enroll.load_identity(out, node_id, "fixture-a")
+            self.assertIn("policy is required", str(refused.exception))
+            self.assertEqual(self._snapshot(out), before)
+
+    def test_saved_policy_fields_must_match_the_checked_in_policy(self):
+        mutations = {
+            "contract_ref": lambda b: b.update(contract_ref=b["contract_ref"] + " (fork)"),
+            "object_id_binding": lambda b: b.update(object_id_binding="any node object id"),
+            "bootstrap_scopes": lambda b: b.update(
+                bootstrap_scopes=list(reversed(b["bootstrap_scopes"])),
+            ),
+            "contract_is_shared": lambda b: b.update(contract_is_shared=False),
+            "fork_allowed": lambda b: b.update(fork_allowed=True),
+        }
+        for field, mutate in mutations.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                out, node_id, _, secret = self._save_identity(tmp)
+                path = out / "enrollment-bundle.json"
+                bundle = json.loads(path.read_text())
+                mutate(bundle)
+                self._rewrite_bundle(out, bundle)
+                before = self._snapshot(out)
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError) as refused:
+                        enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertIn(field, str(refused.exception))
+                self.assertNotIn(secret.decode(), str(refused.exception))
+                self.assertEqual(self._snapshot(out), before)
+
+    def test_policy_bootstrap_scopes_must_remain_the_bounded_pair(self):
+        policy = json.loads(json.dumps(self.policy))
+        policy["policy"]["bootstrap_scopes"] = ["ClaimEnrollment"]
+        with self.assertRaises(ValueError) as refused:
+            enroll.build_preregistration_bundle(
+                "node-fixture", "fixture-a", b"\x22" * 16, b"secret",
+                enroll.FakeKeyPair("fixture-key"), policy,
+            )
+        self.assertIn("bootstrap_scopes", str(refused.exception))
+
+    def test_cli_refuses_a_record_that_changes_only_contract_ref(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, _, _, _ = self._save_identity(tmp)
+            path = out / "enrollment-bundle.json"
+            bundle = json.loads(path.read_text())
+            bundle["contract_ref"] = "ADR0019 / proto/carbonpanel/v1/other.proto"
+            self._rewrite_bundle(out, bundle)
+            before = self._snapshot(out)
+            with self.assertRaises(ValueError) as refused:
+                self._run_cli(out)
+            self.assertIn("contract_ref", str(refused.exception))
+            self.assertEqual(self._snapshot(out), before)
+
+    def _write_pre_pr_legacy_identity(self, out, label="fixture-a"):
+        """Write the pre-persisted-key record shape: raw token, no key, signed-JSON CSR."""
+        out.mkdir(mode=0o700)
+        legacy = enroll.FakeKeyPair("legacy-fixture")
+        salt = enroll.generate_salt(16, repeating(b"\x22"))
+        secret = enroll.generate_secret(256, repeating(b"\x11"))
+        payload = {
+            "node_label": label,
+            "enrollment_salt": enroll._b64(salt),
+            "enrollment_secret_digest": enroll.compute_digest(salt, secret),
+            "approved_public_key_spki": enroll._b64(legacy.spki_der()),
+            "approved_key_fingerprint": legacy.fingerprint(),
+        }
+        signed_json = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        bundle = dict(payload)
+        bundle["csr_pre"] = enroll._b64(signed_json)
+        bundle["csr_pre_signature"] = enroll._b64(legacy.sign(signed_json))
+        bundle["node_id"] = enroll.derive_node_id(
+            label + "::" + str(self.policy.get("artifact_revision", "first-boot")),
+        )
+        bundle["bootstrap_scopes"] = ["BeginEnrollmentChallenge", "ClaimEnrollment"]
+        bundle["object_id_binding"] = self.policy["policy"]["object_id_binding"]
+        bundle["contract_ref"] = self.policy["contract_ref"]
+        bundle["contract_is_shared"] = True
+        bundle["fork_allowed"] = False
+        rewrite_bundle(out, bundle)
+        secret_path = out / "enrollment-secret.bin"
+        secret_path.write_bytes(secret)
+        if os.name == "posix":
+            secret_path.chmod(0o600)
+        return out
+
+    def test_pre_pr_legacy_identity_is_refused_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._write_pre_pr_legacy_identity(Path(tmp) / "enrollment")
+            self.assertFalse((out / "node.key").exists())
+            before = snapshot_identity(out)
+            with self.assertRaises(ValueError) as refused:
+                self._run_cli(out)
+            message = str(refused.exception)
+            self.assertIn("node.key", message)
+            self.assertIn("no automatic migration", message)
+            self.assertEqual(snapshot_identity(out), before)
+            self.assertFalse((out / "node.key").exists())
+
+    def test_legacy_signed_json_csr_with_valid_proof_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, node_id, bundle, secret = self._save_identity(tmp)
+            keypair = SavedFixtureKeyPair(out / "node.key")
+            signed_json = json.dumps(
+                {"node_label": "fixture-a"}, sort_keys=True, separators=(",", ":"),
+            ).encode()
+            bundle["csr_pre"] = enroll._b64(signed_json)
+            bundle["csr_pre_signature"] = enroll._b64(keypair.sign(signed_json))
+            rewrite_bundle(out, bundle)
+            before = snapshot_identity(out)
+            with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                with self.assertRaises(ValueError) as refused:
+                    enroll.load_identity(out, node_id, "fixture-a", self.policy)
+            self.assertIn("signed JSON", str(refused.exception))
+            self.assertNotIn(secret.decode(), str(refused.exception))
+            self.assertEqual(snapshot_identity(out), before)
+
+    def test_oversized_identity_files_are_refused_without_writes(self):
+        cases = {
+            "bundle": lambda out: (out / "enrollment-bundle.json").write_bytes(
+                b"x" * (enroll.MAX_BUNDLE_BYTES + 1),
+            ),
+            "key": lambda out: (out / "node.key").write_bytes(
+                b"x" * (enroll.MAX_KEY_BYTES + 1),
+            ),
+        }
+        for name, grow in cases.items():
+            with self.subTest(file=name), tempfile.TemporaryDirectory() as tmp:
+                out, node_id, _, _ = self._save_identity(tmp)
+                grow(out)
+                if os.name == "posix":
+                    name_on_disk = "enrollment-bundle.json" if name == "bundle" else "node.key"
+                    (out / name_on_disk).chmod(0o600)
+                    out.chmod(0o700)
+                before = self._snapshot(out)
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError) as refused:
+                        enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertIn("size bound", str(refused.exception))
+                self.assertEqual(self._snapshot(out), before)
+
     def test_missing_preregistration_fields_are_refused_without_writes(self):
         for field in sorted(enroll.REQUIRED_BUNDLE_FIELDS):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
@@ -445,10 +641,105 @@ class GuestIdentityTests(unittest.TestCase):
             out.mkdir(mode=0o700)
             marker = out / "enrollment-bundle.json"
             marker.write_text("{}")
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaises(ValueError) as refused:
                 enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            self.assertIn("missing node.key", str(refused.exception))
+            self.assertIn("no automatic migration", str(refused.exception))
             self.assertEqual(list(out.iterdir()), [marker])
             self.assertEqual(marker.read_text(), "{}")
+
+    def test_reuses_previously_qualified_complete_record_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            bundle = enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            before = snapshot_identity(out)
+            self.assertEqual(
+                enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy), bundle,
+            )
+            self.assertEqual(snapshot_identity(out), before)
+            self.assertEqual(
+                enroll.load_identity(
+                    out, enroll.derive_node_id("instance-a"), "fixture-a", self.policy,
+                ),
+                bundle,
+            )
+            self.assertEqual(snapshot_identity(out), before)
+
+    def test_refuses_inconsistent_saved_csr_with_valid_detached_proof(self):
+        def other_key_csr(csr, node_id, tmp):
+            key_path = Path(tmp) / "other.key"
+            subprocess.run(
+                ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key_path)],
+                check=True, capture_output=True,
+            )
+            return subprocess.run(
+                ["openssl", "req", "-new", "-key", str(key_path), "-subj", "/CN=" + node_id,
+                 "-outform", "DER"],
+                check=True, capture_output=True,
+            ).stdout
+
+        cases = {
+            "tampered self-signature": (
+                lambda csr, node_id, tmp: csr[:-1] + bytes([csr[-1] ^ 1]),
+                "self-signature does not verify with the approved key",
+            ),
+            "valid csr from another key": (
+                other_key_csr,
+                "does not match the approved key",
+            ),
+            "unrecognized signature algorithm": (
+                lambda csr, node_id, tmp: replace_signature_algorithm_oid(
+                    csr, bytes.fromhex("2b6571"),
+                ),
+                "signature algorithm is not Ed25519",
+            ),
+            "trailing der bytes": (
+                lambda csr, node_id, tmp: csr + b"\x00",
+                "not a single valid DER PKCS#10 request",
+            ),
+            "legacy signed json": (
+                lambda csr, node_id, tmp: json.dumps(
+                    {"node_label": "fixture-a"}, sort_keys=True, separators=(",", ":"),
+                ).encode(),
+                "legacy signed JSON",
+            ),
+        }
+        for name, (mutate, expected) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "enrollment"
+                bundle = enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+                node_id = bundle["node_id"]
+                key = enroll.OpenSSLKeyPair(out / "node.key")
+                csr = mutate(base64.b64decode(bundle["csr_pre"]), node_id, tmp)
+                saved = json.loads((out / "enrollment-bundle.json").read_text())
+                saved["csr_pre"] = base64.b64encode(csr).decode()
+                # The detached proof is valid for these bytes; only the CSR
+                # assertions or the approved-key binding can refuse them.
+                saved["csr_pre_signature"] = base64.b64encode(key.sign(csr)).decode()
+                rewrite_bundle(out, saved)
+                before = snapshot_identity(out)
+                with self.assertRaises(ValueError) as refused:
+                    enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertIn(expected, str(refused.exception))
+                self.assertEqual(snapshot_identity(out), before)
+
+    def test_refuses_stored_key_that_is_not_ed25519(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            bundle = enroll.ensure_identity(out, "instance-a", "fixture-a", self.policy)
+            key_path = out / "node.key"
+            key_path.unlink()
+            subprocess.run(
+                ["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout",
+                 "-out", str(key_path)],
+                check=True, capture_output=True,
+            )
+            os.chmod(key_path, 0o600)
+            before = snapshot_identity(out)
+            with self.assertRaises(ValueError) as refused:
+                enroll.load_identity(out, bundle["node_id"], "fixture-a", self.policy)
+            self.assertIn("not an Ed25519 key", str(refused.exception))
+            self.assertEqual(snapshot_identity(out), before)
 
 
 if __name__ == "__main__":

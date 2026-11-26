@@ -136,6 +136,14 @@ Verified by the offline guest-module fixtures, not by a live VM:
   leaking field or value is refused by `assert_bundle_has_no_secret`.
 - `write_identity` separates the `0600` bundle from the `0600` secret file in a
   `0700` directory; stdout of `first-boot` carries only public metadata.
+- Saved-identity reuse re-validates the complete record: strict bounded base64,
+  node/key/fingerprint/digest matches, policy-equal `contract_ref`,
+  `object_id_binding` and bootstrap scopes, and a self-signed Ed25519 PKCS#10
+  `CSR_PRE` whose SPKI equals the approved key plus a detached proof made by
+  that key. An internally inconsistent CSR is refused even when the detached
+  proof is valid. A pre-hardening record (raw token, missing `node.key` or
+  signed-JSON pseudo-CSR) is preserved and refused read-only; no automatic
+  migration is performed and operator re-provisioning is required.
 - `SIG_CLAIM` uses the shared ADR0019/OSS-385 `ClaimContextRaw` NUL-delimited
   byte encoding over the **server-stored** nonce, enrollment `expires_at`,
   canonical proto capability names and channel context. Byte-for-byte
