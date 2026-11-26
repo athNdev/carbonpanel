@@ -35,10 +35,9 @@ sources:
 - Keep upload ownership, server-create authorization and retry idempotency scoped
   to the submitting principal. Allocate the destination exclusively on the
   chosen node before committing the new server row.
-- Preview is authorized by server-create, not node inventory. It may return only
-  the enabled destination IDs and display names needed to choose a node; never
-  require nodes/read for this path or expose addresses, credentials, capacity
-  statistics or other private inventory. A supplied node still runs the
+- Preview is authorized by server-create, not node inventory: return only enabled
+  destination IDs and names, never addresses, credentials, capacity statistics or
+  private inventory, and never require nodes/read. A supplied node still runs the
   exact-node eligibility and capacity check.
 - The console offers ZIP and tar.gz export with stopped-server consistency only;
   it never stops a live server. It must show the third-party credential
@@ -48,13 +47,14 @@ sources:
   concrete destination node and renders typed findings and that node's capacity.
   Archive mode never uses generic automatic placement; preview and create bind
   the same node. Fence preview and upload responses by upload and destination.
-  Create stays blocked until the current upload has a successful preview for the
-  current node; a failed preview is retryable for the same upload and node, and
-  a replacement upload blocks submission while it is in flight. Reuse one create
-  request ID across retries and retain a completed upload after a refusal;
-  release that identity only after a committed create.
-- Archive create shows the verified runtime, submits its Minecraft version,
-  loader and loader version, and keeps operator memory and max-player overrides.
-  It disables standalone add-on setup because the archive carries its own
-  content, and never carries a former blueprint image or modpack into the
-  request.
+  Create stays blocked with an on-screen reason until the current upload has a
+  successful preview for the current node; a failed preview is retryable for the
+  same upload and node, and a replacement upload blocks submission while it is
+  in flight. Reuse one create request ID across retries and retain a completed
+  upload after a refusal; release that identity only after a committed create.
+- Archive create submits the verified runtime and keeps operator memory and
+  max-player overrides. It hides standalone add-ons and the incompatible image,
+  modpack, detached and Docker-override fields, normalizing stale values out of
+  the request. Leaving archive mode restores the prior placement choice. While
+  create is in flight, navigation is blocked and completion binds to the
+  captured upload, node and preview.

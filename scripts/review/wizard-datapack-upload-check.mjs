@@ -109,10 +109,7 @@ try {
         { find: "$app/state", replacement: path.join(fixture, "state.js") },
         {
           find: "$app/navigation",
-          replacement: path.join(
-            project,
-            "e2e/oss-245-diagnostics-reconnect/navigation.js",
-          ),
+          replacement: path.join(fixture, "navigation.js"),
         },
         {
           find: "$app/paths",
@@ -582,14 +579,18 @@ try {
     0,
     "archive mode must not offer standalone add-on setup",
   );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Create Server", exact: true })
+      .isDisabled(),
+    true,
+    "a failed preview must leave create disabled",
+  );
   await page
-    .getByRole("button", { name: "Create Server", exact: true })
-    .click();
-  await page
-    .getByText(
-      "Wait for a successful archive preview of this upload and destination before creating.",
-      { exact: true },
-    )
+    .getByTestId("archive-create-blocked-help")
+    .getByText(/Retry the archive preview for this destination/, {
+      exact: false,
+    })
     .waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
   assert.equal(
@@ -597,6 +598,7 @@ try {
     false,
     "a failed preview must block create",
   );
+  await showWizardStep(page, "Basic Information");
   await page
     .getByRole("button", { name: "Retry preview", exact: true })
     .click();
@@ -793,16 +795,18 @@ try {
     .waitFor({ timeout: 15_000 });
   for (let step = 0; step < 4; step++)
     await page.getByRole("button", { name: "Next Step" }).click();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Create Server", exact: true })
+      .isDisabled(),
+    true,
+    "an archive with blocking findings must leave create disabled",
+  );
   await page
-    .getByRole("button", { name: "Create Server", exact: true })
-    .click();
-  await page
-    .getByText(
-      "This archive has blocking findings. Resolve them before creating.",
-      {
-        exact: true,
-      },
-    )
+    .getByTestId("archive-create-blocked-help")
+    .getByText("Resolve the blocking archive findings before creating.", {
+      exact: true,
+    })
     .waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
   assert.equal(
@@ -813,6 +817,224 @@ try {
   summaries.push({
     scenario: "incompatible verified archive runtime stays blocked",
     calls,
+  });
+
+  // Representative desktop/narrow and light/dark captures of the archive
+  // destination preflight, blocked/refusal/retry states and keyboard selection.
+  await page.addInitScript(() => {
+    // A create-only principal: ListNodes stays denied and placement comes from
+    // the archive preview's enabled-destination list.
+    globalThis.__wizardDenyListNodes = true;
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-1", name: "Fixture Node" },
+      { id: "node-2", name: "Fixture Node B" },
+    ];
+    globalThis.__archivePreviewMode = "success";
+  });
+  const archiveViews = [
+    {
+      name: "desktop-dark",
+      viewport: { width: 1440, height: 1000 },
+      theme: "dark",
+    },
+    {
+      name: "desktop-light",
+      viewport: { width: 1440, height: 1000 },
+      theme: "light",
+    },
+    {
+      name: "narrow-dark",
+      viewport: { width: 390, height: 900 },
+      theme: "dark",
+    },
+    {
+      name: "narrow-light",
+      viewport: { width: 390, height: 900 },
+      theme: "light",
+    },
+  ];
+  for (const view of archiveViews) {
+    await page.setViewportSize(view.viewport);
+    await page.goto(base);
+    await waitForFixtureReady(page);
+    await page.evaluate((theme) => {
+      document.documentElement.setAttribute("data-carbon-theme", theme);
+      document.documentElement.classList.toggle("dark", theme === "dark");
+      globalThis.__wizardDenyListNodes = true;
+      globalThis.__wizardArchiveDestinations = [
+        { id: "node-1", name: "Fixture Node" },
+        { id: "node-2", name: "Fixture Node B" },
+      ];
+      globalThis.__archivePreviewMode = "success";
+      globalThis.__wizardReset();
+    }, view.theme);
+    await page
+      .getByPlaceholder("survival-smp-01")
+      .fill(`archive-preview-${view.name}`);
+    await page.getByTestId("create-from-archive-tile").click();
+    await uploadServerArchive(page);
+    await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+    assert.deepEqual(
+      await page.getByTestId("archive-destination-option").count(),
+      0,
+      "destination choices appear on the cluster step, not the upload step",
+    );
+    await page.screenshot({
+      path: path.join(out, `archive-preview-${view.name}.png`),
+      fullPage: true,
+    });
+    for (let step = 0; step < 3; step++)
+      await page.getByRole("button", { name: "Next Step" }).click();
+    const options = page.getByTestId("archive-destination-option");
+    assert.equal(
+      await options.count(),
+      2,
+      "ListNodes denial must fall back to the preview destination list",
+    );
+    await options.nth(1).focus();
+    await page.screenshot({
+      path: path.join(out, `archive-focus-${view.name}.png`),
+      fullPage: true,
+    });
+    await page.keyboard.press("Space");
+    await page.waitForFunction(
+      () =>
+        globalThis.__wizardCalls.some(
+          (call) =>
+            call.method === "previewServerArchive" &&
+            call.payload.nodeId === "node-2",
+        ),
+      null,
+      { timeout: 15_000 },
+    );
+    await page.getByTestId("archive-destination-confirmation").waitFor();
+    assert.equal(
+      await page.getByTestId("archive-destination-node").textContent(),
+      "node-2",
+      "keyboard selection must bind the second concrete destination",
+    );
+    await page.screenshot({
+      path: path.join(out, `archive-selected-${view.name}.png`),
+      fullPage: true,
+    });
+
+    await page.evaluate(() => {
+      globalThis.__archivePreviewMode = "unsupported";
+    });
+    await options.nth(0).click();
+    await page
+      .getByText("This archive has blocking findings and cannot be created.", {
+        exact: true,
+      })
+      .waitFor({ timeout: 15_000 });
+    await page.screenshot({
+      path: path.join(out, `archive-blocked-${view.name}.png`),
+      fullPage: true,
+    });
+
+    await page.evaluate(() => {
+      globalThis.__archivePreviewMode = "fail-once";
+    });
+    await options.nth(1).click();
+    await showWizardStep(page, "Basic Information");
+    await page
+      .getByText(/fixture archive preview refusal/)
+      .waitFor({ timeout: 15_000 });
+    await page.screenshot({
+      path: path.join(out, `archive-refusal-${view.name}.png`),
+      fullPage: true,
+    });
+    await page
+      .getByRole("button", { name: "Retry preview", exact: true })
+      .click();
+    await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+    await page.screenshot({
+      path: path.join(out, `archive-retry-${view.name}.png`),
+      fullPage: true,
+    });
+    summaries.push({ scenario: `archive destinations ${view.name}` });
+
+    if (view.name !== "desktop-dark") continue;
+    // Held archive create: back navigation is cancelled and replacement
+    // controls are disabled while the captured submission is in flight.
+    await showWizardStep(page, "Add-ons");
+    await page.evaluate(() => {
+      globalThis.__wizardHoldCreate = true;
+    });
+    await page
+      .getByRole("button", { name: "Create Server", exact: true })
+      .click();
+    await page.locator("form[inert]").waitFor();
+    assert.equal(
+      await page
+        .getByRole("link", { name: "Cancel" })
+        .getAttribute("aria-disabled"),
+      "true",
+      "cancel navigation must be disabled during the archive create",
+    );
+    assert.equal(
+      await page.getByRole("button", { name: "Previous" }).isDisabled(),
+      true,
+      "step navigation must be disabled during the archive create",
+    );
+    assert.equal(
+      await page.locator('[data-testid="archive-file-input"]').count(),
+      0,
+      "the upload step is not reachable while the archive create is in flight",
+    );
+    const cancelled = await page.evaluate(() => {
+      let cancelled = false;
+      globalThis.__wizardBeforeNavigate?.({
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return cancelled;
+    });
+    assert.equal(
+      cancelled,
+      true,
+      "a browser back during the archive create must be cancelled",
+    );
+    await page.evaluate(() => globalThis.__wizardReleaseCreate());
+    await page.getByRole("heading", { name: "Server created" }).waitFor();
+    calls = await page.evaluate(() => globalThis.__wizardCalls);
+    const heldArchive = calls.find(
+      (call) => call.method === "createServer",
+    ).payload;
+    assert.deepEqual(
+      {
+        archiveUploadId: heldArchive.archiveUploadId,
+        nodeId: heldArchive.nodeId,
+        detached: heldArchive.detached,
+        dockerImage: heldArchive.dockerImage,
+        dockerOverrides: heldArchive.dockerOverrides,
+        modpackId: heldArchive.modpackId,
+      },
+      {
+        archiveUploadId: "seeded-session",
+        nodeId: "node-2",
+        detached: false,
+        dockerImage: "",
+        dockerOverrides: undefined,
+        modpackId: "",
+      },
+      "the held create must submit the captured clean archive request",
+    );
+    assert.equal(
+      calls.filter((call) => call.method === "createServer").length,
+      1,
+      "the held archive create must be submitted exactly once",
+    );
+    summaries.push({
+      scenario:
+        "held archive create cancels back navigation and disables replacement controls",
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
   });
 
   assert.deepEqual(errors, [], "the fixture page must not throw");

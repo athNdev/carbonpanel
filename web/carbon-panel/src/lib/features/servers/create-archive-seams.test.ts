@@ -15,12 +15,12 @@ const container = read('lib/features/servers/ServerArchiveExport.svelte');
 
 test('the wizard submits the completed upload with the stable submission id', () => {
 	assert.ok(
-		wizard.includes("archiveUploadId: archiveMode ? archiveImportState.uploadId : ''"),
+		wizard.includes("archiveUploadId: submission ? submission.uploadId : ''"),
 		'create must carry the completed archive upload'
 	);
 	assert.ok(
-		wizard.includes('createRequest.requestId = archiveImportState.requestId'),
-		'archive retries must reuse the same request id'
+		wizard.includes('createRequest.requestId = submission.requestId'),
+		'archive retries must reuse the same request id captured for the submission'
 	);
 	assert.ok(
 		wizard.includes('previewServerArchive(request, ARCHIVE_RPC_OPTIONS)'),
@@ -74,8 +74,20 @@ test('archive create needs the current successful preview and keeps source ident
 		'operator memory and max-player overrides must survive archive create'
 	);
 	assert.ok(
-		wizard.includes("dockerImage: archiveMode ? '' : formData.dockerImage"),
+		wizard.includes("dockerImage: submission ? '' : formData.dockerImage"),
 		'a former blueprint or manual image must not be submitted with an archive'
+	);
+	assert.ok(
+		wizard.includes('detached: submission ? false : formData.detached'),
+		'a stale detached flag from an earlier mode must not reach the archive request'
+	);
+	assert.ok(
+		wizard.includes('dockerOverrides: submission ? undefined : formData.dockerOverrides'),
+		'stale Docker overrides from an earlier mode must not reach the archive request'
+	);
+	assert.ok(
+		wizard.includes("modpackId: submission ? '' : selectedModpack?.id || ''"),
+		'a stale modpack selection must not reach the archive request'
 	);
 	assert.match(
 		wizard,
@@ -96,18 +108,101 @@ test('archive create binds a concrete destination and refuses generic placement'
 	);
 	assert.match(
 		wizard,
-		/nodeId: archiveMode\s*\?\s*selectedNodeId/,
+		/nodeId: submission\s*\?\s*submission\.nodeId/,
 		'archive create must submit exactly the previewed node'
 	);
 	assert.match(
 		wizard,
-		/placementStrategy: archiveMode\s*\?\s*''/,
+		/placementStrategy: submission \? ''/,
 		'archive create must not ask the controller to place the import automatically'
 	);
 	assert.match(
 		wizard,
 		/function ensureArchiveDestination\(\)[\s\S]*nodePlacementMode = 'manual'/,
 		'entering archive mode must choose a concrete destination'
+	);
+});
+
+test('a create-only operator receives a narrow destination preflight', () => {
+	assert.ok(
+		wizard.includes('archiveImportState.destinations'),
+		'archive mode must consume the preview destination list when ListNodes is denied'
+	);
+	assert.ok(
+		wizard.includes('data-testid="archive-destination-option"'),
+		'the narrow destination list must be selectable'
+	);
+	assert.ok(
+		wizard.includes('archive-create-blocked-help'),
+		'the final step must explain what still blocks create'
+	);
+	assert.ok(
+		wizard.includes('archiveCreateReady'),
+		'create must only enable once the current archive and destination are ready'
+	);
+});
+
+test('archive mode hides fields the controller rejects', () => {
+	assert.ok(
+		wizard.includes('data-testid="archive-runtime-fields-locked"'),
+		'archive mode must state that image, detached mode and overrides are managed'
+	);
+	assert.match(
+		wizard,
+		/<!-- Detached Mode -->\s*\{#if !archiveMode\}/,
+		'detached mode must not be offered for an archive'
+	);
+	assert.match(
+		wizard,
+		/\{#if !archiveMode\}\s*<div class="border-t border-border pt-2">\s*<DockerOverridesEditor/,
+		'Docker overrides must not be offered for an archive'
+	);
+});
+
+test('an in-flight archive create is captured and navigation is fenced', () => {
+	assert.ok(
+		wizard.includes('interface ArchiveSubmission'),
+		'the submission must carry its upload, node, request id and preview'
+	);
+	assert.ok(
+		wizard.includes('archiveSubmission = submission'),
+		'create must capture the submission before awaiting the controller'
+	);
+	assert.ok(
+		wizard.includes('if (archiveSubmission) cancel();'),
+		'browser navigation must be cancelled while the archive create is in flight'
+	);
+	assert.ok(
+		wizard.includes('disabled={Boolean(archiveSubmission)}'),
+		'upload, mode and destination controls must be disabled during the submission'
+	);
+	assert.ok(
+		wizard.includes('archiveImportState.uploadId === submission.uploadId'),
+		'completion must only release the captured upload identity'
+	);
+	assert.match(
+		wizard,
+		/archiveSubmission = null;\s*createdServer = response\.server;/,
+		'a committed create must clear the in-flight fence before navigating'
+	);
+});
+
+test('leaving archive mode restores the ordinary placement state', () => {
+	assert.ok(wizard.includes('interface ArchivePlacementSnapshot'));
+	assert.match(
+		wizard,
+		/function leaveArchiveMode\(\)[\s\S]*nodePlacementMode = priorPlacement\.nodePlacementMode[\s\S]*selectedNodeId = priorPlacement\.selectedNodeId[\s\S]*placementStrategy = priorPlacement\.placementStrategy/,
+		'the prior auto/manual mode, node and strategy must come back'
+	);
+	assert.match(
+		wizard,
+		/function applyBlueprint\(seed: ServerBlueprint\) \{[\s\S]*leaveArchiveMode\(\)/,
+		'a blueprint switch must leave archive mode through the restoring path'
+	);
+	assert.match(
+		wizard,
+		/async function selectModpack\(modpack: IndexedModpack\) \{[\s\S]*leaveArchiveMode\(\)/,
+		'a modpack switch must leave archive mode through the restoring path'
 	);
 });
 

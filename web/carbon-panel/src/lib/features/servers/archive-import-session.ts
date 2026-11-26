@@ -19,7 +19,10 @@
  */
 
 import { beginLifecycleRequest } from '../../lifecycle-request';
-import type { PreviewServerArchiveResponse } from '../../proto/carbonpanel/v1/server_pb';
+import type {
+	PreviewServerArchiveResponse,
+	ServerArchiveDestination
+} from '../../proto/carbonpanel/v1/server_pb';
 import { createRequestSequence } from '../../utils/request-sequence';
 
 export interface ArchivePreviewCall {
@@ -39,6 +42,8 @@ export interface ArchiveImportState {
 	previewUploadId: string;
 	/** Destination node the successful preview belongs to; empty for automatic placement. */
 	previewNodeId: string;
+	/** Enabled destinations from the placement preflight; retained across a failed preview. */
+	destinations: ServerArchiveDestination[];
 	preparing: boolean;
 	error: string | null;
 	/** Stable across retries of this submission; empty until an upload completes. */
@@ -75,6 +80,7 @@ export function createArchiveImport(
 	let preview: PreviewServerArchiveResponse | null = null;
 	let previewUploadId = '';
 	let previewNodeId = '';
+	let destinations: ServerArchiveDestination[] = [];
 	let preparing = false;
 	let error: string | null = null;
 	let attempt: { requestId: string; finish: () => void } | null = null;
@@ -86,6 +92,7 @@ export function createArchiveImport(
 			preview,
 			previewUploadId,
 			previewNodeId,
+			destinations,
 			preparing,
 			error,
 			requestId: attempt?.requestId ?? ''
@@ -103,6 +110,7 @@ export function createArchiveImport(
 		preview = null;
 		previewUploadId = '';
 		previewNodeId = '';
+		destinations = [];
 		preparing = false;
 		error = null;
 		attempt?.finish();
@@ -129,6 +137,9 @@ export function createArchiveImport(
 			preview = result;
 			previewUploadId = currentUpload;
 			previewNodeId = nodeId;
+			// The preflight is independent of the concrete-node capacity result, so
+			// keep it available while the operator retries a failed preview.
+			destinations = result.destinations;
 		} catch (cause) {
 			if (seq !== sequence.current || currentUpload !== uploadId) return;
 			preview = null;
@@ -162,6 +173,7 @@ export function createArchiveImport(
 		preview = null;
 		previewUploadId = '';
 		previewNodeId = '';
+		destinations = [];
 		preparing = false;
 		error = null;
 		attempt?.finish();

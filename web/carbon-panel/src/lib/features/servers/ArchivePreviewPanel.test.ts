@@ -62,6 +62,23 @@ test('the rendered preview shows runtime defaults, sizes, node capacity and port
 	assert.match(html, /No compatibility findings/);
 });
 
+test('capacity and destination pairs stay compact instead of spanning the panel', () => {
+	assert.match(
+		source,
+		/Required<\/span>\s*<span class="text-foreground">\{view\.requiredBytes\}/,
+		'the required label and value must be an inline pair'
+	);
+	assert.match(
+		source,
+		/class="flex flex-wrap items-baseline gap-x-6 gap-y-1"/,
+		'label/value groups must wrap as compact units'
+	);
+	assert.ok(
+		!source.includes('flex justify-between gap-2'),
+		'labels and values must not be pushed to opposite edges at desktop width'
+	);
+});
+
 test('typed blockers and capacity refusal are visible in the rendered panel', async () => {
 	const html = await renderPanel(
 		describePreview(

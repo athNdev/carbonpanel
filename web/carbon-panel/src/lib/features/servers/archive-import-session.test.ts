@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { create } from '@bufbuild/protobuf';
 import {
 	PreviewServerArchiveResponseSchema,
-	type PreviewServerArchiveResponse
+	ServerArchiveDestinationSchema,
+	type PreviewServerArchiveResponse,
+	type ServerArchiveDestination
 } from '../../proto/carbonpanel/v1/server_pb';
 import { createArchiveImport, isArchivePreviewCurrent } from './archive-import-session';
 
@@ -190,8 +192,44 @@ test('discard clears upload, preview and submission identity', async () => {
 		preview: null,
 		previewUploadId: '',
 		previewNodeId: '',
+		destinations: [],
 		preparing: false,
 		error: null,
 		requestId: ''
 	});
+});
+
+test('destination preflight survives a failed concrete preview and resets with a new upload', async () => {
+	const destinations: ServerArchiveDestination[] = [
+		create(ServerArchiveDestinationSchema, { id: 'node-2', name: 'Second Node' }),
+		create(ServerArchiveDestinationSchema, { id: 'node-3', name: 'Third Node' })
+	];
+	let fail = false;
+	const session = createArchiveImport({
+		previewServerArchive: () =>
+			fail
+				? Promise.reject(new Error('storage refusal'))
+				: Promise.resolve(
+						create(PreviewServerArchiveResponseSchema, { mcVersion: '1.21.1', destinations })
+					)
+	});
+	session.setUpload('upload-1', 'world.zip');
+	await session.refresh('');
+	assert.deepEqual(session.state.destinations, destinations);
+
+	fail = true;
+	await session.refresh('node-2');
+	assert.equal(session.state.error, 'storage refusal');
+	assert.deepEqual(
+		session.state.destinations,
+		destinations,
+		'the enabled destinations stay available for a same-node retry'
+	);
+
+	session.setUpload('upload-2', 'replacement.zip');
+	assert.deepEqual(
+		session.state.destinations,
+		[],
+		'a replacement upload clears stale destinations'
+	);
 });

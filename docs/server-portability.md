@@ -102,19 +102,28 @@ runtime defaults, file count, expanded and required bytes, destination
 availability, the chosen port and typed blockers or warnings. Archive mode
 requires a concrete destination
 node so the preview can check that node's free space; automatic placement
-remains available for ordinary creates. Create stays disabled until the current
-upload has a successful preview for that exact node, and the create request
-submits precisely the previewed node. A replacement upload blocks submission
-while it is in flight, and a late result for a superseded upload or destination
-is ignored. The visible engine and loader identity follows the verified archive
-runtime, while operator memory and max-player overrides remain editable.
+remains available for ordinary creates. A create-only operator whose role
+denies node inventory sees the enabled destination IDs and display names from
+the preview instead of the full node list. Create stays disabled until the
+current upload has a successful preview for that exact node, and the create
+request submits precisely the previewed node. The final step names the
+remaining blocker when create is unavailable. A replacement upload blocks
+submission while it is in flight, and a late result for a superseded upload or
+destination is ignored. The visible engine and loader identity follows the
+verified archive runtime, while operator memory and max-player overrides remain
+editable. Docker image, Detached Mode and Docker overrides are hidden in
+archive mode, and the request clears any stale values from an earlier mode.
+Leaving archive mode restores the ordinary auto/manual placement choice.
 Standalone setup add-ons are disabled for an archive import because the archive
 already carries its mods, plugins, datapacks and configuration; manage them from
 the server page after creation. A failed preview offers a same-node retry. The
 controller revalidates the upload and destination on create. A create
 submission keeps one request ID across retries; a refusal retains the completed
-upload so the operator can correct the destination and retry. A successful
-create discards the submission identity. Neither path stops an existing server.
+upload so the operator can correct the destination and retry. While that create
+is in flight, step, cancel and browser-back navigation are blocked and the
+submission completion is bound to the upload, node and preview captured when it
+started. A successful create discards the submission identity. Neither path
+stops an existing server.
 
 Export preparation, preview and create-from-archive validation use an extended
 one-hour client deadline and respect earlier cancellation. The console reports

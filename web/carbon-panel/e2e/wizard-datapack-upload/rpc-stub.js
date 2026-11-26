@@ -139,6 +139,9 @@ export const rpcClient = {
 				expandedBytes: 1048576n,
 				requiredBytes: 2097152n,
 				availableBytes: payload.nodeId ? 4194304n : undefined,
+				destinations: globalThis.__wizardArchiveDestinations || [
+					{ id: 'node-1', name: 'Fixture Node' }
+				],
 				findings
 			});
 		},
@@ -185,6 +188,11 @@ export const rpcClient = {
 	},
 	node: {
 		listNodes() {
+			if (globalThis.__wizardDenyListNodes) {
+				return Promise.reject(
+					new ConnectError('insufficient permissions for nodes/read', Code.PermissionDenied)
+				);
+			}
 			return Promise.resolve({
 				nodes: [{ id: 'node-1', name: 'Fixture Node', enabled: true, status: 1 }]
 			});

@@ -61,13 +61,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<div class="space-y-1 font-mono text-xs">
-		<div class="flex justify-between gap-2">
-			<span class="text-muted-foreground">Required bytes</span>
-			<span class="text-foreground">{view.requiredBytes}</span>
-		</div>
-		<div class="flex justify-between gap-2">
-			<span class="text-muted-foreground">Available bytes</span>
-			<span class="text-foreground">{view.availableBytes ?? 'not checked yet'}</span>
+		<div class="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+			<span class="inline-flex items-baseline gap-1.5">
+				<span class="text-muted-foreground">Required</span>
+				<span class="text-foreground">{view.requiredBytes}</span>
+			</span>
+			<span class="inline-flex items-baseline gap-1.5">
+				<span class="text-muted-foreground">Available</span>
+				<span class="text-foreground">{view.availableBytes ?? 'not checked yet'}</span>
+			</span>
 		</div>
 		<p
 			class="font-sans {view.capacity === 'insufficient'
@@ -81,13 +83,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<div class="space-y-1 border-t border-border pt-3 font-mono text-xs">
-		<div class="flex justify-between gap-2">
-			<span class="text-muted-foreground">Destination node</span>
-			<span class="text-foreground">{nodeId || 'automatic placement'}</span>
-		</div>
-		<div class="flex justify-between gap-2">
-			<span class="text-muted-foreground">Game port</span>
-			<span class="text-foreground">{port > 0 ? port : 'assign automatically'}</span>
+		<div class="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+			<span class="inline-flex items-baseline gap-1.5">
+				<span class="text-muted-foreground">Destination</span>
+				<span class="text-foreground">{nodeId || 'automatic placement'}</span>
+			</span>
+			<span class="inline-flex items-baseline gap-1.5">
+				<span class="text-muted-foreground">Game port</span>
+				<span class="text-foreground">{port > 0 ? port : 'assign automatically'}</span>
+			</span>
 		</div>
 	</div>
 
