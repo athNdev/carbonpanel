@@ -90,17 +90,25 @@ jobs:
             python3 - "$RUNNER_TEMP/upgrade-rehearsal/rehearsal-ci-report.json" <<'PY'
           import json, sys
           report = json.load(open(sys.argv[1], encoding="utf-8"))
-          print("upgrade rehearsal pass:", report["pass"])
+          print("upgrade rehearsal pass:", report.get("pass"))
+          # A fail-closed run can stop before the candidate or cases are recorded;
+          # still surface the original error instead of crashing the summary.
+          if report.get("error"):
+              print("error:", report["error"])
           for case in ("legacy", "current"):
-              meta = report.get("stable_" + case, {})
+              meta = report.get("stable_" + case) or {}
               if meta:
                   print(case + " stable:", meta.get("release_tag"), meta.get("archive_sha256"),
                         "source:", meta.get("source"))
-          print("candidate:", report["candidate"]["version"], report["candidate"]["commit"],
-                report["candidate"]["binary_sha256"])
-          print("failed checks:", report["failed_checks"])
-          for name, detail in report["cases"].items():
-              print(name, "tables:", detail["stable_tables"], "->", detail["candidate_tables"])
+          candidate = report.get("candidate") or {}
+          if candidate:
+              print("candidate:", candidate.get("version"), candidate.get("commit"),
+                    candidate.get("binary_sha256"))
+          else:
+              print("candidate: unavailable (run stopped before the candidate was recorded)")
+          print("failed checks:", report.get("failed_checks") or [])
+          for name, detail in (report.get("cases") or {}).items():
+              print(name, "tables:", detail.get("stable_tables"), "->", detail.get("candidate_tables"))
           PY
           fi
 

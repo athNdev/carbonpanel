@@ -62,11 +62,13 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
 runs two fail-closed cases on seeded disposable DB/world copies: the explicit
-`v1.0.40` legacy baseline (35 → 45 → 35 tables) and the current published
+`v1.0.40` legacy baseline (pinned 35-table stable baseline and rollback; the
+candidate count is derived from the real binary) and the current published
 stable derived from the authoritative release record by the product version
 contract, so the weekly check follows new stables without a hardcoded version.
-Both use real `carbon-panel` binaries and assert integrity, additive table
-growth, row/world preservation, forced-failure refusal and both restore paths.
+Both use real `carbon-panel` binaries, require the historical model and
+archive-import schema surfaces, and assert integrity, additive table growth,
+row/world preservation, forced-failure refusal and both restore paths.
 Exact artifact versions and SHA-256 digests are emitted in the job's evidence
 report. This check is not a release approval gate: it grants no write scope,
 touches no live world, host, tag, release or registry, and does not replace the
