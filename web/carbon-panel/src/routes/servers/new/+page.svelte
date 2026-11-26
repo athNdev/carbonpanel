@@ -225,6 +225,7 @@ one at https://mozilla.org/MPL/2.0/.
 		previewUploadId: '',
 		previewNodeId: '',
 		destinations: [],
+		preflightUploadId: '',
 		preparing: false,
 		error: null,
 		requestId: ''
@@ -269,25 +270,55 @@ one at https://mozilla.org/MPL/2.0/.
 	);
 	const archivePreviewReady = $derived(isArchivePreviewCurrent(archiveImportState, archiveNodeId));
 	const firstEnabledNode = $derived(nodes.find((node) => node.enabled) ?? null);
-	// A create-only operator may be denied ListNodes. In that case the preview's
-	// narrow enabled-destination list is the placement preflight.
-	const destinationChoices = $derived(
-		nodes.some((node) => node.enabled)
-			? nodes.filter((node) => node.enabled).map((node) => ({ id: node.id, name: node.name }))
-			: archiveImportState.destinations.map((destination) => ({
-					id: destination.id,
-					name: destination.name
-				}))
+	// A successful preflight for the current upload is authoritative for archive
+	// placement: it lists the nodes enabled right now, even when the cached
+	// ListNodes inventory is stale, and it is the only source when nodes/read is
+	// denied. Cached inventory may only seed the choice before an upload.
+	const archivePreflightSettled = $derived(
+		archiveMode &&
+			Boolean(archiveImportState.uploadId) &&
+			archiveImportState.preflightUploadId === archiveImportState.uploadId
 	);
-	const selectedNodeEnabled = $derived(
-		nodes.some((node) => node.id === selectedNodeId && node.enabled) ||
-			archiveImportState.destinations.some((destination) => destination.id === selectedNodeId)
+	const archivePreflightWaiting = $derived(
+		archiveMode &&
+			Boolean(archiveImportState.uploadId) &&
+			!archivePreflightSettled &&
+			!archiveImportState.error
 	);
+	const destinationChoices = $derived.by(() => {
+		if (!archiveMode || !archiveImportState.uploadId) {
+			return nodes.filter((node) => node.enabled).map((node) => ({ id: node.id, name: node.name }));
+		}
+		if (archivePreflightSettled) {
+			return archiveImportState.destinations.map((destination) => ({
+				id: destination.id,
+				name: destination.name
+			}));
+		}
+		return [];
+	});
+	const selectedNodeEnabled = $derived.by(() => {
+		// Until the preflight settles, keep the preliminary cached choice so the
+		// first preview can still validate it. A settled preflight is the truth.
+		if (archiveMode && archiveImportState.uploadId && !archivePreflightSettled) {
+			return Boolean(selectedNodeId);
+		}
+		if (archivePreflightSettled) {
+			return archiveImportState.destinations.some(
+				(destination) => destination.id === selectedNodeId
+			);
+		}
+		return nodes.some((node) => node.id === selectedNodeId && node.enabled);
+	});
 	const archiveCreateBlockedReason = $derived.by(() => {
 		if (!archiveMode) return '';
 		if (!archiveImportState.uploadId) return 'Upload a server archive before creating.';
 		if (archiveUploading) return 'Wait for the replacement archive upload to finish.';
-		if (!archiveNodeId) return 'Choose an enabled destination node so its storage can be verified.';
+		if (!archiveNodeId) {
+			if (archivePreflightSettled && archiveImportState.destinations.length === 0)
+				return 'Enable a Docker node in Settings → Docker Nodes, then retry the archive preview.';
+			return 'Choose an enabled destination node so its storage can be verified.';
+		}
 		if (archiveImportState.preparing) return 'Wait for the archive preview to finish.';
 		if (archiveImportState.error)
 			return 'Retry the archive preview for this destination before creating.';
@@ -301,12 +332,21 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 	const archiveCreateReady = $derived(!archiveMode || archiveCreateBlockedReason === '');
 
-	// Nodes may resolve after archive mode is entered; bind a concrete enabled
-	// node as soon as one is available so the preview can check its storage.
+	// Bind a concrete enabled node as soon as one is available. Before an
+	// upload, cached inventory seeds the choice; afterwards only a settled
+	// preflight may bind, and a now-ineligible selection is replaced so a stale
+	// cached node cannot stay selected after it was disabled.
 	$effect(() => {
-		if (!archiveMode || archiveSubmission || selectedNodeEnabled) return;
-		const first = firstEnabledNode ?? archiveImportState.destinations[0] ?? null;
-		if (first) selectedNodeId = first.id;
+		if (!archiveMode || archiveSubmission) return;
+		if (!archiveImportState.uploadId) {
+			if (selectedNodeEnabled) return;
+			if (firstEnabledNode) selectedNodeId = firstEnabledNode.id;
+			return;
+		}
+		if (!archivePreflightSettled) return;
+		if (archiveImportState.destinations.some((destination) => destination.id === selectedNodeId))
+			return;
+		selectedNodeId = archiveImportState.destinations[0]?.id ?? '';
 	});
 
 	// Keep the visible engine identity aligned with the verified archive. An
@@ -343,12 +383,25 @@ one at https://mozilla.org/MPL/2.0/.
 		void archiveImport.retry(archiveNodeId);
 	}
 
+	// When no destination list is known, retrying the previously selected node
+	// would just refuse again. Ask for the inspection result so newly enabled
+	// nodes can be discovered, then the effect previews the concrete choice.
+	function retryArchiveDestinations() {
+		if (!archiveImportState.uploadId) return;
+		void archiveImport.retry('');
+	}
+
 	/** Pick a concrete destination for an archive while keeping the choice editable. */
 	function ensureArchiveDestination() {
 		nodePlacementMode = 'manual';
+		if (archivePreflightSettled) {
+			if (archiveImportState.destinations.some((destination) => destination.id === selectedNodeId))
+				return;
+			selectedNodeId = archiveImportState.destinations[0]?.id ?? '';
+			return;
+		}
 		if (selectedNodeEnabled) return;
-		const first = firstEnabledNode ?? archiveImportState.destinations[0] ?? null;
-		if (first) selectedNodeId = first.id;
+		if (firstEnabledNode) selectedNodeId = firstEnabledNode.id;
 	}
 
 	/** Standalone add-ons are post-create work; an archive already carries its files. */
@@ -2416,7 +2469,7 @@ one at https://mozilla.org/MPL/2.0/.
 							</button>
 						</div>
 
-						{#if archiveMode && !archiveNodeId}
+						{#if archiveMode && !archiveNodeId && !(archiveImportState.uploadId && destinationChoices.length === 0)}
 							<div
 								class="border border-border bg-background p-4 text-xs text-muted-foreground"
 								data-testid="archive-destination-required"
@@ -2452,7 +2505,7 @@ one at https://mozilla.org/MPL/2.0/.
 									>
 										<CarbonInlineLoading description="Scanning cluster topology..." />
 									</div>
-								{:else if archiveMode && archiveImportState.uploadId && !archiveImportState.error && destinationChoices.length === 0}
+								{:else if archivePreflightWaiting}
 									<div
 										class="border border-border bg-background p-4 text-xs text-muted-foreground"
 										data-testid="archive-destination-preflight"
@@ -2461,10 +2514,41 @@ one at https://mozilla.org/MPL/2.0/.
 										destination without node inventory access.
 									</div>
 								{:else if archiveMode ? destinationChoices.length === 0 : nodes.length === 0}
-									<div class="border border-border bg-background p-4 text-xs text-muted-foreground">
-										No worker nodes available. Add and enable a Docker node in Settings → Docker
-										Nodes before creating servers.
-									</div>
+									{#if archiveMode && archiveImportState.uploadId}
+										<div
+											class="space-y-3 border border-border bg-background p-4"
+											data-testid="archive-destination-empty"
+										>
+											<p class="text-xs text-muted-foreground">
+												{#if archivePreflightSettled}
+													The archive placement preflight found no enabled destination nodes. Enable
+													a Docker node in Settings → Docker Nodes, then retry the preview.
+												{:else if archiveImportState.error}
+													The archive placement preflight could not list enabled destinations. Retry
+													the preview after checking the controller.
+												{:else}
+													The archive placement preflight returned no enabled destinations. Retry
+													the preview after enabling a Docker node in Settings → Docker Nodes.
+												{/if}
+											</p>
+											<CarbonButton
+												kind="secondary"
+												size="sm"
+												disabled={archiveUploading || Boolean(archiveSubmission)}
+												onclick={retryArchiveDestinations}
+												data-testid="archive-destination-retry"
+											>
+												Retry preflight
+											</CarbonButton>
+										</div>
+									{:else}
+										<div
+											class="border border-border bg-background p-4 text-xs text-muted-foreground"
+										>
+											No worker nodes available. Add and enable a Docker node in Settings → Docker
+											Nodes before creating servers.
+										</div>
+									{/if}
 								{:else if archiveMode}
 									<div
 										role="radiogroup"

@@ -142,6 +142,36 @@ test('a create-only operator receives a narrow destination preflight', () => {
 	);
 });
 
+test('the current archive preflight outranks cached node inventory', () => {
+	assert.match(
+		wizard,
+		/const archivePreflightSettled = \$derived\([\s\S]*preflightUploadId === archiveImportState\.uploadId/,
+		'a destination preflight is authoritative only for its own upload'
+	);
+	assert.match(
+		wizard,
+		/const destinationChoices = \$derived\.by\(\(\) => \{[\s\S]*if \(archivePreflightSettled\) \{[\s\S]*archiveImportState\.destinations\.map[\s\S]*\n\t\t\}\n\t\treturn \[\];\n\t\}\);/,
+		'a settled preflight replaces cached inventory while it is being refreshed'
+	);
+	assert.match(
+		wizard,
+		/if \(!archivePreflightSettled\) return;\s*if \(archiveImportState\.destinations\.some\(\(destination\) => destination\.id === selectedNodeId\)\)\s*return;/,
+		'a still-eligible selection is preserved, otherwise it is replaced'
+	);
+	assert.ok(
+		wizard.includes('data-testid="archive-destination-empty"'),
+		'a settled preflight with zero enabled nodes must render an empty state'
+	);
+	assert.ok(
+		wizard.includes('data-testid="archive-destination-retry"'),
+		'the empty state must offer an actionable preflight retry'
+	);
+	assert.ok(
+		wizard.includes("void archiveImport.retry('')"),
+		'the empty state must re-run the inspection so newly enabled nodes appear'
+	);
+});
+
 test('archive mode hides fields the controller rejects', () => {
 	assert.ok(
 		wizard.includes('data-testid="archive-runtime-fields-locked"'),

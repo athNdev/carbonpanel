@@ -193,6 +193,7 @@ test('discard clears upload, preview and submission identity', async () => {
 		previewUploadId: '',
 		previewNodeId: '',
 		destinations: [],
+		preflightUploadId: '',
 		preparing: false,
 		error: null,
 		requestId: ''
@@ -216,6 +217,7 @@ test('destination preflight survives a failed concrete preview and resets with a
 	session.setUpload('upload-1', 'world.zip');
 	await session.refresh('');
 	assert.deepEqual(session.state.destinations, destinations);
+	assert.equal(session.state.preflightUploadId, 'upload-1');
 
 	fail = true;
 	await session.refresh('node-2');
@@ -225,6 +227,11 @@ test('destination preflight survives a failed concrete preview and resets with a
 		destinations,
 		'the enabled destinations stay available for a same-node retry'
 	);
+	assert.equal(
+		session.state.preflightUploadId,
+		'upload-1',
+		'a failed node preview must not revoke the current destination preflight'
+	);
 
 	session.setUpload('upload-2', 'replacement.zip');
 	assert.deepEqual(
@@ -232,4 +239,37 @@ test('destination preflight survives a failed concrete preview and resets with a
 		[],
 		'a replacement upload clears stale destinations'
 	);
+	assert.equal(
+		session.state.preflightUploadId,
+		'',
+		'a replacement upload must wait for its own preflight'
+	);
+});
+
+test('a settled preflight with no enabled destination stays settled and empty', async () => {
+	const session = createArchiveImport({
+		previewServerArchive: () =>
+			Promise.resolve(create(PreviewServerArchiveResponseSchema, { mcVersion: '1.21.1' }))
+	});
+	session.setUpload('upload-1', 'world.zip');
+	await session.refresh('');
+
+	assert.deepEqual(session.state.destinations, []);
+	assert.equal(session.state.preflightUploadId, 'upload-1');
+	assert.equal(session.state.preparing, false);
+	assert.equal(session.state.error, null);
+	assert.equal(isArchivePreviewCurrent(session.state, ''), false);
+});
+
+test('a failed preflight never records a settled destination list', async () => {
+	const session = createArchiveImport({
+		previewServerArchive: () => Promise.reject(new Error('inventory unavailable'))
+	});
+	session.setUpload('upload-1', 'world.zip');
+
+	await session.refresh('node-2');
+
+	assert.equal(session.state.error, 'inventory unavailable');
+	assert.equal(session.state.preflightUploadId, '');
+	assert.deepEqual(session.state.destinations, []);
 });

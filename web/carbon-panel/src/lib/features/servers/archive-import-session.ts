@@ -44,6 +44,12 @@ export interface ArchiveImportState {
 	previewNodeId: string;
 	/** Enabled destinations from the placement preflight; retained across a failed preview. */
 	destinations: ServerArchiveDestination[];
+	/**
+	 * Upload whose enabled-destination preflight succeeded. It stays set across a
+	 * later failed node preview so the current preflight remains authoritative
+	 * instead of a stale node inventory snapshot.
+	 */
+	preflightUploadId: string;
 	preparing: boolean;
 	error: string | null;
 	/** Stable across retries of this submission; empty until an upload completes. */
@@ -81,6 +87,7 @@ export function createArchiveImport(
 	let previewUploadId = '';
 	let previewNodeId = '';
 	let destinations: ServerArchiveDestination[] = [];
+	let preflightUploadId = '';
 	let preparing = false;
 	let error: string | null = null;
 	let attempt: { requestId: string; finish: () => void } | null = null;
@@ -93,6 +100,7 @@ export function createArchiveImport(
 			previewUploadId,
 			previewNodeId,
 			destinations,
+			preflightUploadId,
 			preparing,
 			error,
 			requestId: attempt?.requestId ?? ''
@@ -111,6 +119,7 @@ export function createArchiveImport(
 		previewUploadId = '';
 		previewNodeId = '';
 		destinations = [];
+		preflightUploadId = '';
 		preparing = false;
 		error = null;
 		attempt?.finish();
@@ -140,6 +149,7 @@ export function createArchiveImport(
 			// The preflight is independent of the concrete-node capacity result, so
 			// keep it available while the operator retries a failed preview.
 			destinations = result.destinations;
+			preflightUploadId = currentUpload;
 		} catch (cause) {
 			if (seq !== sequence.current || currentUpload !== uploadId) return;
 			preview = null;
@@ -174,6 +184,7 @@ export function createArchiveImport(
 		previewUploadId = '';
 		previewNodeId = '';
 		destinations = [];
+		preflightUploadId = '';
 		preparing = false;
 		error = null;
 		attempt?.finish();
