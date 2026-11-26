@@ -32,18 +32,35 @@ def generate_to(path, config=None, readme=None, index=None, live_index=None, che
         command += ["--live-index", str(live_index)]
     else:
         command += ["--skip-live-index"]
+    # Existing fixtures exercise copy generation; the publication guard has its
+    # own real-generator tests with explicit offline fixtures below.
+    if "--skip-publication-guard" not in command:
+        command += ["--skip-publication-guard"]
     return subprocess.run(command, cwd=str(ROOT), capture_output=True, text=True, check=check)
 
 
-def promoted_index(tag="carbonpanel-v2.0.1", version="2.0.1"):
+LEGACY_VERSION = "1.0.40"  # explicit legacy fixture, independent of the checkout index
+LEGACY_COMMIT = "f88748be6a216b187e675bbb1f110df07e544148"
+LEGACY_DIGEST = "sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001"
+
+
+def stable_index(tag, version, commit, digest):
+    """Explicit Stable fixture; never depends on the mutable checkout index."""
     index = json.loads(VERSION_INDEX.read_text(encoding="utf-8"))
-    commit, digest = "1" * 40, "sha256:" + "2" * 64
     for stable in (index["stable"], index["channels"]["stable"]):
         stable.update({"tag": tag, "version": version, "commit": commit, "digest": digest})
     image = index["channels"]["stable"]["image"]
     image.update({"digest": digest, "revision": commit, "tag": "latest",
                   "docker_hub": "atharvnaphade/carbonpanel:latest"})
     return index
+
+
+def promoted_index():
+    return stable_index("carbonpanel-v2.0.1", "2.0.1", "1" * 40, "sha256:" + "2" * 64)
+
+
+def legacy_index():
+    return stable_index("v" + LEGACY_VERSION, LEGACY_VERSION, LEGACY_COMMIT, LEGACY_DIGEST)
 
 
 class DockerHubDescriptionTests(unittest.TestCase):
@@ -71,18 +88,22 @@ class DockerHubDescriptionTests(unittest.TestCase):
         self.assertNotIn("stable_version", config)
         self.assertNotIn("stable_commit", config)
         stable = description.resolve_stable(VERSION_INDEX)
-        self.assertEqual(stable["version"], "1.0.40")
-        self.assertEqual(stable["tag"], "v1.0.40")
-        self.assertEqual(stable["commit"], "f88748be6a216b187e675bbb1f110df07e544148")
+        # Derive expectations from the checked-in contract: a normal Stable roll
+        # must not require editing these assertions.
+        self.assertRegex(stable["version"], r"^\d+\.\d+\.\d+")
+        self.assertRegex(stable["commit"], r"^[0-9a-f]{40}$")
         self.assertEqual(stable["image_tag"], "latest")
+        self.assertEqual(description.release_contract.version_from_release_tag(
+            stable["tag"]), "v" + stable["version"])
         with tempfile.TemporaryDirectory() as folder:
             body = Path(folder) / "body.md"
             summary = json.loads(generate_to(body).stdout)
             self.assertEqual(summary["stable_version"], stable["version"])
             self.assertEqual(summary["stable_commit"], stable["commit"])
             text = body.read_text(encoding="utf-8")
-            self.assertIn("`1.0.40` (`v1.0.40`", text)
-            self.assertIn("docker pull atharvnaphade/carbonpanel:1.0.40", text)
+            self.assertIn("`" + stable["version"] + "` (`" + stable["tag"] + "`", text)
+            self.assertIn("docker pull atharvnaphade/carbonpanel:"
+                          + stable["version"], text)
 
     def test_generated_body_has_absolute_links_and_both_channel_explanations(self):
         config = json.loads(CONFIG.read_text(encoding="utf-8"))
@@ -239,7 +260,7 @@ class DockerHubDescriptionTests(unittest.TestCase):
             self.assertIn("`2.0.1` (`carbonpanel-v2.0.1`", text)
             self.assertIn("docker pull atharvnaphade/carbonpanel:2.0.1", text)
             self.assertIn("sha256:" + "2" * 12, text)
-            self.assertNotIn("`1.0.40`", text)
+            self.assertNotIn("`" + LEGACY_VERSION + "`", text)
             self.assertNotIn("The verified stable is", text)
             self.assertLessEqual(summary["bytes"], 25000)
 
@@ -248,17 +269,18 @@ class DockerHubDescriptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             live = Path(folder) / "live.json"
             live.write_text(json.dumps(promoted), encoding="utf-8")
+            baseline = Path(folder) / "baseline.json"
+            baseline.write_text(json.dumps(legacy_index()), encoding="utf-8")
             body = Path(folder) / "body.md"
-            summary = json.loads(generate_to(body, live_index=live).stdout)
+            summary = json.loads(generate_to(body, index=baseline, live_index=live).stdout)
             text = body.read_text(encoding="utf-8")
             self.assertEqual(summary["stable_source"], "live published version index")
             self.assertEqual(summary["stable_version"], "2.0.1")
             self.assertIn("`2.0.1` (`carbonpanel-v2.0.1`", text)
-            self.assertNotIn("`1.0.40`", text)
+            self.assertNotIn("`" + LEGACY_VERSION + "`", text)
             # A lagging live index must not silently move the body backwards.
             stale = Path(folder) / "stale.json"
-            stale.write_text(json.dumps(json.loads(VERSION_INDEX.read_text(
-                encoding="utf-8"))), encoding="utf-8")
+            stale.write_text(json.dumps(legacy_index()), encoding="utf-8")
             promoted_baseline = Path(folder) / "promoted-baseline.json"
             promoted_baseline.write_text(json.dumps(promoted), encoding="utf-8")
             result = generate_to(body, index=promoted_baseline,
@@ -287,12 +309,29 @@ class DockerHubDescriptionTests(unittest.TestCase):
             output = Path(folder) / "body.md"
             summary = json.loads(generate_to(output).stdout)
             self.assertEqual(summary["stable_source"], "checked-in version index")
-            self.assertIn("`1.0.40`", output.read_text(encoding="utf-8"))
+            self.assertIn("`" + description.resolve_stable(VERSION_INDEX)["version"] + "`",
+                          output.read_text(encoding="utf-8"))
+
+    def test_synthetic_advanced_checkout_index_generates_cleanly(self):
+        advanced = stable_index("carbonpanel-v3.0.0", "3.0.0", "3" * 40,
+                                "sha256:" + "4" * 64)
+        with tempfile.TemporaryDirectory() as folder:
+            index = Path(folder) / "version-index.json"
+            index.write_text(json.dumps(advanced), encoding="utf-8")
+            body = Path(folder) / "body.md"
+            summary = json.loads(generate_to(body, index=index).stdout)
+            text = body.read_text(encoding="utf-8")
+            self.assertEqual(summary["stable_version"], "3.0.0")
+            self.assertIn("`3.0.0` (`carbonpanel-v3.0.0`", text)
+            self.assertNotIn("`" + LEGACY_VERSION + "`", text)
+            self.assertLessEqual(summary["bytes"], 25000)
 
     def test_legacy_and_product_tags_share_release_contract_parsing(self):
-        baseline = description.resolve_stable(VERSION_INDEX)
-        self.assertEqual(baseline["tag"], "v1.0.40")
-        self.assertEqual(baseline["version"], "1.0.40")
+        baseline = description.stable_identity(legacy_index(), "explicit legacy")
+        self.assertEqual(baseline["tag"], "v" + LEGACY_VERSION)
+        self.assertEqual(baseline["version"], LEGACY_VERSION)
+        self.assertEqual(description.release_contract.version_from_release_tag(
+            baseline["tag"]), "v" + LEGACY_VERSION)
         promoted = description.stable_identity(promoted_index(), "live")
         self.assertEqual(promoted["tag"], "carbonpanel-v2.0.1")
         self.assertEqual(promoted["version"], "2.0.1")
@@ -509,7 +548,9 @@ class DockerHubDescriptionWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request", triggers)
         self.assertNotIn("pull_request_target", triggers)
         self.assertEqual(document["permissions"], {"contents": "read"})
+        self.assertEqual(document["concurrency"]["group"], "pages-deploy")
         self.assertFalse(document["concurrency"]["cancel-in-progress"])
+        self.assertEqual(document["concurrency"]["queue"], "max")
         job = document["jobs"]["update"]
         self.assertIn("workflow_run.conclusion == 'success'", job["if"])
         self.assertIn("workflow_run.head_branch == 'main'", job["if"])
@@ -549,7 +590,14 @@ class DockerHubDescriptionWorkflowTests(unittest.TestCase):
         for step in resolve_steps:
             self.assertEqual(step.get("env", {}).get("GH_TOKEN"), "${{ github.token }}")
         for step in steps:
-            if "resolve-main" not in step.get("run", ""):
+            # OSS-433 also needs read-only release provenance at the Hub write
+            # boundary and after the write; those steps use the same token.
+            if ("resolve-main" in step.get("run", "")
+                    or "assert-publication-identity" in step.get("run", "")
+                    or "dockerhub_description.py generate" in step.get("run", "")):
+                self.assertEqual(step.get("env", {}).get("GH_TOKEN"),
+                                 "${{ github.token }}")
+            else:
                 self.assertNotIn("GH_TOKEN", step.get("env", {}))
                 self.assertNotIn("GH_TOKEN", step.get("run", ""))
         self.assertNotIn("| tail -n 1", source)

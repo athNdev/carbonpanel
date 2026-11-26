@@ -602,8 +602,11 @@ byte-bounded Docker-focused view generated from `README.md` sections and the
 published Stable identity in `docs/version-index.json`; the generator
 (`scripts/dockerhub_description.py`) fails rather than emit a body over Docker
 Hub's 25,000 UTF-8 byte limit. The workflow reconciles on affected main merges,
-once daily and on manual `workflow_dispatch` recovery, then verifies the public
-body by reading it back from the unauthenticated Docker Hub API.
+once daily, after a successful Stable release run and on manual
+`workflow_dispatch` recovery, then verifies the public body by reading it back
+from the unauthenticated Docker Hub API. It joins the same non-cancelling
+`pages-deploy` concurrency group as Stable/CD publication, so a description
+PATCH cannot interleave with a docs or moving-alias write.
 
 A Stable promotion only has to update the version contract
 (`docs/website-source.json`, regenerated `docs/version-index.json`). Do not add
@@ -611,7 +614,10 @@ a second Stable version to `docs/dockerhub-description.json`. Production
 generation reads the **live published** version index and fails closed if it is
 unavailable or older than the checked-in baseline: a temporary docs outage or a
 pre-promotion identity can never put an obsolete Stable on the public page.
-Offline fixtures may opt into the baseline explicitly. A main-head guard
+Offline fixtures may opt into the baseline explicitly. Before advertising a
+Stable, the generator also requires a non-draft Stable release manifest and the
+verified `:latest` digest/revision in both registries; a partial promotion or an
+unavailable provider leaves the last published body untouched. A main-head guard
 prevents an in-flight scheduled run from reverting a newly promoted Stable, and
 CD/release no longer write the description. Both the README and the derived Hub
 body describe the two channels: `:latest` follows controlled, tested Stable
