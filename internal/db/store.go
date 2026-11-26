@@ -1720,6 +1720,30 @@ func (s *Store) UpdateTaskExecution(ctx context.Context, execution *TaskExecutio
 	return s.db.WithContext(ctx).Save(execution).Error
 }
 
+// UpdateTaskExecutionIfRunning applies an outcome only while the durable row is
+// still running. A cancellation or another writer that already reached a
+// terminal state keeps its outcome, so a late worker cannot overwrite it. It
+// reports whether the row was updated.
+func (s *Store) UpdateTaskExecutionIfRunning(ctx context.Context, execution *TaskExecution) (bool, error) {
+	if execution == nil {
+		return false, nil
+	}
+	res := s.db.WithContext(ctx).Model(&TaskExecution{}).
+		Where("id = ? AND status = ?", execution.ID, ExecutionStatusRunning).
+		Updates(map[string]any{
+			"status":    execution.Status,
+			"ended_at":  execution.EndedAt,
+			"duration":  execution.Duration,
+			"output":    execution.Output,
+			"error":     execution.Error,
+			"retry_num": execution.RetryNum,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
 func (s *Store) DeleteTaskExecutions(ctx context.Context, taskID string) error {
 	return s.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&TaskExecution{}).Error
 }

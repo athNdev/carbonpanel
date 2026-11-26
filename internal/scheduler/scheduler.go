@@ -91,6 +91,12 @@ type Scheduler struct {
 	// Execution tracking
 	runningExecutions map[string]context.CancelFunc // executionID -> cancel func
 	executionMu       sync.RWMutex
+	// A claimed execution exists in storage before its worker registers a
+	// cancel function. pendingExecutions closes that handoff window;
+	// pendingCancellations records a cancel that arrived first so the worker
+	// can refuse to start instead of overwriting a cancelled outcome.
+	pendingExecutions    map[string]bool
+	pendingCancellations map[string]bool
 
 	// In-flight task tracking to prevent double-dispatching
 	runningTasks   map[string]bool // taskID -> bool
@@ -187,21 +193,23 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 	}
 
 	return &Scheduler{
-		store:             store,
-		docker:            docker,
-		sender:            sender,
-		appConfig:         appCfg,
-		metrics:           metricsCollector,
-		log:               log,
-		checkInterval:     cfg.CheckInterval,
-		stopChan:          make(chan struct{}),
-		runningExecutions: make(map[string]context.CancelFunc),
-		runningTasks:      make(map[string]bool),
-		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
-		now:               time.Now,
-		snapshotEngine:    snapEngine,
-		admission:         admission,
-		storageResolver:   cfg.StorageResolver,
+		store:                store,
+		docker:               docker,
+		sender:               sender,
+		appConfig:            appCfg,
+		metrics:              metricsCollector,
+		log:                  log,
+		checkInterval:        cfg.CheckInterval,
+		stopChan:             make(chan struct{}),
+		runningExecutions:    make(map[string]context.CancelFunc),
+		pendingExecutions:    make(map[string]bool),
+		pendingCancellations: make(map[string]bool),
+		runningTasks:         make(map[string]bool),
+		cronParser:           cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		now:                  time.Now,
+		snapshotEngine:       snapEngine,
+		admission:            admission,
+		storageResolver:      cfg.StorageResolver,
 	}
 }
 
@@ -440,6 +448,10 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		var claim *storage.TaskExecution
 		if task.TaskType == storage.TaskTypeModUpdate && task.Schedule != storage.ScheduleTypeEvent {
 			claim = newScheduledExecution(task, time.Now())
+			// The row becomes running inside updateNextRun. Register the
+			// handoff before that write so CancelExecution can find it even
+			// before the asynchronous worker starts.
+			s.registerPendingExecution(claim.ID)
 		}
 		if err := s.updateNextRun(task, claim); err != nil {
 			switch {
@@ -460,6 +472,9 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			default:
 				s.log.Error("Task %s: cannot persist schedule, leaving it due: %v", task.Name, err)
 			}
+			if claim != nil {
+				s.forgetPendingExecution(claim.ID)
+			}
 			s.releaseTask(task.ID)
 			continue
 		}
@@ -472,6 +487,7 @@ func (s *Scheduler) checkAndRunDueTasks() {
 				s.log.Error("Task %s: mod update policy changed after claiming its due slot, refusing dispatch: %v", task.Name, err)
 				if claim != nil {
 					s.failClaimedExecution(ctx, claim, "mod update policy changed after claiming its due slot; the stale policy was not dispatched")
+					s.forgetPendingExecution(claim.ID)
 				}
 				s.releaseTask(task.ID)
 				continue
@@ -484,6 +500,9 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		go func(t *storage.ScheduledTask, claimed *storage.TaskExecution) {
 			defer s.wg.Done()
 			defer s.releaseTask(t.ID)
+			if claimed != nil {
+				defer s.forgetPendingExecution(claimed.ID)
+			}
 			// A scheduled run is owned by the scheduler, not by any caller.
 			_, _ = s.executeTask(context.Background(), t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, claimed)
 		}(task, claim)
@@ -611,6 +630,13 @@ func (s *Scheduler) executeTask(ctx context.Context, task *storage.ScheduledTask
 const maxChainDepth = 4
 
 func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, depth int, claimed *storage.TaskExecution) (*storage.TaskExecution, error) {
+	if claimed != nil {
+		// Direct callers and tests may reach executeTask without the dispatch
+		// registration; make the handoff visible before the first terminal
+		// write can be considered.
+		s.registerPendingExecution(claimed.ID)
+		defer s.forgetPendingExecution(claimed.ID)
+	}
 
 	// Check if server exists
 	server, err := s.store.GetServer(ctx, task.ServerID)
@@ -681,7 +707,10 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 			StartedAt: time.Now(),
 			Trigger:   trigger,
 		}
+		// Register the handoff before the row becomes visible in storage.
+		s.registerPendingExecution(execution.ID)
 		if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
+			s.forgetPendingExecution(execution.ID)
 			s.log.Error("Task %s: failed to create execution record: %v", task.Name, err)
 			return nil, err
 		}
@@ -694,10 +723,20 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	// Track running execution
-	s.executionMu.Lock()
-	s.runningExecutions[execution.ID] = cancel
-	s.executionMu.Unlock()
+	// Activate the worker exactly once. A cancellation that arrived while the
+	// claimed row was visible but no worker was registered wins here: do not
+	// invoke the planner and keep the cancelled outcome.
+	if !s.activateExecution(execution.ID, cancel) {
+		cancel()
+		now := time.Now()
+		execution.Status = storage.ExecutionStatusCancelled
+		execution.Error = "execution cancelled"
+		execution.EndedAt = &now
+		execution.Duration = now.Sub(execution.StartedAt).Milliseconds()
+		s.persistTerminalExecution(ctx, execution)
+		s.log.Info("Task %s: cancelled before execution started", task.Name)
+		return execution, context.Canceled
+	}
 
 	defer func() {
 		cancel()
@@ -776,7 +815,7 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		s.log.Info("Task %s: completed successfully", task.Name)
 	}
 
-	s.store.UpdateTaskExecution(ctx, execution)
+	s.persistTerminalExecution(ctx, execution)
 
 	// Reaction chain (MINE-142): run enabled children in step order when the
 	// parent succeeded, or when it failed but allows continuation. A child
@@ -875,16 +914,73 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	}
 }
 
+// registerPendingExecution records a claimed execution before its worker owns
+// a cancel function. It is idempotent and never clears a cancellation that
+// already won the handoff.
+func (s *Scheduler) registerPendingExecution(executionID string) {
+	if executionID == "" {
+		return
+	}
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+	if s.pendingExecutions == nil {
+		s.pendingExecutions = make(map[string]bool)
+	}
+	if _, active := s.runningExecutions[executionID]; !active {
+		s.pendingExecutions[executionID] = true
+	}
+}
+
+// forgetPendingExecution drops handoff bookkeeping after a worker starts or a
+// claim is abandoned. It does not touch an active worker.
+func (s *Scheduler) forgetPendingExecution(executionID string) {
+	if executionID == "" {
+		return
+	}
+	s.executionMu.Lock()
+	delete(s.pendingExecutions, executionID)
+	delete(s.pendingCancellations, executionID)
+	s.executionMu.Unlock()
+}
+
+// activateExecution makes a worker the owner of its execution. It returns
+// false when a cancellation won the handoff, in which case the worker must not
+// invoke the task planner.
+func (s *Scheduler) activateExecution(executionID string, cancel context.CancelFunc) bool {
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+	delete(s.pendingExecutions, executionID)
+	if s.pendingCancellations[executionID] {
+		delete(s.pendingCancellations, executionID)
+		return false
+	}
+	if s.runningExecutions == nil {
+		s.runningExecutions = make(map[string]context.CancelFunc)
+	}
+	s.runningExecutions[executionID] = cancel
+	return true
+}
+
 // CancelExecution cancels a running execution
 func (s *Scheduler) CancelExecution(executionID string) error {
-	s.executionMu.RLock()
-	cancel, exists := s.runningExecutions[executionID]
-	s.executionMu.RUnlock()
-
-	if exists {
+	s.executionMu.Lock()
+	if cancel, exists := s.runningExecutions[executionID]; exists {
+		s.executionMu.Unlock()
 		cancel()
 		return nil
 	}
+	if s.pendingExecutions[executionID] {
+		// The worker has not activated yet. Record the intent and let it
+		// observe the cancellation at the handoff instead of writing a
+		// terminal state the worker could later overwrite.
+		if s.pendingCancellations == nil {
+			s.pendingCancellations = make(map[string]bool)
+		}
+		s.pendingCancellations[executionID] = true
+		s.executionMu.Unlock()
+		return nil
+	}
+	s.executionMu.Unlock()
 
 	// If not running in active memory, check if it was left orphaned in storage
 	if s.store != nil {
@@ -924,21 +1020,69 @@ func newScheduledExecution(task *storage.ScheduledTask, now time.Time) *storage.
 	}
 }
 
+// persistTerminalExecution writes an outcome only while the durable row is
+// still running. A cancel that won the handoff keeps its cancelled outcome.
+func (s *Scheduler) persistTerminalExecution(ctx context.Context, execution *storage.TaskExecution) {
+	if execution == nil {
+		return
+	}
+	updated, err := s.store.UpdateTaskExecutionIfRunning(ctx, execution)
+	if err != nil {
+		s.log.Error("Task execution %s: failed to record outcome: %v", execution.ID, err)
+		return
+	}
+	if !updated {
+		s.log.Debug("Task execution %s: kept an outcome written by a cancellation", execution.ID)
+	}
+}
+
 // failClaimedExecution records a terminal outcome for a slot claim that was
 // refused or could not start, so the consumed slot is never silent and no
-// execution stays stuck in running until the next process start.
+// execution stays stuck in running until the next process start. The write has
+// its own bounded context so caller cancellation cannot abandon the claim, and
+// it retries briefly because storage may recover during the retry window.
 func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage.TaskExecution, reason string) {
 	if execution == nil {
 		return
 	}
+	s.executionMu.Lock()
+	cancelled := s.pendingCancellations[execution.ID]
+	if cancelled {
+		delete(s.pendingCancellations, execution.ID)
+	}
+	s.executionMu.Unlock()
+
 	now := time.Now()
-	execution.Status = storage.ExecutionStatusFailed
-	execution.Error = reason
+	if cancelled {
+		execution.Status = storage.ExecutionStatusCancelled
+		execution.Error = "execution cancelled"
+	} else {
+		execution.Status = storage.ExecutionStatusFailed
+		execution.Error = reason
+	}
 	execution.EndedAt = &now
 	execution.Duration = now.Sub(execution.StartedAt).Milliseconds()
-	if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
-		s.log.Error("Task execution %s: failed to record outcome: %v", execution.ID, err)
+
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, lastErr = s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
+		if lastErr == nil {
+			return
+		}
+		if writeCtx.Err() != nil {
+			break
+		}
+		s.log.Warn("Task execution %s: terminal write failed (attempt %d), retrying: %v", execution.ID, attempt+1, lastErr)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-writeCtx.Done():
+			timer.Stop()
+		}
 	}
+	s.log.Error("Task execution %s: failed to record outcome after retries: %v", execution.ID, lastErr)
 }
 
 // updateNextRun calculates and updates the next run time for a task. It uses

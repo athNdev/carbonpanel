@@ -27,7 +27,8 @@ streamed through the WebSocket hub.
   stays due, and a manual trigger returns that error. An unknown check is
   treated as running.
 - A bare cron expression uses the task timezone; an explicit `TZ=` or `CRON_TZ=` prefix wins. A missed slot is not replayed: one due check runs the task once.
-- A due slot is claimed only when schedule, deadline, status and policy revision match. Every due mod-update slot, whether one-shot, cron or interval, records its execution in the same guarded write as the slot; a one-shot also persists its terminal disabled state. An interruption before dispatch is recovered and an insert failure leaves the slot due.
+- A due slot is claimed only when schedule, deadline, status and policy revision match. Every due mod-update slot, whether one-shot, cron or interval, records its execution in the same guarded write as the slot; a one-shot also persists its terminal disabled state. An interruption before dispatch is recovered and an insert failure leaves the slot due. A cancellation that arrives before the worker registers its cancel function wins the handoff: the planner does not run and the cancelled outcome is kept.
+- A refused claim still records a terminal outcome; the write has its own bounded context and retries after storage recovers, without redispatching the slot or clearing an active worker's record.
 - Retained legacy scheduled-config rows have no production cron consumer. They are pending manual apply/discard actions or an explicit operator conversion; do not re-enable cron execution silently.
 - Only invalid schedule definitions disable tasks. Transient next-run persistence failures leave tasks enabled and due.
 - When a chain stops at a step, that execution names the step and says the
