@@ -649,6 +649,9 @@ func TestInterruptedNextRestartRecoveryIsRestoredBeforeReuse(t *testing.T) {
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.Nil(t, open)
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err, "normal admission works after the interrupted attempt resolves")
 }
 
 func TestAcknowledgementPersistenceFailureDoesNotCleanUpOrClose(t *testing.T) {
