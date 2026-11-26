@@ -126,7 +126,7 @@ export const rpcClient = {
 							}
 						]
 					: [];
-			return Promise.resolve({
+			const result = {
 				format: 1,
 				schemaVersion: 1,
 				exporterVersion: 'fixture-1.0.0',
@@ -143,7 +143,13 @@ export const rpcClient = {
 					{ id: 'node-1', name: 'Fixture Node' }
 				],
 				findings
-			});
+			};
+			if (!payload.nodeId && globalThis.__wizardHoldArchivePreflight) {
+				return new Promise((resolve) => {
+					globalThis.__wizardReleaseArchivePreflight = () => resolve(result);
+				});
+			}
+			return Promise.resolve(result);
 		},
 		getServer(payload) {
 			record('getServer', payload);

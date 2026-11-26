@@ -875,8 +875,18 @@ try {
     globalThis.__wizardArchiveDestinations = [
       { id: "node-1", name: "Fixture Node" },
     ];
+    globalThis.__wizardHoldArchivePreflight = true;
   });
-  await page.getByTestId("archive-destination-retry").click();
+  const preflightRetry = page.getByTestId("archive-destination-retry");
+  await preflightRetry.click();
+  await page.waitForFunction(
+    () => typeof globalThis.__wizardReleaseArchivePreflight === "function",
+  );
+  assert.equal(await preflightRetry.isEnabled(), false, "a pending preflight disables retry");
+  await page.evaluate(() => {
+    globalThis.__wizardHoldArchivePreflight = false;
+    globalThis.__wizardReleaseArchivePreflight();
+  });
   await page.waitForFunction(
     () =>
       globalThis.__wizardCalls.some(

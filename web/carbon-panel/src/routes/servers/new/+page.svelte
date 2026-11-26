@@ -2534,7 +2534,9 @@ one at https://mozilla.org/MPL/2.0/.
 											<CarbonButton
 												kind="secondary"
 												size="sm"
-												disabled={archiveUploading || Boolean(archiveSubmission)}
+												disabled={archiveUploading ||
+													archiveImportState.preparing ||
+													Boolean(archiveSubmission)}
 												onclick={retryArchiveDestinations}
 												data-testid="archive-destination-retry"
 											>
