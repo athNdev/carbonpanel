@@ -420,3 +420,27 @@ wrong node scope. Its stored snapshot did not contain the plaintext token.
 The attempt to feed proof from the rebooted VM to that authority timed out
 while retrieving the registration bundle over SSH. Live guest enrollment,
 controller mTLS, heartbeat transmission and node daemon health remain open.
+
+## 15. 2026-11-26 harness-only follow-up (no guest run)
+
+No guest, host, registry or release was touched. The qualification helper now
+models the declared UEFI target instead of silently booting SeaBIOS:
+
+- `find_uefi_firmware()` resolves OVMF/edk2 code and variable templates from
+  standard paths or `CARBON_OVMF_CODE`/`CARBON_OVMF_VARS`, and reports
+  `BLOCKED` (never a BIOS fallback) when firmware is absent.
+- `prepare_uefi_vars()` copies the variable template to a fresh private file in
+  the owned work directory; the system firmware file is never written.
+- `qemu_command()` accepts a q35/virt machine and adds readonly code plus
+  writable vars pflash drives. `prepare_overlay(..., size=...)` requests an
+  expanded qcow2 overlay and refuses to fall back to an unresized copy.
+- `--firmware {uefi,bios}`, `--machine` and `--disk-size` expose these paths.
+  UEFI is the CLI default because it matches `config/build-config.json`.
+- Blocked/inconclusive attempts now persist `boot-qual-report.json` before an
+  early return, so firmware-missing and prior-disk refusals keep their evidence.
+
+These paths are unit-tested only: 55 fixtures pass with the two Linux-only
+OpenSSL guest fixtures skipped on Windows, and all 57 pass in the Linux guest
+environment. They do not qualify the 20 GiB q35 profile or any open
+live-enrollment gate; a future run must provide fresh serial/disk evidence on a
+disposable guest.

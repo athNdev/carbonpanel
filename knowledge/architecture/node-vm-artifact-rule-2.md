@@ -4,7 +4,7 @@ title: "Node VM artifact — Rule (part 2)"
 description: "Disposable boot and enrollment proof checks for the planned QCOW2 artifact."
 status: draft
 owners: [oss-runtime]
-code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
+code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
 sources:
   - title: Parent concept
     resource: node-vm-artifact.md
@@ -19,7 +19,11 @@ Ethernet interface names.
 
 Clean boot can be checked on a disposable QEMU runner with hardware or software
 acceleration. Record the firmware, architecture, seed and base image digests.
-Measure network and identity persistence in the guest. Shared enrollment
-authority checks validate proof and credential scope. Live mTLS enrollment,
-heartbeat and daemon health require an installed node agent and a mounted
-controller service. See [disposable VM qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).
+The helper defaults to the declared UEFI target and fails closed without
+OVMF/edk2 rather than booting SeaBIOS; it copies a fresh private variable store
+and can request an expanded overlay. Measure network and identity persistence
+in the guest. The 20 GiB q35 expanded-disk profile, arm64 and live mTLS
+enrollment remain unqualified. Shared enrollment authority checks validate
+proof and credential scope. Live mTLS enrollment, heartbeat and daemon health
+require an installed node agent and a mounted controller service. See
+[disposable VM qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).

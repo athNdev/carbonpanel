@@ -9,7 +9,9 @@ and never mutates the source image.
 
 Evidence produced is explicit and gate-scoped:
   - image/seed/ISO preparation (offline, deterministic inputs)
-  - QEMU availability and boot attempt
+  - firmware and QEMU availability; UEFI is the declared artifact target and a
+    missing OVMF/edk2 install is reported BLOCKED rather than falling back to BIOS
+  - boot attempt (optionally on an expanded qcow2 overlay)
   - serial-console markers (cloud-init progress, first-boot enrollment stdout,
     reboot/power-state signals) without claiming secrets are absent unless the
     captured log is actually scanned
@@ -76,6 +78,70 @@ def run(cmd, **kwargs):
     return subprocess.run(cmd, **kwargs)
 
 
+# OVMF/edk2 locations differ across distributions. The declared artifact target
+# is UEFI, so a qualification run must not silently fall back to SeaBIOS.
+UEFI_FIRMWARE_CANDIDATES = {
+    "x86_64": (
+        ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
+        ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
+        ("/usr/share/edk2/ovmf/OVMF_CODE.fd", "/usr/share/edk2/ovmf/OVMF_VARS.fd"),
+        ("/usr/share/edk2/x64/OVMF_CODE.fd", "/usr/share/edk2/x64/OVMF_VARS.fd"),
+        ("/usr/share/qemu/OVMF_CODE.fd", "/usr/share/qemu/OVMF_VARS.fd"),
+    ),
+    "aarch64": (
+        ("/usr/share/AAVMF/AAVMF_CODE.fd", "/usr/share/AAVMF/AAVMF_VARS.fd"),
+        ("/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+         "/usr/share/qemu-efi-aarch64/QEMU_VARS.fd"),
+        ("/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw",
+         "/usr/share/edk2/aarch64/QEMU_VARS.fd"),
+        ("/usr/share/edk2/aarch64/QEMU_EFI.fd",
+         "/usr/share/edk2/aarch64/QEMU_VARS.fd"),
+    ),
+}
+
+
+def find_uefi_firmware(arch="x86_64"):
+    """Resolve OVMF code and variable templates without touching system files.
+
+    CARBON_OVMF_CODE/CARBON_OVMF_VARS override discovery for non-standard hosts.
+    Returns (code_path, vars_template_path); raises BootQualError when the
+    declared UEFI target cannot be satisfied.
+    """
+    env_code = os.environ.get("CARBON_OVMF_CODE")
+    env_vars = os.environ.get("CARBON_OVMF_VARS")
+    if env_code or env_vars:
+        if not (env_code and env_vars):
+            raise BootQualError(
+                "set both CARBON_OVMF_CODE and CARBON_OVMF_VARS, or neither")
+        candidates = ((env_code, env_vars),)
+    else:
+        candidates = UEFI_FIRMWARE_CANDIDATES.get(arch, ())
+    for code, variables in candidates:
+        if Path(code).is_file() and Path(variables).is_file():
+            return str(code), str(variables)
+    raise BootQualError(
+        "no UEFI firmware for %s (set CARBON_OVMF_CODE/CARBON_OVMF_VARS or "
+        "install OVMF/edk2); refusing to fall back to BIOS" % arch)
+
+
+def prepare_uefi_vars(work_dir, vars_template, filename="uefi-vars.fd"):
+    """Copy the OVMF variable template to a fresh private per-run file."""
+    dest = Path(work_dir) / filename
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.touch(mode=0o600, exist_ok=False)
+    except FileExistsError as exc:
+        raise BootQualError(
+            "UEFI variable store already exists; use a new work directory") from exc
+    try:
+        shutil.copyfile(vars_template, dest)
+        os.chmod(dest, 0o600)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+    return str(dest)
+
+
 def make_seed_iso(seed_nocloud_dir, iso_path):
     """Create a CIDATA NoCloud ISO from a nocloud directory. Returns tool used."""
     nocloud = Path(seed_nocloud_dir)
@@ -119,8 +185,14 @@ def make_seed_iso(seed_nocloud_dir, iso_path):
         "no ISO tool found (need cloud-localds, xorriso, or genisoimage/mkisofs)")
 
 
-def prepare_overlay(image_path, work_dir):
-    """Create a disposable qcow2 overlay/copy for boot; never mutate source."""
+def prepare_overlay(image_path, work_dir, size=None):
+    """Create a disposable qcow2 overlay/copy for boot; never mutate source.
+
+    size is passed through to qemu-img (for example "20G") to exercise an
+    expanded disk. Resizing without qemu-img is refused: a plain copy cannot
+    change the virtual size, and silently booting the base size would hide the
+    gate being qualified.
+    """
     image_path = Path(image_path)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -134,11 +206,21 @@ def prepare_overlay(image_path, work_dir):
     try:
         qemu_img = which_any("qemu-img")
         if qemu_img:
-            proc = run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2",
-                        "-b", str(image_path.resolve()), str(overlay)])
+            cmd = [qemu_img, "create", "-f", "qcow2", "-F", "qcow2",
+                   "-b", str(image_path.resolve())]
+            cmd.append(str(overlay))
+            if size:
+                cmd.append(str(size))
+            proc = run(cmd)
             if proc.returncode == 0 and overlay.stat().st_size > 0:
-                return {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
+                result = {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
+                if size:
+                    result["size"] = str(size)
+                return result
             # fallback to full copy if backing fails (e.g. format quirks)
+        if size:
+            raise BootQualError(
+                "qemu-img is required to create an expanded boot disk of %s" % size)
         shutil.copy2(image_path, overlay)
         os.chmod(overlay, 0o600)
         return {"path": str(overlay), "mode": "copy", "tool": "copy-fallback" if qemu_img else "copy"}
@@ -148,16 +230,25 @@ def prepare_overlay(image_path, work_dir):
 
 
 def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048,
-                 cpus=2, accel=None):
+                 cpus=2, accel=None, firmware="bios", uefi_code=None,
+                 uefi_vars=None, machine=None):
     bin_name = "qemu-system-%s" % arch
     qemu = which_any(bin_name)
     if not qemu:
         raise BootQualError("%s not found on PATH" % bin_name)
+    if firmware not in ("bios", "uefi"):
+        raise BootQualError("unknown firmware mode: %s" % firmware)
+    if firmware == "bios" and arch == "aarch64":
+        raise BootQualError("BIOS firmware is not defined for aarch64; use UEFI")
 
     cmd = [
         qemu,
         "-m", str(memory_mib),
         "-smp", str(cpus),
+    ]
+    if machine:
+        cmd.extend(["-machine", machine])
+    cmd.extend([
         "-drive", "file=%s,if=virtio,format=qcow2" % disk_path,
         "-drive", "file=%s,if=virtio,format=raw,readonly=on,media=cdrom" % seed_iso,
         "-nographic",
@@ -166,7 +257,19 @@ def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048
         "-no-reboot",  # capture first-boot-to-reboot boundary as shutdown
         "-device", "virtio-net-pci,netdev=net0",
         "-netdev", "user,id=net0",
-    ]
+    ])
+    if firmware == "uefi":
+        if arch not in ("x86_64", "aarch64"):
+            raise BootQualError("UEFI boot is not defined for arch %s" % arch)
+        if not (uefi_code and uefi_vars):
+            raise BootQualError("UEFI boot requires OVMF code and variable files")
+        for label, path in (("code", uefi_code), ("vars", uefi_vars)):
+            if not Path(path).is_file():
+                raise BootQualError("UEFI %s firmware file missing: %s" % (label, path))
+        cmd.extend([
+            "-drive", "if=pflash,format=raw,readonly=on,file=%s" % uefi_code,
+            "-drive", "if=pflash,format=raw,file=%s" % uefi_vars,
+        ])
     if accel:
         cmd.extend(["-accel", accel])
     elif os.path.exists("/dev/kvm"):
@@ -316,7 +419,8 @@ def wait_for_process(proc, timeout_seconds, poll=2.0):
 def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=1800,
                      memory_mib=2048, cpus=2, arch="x86_64", accel=None,
                      do_offline_inspect=True, verify_ref=None, profile="artifact",
-                     sha256sums_text=None, seed_iso_path=None):
+                     sha256sums_text=None, seed_iso_path=None, firmware="uefi",
+                     disk_size=None, machine=None):
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     report = {
@@ -327,6 +431,12 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         "gates": {},
         "notes": [],
     }
+
+    def _finish():
+        # Write evidence for blocked/inconclusive runs too, not only full boots.
+        (work_dir / "boot-qual-report.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n")
+        return report
 
     # Precondition: verify image bytes if requested
     if verify_ref:
@@ -339,7 +449,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         except Exception as e:
             report["gates"]["image_bytes_verified"] = {
                 "status": "FAIL", "error": str(e)}
-            return report
+            return _finish()
     else:
         report["gates"]["image_bytes_verified"] = {
             "status": "NOT_RUN", "reason": "no --verify-ref provided"}
@@ -347,7 +457,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
     seed_nocloud_dir = Path(seed_nocloud_dir)
     if not seed_nocloud_dir.is_dir():
         report["gates"]["seed"] = {"status": "FAIL", "error": "seed nocloud dir missing"}
-        return report
+        return _finish()
     report["gates"]["seed"] = {"status": "PASS", "path": str(seed_nocloud_dir)}
 
     iso_path = Path(seed_iso_path) if seed_iso_path else (work_dir / "seed.iso")
@@ -360,7 +470,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
             report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
         except Exception as e:
             report["gates"]["seed_iso"] = {"status": "FAIL", "error": str(e)}
-            return report
+            return _finish()
 
     qemu_bin = which_any("qemu-system-%s" % arch)
     if not qemu_bin:
@@ -369,29 +479,70 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
             "reason": "qemu-system-%s not found; cannot attempt TCG/KVM boot" % arch,
         }
         report["gates"]["boot_attempt"] = {"status": "BLOCKED", "reason": "qemu unavailable"}
-        return report
+        return _finish()
     report["gates"]["qemu_available"] = {"status": "PASS", "path": qemu_bin}
 
+    if (work_dir / "boot-disk.qcow2").exists():
+        report["gates"]["boot_disk"] = {
+            "status": "FAIL",
+            "error": "boot disk already exists; use a new work directory",
+        }
+        return _finish()
+
+    uefi_code = uefi_vars = None
+    if firmware == "uefi":
+        try:
+            uefi_code, vars_template = find_uefi_firmware(arch)
+            uefi_vars = prepare_uefi_vars(work_dir, vars_template)
+            report["gates"]["firmware"] = {
+                "status": "PASS",
+                "mode": "uefi",
+                "code": uefi_code,
+                "vars_template": vars_template,
+                "vars_copy": uefi_vars,
+                "note": "fresh private variable store per run; system firmware is never written",
+            }
+        except Exception as e:
+            report["gates"]["firmware"] = {
+                "status": "BLOCKED", "mode": "uefi", "reason": str(e)}
+            report["gates"]["boot_attempt"] = {
+                "status": "BLOCKED", "reason": "UEFI firmware unavailable"}
+            return _finish()
+    elif firmware == "bios":
+        report["gates"]["firmware"] = {
+            "status": "PASS",
+            "mode": "bios",
+            "note": "BIOS is not the declared artifact target; use it only for diagnosis",
+        }
+    else:
+        report["gates"]["firmware"] = {
+            "status": "FAIL", "error": "unknown firmware mode: %s" % firmware}
+        return _finish()
+
     try:
-        disk_info = prepare_overlay(image_path, work_dir)
+        disk_info = prepare_overlay(image_path, work_dir, size=disk_size)
         report["gates"]["boot_disk"] = {"status": "PASS", **disk_info}
     except Exception as e:
         report["gates"]["boot_disk"] = {"status": "FAIL", "error": str(e)}
-        return report
+        return _finish()
 
     serial_log = work_dir / "serial-console.log"
     try:
         cmd = qemu_command(disk_info["path"], iso_info["path"], str(serial_log),
-                           arch=arch, memory_mib=memory_mib, cpus=cpus, accel=accel)
+                           arch=arch, memory_mib=memory_mib, cpus=cpus, accel=accel,
+                           firmware=firmware, uefi_code=uefi_code,
+                           uefi_vars=uefi_vars, machine=machine)
     except Exception as e:
         report["gates"]["boot_attempt"] = {"status": "FAIL", "error": str(e)}
-        return report
+        return _finish()
 
     report["gates"]["boot_attempt"] = {
         "status": "ATTEMPTED",
         "command": cmd,
         "timeout_seconds": timeout_seconds,
         "accel": "kvm" if os.path.exists("/dev/kvm") and not accel else (accel or "tcg"),
+        "firmware": firmware,
+        "disk_size": disk_size,
         "serial_log": str(serial_log),
         "note": "qemu started; -no-reboot captures first boot-to-reboot as process exit",
     }
@@ -504,9 +655,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         "reason": "no in-guest health probe; daemon installation/health depends on image contents beyond first-boot enrollment script",
     }
 
-    (work_dir / "boot-qual-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n")
-    return report
+    return _finish()
 
 
 def main(argv=None):
@@ -520,6 +669,10 @@ def main(argv=None):
     parser.add_argument("--cpus", type=int, default=2)
     parser.add_argument("--arch", default="x86_64")
     parser.add_argument("--accel", help="qemu accel (tcg or kvm); default: kvm if /dev/kvm else tcg")
+    parser.add_argument("--firmware", choices=("uefi", "bios"), default="uefi",
+                        help="guest firmware; default uefi matches the declared artifact target")
+    parser.add_argument("--disk-size", help="qcow2 overlay virtual size (for example 20G); requires qemu-img")
+    parser.add_argument("--machine", help="qemu machine type (for example q35, pc or virt)")
     parser.add_argument("--no-offline-inspect", action="store_true")
     parser.add_argument("--verify-ref", help="base image ref to verify bytes against pinned provenance before boot")
     parser.add_argument("--profile", choices=("artifact", "fixture"), default="artifact")
@@ -561,6 +714,26 @@ def main(argv=None):
             {"status": "PASS", "path": qemu_bin} if qemu_bin else
             {"status": "BLOCKED", "reason": "qemu-system-%s not found" % args.arch}
         )
+        if args.firmware == "uefi":
+            try:
+                code, vars_template = find_uefi_firmware(args.arch)
+                report["gates"]["firmware"] = {
+                    "status": "PASS", "mode": "uefi",
+                    "code": code, "vars_template": vars_template,
+                }
+            except Exception as e:
+                report["gates"]["firmware"] = {
+                    "status": "BLOCKED", "mode": "uefi", "reason": str(e)}
+        else:
+            report["gates"]["firmware"] = {
+                "status": "PASS", "mode": "bios",
+                "note": "BIOS is not the declared artifact target; use it only for diagnosis",
+            }
+        if args.disk_size:
+            report["gates"]["disk_size"] = {
+                "status": "CONFIGURED", "size": args.disk_size,
+                "note": "expanded-disk boot is not qualified; prepare_overlay requires qemu-img for this size",
+            }
         report["gates"]["boot_attempt"] = {
             "status": "NOT_RUN", "reason": "no --image provided (prepare-only)"}
         (work_dir / "boot-qual-report.json").write_text(
@@ -574,7 +747,8 @@ def main(argv=None):
         memory_mib=args.memory_mib, cpus=args.cpus, arch=args.arch,
         accel=args.accel, do_offline_inspect=not args.no_offline_inspect,
         verify_ref=args.verify_ref, profile=args.profile, sha256sums_text=sums,
-        seed_iso_path=args.seed_iso,
+        seed_iso_path=args.seed_iso, firmware=args.firmware,
+        disk_size=args.disk_size, machine=args.machine,
     )
     print(json.dumps(report, sort_keys=True))
     # Exit non-zero only for hard failures in preparation/verification inputs;

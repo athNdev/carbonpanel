@@ -32,11 +32,14 @@ the shared node-control contract without duplicating it.
   ubuntu-24.04-amd64 --sha256sums <SHA256SUMS>` (real-byte check, offline and
   read-only; requires a caller-supplied image file)
 - `python3 scripts/node_vm_boot_qual.py --work-dir <owned-tmp> --generate-seed`
-  prepares deterministic seed/ISO inputs and reports qemu availability; with
-  `--image <verified.qcow2>` on a capable disposable runner (qemu-system with
+  prepares deterministic seed/ISO inputs and reports qemu/firmware availability;
+  with `--image <verified.qcow2>` on a capable disposable runner (qemu-system with
   TCG or KVM) it attempts a boot, captures serial-console evidence and can
-  perform offline disk inspection. Report blocked/unobserved gates honestly;
-  never claim live boot, enrollment or network isolation without evidence.
+  perform offline disk inspection. UEFI is the default; missing OVMF/edk2 is
+  reported blocked, never silently replaced by BIOS. `--disk-size 20G` exercises
+  the declared expanded profile, which remains unqualified. Report
+  blocked/unobserved gates honestly; never claim live boot, enrollment or
+  network isolation without evidence.
 - Never substitute a real key, endpoint or world path for a fixture value, and
   never run these drivers against a live VM from this lane.
 

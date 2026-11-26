@@ -95,6 +95,14 @@ python scripts/node_vm_upgrade.py --from-revision 0.1.0 --to-revision 0.2.0 --ba
 python -m unittest discover -s scripts -p 'test_node_vm_*.py' -v
 ```
 
+UEFI is the declared target and the qualification helper's default. It resolves
+OVMF/edk2 or fails closed (use `CARBON_OVMF_CODE`/`CARBON_OVMF_VARS` for a
+non-standard host) rather than falling back to BIOS. On a capable disposable
+runner, `--firmware uefi --machine q35 --disk-size 20G` exercises the declared
+profile; that expanded-disk profile is not yet qualified. The helper copies a
+fresh private UEFI variable store per run and never writes system firmware. See
+[QEMU boot qualification](qualification/VM-BOOT-QUALIFICATION.md).
+
 All commands are local-file operations. They do not call qemu-img, xorriso,
 virt-customize, a hypervisor API, a package registry or a signing service.
 The integrity `signing-plan.json` describes operator-run detached signing only.
