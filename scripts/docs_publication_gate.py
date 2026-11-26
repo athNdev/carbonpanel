@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MPL-2.0
 """Read-only gates for the docs-only maintained-guide publication lane.
 
-This module is deliberately independent of the OCI/channel-promotion tooling.
 It qualifies the LIVE two-channel docs receipt before a build, proves that a
 rebuilt site reproduces that receipt exactly, verifies the real rendered guide
 content, and resolves the exact prior Pages deployment artifact for rollback.
@@ -26,6 +25,10 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts import release
+
 SCHEMA_VERSION = 3
 CHANNELS = ("stable", "nightly")
 SELECTOR_LABELS = {"stable": "Stable", "nightly": "Nightly"}
@@ -42,7 +45,20 @@ NIGHTLY_BASELINE = {
 PAGES_ARTIFACT_NAME = "github-pages"
 # A rollback becomes the latest successful Pages deployment and serves this
 # narrowly named artifact; it is a valid baseline once its bytes are validated.
-PAGES_ARTIFACT_NAMES = ("github-pages", "github-pages-prior")
+PAGES_DEPLOY_STEPS = {
+    "Deploy the full canonical stage artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the final canonical artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the selected Pages artifact": PAGES_ARTIFACT_NAME,
+    "Deploy the full preserved site once": PAGES_ARTIFACT_NAME,
+    "Deploy to GitHub Pages": PAGES_ARTIFACT_NAME,
+    "Deploy the synchronized stable docs marker once": PAGES_ARTIFACT_NAME,
+    "Deploy the off-path Stable candidate probe": "github-pages-stable-probe",
+    "Deploy the off-path Nightly candidate probe": "github-pages-nightly-probe",
+    "Deploy the exact prior docs bytes": "github-pages-prior",
+    "Restore prior stable docs after a failed synchronized transaction": "github-pages-prior-stable",
+    "Deploy the exact prior stable docs bytes": "github-pages-prior-stable",
+}
+PAGES_ARTIFACT_NAMES = tuple(dict.fromkeys(PAGES_DEPLOY_STEPS.values()))
 PAGES_ENVIRONMENT = "github-pages"
 LIVE_INDEX_URL = "https://carbonpanel.dev/version-index.json"
 DEPLOYMENT_STATES = frozenset({
@@ -76,7 +92,13 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def validate_channel_contract(document):
+def stable_identity(document):
+    stable = document["channels"]["stable"]
+    return {"tag": stable.get("tag"), "version": stable.get("version"),
+            "commit": stable.get("commit"), "digest": (stable.get("image") or {}).get("digest")}
+
+
+def validate_channel_contract(document, stable_source=None):
     """Fail-closed validation of the schema 3 two-channel contract.
 
     Accepts either the tracked source contract (which names a catalog) or the
@@ -127,9 +149,11 @@ def validate_channel_contract(document):
     simage = stable.get("image", {}) if isinstance(stable, dict) else {}
     if simage.get("tag") != "latest" or simage.get("stable_alias") != "stable":
         problems.append("stable must pin latest and the stable alias")
-    if stable.get("commit") != STABLE_BASELINE["commit"] \
-            or simage.get("digest") != STABLE_BASELINE["digest"]:
-        problems.append("stable must stay on the verified stable baseline")
+    expected = stable_identity(stable_source) if stable_source is not None else STABLE_BASELINE
+    actual = {"tag": stable.get("tag"), "version": stable.get("version"),
+              "commit": stable.get("commit"), "digest": simage.get("digest")}
+    if any(actual[field] != value for field, value in expected.items()):
+        problems.append("stable must stay on the verified stable identity")
     nightly = channels["nightly"]
     nimage = nightly.get("image", {}) if isinstance(nightly, dict) else {}
     if nightly.get("tag") is not None or nimage.get("tag") != "nightly":
@@ -137,14 +161,14 @@ def validate_channel_contract(document):
     return (not problems), problems
 
 
-def resolve_live_docs_state(document):
+def resolve_live_docs_state(document, stable_source=None):
     """Classify the live state and return the exact render inputs.
 
     final -> render with the OBSERVED promoted revision/digest/receipt.
     baseline -> render the explicitly unpromoted matched baseline.
     Candidate, unknown, mismatched or invalid states fail closed.
     """
-    ok, problems = validate_channel_contract(document)
+    ok, problems = validate_channel_contract(document, stable_source)
     if not ok:
         return None, "invalid live channel contract: " + "; ".join(problems)
     nightly = (document.get("channels") or {}).get("nightly") or {}
@@ -174,6 +198,54 @@ def resolve_live_docs_state(document):
         return {"state": "baseline", "revision": commit, "digest": digest,
                 "receipt": ""}, ""
     return None, f"unsupported live nightly promotion state {state!r}"
+
+
+def qualify_public_stable(document, repository):
+    """Bind the public Stable marker to the published release and both registries."""
+    ok, problems = validate_channel_contract(document, stable_source=document)
+    if not ok:
+        raise ValueError("Invalid public channel contract: " + "; ".join(problems))
+    stable = stable_identity(document)
+    tag, commit, digest = stable["tag"], stable["commit"], stable["digest"]
+    product = release.product_release_or_none(tag)
+    legacy = tag == release.LEGACY_STABLE_TAG and stable["version"] == tag[1:]
+    if not legacy and not (product and not product["prerelease"]
+                           and stable["version"] == product["semver"]):
+        raise ValueError("Public Stable marker needs a recognized stable release tag and version")
+    if document["channels"]["stable"].get("promotion") != {"state": "published", "promoted": True}:
+        raise ValueError("Stable docs do not describe a published release")
+    read, endpoint = github_api(repository)
+    latest = json.loads(read(f"{endpoint}/releases/latest"))
+    if (latest.get("tag_name") != tag or latest.get("draft") is not False
+            or latest.get("prerelease") is not False or not latest.get("published_at")):
+        raise ValueError("The published GitHub Latest release disagrees with Stable docs")
+    if json.loads(read(f"{endpoint}/commits/{tag}")).get("sha") != commit:
+        raise ValueError("The GitHub release tag does not peel to the Stable revision")
+    verified, reason, _ = release.release_provenance(f"v{stable['version']}", commit, digest,
+                                                       [[latest]], git_tag=tag)
+    if not verified:
+        raise ValueError("Stable release provenance failed: " + reason)
+    for reference in ("latest", "stable", stable["version"]):
+        observations = release.channel_observe(reference)
+        if legacy and reference == "stable" and all(
+                observations.get(registry, [None])[0] == "absent"
+                for registry in release.CHANNEL_REGISTRIES):
+            continue
+        verified, reason = release.channel_oci_parity(observations, digest, commit)
+        if not verified:
+            raise ValueError(f"Stable {reference!r} registry evidence failed: {reason}")
+    return stable
+
+
+def stable_render_inputs(stable, root=ROOT):
+    """Pass the verified product pins, preserving only an exact tracked legacy identity."""
+    if stable["tag"] == release.LEGACY_STABLE_TAG:
+        tracked = stable_identity(load_json(Path(root) / "docs/website-source.json"))
+        if tracked != stable:
+            raise ValueError("The verified legacy Stable identity differs from the tracked renderer source")
+        return {"stable_tag": "", "stable_revision": "", "stable_digest": ""}
+    return {"stable_tag": stable["tag"], "stable_revision": stable["commit"],
+            "stable_digest": stable["digest"]}
 
 
 def verify_docs_receipt(built, live):
@@ -268,11 +340,7 @@ def verify_channel_docs(index, channel, commit, digest, page_texts=(),
             if needle in text:
                 problems.append(f"{channel} page still contains forbidden content {needle!r}")
     if stable_source is not None:
-        before = (stable_source.get("channels", {}).get("stable", {}))
-        after = channels.get("stable", {})
-        if (after.get("commit") != before.get("commit")
-                or (after.get("image") or {}).get("digest")
-                != (before.get("image") or {}).get("digest")):
+        if stable_identity(index) != stable_identity(stable_source):
             problems.append("stable identity no longer matches the live receipt")
     return (not problems), problems
 
@@ -280,7 +348,7 @@ def verify_channel_docs(index, channel, commit, digest, page_texts=(),
 GUIDE_PATH_PREFIX = "docs/carbon-panel/src/content/docs/"
 
 
-def guide_fingerprint(declaration, revision, blobs):
+def guide_fingerprint(declaration, revision, blobs, presentation=None):
     """Fingerprint the declaration plus the exact maintained source blobs.
 
     This is release-independent liveness: a later unrelated merge, a cancelled
@@ -316,22 +384,34 @@ def guide_fingerprint(declaration, revision, blobs):
                 "guides": records}
     payload = {"declaration_sha256": declaration_hash,
                "revision": revision, "guides": records}
-    return {"fingerprint": hashlib.sha256(
+    presentation_hash = ""
+    if presentation is not None:
+        presentation_hash = str(presentation.get("fingerprint", "")) \
+            if isinstance(presentation, dict) else str(presentation)
+        if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
+            raise ValueError("presentation fingerprint must be a SHA-256")
+        payload["presentation_fingerprint"] = presentation_hash
+    result = {"fingerprint": hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
         "revision": revision, "declaration_sha256": declaration_hash,
         "manifest_identity": identity,
         "manifest_identity_hash": manifest_identity_hash(identity),
         "guides": records}
+    # Legacy candidates predate presentation; omit the field entirely so their
+    # candidate JSON bytes are unchanged.
+    if presentation_hash:
+        result["presentation_fingerprint"] = presentation_hash
+    return result
 
 
-def candidate_guide_fingerprint(declaration_path, revision, root):
+def candidate_guide_fingerprint(declaration_path, revision, root, presentation=None):
     declaration = load_json(declaration_path)
     blobs = {}
     for guide in declaration.get("guides") or []:
         path = guide.get("source_path")
         blobs[path] = subprocess.check_output(
             ["git", "show", f"{revision}:{path}"], cwd=root)
-    return guide_fingerprint(declaration, revision, blobs)
+    return guide_fingerprint(declaration, revision, blobs, presentation=presentation)
 
 
 PUBLISHED_INDEX_ROUTES = ("/version-index.json", "/docs/version-index.json")
@@ -370,6 +450,14 @@ def fetch_live_guide_evidence(get_bytes):
             if isinstance(error, urllib.error.HTTPError) and error.code != 404:
                 raise
             evidence[channel] = None
+        if isinstance(evidence[channel], dict):
+            presentation_path = "/" + CHANNEL_ROUTES[channel].strip("/") + "/presentation.json"
+            try:
+                evidence[channel]["presentation"] = json.loads(get_bytes(presentation_path).decode("utf-8"))
+            except (urllib.error.HTTPError, FileNotFoundError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code != 404:
+                    raise
+                evidence[channel]["presentation"] = None
     route_state = published_route_liveness(get_bytes)
     evidence["published_routes"] = route_state["routes"]
     evidence["published_route_problems"] = route_state["problems"]
@@ -423,6 +511,14 @@ def guide_change_decision(candidate, live_evidence):
         # invisible; source HEAD movement with identical inputs stays a no-op.
         if manifest.get("declaration_sha256") != declaration_hash:
             problems.append(f"{channel} live maintained declaration hash is stale")
+        # Changelog/banner presentation is a SEPARATE channel input, never a
+        # release-independent maintained guide. A version-banner-only fix must
+        # still reconcile Pages: its fingerprint is stamped into the built
+        # presentation.json and compared here, not folded into the guide receipt.
+        wanted_presentation = candidate.get("presentation_fingerprint", "")
+        live_presentation = (manifest.get("presentation") or {}).get("fingerprint")
+        if wanted_presentation and live_presentation != wanted_presentation:
+            problems.append(f"{channel} live channel presentation is stale")
     problems.extend((live_evidence or {}).get("published_route_problems") or [])
     return {"publish": bool(problems),
             "reason": ("live maintained guide receipt is missing or stale"
@@ -439,8 +535,9 @@ def recheck_main_tip(repository, expected):
             "tip": first, "expected": expected}
 
 
-def pages_deployment_identity(deployments, statuses_by_id, environment=PAGES_ENVIRONMENT):
-    """Resolve the last SUCCESSFUL Pages deployment, independent of artifacts."""
+def pages_deployment_identity(deployments, statuses_by_id, get_job,
+                              environment=PAGES_ENVIRONMENT):
+    """Resolve the last job with an actual successful Pages deploy step."""
     candidates = [item for item in (deployments or [])
                   if isinstance(item, dict) and item.get("environment") == environment]
     if not candidates:
@@ -454,37 +551,53 @@ def pages_deployment_identity(deployments, statuses_by_id, environment=PAGES_ENV
         state = str(statuses[0].get("state") or "").lower()
         if state not in DEPLOYMENT_STATES:
             return None, f"deployment {deployment.get('id')} has unknown state {state!r}"
-        if state != "success":
+        # A rollback job can deliberately fail its final workflow assertion
+        # after restoring Pages successfully. The deploy step is authoritative.
+        if state not in {"success", "failure", "error", "inactive"}:
             continue
-        match = re.search(r"/actions/runs/(\d+)", str(statuses[0].get("target_url") or ""))
+        match = re.search(r"/actions/runs/(\d+)/job/(\d+)$", str(statuses[0].get("target_url") or ""))
         if not match:
-            return None, f"successful deployment {deployment.get('id')} has no resolvable run id"
-        return {"deployment_id": str(deployment.get("id")), "run_id": match.group(1),
+            return None, f"completed deployment {deployment.get('id')} has no resolvable job id"
+        run_id, job_id = match.groups()
+        job = get_job(job_id)
+        if (str(job.get("id")) != job_id or str(job.get("run_id")) != run_id
+                or job.get("head_sha") != deployment.get("sha")):
+            return None, f"deployment {deployment.get('id')} does not match its Actions job"
+        steps = []
+        for step in job.get("steps") or []:
+            name = step.get("name", "")
+            artifact_name = PAGES_DEPLOY_STEPS.get(name)
+            if name.startswith("Run actions/deploy-pages@"):
+                artifact_name = PAGES_ARTIFACT_NAME
+            if artifact_name:
+                steps.append((step, artifact_name))
+        if not steps:
+            return None, f"deployment {deployment.get('id')} has no recognized Pages deploy steps"
+        attempted = [entry for entry in steps if entry[0].get("conclusion") != "skipped"]
+        if not attempted:
+            continue
+        step, artifact_name = max(attempted, key=lambda entry: entry[0]["number"])
+        if step.get("conclusion") != "success":
+            return None, f"deployment {deployment.get('id')} has an unverified final Pages step"
+        return {"deployment_id": str(deployment.get("id")), "run_id": run_id,
                 "sha": str(deployment.get("sha") or ""),
+                "job_id": job_id, "deploy_step": step["name"], "artifact_name": artifact_name,
                 "environment": environment, "state": "success"}, ""
-    return None, "no successful github-pages deployment was observed"
+    return None, "no actual successful github-pages deploy step was observed"
 
 
-def pages_baseline_from_deployments(deployments, statuses_by_id, artifacts_by_run=None,
-                                    environment=PAGES_ENVIRONMENT):
-    """Resolve deployment identity, then name its candidate Pages artifacts.
-
-    Artifact availability never hides the deployment SHA. A normal run may hold
-    both `github-pages` and `github-pages-prior`; the fetch step disambiguates
-    them by verifying exact current live bytes (source manifests included).
-    """
-    identity, reason = pages_deployment_identity(deployments, statuses_by_id, environment)
-    if not identity:
-        return None, reason
-    artifacts = (artifacts_by_run or {}).get(identity["run_id"]) or []
+def pages_baseline_artifact(identity, artifacts):
+    """Select only the artifact used by the proven deployment step."""
     candidates = [artifact for artifact in artifacts
                   if isinstance(artifact, dict)
-                  and artifact.get("name") in PAGES_ARTIFACT_NAMES
+                  and artifact.get("name") == identity["artifact_name"]
                   and not artifact.get("expired") and artifact.get("id")]
     if not candidates:
-        return {**identity, "artifact_id": "", "artifact_name": "",
+        return {**identity, "artifact_id": "",
                 "artifact_candidates": [], "artifact_verified": False}, (
                     "deployment resolved; its Pages artifact is unavailable or expired")
+    if len(candidates) != 1:
+        return None, "the deploying run has multiple artifacts with the deployed name"
     return {**identity,
             "artifact_id": str(candidates[0]["id"]),
             "artifact_name": candidates[0].get("name", ""),
@@ -519,16 +632,13 @@ def pages_baseline(repository):
         identifier = str(deployment.get("id"))
         statuses_by_id[identifier] = json.loads(
             api(f"{root}/deployments/{identifier}/statuses?per_page=10"))
-    artifacts_by_run = {}
-    for statuses in statuses_by_id.values():
-        if not statuses or str(statuses[0].get("state") or "").lower() != "success":
-            continue
-        match = re.search(r"/actions/runs/(\d+)", str(statuses[0].get("target_url") or ""))
-        if not match or match.group(1) in artifacts_by_run:
-            continue
-        listing = json.loads(api(f"{root}/actions/runs/{match.group(1)}/artifacts?per_page=100"))
-        artifacts_by_run[match.group(1)] = listing.get("artifacts") or []
-    return pages_baseline_from_deployments(deployments, statuses_by_id, artifacts_by_run)
+    identity, reason = pages_deployment_identity(
+        deployments, statuses_by_id,
+        lambda job_id: json.loads(api(f"{root}/actions/jobs/{job_id}")))
+    if not identity:
+        return None, reason
+    listing = json.loads(api(f"{root}/actions/runs/{identity['run_id']}/artifacts?per_page=100"))
+    return pages_baseline_artifact(identity, listing.get("artifacts") or [])
 
 
 def _extract_pages_artifact(archive, destination):
@@ -657,6 +767,37 @@ def verify_manifest_identity(candidate, manifest):
     return (not problems), problems
 
 
+def channel_presentation_paths(live_index):
+    """Presentation and changelog receipt paths for every published version.
+
+    Both the canonical channel route and the immutable archive route carry the
+    same generated presentation, so a banner/changelog-only change must be
+    attested at each path, not merely at one canonical copy. A legacy index
+    without `versions` falls back to the two canonical channel routes.
+    """
+    routes = []
+    for version in live_index.get("versions") or []:
+        if not isinstance(version, dict):
+            continue
+        for key in ("route", "immutable_route"):
+            route = str(version.get(key) or "").strip("/")
+            if route:
+                routes.append(route)
+    if not routes:
+        routes = [value.strip("/") for value in CHANNEL_ROUTES.values()]
+    routes = sorted(set(routes))
+    return ([f"/{route}/presentation.json" for route in routes],
+            [f"/{route}/changelog/index.html" for route in routes])
+
+
+def _presentation_fingerprint(payload):
+    """The fingerprint actually carried by a built presentation.json."""
+    if not isinstance(payload, dict):
+        return ""
+    value = str(payload.get("fingerprint", ""))
+    return value if re.fullmatch(r"[0-9a-f]{64}", value) else ""
+
+
 def stamp_publication_receipt(site, candidate, live_index, source_revision):
     """Stamp a publication receipt into the built artifact (never main)."""
     if not valid_commit(source_revision):
@@ -684,6 +825,37 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
         local = root / path.lstrip("/")
         if local.is_file():
             page_hashes[path] = sha256_bytes(local.read_bytes())
+    # Channel presentation is a real built input, not an echoed candidate
+    # string. When the candidate declares a presentation fingerprint, read the
+    # ACTUAL presentation.json at canonical AND stable archive paths, require a
+    # valid SHA-256 that matches the candidate, and attest its bytes together
+    # with the generated changelog HTML. A wrong or missing file fails here
+    # instead of passing on a hash copied from the candidate. Legacy candidates
+    # without a presentation fingerprint keep the original path.
+    presentation_hash = str(candidate.get("presentation_fingerprint") or "")
+    if presentation_hash:
+        if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
+            raise ValueError("candidate channel presentation fingerprint must be a SHA-256")
+        presentation_paths, changelog_paths = channel_presentation_paths(live_index)
+        for path in presentation_paths:
+            local = root / path.lstrip("/")
+            if not local.is_file():
+                raise ValueError(f"channel presentation receipt is missing: {path}")
+            try:
+                payload = json.loads(local.read_text(encoding="utf-8"))
+            except (ValueError, UnicodeDecodeError) as error:
+                raise ValueError(f"channel presentation receipt is malformed: {path}: {error}")
+            actual = _presentation_fingerprint(payload)
+            if not actual:
+                raise ValueError(f"channel presentation receipt has no valid fingerprint: {path}")
+            if actual != presentation_hash:
+                raise ValueError(f"channel presentation fingerprint disagrees with candidate: {path}")
+            page_hashes[path] = sha256_bytes(local.read_bytes())
+        for path in changelog_paths:
+            local = root / path.lstrip("/")
+            if not local.is_file():
+                raise ValueError(f"generated changelog page is missing: {path}")
+            page_hashes[path] = sha256_bytes(local.read_bytes())
     nightly = (live_index.get("channels") or {}).get("nightly") or {}
     receipt = {"schema_version": 1, "source_revision": source_revision,
                "nightly_promotion_receipt": (nightly.get("promotion") or {}).get("receipt", ""),
@@ -692,6 +864,11 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
                "manifest_identity_hash": candidate.get("manifest_identity_hash", ""),
                "channels": channels, "page_hashes": page_hashes,
                "baseline_mode": "exact-artifact"}
+    # Legacy candidates have NO presentation input. Omit the field entirely so
+    # their historical receipt bytes stay identical (bots flagged the extra
+    # empty field as a byte regression). New candidates keep the explicit key.
+    if presentation_hash:
+        receipt["presentation_fingerprint"] = presentation_hash
     path = Path(site) / "publication-receipt.json"
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return receipt
@@ -706,6 +883,19 @@ def verify_publication_receipt(receipt, candidate, live_index, source_revision,
         field = {"guide_fingerprint": "fingerprint"}.get(key, key)
         if receipt.get(key) != candidate.get(field):
             problems.append(f"publication receipt {key} does not match the candidate")
+    # Legacy receipts predate channel presentation and stay compatible. Once a
+    # candidate declares presentation, the key is REQUIRED, valid, and equal:
+    # a VersionBanner/changelog-only change must therefore reconcile Pages.
+    presented = str(candidate.get("presentation_fingerprint") or "")
+    if presented:
+        if not re.fullmatch(r"[0-9a-f]{64}", presented):
+            problems.append("candidate channel presentation fingerprint is not a SHA-256")
+        if "presentation_fingerprint" not in receipt:
+            problems.append("publication receipt is missing the presentation fingerprint")
+        elif receipt["presentation_fingerprint"] != presented:
+            problems.append("publication receipt presentation fingerprint does not match the candidate")
+    elif receipt.get("presentation_fingerprint") not in (None, ""):
+        problems.append("legacy publication receipt has an unexpected presentation fingerprint")
     if receipt.get("source_revision") != source_revision:
         problems.append("publication receipt source revision is not the tested commit")
     for name in CHANNELS:
@@ -718,6 +908,24 @@ def verify_publication_receipt(receipt, candidate, live_index, source_revision,
         attested = receipt.get("page_hashes") or {}
         if not attested:
             problems.append("publication receipt has no page byte hashes")
+        if presented and re.fullmatch(r"[0-9a-f]{64}", presented):
+            presentation_paths, changelog_paths = channel_presentation_paths(live_index)
+            for path in presentation_paths + changelog_paths:
+                if path not in attested:
+                    problems.append(f"publication receipt does not attest channel bytes: {path}")
+            # Read the real served presentation.json: a hash echoed from the
+            # candidate on an absent or wrong file must never pass.
+            for path in presentation_paths:
+                try:
+                    payload = json.loads(get_bytes(path).decode("utf-8"))
+                except Exception as error:
+                    problems.append(f"public channel presentation {path} is unavailable or malformed: {error}")
+                    continue
+                actual = _presentation_fingerprint(payload)
+                if not actual:
+                    problems.append(f"public channel presentation {path} has no valid fingerprint")
+                elif actual != presented:
+                    problems.append(f"public channel presentation fingerprint at {path} does not match the candidate")
         for path, digest in attested.items():
             try:
                 observed = get_bytes(path)
@@ -883,7 +1091,33 @@ def verify_prior_bytes(site, base_url):
     receipt_bytes = observed["/publication-receipt.json"]
     if receipt_bytes is not None:
         receipt = json.loads(receipt_bytes.decode("utf-8"))
-        for path, digest in (receipt.get("page_hashes") or {}).items():
+        attested = receipt.get("page_hashes") or {}
+        presented = str(receipt.get("presentation_fingerprint") or "")
+        if presented:
+            # After deploy the SAME required keys/paths must be present: a
+            # legacy receipt (no presentation) keeps the old compatible path.
+            if not re.fullmatch(r"[0-9a-f]{64}", presented):
+                problems.append("live receipt presentation fingerprint is not a SHA-256")
+            presentation_paths, changelog_paths = channel_presentation_paths(index)
+            for path in presentation_paths + changelog_paths:
+                if path not in attested:
+                    problems.append(f"live receipt does not attest channel bytes: {path}")
+            for path in presentation_paths:
+                live_value = live_bytes(get_bytes, [path])[path]
+                if live_value is None:
+                    problems.append(f"live channel presentation is missing: {path}")
+                    continue
+                try:
+                    payload = json.loads(live_value.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    problems.append(f"live channel presentation is malformed: {path}")
+                    continue
+                actual = _presentation_fingerprint(payload)
+                if not actual:
+                    problems.append(f"live channel presentation has no valid fingerprint: {path}")
+                elif actual != presented:
+                    problems.append(f"live channel presentation fingerprint disagrees with the receipt: {path}")
+        for path, digest in attested.items():
             live_value = page_observed.get(path)
             if live_value is None:
                 live_value = live_bytes(get_bytes, [path])[path]
@@ -904,7 +1138,7 @@ def _page_bytes(data):
 
 
 def recover_prior_pages(destination, base_url, deployment_sha, root,
-                        trusted_declaration=""):
+                        trusted_declaration="", stable_source=None):
     """Rebuild ONLY from a deployment SHA confirmed on origin/main.
 
     The result is a RECONSTRUCTED baseline, never claimed as the exact artifact.
@@ -912,6 +1146,7 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
     deployment predating maintained guides gets no stamped receipt: its real
     pages are compared byte-for-byte against live instead.
     """
+    root = Path(root).resolve()
     if not valid_commit(deployment_sha):
         raise ValueError("recovery needs the exact deployment commit SHA")
     if subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
@@ -921,7 +1156,7 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
                       cwd=root).returncode != 0:
         raise ValueError("deployment SHA is not on origin/main")
     live = json.loads(_http_get(base_url)("/version-index.json").decode("utf-8"))
-    resolved, reason = resolve_live_docs_state(live)
+    resolved, reason = resolve_live_docs_state(live, stable_source)
     if not resolved:
         raise ValueError("live channel state is not qualified for recovery: " + reason)
     argv = [sys.executable, str(Path(root) / "scripts/build_website.py")]
@@ -930,7 +1165,12 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
                  "--nightly-digest", resolved["digest"],
                  "--promotion-state", "final",
                  "--promotion-receipt", resolved["receipt"]]
-    subprocess.check_call(argv, cwd=root)
+    if stable_source is None:
+        subprocess.check_call(argv, cwd=root)
+    else:
+        inputs = stable_render_inputs(stable_identity(stable_source), root)
+        env = {**os.environ, **{f"CARBONPANEL_{key.upper()}": value for key, value in inputs.items()}}
+        subprocess.check_call(argv, cwd=root, env=env)
     site = Path(root) / ".website-build/site"
     get_bytes = _http_get(base_url)
     receipt_bytes = live_bytes(get_bytes, ["/publication-receipt.json"])[
@@ -958,9 +1198,14 @@ def recover_prior_pages(destination, base_url, deployment_sha, root,
         mode = "legacy-reconstructed"
     else:
         # The workflow stamps receipts separately, so reconstruct it from the
-        # exact declaration and blobs at the deployment SHA.
+        # exact declaration and blobs at the deployment SHA, PLUS the channel
+        # presentation fingerprint persisted by the trusted build. A legacy
+        # artifact without presentation.json stays compatible (no field).
+        presentation_path = site / CHANNEL_ROUTES["stable"].strip("/") / "presentation.json"
+        presentation = load_json(presentation_path) if presentation_path.is_file() else None
         candidate = candidate_guide_fingerprint(
-            Path(root) / "docs/maintained-guides.json", deployment_sha, root)
+            Path(root) / "docs/maintained-guides.json", deployment_sha, root,
+            presentation=presentation)
         stamp_publication_receipt(site, candidate, live, deployment_sha)
         ok, problems = verify_rendered_guide_links(_local_get(site), live, root)
         if not ok:
@@ -992,8 +1237,13 @@ def build_parser():
     commands = parser.add_subparsers(dest="command", required=True)
     contract = commands.add_parser("validate-channel-contract")
     contract.add_argument("--path", required=True)
+    contract.add_argument("--stable-source", help="already-qualified live version index")
     state = commands.add_parser("resolve-live-docs-state")
     state.add_argument("--path", required=True)
+    state.add_argument("--verify-stable", action="store_true")
+    state.add_argument("--require-nightly-parity", action="store_true")
+    state.add_argument("--repository",
+                       default=os.environ.get("GITHUB_REPOSITORY", "athNdev/carbonpanel"))
     receipt = commands.add_parser("verify-docs-receipt")
     receipt.add_argument("--built", required=True)
     receipt.add_argument("--live", required=True)
@@ -1005,6 +1255,8 @@ def build_parser():
     fingerprint.add_argument("--declaration", required=True)
     fingerprint.add_argument("--revision", required=True)
     fingerprint.add_argument("--root", default=str(ROOT))
+    fingerprint.add_argument("--presentation", default="",
+                             help="path to the generated presentation fingerprint JSON")
     evidence = commands.add_parser("guide-evidence")
     evidence.add_argument("--base-url", default="https://carbonpanel.dev")
     decision = commands.add_parser("guide-change-decision")
@@ -1040,6 +1292,7 @@ def build_parser():
     recover.add_argument("--root", required=True)
     recover.add_argument("--deployment-sha", required=True)
     recover.add_argument("--trusted-declaration", default="")
+    recover.add_argument("--stable-source", help="already-qualified live version index")
     docs = commands.add_parser("verify-channel-docs")
     docs.add_argument("--site", default="")
     docs.add_argument("--base-url", default="")
@@ -1067,15 +1320,25 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
     if args.command == "validate-channel-contract":
-        ok, problems = validate_channel_contract(load_json(args.path))
+        stable_source = load_json(args.stable_source) if args.stable_source else None
+        ok, problems = validate_channel_contract(load_json(args.path), stable_source)
         emit({"verified": ok, "problems": problems})
         if not ok:
             raise ValueError("Channel contract validation failed: " + "; ".join(problems))
     elif args.command == "resolve-live-docs-state":
-        resolved, reason = resolve_live_docs_state(load_json(args.path))
-        emit({**(resolved or {}), "verified": bool(resolved), "reason": reason})
+        live = load_json(args.path)
+        stable = qualify_public_stable(live, args.repository) if args.verify_stable else None
+        resolved, reason = resolve_live_docs_state(live, live if args.verify_stable else None)
         if not resolved:
+            emit({"verified": False, "reason": reason})
             raise ValueError("Live docs state resolution failed: " + reason)
+        if args.require_nightly_parity:
+            ok, reason = release.channel_oci_parity(
+                release.channel_observe("nightly"), resolved["digest"], resolved["revision"])
+            if not ok:
+                raise ValueError("Public Nightly is not qualified for a site-only deployment: " + reason)
+        stable_inputs = stable_render_inputs(stable) if stable else {}
+        emit({**resolved, **stable_inputs, "verified": True, "reason": ""})
     elif args.command == "verify-docs-receipt":
         ok, problems = verify_docs_receipt(load_json(args.built), load_json(args.live))
         emit({"verified": ok, "problems": problems})
@@ -1095,8 +1358,10 @@ def main():
         if not ok:
             raise ValueError("Maintained guide provenance failed: " + "; ".join(problems))
     elif args.command == "guide-fingerprint":
+        presentation = load_json(args.presentation) if args.presentation else None
         emit({"verified": True,
-              **candidate_guide_fingerprint(args.declaration, args.revision, args.root)})
+              **candidate_guide_fingerprint(args.declaration, args.revision, args.root,
+                                            presentation=presentation)})
     elif args.command == "guide-evidence":
         evidence = _public_evidence(args.base_url)
         emit({"verified": True, **evidence})
@@ -1148,8 +1413,9 @@ def main():
         if not ok:
             raise ValueError("Prior bytes differ from live: " + "; ".join(problems))
     elif args.command == "recover-prior-pages":
+        stable_source = load_json(args.stable_source) if args.stable_source else None
         result = recover_prior_pages(args.site, args.base_url, args.deployment_sha,
-                                     args.root, args.trusted_declaration)
+                                     args.root, args.trusted_declaration, stable_source)
         emit(result)
     elif args.command == "verify-channel-docs":
         if bool(args.site) == bool(args.base_url):
@@ -1192,7 +1458,7 @@ def main():
     elif args.command == "fetch-prior-pages":
         api, _ = github_api(args.repository)
         live = urllib.request.urlopen(args.live_url, timeout=60).read()
-        if args.run_id and not args.artifact_id:
+        if args.run_id:
             listing = json.loads(api(
                 f"https://api.github.com/repos/{args.repository}/actions/runs"
                 f"/{args.run_id}/artifacts?per_page=100"))

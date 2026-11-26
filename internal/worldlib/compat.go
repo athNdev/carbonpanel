@@ -125,8 +125,8 @@ func NewEngine() *Engine { return &Engine{} }
 // the verdict come from the local table below or from level.dat.
 var protocolVersion = minecraft.GetProtocolVersion
 
-// dataVersionByMC documents a few representative Java data versions (source:
-// Minecraft data-version list). This is deliberately a small, explicit table:
+// dataVersionByMC documents representative Java world_version values from
+// Mojang's release JAR version.json. This is a small, explicit table:
 // unknown versions stay unknown rather than being interpolated or guessed.
 var dataVersionByMC = map[string]int{
 	"1.16.5": 2586,
@@ -136,7 +136,7 @@ var dataVersionByMC = map[string]int{
 	"1.20.1": 3635,
 	"1.20.4": 3690,
 	"1.21":   3953,
-	"1.21.1": 3953,
+	"1.21.1": 3955,
 }
 
 func dataVersionForMC(mcVersion string) (int, bool) {

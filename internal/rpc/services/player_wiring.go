@@ -8,6 +8,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,9 @@ import (
 // never tear down a moderation adapter that is mid-mutation.
 type adapterEntry struct {
 	adapter playeradapters.Adapter
-	closer  interface{ Close() }
+	// ManagementAdapter.Close returns error; a plain Close() assertion would
+	// silently match nothing and leak its background WebSocket reader.
+	closer  interface{ Close() error }
 	info    playeradapters.ServerInfo
 	caps    capabilityInfo
 	refs    int
@@ -83,17 +86,19 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 			info.RCONPassword = *serverCfg.RCONPassword
 		}
 	}
-	// A controller-reachable RCON host is an explicit operator setting. When it
-	// is absent, the node-scoped exec path handles local RCON and remote exec
-	// with correct host resolution and password redaction.
-	info.RCONHost = globalString(n.cfg, "player_rcon_host")
+	// A controller connection is only eligible for its configured server and
+	// current node. Unscoped legacy settings cannot identify the intended JVM.
+	if n.cfg != nil && server.ID != "" && server.NodeID != "" {
+		endpoint, exists := n.cfg.Minecraft.PlayerEndpoints[server.ID]
+		if exists && endpoint.NodeID == server.NodeID {
+			info.RCONHost = strings.TrimSpace(endpoint.RCONHost)
+			info.ManagementURL = strings.TrimSpace(endpoint.ManagementURL)
+			info.ManagementSecret = os.Getenv(endpoint.ManagementSecretEnv)
+			info.ManagementEnabled = info.ManagementURL != ""
+		}
+	}
 	if info.RCONHost == "" {
 		info.RCONEnabled = false
-	}
-	info.ManagementURL = globalString(n.cfg, "management_server_url")
-	info.ManagementSecret = globalString(n.cfg, "management_server_secret")
-	if info.ManagementURL != "" {
-		info.ManagementEnabled = true
 	}
 
 	var exec playeradapters.ExecFunc
@@ -119,8 +124,8 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 			n.mu.Unlock()
 			return nil, toCapabilityInfo(caps), err
 		}
-		var closer interface{ Close() }
-		if candidate, ok := adapter.(interface{ Close() }); ok {
+		var closer interface{ Close() error }
+		if candidate, ok := adapter.(interface{ Close() error }); ok {
 			closer = candidate
 		}
 		entry = &adapterEntry{adapter: adapter, closer: closer, info: info, caps: toCapabilityInfo(caps)}
@@ -128,7 +133,7 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 	}
 	caps := entry.caps
 	n.mu.Unlock()
-	return &refCountedSource{shim: n, serverID: server.ID, caps: caps}, caps, nil
+	return &refCountedSource{shim: n, serverID: server.ID, entry: entry, caps: caps}, caps, nil
 }
 
 func toCapabilityInfo(caps playeradapters.CapabilitySet) capabilityInfo {
@@ -144,30 +149,29 @@ func toCapabilityInfo(caps playeradapters.CapabilitySet) capabilityInfo {
 
 func closeAdapterEntry(entry *adapterEntry) {
 	if entry.closer != nil {
-		entry.closer.Close()
+		_ = entry.closer.Close()
 	}
 }
 
-func (n *negotiatorShim) release(serverID string) {
+func (n *negotiatorShim) release(serverID string, entry *adapterEntry) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	entry := n.entries[serverID]
-	if entry == nil {
-		return
-	}
 	entry.refs--
 	if entry.retired && entry.refs <= 0 {
 		closeAdapterEntry(entry)
-		delete(n.entries, serverID)
+		if n.entries[serverID] == entry {
+			delete(n.entries, serverID)
+		}
 	}
 }
 
-// refCountedSource acquires the current adapter for the duration of one call.
+// refCountedSource leases the adapter selected for this server generation.
 // Each method releases after it finishes, so re-negotiation can never close an
 // adapter that is still in flight.
 type refCountedSource struct {
 	shim     *negotiatorShim
 	serverID string
+	entry    *adapterEntry
 	caps     capabilityInfo
 }
 
@@ -176,14 +180,14 @@ func (r *refCountedSource) Source() string { return r.caps.ChosenSource }
 func (r *refCountedSource) with(fn func(playeradapters.Adapter) error) error {
 	r.shim.mu.Lock()
 	entry := r.shim.entries[r.serverID]
-	if entry == nil || entry.retired {
+	if entry == nil || entry != r.entry || entry.retired {
 		r.shim.mu.Unlock()
 		return fmt.Errorf("player adapter for %s is no longer active", r.serverID)
 	}
 	entry.refs++
 	adapter := entry.adapter
 	r.shim.mu.Unlock()
-	defer r.shim.release(r.serverID)
+	defer r.shim.release(r.serverID, entry)
 	return fn(adapter)
 }
 

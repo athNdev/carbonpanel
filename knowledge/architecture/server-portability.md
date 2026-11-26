@@ -6,10 +6,8 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/serverarchive
-  - internal/rpc/services/server_archive.go
-  - internal/rpc/services/server_archive_import.go
   - internal/nodestorage/allocation.go
-  - proto/carbonpanel/v1/server.proto
+  - internal/rpc/services
 sources:
   - title: Server portability archive format
     resource: ../../docs/server-portability.md

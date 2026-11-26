@@ -20,15 +20,17 @@ by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
 The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
-mounts the combined OSS-370 catalog: 211 tools covering 201 SUPPORTED operations
+mounts the combined OSS-370 catalog: 212 tools covering 201 supported operations
 (0 PENDING) from the OSS-375 audit matrix. The byte-transport lanes add five
 download tools and four upload/commit tools to the earlier combined set. The 30 first-slice declarations are
 the highest-precedence source; family descriptors (server, content, admin),
 stream typed equivalents and integration-owned additions are merged by
-`internal/mcp/cataloggen` into one generated `exposedTools` list. The 61
-excluded operations stay unmounted with exact source reasons and supported
+`internal/mcp/cataloggen` into one generated `exposedTools` list. The 77
+excluded operations stay outside the tool list with exact source reasons and supported
 equivalent flows in `family_audit_matrix.json`; free-form commands, node
 enrollment/TLS dumps, secret bootstrap and third-party egress are never tools.
+The staged config read tool projects rollout metadata and drops saved config
+payloads. It requires a concrete server grant and bounds the response size.
 Tools are high-level, bounded workflows: mutations carry a `confirm=true` gate,
 paths are instance-relative, and result limits are capped in Go as well as in
 the schema.

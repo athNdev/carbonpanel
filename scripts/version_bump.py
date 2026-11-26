@@ -18,13 +18,65 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 from scripts import version_contract as vc
+from scripts import dockerhub_description as hub_description
 
 ROOT = _ROOT
 BANNER = ROOT / "docs/carbon-panel/src/components/VersionBanner.astro"
 BUILDER = ROOT / "scripts/build_website.py"
 PROTO = ROOT / "proto/carbonpanel/v1/auth.proto"
 CHANGELOG = ROOT / "docs/carbon-panel/src/content/docs/changelog.md"
-README = ROOT / "README.md"
+# The README and the derived Docker Hub body share one release-channel section.
+# The gate checks its aliases and docs links, never a hardcoded Stable version:
+# a promotion changes the verified identity without invalidating this copy.
+CHANNEL_SECTION = "Release channels"
+CHANNEL_ITEMS = {
+    "Stable": {"alias": "`:latest`", "docs": "https://carbonpanel.dev/docs/"},
+    "Nightly": {"alias": "`:nightly`", "docs": "https://carbonpanel.dev/docs/nightly/"},
+}
+MARKDOWN_LINK_RE = re.compile(r"\]\(([^)]+)\)")
+
+
+def channel_item(section, channel):
+    """Return one channel bullet, including its wrapped continuation lines."""
+    match = re.search(r"^-\s+\*\*" + channel + r"\*\*.*?(?=^-\s+\*\*|\Z)",
+                      section, re.MULTILINE | re.DOTALL)
+    return match.group(0) if match else ""
+
+
+def link_destinations(text):
+    """Exact inline Markdown link destinations, without optional titles."""
+    return {target.split()[0] for target in MARKDOWN_LINK_RE.findall(text)}
+
+
+def verify_readme_channels(root):
+    """Check each shared channel bullet without banning historical versions."""
+    errors = []
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    section = hub_description.split_sections(readme).get(CHANNEL_SECTION, "")
+    if not section.strip():
+        return ["README must contain a '## {}' section describing Stable and Nightly".format(
+            CHANNEL_SECTION)]
+    for channel, requirement in CHANNEL_ITEMS.items():
+        item = channel_item(section, channel)
+        if not item:
+            errors.append("README {} must describe the {} channel".format(
+                CHANNEL_SECTION, channel))
+            continue
+        if requirement["alias"] not in item:
+            errors.append("README {} item must use the exact inline alias {}".format(
+                channel, requirement["alias"]))
+        if requirement["docs"] not in link_destinations(item):
+            errors.append("README {} item must link the {} documentation at {}".format(
+                channel, channel, requirement["docs"]))
+    config_path = root / "docs" / "dockerhub-description.json"
+    if not config_path.is_file():
+        errors.append("docs/dockerhub-description.json is missing")
+    else:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if CHANNEL_SECTION not in config.get("sections", []):
+            errors.append("Docker Hub generator config must include the shared '{}' section".format(
+                CHANNEL_SECTION))
+    return errors
 
 
 def verify_surfaces(root, contract, index):
@@ -66,10 +118,7 @@ def verify_surfaces(root, contract, index):
     changelog = CHANGELOG.read_text(encoding="utf-8")
     if "3.0.0-beta.4" in changelog and "name collision" not in changelog:
         errors.append("docs changelog must mark v3.0.0-beta.4 as an excluded name collision")
-    readme = README.read_text(encoding="utf-8")
-    stable = contract["channels"]["stable"]["tag"].removeprefix("v")
-    if stable not in readme:
-        errors.append(f"README install refs must name the verified stable {stable}")
+    errors.extend(verify_readme_channels(root))
     for version in index["versions"]:
         if version["tag"] in vc.EXCLUDED:
             errors.append(f"contract documents excluded tag {version['tag']}")

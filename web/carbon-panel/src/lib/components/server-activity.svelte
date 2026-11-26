@@ -7,98 +7,151 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { create } from '@bufbuild/protobuf';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
+	import { Code, ConnectError } from '@connectrpc/connect';
+	import { RefreshCw } from '@lucide/svelte';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import {
 		ListActivityLogsRequestSchema,
 		type ActivityLogEntry
 	} from '$lib/proto/carbonpanel/v1/activity_pb';
-	import { toast } from 'svelte-sonner';
+	import { CarbonButton, CarbonSelect, CarbonTag } from '$lib/components/carbon';
 	import { formatTimestamp } from '$lib/utils/format-time';
+	import { activityCategory, describeActivity } from './server-activity';
 
-	let { server, active = false }: { server: Server; active?: boolean } = $props();
+	let { serverId, active = false }: { serverId: string; active?: boolean } = $props();
 
-	let entries = $state<ActivityLogEntry[]>([]);
-	let loading = $state(false);
+	const pageSize = 100;
+	const maxEntries = 500;
+	let history = $state<{ serverId: string; entries: ActivityLogEntry[]; limit: number }>();
+	let current = $derived(history?.serverId === serverId ? history : undefined);
+	let entries = $derived(current?.entries ?? []);
+	let category = $state<string | number>('all');
+	let displayed = $derived(
+		entries.filter((entry) => category === 'all' || activityCategory(entry.event) === category)
+	);
+	let loading = $state(true);
+	let loadError = $state('');
+	let request: AbortController | undefined;
 
-	async function loadActivity() {
+	async function loadActivity(serverId: string, limit: number) {
+		request?.abort();
+		const controller = new AbortController();
+		request = controller;
 		loading = true;
+		loadError = '';
 		try {
-			const request = create(ListActivityLogsRequestSchema, {
-				serverId: server.id,
-				limit: 100
-			});
-			const response = await rpcClient.activity.listActivityLogs(request);
-			entries = response.entries;
-		} catch (error) {
-			toast.error(
-				'Failed to load activity: ' + (error instanceof Error ? error.message : 'Unknown error')
+			const response = await rpcClient.activity.listActivityLogs(
+				create(ListActivityLogsRequestSchema, { serverId, limit }),
+				{ ...silentCallOptions, signal: controller.signal }
 			);
+			if (!controller.signal.aborted) history = { serverId, entries: response.entries, limit };
+		} catch (error) {
+			if (controller.signal.aborted) return;
+			const code = ConnectError.from(error).code;
+			if (
+				code === Code.PermissionDenied ||
+				code === Code.Unauthenticated ||
+				code === Code.NotFound
+			) {
+				history = undefined;
+				loadError =
+					code === Code.NotFound
+						? 'This server is no longer available.'
+						: 'You don’t have access to this activity log.';
+			} else {
+				loadError = 'Could not load the activity log.';
+			}
 		} finally {
-			loading = false;
+			if (!controller.signal.aborted) loading = false;
 		}
 	}
 
 	$effect(() => {
-		if (active) {
-			loadActivity();
-		}
+		if (!active) return;
+		category = 'all';
+		void loadActivity(serverId, pageSize);
+		return () => request?.abort();
 	});
 </script>
 
-<div>
-	<div class="mb-3 flex items-center justify-between">
-		<h3 class="text-sm font-medium text-foreground">Audit log</h3>
-		<button
-			type="button"
-			class="inline-flex h-8 items-center rounded-none bg-secondary px-4 text-xs text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
-			onclick={loadActivity}
+<section aria-label="Server audit log" class="border border-border bg-card">
+	<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+		<h3 class="text-sm font-semibold text-foreground">Audit log</h3>
+		<CarbonButton
+			kind="secondary"
+			size="sm"
 			disabled={loading}
+			onclick={() => loadActivity(serverId, current?.limit ?? pageSize)}
 		>
-			{loading ? 'Loading…' : 'Refresh'}
-		</button>
+			<RefreshCw class="mr-2 h-4 w-4" />
+			{loading ? 'Loading…' : 'Refresh audit log'}
+		</CarbonButton>
 	</div>
-	<p class="mb-6 text-xs text-muted-foreground">
-		Who did what on this server, newest first. Journaled actions show the request id that joins them
-		to the operations journal.
-	</p>
-
-	{#if entries.length === 0}
-		<p class="py-8 text-center font-mono text-xs text-muted-foreground">
-			{loading
-				? 'Loading activity…'
-				: 'No activity recorded yet. Start or stop the server to generate entries.'}
+	{#if loadError}
+		<p role="alert" class="border-b border-border p-4 text-sm text-destructive-text">
+			{loadError}
+			{entries.length > 0 ? 'Showing the last loaded entries.' : ''}
 		</p>
-	{:else}
-		<div class="overflow-x-auto">
-			<table class="w-full min-w-[480px] text-xs" aria-label="Server activity log">
-				<thead>
-					<tr class="border-b border-border text-left text-muted-foreground">
-						<th scope="col" class="py-2 pr-4 font-medium">Time</th>
-						<th scope="col" class="py-2 pr-4 font-medium">Actor</th>
-						<th scope="col" class="py-2 pr-4 font-medium">Event</th>
-						<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
-						<th scope="col" class="py-2 font-medium">IP</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each entries as entry (entry.id)}
-						<tr class="border-b border-border font-mono text-foreground">
-							<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(entry.createdAt)}</td>
-							<td
-								class="max-w-[160px] truncate py-2 pr-4"
-								title={entry.actorName || entry.actorId || ''}
-								>{entry.actorName || entry.actorId || '—'}</td
-							>
-							<td class="py-2 pr-4">{entry.event}</td>
-							<td class="max-w-[180px] truncate py-2 pr-4" title={entry.requestId || ''}
-								>{entry.requestId || '—'}</td
-							>
-							<td class="py-2">{entry.ip || '—'}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
 	{/if}
-</div>
+	{#if entries.length > 0}
+		<div class="flex flex-wrap items-end justify-between gap-3 border-b border-border p-4">
+			<CarbonSelect label="Action type" bind:value={category} class="w-full sm:w-48">
+				<option value="all">All actions</option>
+				<option value="server">Server</option>
+				<option value="player">Players</option>
+				<option value="mod">Mods</option>
+				<option value="world">Worlds and maps</option>
+				<option value="other">Other</option>
+			</CarbonSelect>
+			<p role="status" class="text-xs text-muted-foreground">
+				{displayed.length} of {entries.length} loaded {entries.length === 1 ? 'entry' : 'entries'}
+			</p>
+		</div>
+		{#if displayed.length === 0}
+			<p class="p-6 text-sm text-muted-foreground">No loaded entries match this action type.</p>
+		{:else}
+			<ul aria-label="Audit entries, newest first" class="divide-y divide-border">
+				{#each displayed as entry (entry.id)}
+					{@const row = describeActivity(entry)}
+					<li class="grid gap-2 p-4 text-sm sm:grid-cols-[minmax(0,1fr)_auto]">
+						<div class="min-w-0">
+							<div class="flex flex-wrap items-center gap-2">
+								<p class="font-medium break-words text-foreground">{row.label}</p>
+								<CarbonTag type={row.outcome.tone} size="sm">{row.outcome.label}</CarbonTag>
+							</div>
+							<p class="mt-1 break-words text-muted-foreground">{row.actor}</p>
+							{#if row.details.length > 0}
+								<details class="mt-2 text-xs">
+									<summary class="focus-ring w-fit cursor-pointer text-primary">Details</summary>
+									<dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+										{#each row.details as [label, value] (label)}
+											<dt class="text-muted-foreground">{label}</dt>
+											<dd class="break-all text-foreground">{value}</dd>
+										{/each}
+									</dl>
+								</details>
+							{/if}
+						</div>
+						<p class="text-xs text-muted-foreground">{formatTimestamp(entry.createdAt)}</p>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if current && entries.length === current.limit && current.limit < maxEntries}
+			<div class="border-t border-border p-4">
+				<CarbonButton
+					kind="tertiary"
+					size="sm"
+					disabled={loading}
+					onclick={() => loadActivity(serverId, (current?.limit ?? pageSize) + pageSize)}
+				>
+					Load older entries
+				</CarbonButton>
+			</div>
+		{/if}
+	{:else if loading || !loadError}
+		<p role="status" class="p-6 text-sm text-muted-foreground">
+			{loading ? 'Loading activity…' : 'No audit entries have been recorded for this server.'}
+		</p>
+	{/if}
+</section>

@@ -4,7 +4,7 @@ title: Backup and restore
 description: Where panel database snapshot, backup storage, restore and retention are specified.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/s3, internal/snapshot, internal/scheduler, internal/worldstore, scripts/snapshot-panel-db.sh, scripts/compose-upgrade.sh, scripts/compose-upgrade-rollback.sh, docker-compose.yml]
+code_refs: [internal/s3, internal/snapshot, internal/scheduler, internal/worldstore, scripts/snapshot-panel-db.sh, scripts/compose-upgrade.sh, scripts/compose-upgrade-rollback.sh, scripts/qualify_packaged_panel_restore.py, .github/workflows/panel-restore-qualification.yml, docker-compose.yml]
 sources:
   - title: Streaming limits and recovery
     resource: ../../docs/storage-streaming.md
@@ -12,6 +12,8 @@ sources:
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
   - title: Snapshot integrity issue
     resource: ../../docs/issues/015-DEP-3-snapshot-integrity-concurrency-retention.md
+  - title: Packaged Panel database restore workflow
+    resource: ../../.github/workflows/panel-restore-qualification.yml
 ---
 
 # Parts
@@ -25,6 +27,10 @@ sources:
 - Panel database snapshots and the offline restore command are specified in
 - A backup is not complete until it can be restored. Test the restore path.
 - `docs/runbook-panel-db-restore.md`.
+- Dispatch the Packaged Panel database restore workflow with the exact release
+  build run and product commit. It uses the staged Linux archive to verify daily
+  snapshot restore, retained pre-restore state, and authenticated inventory after
+  restart on a disposable hosted runner.
 - Before a controller upgrade, run the named operator script
 - `scripts/snapshot-panel-db.sh` (or `make snapshot-panel-db`). It writes
 - `carbon-panel-db-<timestamp>.sqlite` beside the data directory. Restore by

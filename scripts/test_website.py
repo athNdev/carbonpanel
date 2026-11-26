@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import copy
 import json
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 import subprocess
 import tempfile
@@ -14,11 +15,14 @@ from scripts.build_website import (
     build_sitemap,
     export_snapshot,
     normalize_mdx,
+    prepare_project,
     publish_design_system,
     publish_shared_index,
     render_astro_config,
     scoped_links,
 )
+from scripts import changelog_page
+from scripts import maintained_guides
 from scripts import version_contract as vc
 from scripts.check_website import (
     Links, bases_from_index, check, check_channels, check_marker, check_version_ui,
@@ -75,6 +79,26 @@ class WebsiteTests(unittest.TestCase):
             export_snapshot(root, revision, export)
             self.assertEqual((export / "config.example.yaml").read_text(), "pinned")
             self.assertEqual((export / "docs/carbon-panel/src/content/docs/intro.md").read_text(), "pinned")
+
+    def test_nightly_candidate_sources_first_party_proxmox_page(self):
+        # The Nightly candidate renders its Proxmox guide from the qualified
+        # first-party revision and never at a canonical route.
+        root = Path(__file__).resolve().parent.parent
+        revision = "08a67f306c249a36dc742d7b166d13e2eb905d1f"  # origin/main: first-party Proxmox page
+        probe = subprocess.run(["git", "cat-file", "-e", revision], cwd=root,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if probe.returncode != 0:
+            self.skipTest(f"qualified revision {revision} is not in this checkout")
+        first_party_link = ("https://raw.githubusercontent.com/athNdev/carbonpanel/"
+                            "main/scripts/proxmox/install-carbon-panel.sh")
+        with tempfile.TemporaryDirectory() as temporary:
+            export_snapshot(root, revision, Path(temporary))
+            page = (Path(temporary)
+                    / "docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx")
+            self.assertTrue(page.is_file())
+            self.assertIn(first_party_link, page.read_text(encoding="utf-8"))
+            self.assertEqual(vc.candidate_route(revision),
+                             "/docs/candidate/" + revision + "/")
 
     def test_subpath_links_and_source_links(self):
         source = '[Config](/configuration/) <iframe src="/api-reference.html"></iframe> ' + \
@@ -336,6 +360,234 @@ class WebsiteTests(unittest.TestCase):
             with self.assertRaises(ValueError) as raised:
                 check(root)
             self.assertIn("og:title", str(raised.exception))
+
+
+class PrepareProjectStagingTests(unittest.TestCase):
+    """Candidate staging is explicit build state, never a base-path guess."""
+
+    def test_same_custom_base_scopes_only_when_candidate_is_flagged(self):
+        root = Path(__file__).resolve().parent.parent
+        contract, catalog = vc.load(root)
+        index = vc.version_index(
+            vc.release_build_contract(vc.apply_promotion(contract, None)), catalog, root)
+        current = index["versions"][1]
+        guides = maintained_guides.load(root)
+        revision, origin = maintained_guides.derive_revision(root)
+        custom = "/docs/candidate/preview/"  # looks like staging; is a real base
+        for candidate in (False, True):
+            with self.subTest(candidate=candidate), tempfile.TemporaryDirectory() as temporary:
+                snapshot = Path(temporary) / "snapshot"
+                head = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+                export_snapshot(root, head, snapshot)
+                prepare_project(snapshot, root / "docs/carbon-panel", index, current,
+                                custom, custom, custom, "https://carbonpanel.dev",
+                                guides, revision, origin, root, candidate=candidate)
+                page = (snapshot / "docs/carbon-panel"
+                        / changelog_page.GENERATED_PAGE).read_text(encoding="utf-8")
+                if candidate:
+                    self.assertIn("https://carbonpanel.dev/docs/changelog/", page)
+                    self.assertNotIn(custom + "docs/changelog/", page)
+                else:
+                    self.assertIn("https://carbonpanel.dev" + custom + "docs/changelog/", page)
+
+
+class ChannelChangelogTests(unittest.TestCase):
+    """Channel-correct changelog generated from the one version contract."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.declaration = changelog_page.load_source()
+        cls.notes = changelog_page.load_notes()
+        contract, catalog = vc.load()
+        cls.index = vc.version_index(
+            vc.release_build_contract(vc.apply_promotion(contract, None)), catalog)
+
+    def render(self, channel):
+        current = next(v for v in self.index["versions"] if v["channel"] == channel)
+        return changelog_page.render(self.index, current, self.declaration, self.notes)
+
+    def test_one_h1_and_no_retired_or_collision_claims(self):
+        for channel in ("stable", "nightly"):
+            page = self.render(channel)
+            self.assertIn("title: Changelog", page)
+            self.assertFalse(page.startswith("# "))
+            self.assertNotIn("\n# ", page)
+            for stale in ("3.0.0-beta.4", "3.0.0-beta.3", "2.0.15", "1.0.38",
+                          "working-tree changelog", "Versioned documentation"):
+                self.assertNotIn(stale, page, channel)
+
+    def test_stable_exact_identity_canonical_notes_and_upgrade_link(self):
+        page = self.render("stable")
+        stable = next(v for v in self.index["versions"] if v["channel"] == "stable")
+        self.assertIn(stable["tag"], page)
+        self.assertIn(stable["commit"][:12], page)
+        self.assertIn("Canonical GitHub release notes:", page)
+        self.assertIn(f"/releases/tag/{stable['tag']}", page)
+        if stable["tag"] in self.declaration["upgrade_links"]:
+            self.assertIn(self.declaration["upgrade_links"][stable["tag"]]["anchor"], page)
+        else:
+            self.assertNotIn("upgrade-notes-", page)
+        self.assertIn("/docs/nightly/changelog/", page)
+
+    def test_nightly_exact_revision_compare_and_stable_baseline(self):
+        page = self.render("nightly")
+        nightly = next(v for v in self.index["versions"] if v["channel"] == "nightly")
+        stable = next(v for v in self.index["versions"] if v["channel"] == "stable")
+        self.assertIn(nightly["commit"][:12], page)
+        self.assertIn(f"/compare/{stable['commit']}...{nightly['commit']}", page)
+        self.assertIn(stable["tag"], page)
+        self.assertIn("Promotion state:", page)
+        self.assertIn("/docs/changelog/", page)
+
+    def test_exact_published_release_notes_and_tag_upgrade_link(self):
+        index = copy.deepcopy(self.index)
+        stable = index["versions"][0]
+        stable["tag"], stable["display"] = "carbonpanel-v2.0.1", "2.0.1"
+        page = changelog_page.render(index, stable, self.declaration, self.notes)
+        self.assertIn("upgrade-notes-from-v1040", page)
+        self.assertIn("/releases/tag/carbonpanel-v2.0.1", page)
+        self.assertIn("## Downloads", page)
+        self.assertIn("atharvnaphade/carbonpanel:2.0.1", page)
+
+    def test_baseline_and_future_release_without_local_notes(self):
+        """A tracked 1.0.40 Stable or a future tag must not abort the build."""
+        index = copy.deepcopy(self.index)
+        stable = index["versions"][0]
+        stable["tag"], stable["display"] = "v1.0.40", "1.0.40"
+        page = changelog_page.render(index, stable, self.declaration, {})
+        self.assertIn("/releases/tag/v1.0.40", page)
+        self.assertIn("No local attested copy", page)
+        self.assertNotIn("upgrade-notes-from-v1040", page)
+        self.assertFalse(page.startswith("# "))
+        self.assertNotIn("\n# ", page)
+
+    def test_presentation_fingerprint_includes_banner_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for rel in (changelog_page.SOURCE_PATH,
+                        self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"],
+                        changelog_page.BANNER_SOURCE):
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((Path(__file__).resolve().parent.parent / rel).read_bytes())
+            first = changelog_page.presentation_fingerprint(root)["fingerprint"]
+            banner = root / changelog_page.BANNER_SOURCE
+            banner.write_text(banner.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            second = changelog_page.presentation_fingerprint(root)["fingerprint"]
+            self.assertNotEqual(first, second)
+
+    def test_banner_shows_actual_release_and_matching_page_options(self):
+        banner = (Path(__file__).resolve().parent.parent
+                  / "docs/carbon-panel/src/components/VersionBanner.astro").read_text(encoding="utf-8")
+        self.assertIn("const tabLabel = current.tag || current.display;", banner)
+        self.assertIn("current.version", banner)
+        self.assertIn("rolling ", banner)
+        self.assertIn("{dev ? index.development.label : tabLabel}", banner)
+        # Provenance markers and matching-page switcher are retained.
+        self.assertIn("data-channel-revision={current.commit}", banner)
+        self.assertIn("item.pages?.includes(slug)", banner)
+        self.assertNotIn("current.channel + ' / ' + current.availability", banner)
+        # No CSS truncation cap was introduced to hide part of the tab label.
+        label_rule = re.search(r"\.version-label\s*\{[^}]*\}", banner).group(0)
+        self.assertNotIn("text-overflow", label_rule)
+        self.assertNotIn("max-width", label_rule)
+        self.assertNotIn("overflow", label_rule)
+
+    def test_counterpart_links_honour_deployment_subpath(self):
+        for channel, expected in (("stable", "/docs/nightly/changelog/"),
+                                  ("nightly", "/docs/changelog/")):
+            page = self.render(channel)
+            self.assertIn(f"https://carbonpanel.dev{expected}", page)
+            sub = changelog_page.render(
+                self.index,
+                next(v for v in self.index["versions"] if v["channel"] == channel),
+                self.declaration, self.notes, base="/panel/")
+            self.assertIn(f"https://carbonpanel.dev/panel{expected}", sub)
+            self.assertNotIn(f"https://carbonpanel.dev{expected})", sub)
+
+    def test_candidate_staging_counterparts_stay_at_the_global_site_root(self):
+        """A non-active probe path is not a deployment subpath."""
+        index = copy.deepcopy(self.index)
+        revision = "f" * 40
+        staging = f"/docs/candidate/{revision}/"
+        for version in index["versions"]:
+            if version["channel"] == "nightly":
+                version["route"] = version["immutable_route"] = staging
+        current = next(v for v in index["versions"] if v["channel"] == "nightly")
+        page = changelog_page.render(index, current, self.declaration, self.notes,
+                                     base=staging, staging=True)
+        self.assertIn("https://carbonpanel.dev/docs/changelog/", page)
+        self.assertNotIn(staging + "docs/changelog/", page)
+
+    def test_presentation_hash_is_lf_stable_and_notes_are_utf8_clean(self):
+        root = Path(__file__).resolve().parent.parent
+        notes_rel = self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"]
+        body = (root / notes_rel).read_bytes()
+        self.assertEqual(changelog_page._sha256(body),
+                         changelog_page._sha256(body.replace(b"\r\n", b"\n")))
+        notes = changelog_page.load_notes()
+        self.assertIn("\u2014", notes["carbonpanel-v2.0.1"])
+        self.assertNotIn("\ufffd", notes["carbonpanel-v2.0.1"])
+        self.assertNotIn("\u00e2\u20ac", notes["carbonpanel-v2.0.1"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            copy_root = Path(temporary)
+            for rel in (changelog_page.SOURCE_PATH, notes_rel, changelog_page.BANNER_SOURCE):
+                target = copy_root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((root / rel).read_bytes().replace(b"\n", b"\r\n"))
+            crlf = changelog_page.presentation_fingerprint(copy_root)["fingerprint"]
+            for rel in (notes_rel, changelog_page.BANNER_SOURCE):
+                target = copy_root / rel
+                target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+            lf = changelog_page.presentation_fingerprint(copy_root)["fingerprint"]
+            self.assertEqual(crlf, lf)
+
+    def test_mojibake_release_notes_are_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            notes_rel = self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"]
+            target = root / notes_rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            damaged = "## Notes \u2014 exact\n".encode("utf-8").decode("utf-8")
+            damaged = damaged.replace("\u2014", "\u00e2\u20ac\u201d")
+            target.write_bytes(damaged.encode("utf-8"))
+            declaration = copy.deepcopy(self.declaration)
+            declaration["release_notes"]["carbonpanel-v2.0.1"]["sha256"] = \
+                changelog_page._sha256(target.read_bytes())
+            source = root / changelog_page.SOURCE_PATH
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(json.dumps(declaration), encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                changelog_page.load_notes(root)
+            self.assertIn("mojibake", str(raised.exception))
+
+    def test_presentation_fingerprint_excludes_channel_contract_identity(self):
+        """Channel state stays with the verified promotion authority, not this gate."""
+        payload = changelog_page.presentation_fingerprint()["inputs"]
+        self.assertEqual(set(payload), {"declaration", "notes", "generator_sha256",
+                                        "banner_sha256"})
+        self.assertNotIn("index", payload)
+        self.assertNotIn("version", payload)
+
+    def test_browser_gate_is_wired_into_normal_website_validation(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assertTrue((root / "scripts/changelog_browser_check.py").is_file())
+        self.assertTrue((root / "scripts/manual-review/e2e/changelog-switcher-dom.mjs").is_file())
+        docs_ci = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/changelog_browser_check.py", docs_ci)
+        self.assertIn("bunx playwright install --with-deps chromium", docs_ci)
+        self.assertIn("scripts/manual-review/e2e/changelog-switcher-dom.mjs", docs_ci)
+        published = (root / "docs/website-publishing.md").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/changelog_browser_check.py", published)
+
+    def test_builder_generates_and_excludes_changelog_from_rebasing(self):
+        source = (Path(__file__).resolve().parent / "build_website.py").read_text(encoding="utf-8")
+        self.assertIn("changelog_page.GENERATED_PAGE", source)
+        self.assertIn("changelog_page.PINNED_PAGE", source)
+        self.assertIn("changelog_page.presentation_fingerprint", source)
+        self.assertIn('"changelog.mdx"', source)
 
 
 if __name__ == "__main__":

@@ -79,10 +79,11 @@ Keep your backup directory on different storage than your server data if you can
 
 ## Restoring a backup
 
-1. **Stop the server.**
-2. Locate the backup `.zip` in your backup directory on the host.
-3. In the server's **Files** tab, delete (or rename) the world folder(s) you're restoring, then upload the backup archive and extract it. Alternatively, extract it directly into the server's data directory on the host.
-4. Start the server.
+1. In the **World Library**, use **Unbind** on each binding for this server. Unbinding removes the library association and leaves the live files in place.
+2. Open the server's **Backups** tab and choose **Restore** for the archive you want to use.
+3. Confirm that you want to replace the current world data. Carbon Panel verifies the archive and stops a running server before restoring it.
+
+If Carbon Panel finds an active binding, it refuses the restore before stopping the server or changing world files. After unbinding, retry the same backup.
 
 <Aside type="note">
 Backups created with default settings contain the world folder(s) at the archive root, so extracting into the server directory puts everything back where it belongs.

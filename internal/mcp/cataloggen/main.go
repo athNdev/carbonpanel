@@ -71,6 +71,8 @@ func buildForMethod(service, method string) string {
 	switch service {
 	case "PlayerService", "WorldService", "WorldViewService", "ModBrowseService":
 		return "PanelBuildPostStable"
+	case "PackwizService", "StagedConfigService":
+		return "PanelBuildProductRPCs"
 	default:
 		return "PanelBuildStableV140"
 	}

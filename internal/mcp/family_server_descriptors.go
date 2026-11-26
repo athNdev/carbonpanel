@@ -525,26 +525,26 @@ type FamilyServerExcludedSurface struct {
 
 // FamilyServerExcludedSurfaces documents protocol/HTTP surfaces that are not
 // tools. There is intentionally no health-endpoint tool: healthz/readyz are
-// public probes, and read-only metrics are served by the servers/read tools
-// (get_server_logs, list_server_players, get_next_available_port) above.
+// public probes. The servers/read tools give server status, logs and cached operational metrics,
+// while Prometheus monitoring uses the panel metrics endpoints.
 var FamilyServerExcludedSurfaces = []FamilyServerExcludedSurface{
 	{
 		Surface: "/api/v2/metrics/*", Service: "ServerService", Scope: "servers/read",
 		Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:326-332 (mux.Handle at :326); handler internal/rpc/handlers/metrics.go:75",
-		Equivalent: "get_server_logs, list_server_players, get_next_available_port",
-		Detail:     "Scoped REST metrics read with servers/read but no generated typed client. The equivalent bounded servers/read RPC tools are listed above; no health-endpoint tool is created.",
+		Equivalent: "authorized Prometheus scrape",
+		Detail:     "Host metrics require a global servers/read grant. Per-server metrics require servers/read on that server.",
 	},
 	{
 		Surface: "/api/v1/settings/validate-key", Service: "ConfigService", Scope: "settings/read",
-		Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:305; handler internal/rpc/handlers/key_validator.go:45",
-		Equivalent: "validate_provider_key",
-		Detail:     "Legacy REST duplicate of the generated ConfigService/ValidateProviderKey RPC. The typed RPC carries the same settings/read scope and never echoes the key.",
+		Reason: ExcludeThirdPartyEgress, Source: "internal/rpc/server.go:300; handler internal/rpc/handlers/key_validator.go:45",
+		Equivalent: "authorized provider validation in panel settings",
+		Detail:     "The REST adapter and generated RPC delegate to the same settings/read operation. It handles provider credentials and contacts the provider.",
 	},
 	{
-		Surface: "/api/v1/staged-config/*", Service: "ConfigService", Scope: "server_config/read|create",
-		Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:323; handler internal/rpc/handlers/staged_config.go:87,101",
-		Equivalent: "get_update_batch, update_server_config, discard_update_batch",
-		Detail:     "Deprecated REST adapter replaced by the generated ConfigService staged-batch RPCs, with the same server_config scopes.",
+		Surface: "/api/v1/staged-config/*", Service: "StagedConfigService", Scope: "server_config/read|create",
+		Reason: ExcludeMaintenance, Source: "internal/rpc/server.go:317; handler internal/rpc/handlers/staged_config.go:87,101",
+		Equivalent: "panel staged changes workflow",
+		Detail:     "The legacy adapter and generated StagedConfigService share staged changes, their server_config scopes and mutation owner checks.",
 	},
 	{
 		Surface: "/api/v1/nodes/scan", Service: "NodeService", Scope: "nodes/read",
@@ -561,7 +561,7 @@ var FamilyServerExcludedSurfaces = []FamilyServerExcludedSurface{
 	{Surface: "/ws", Service: "WebSocket hub", Reason: ExcludeBrowserHandshake, Source: "internal/rpc/server.go:278", Equivalent: "none (browser private handshake)", Detail: "Browser console/log/event hub."},
 	{Surface: "/api/v1/auth/oidc/login, /callback, /exchange", Service: "AuthService", Reason: ExcludeBrowserHandshake, Source: "internal/rpc/server.go:287-294; internal/auth/oidc.go:596-627", Equivalent: "none (browser session bootstrap)", Detail: "IdP handshake; exchange redeems a one-time code for a session token."},
 	{Surface: "/healthz, /readyz, /health/detail", Service: "platform", Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:282-284", Equivalent: "none (public probes)", Detail: "Public read-only liveness probes; deliberately no health-endpoint tool."},
-	{Surface: "gRPC reflection v1/v1alpha", Service: "platform", Reason: ExcludePrivateProtocol, Source: "internal/rpc/server.go:252-274", Equivalent: "none (stale catalog source)", Detail: "19-service stale list; the MCP catalog never uses reflection."},
+	{Surface: "gRPC reflection v1/v1alpha", Service: "platform", Reason: ExcludePrivateProtocol, Source: "internal/rpc/server.go:252-274", Equivalent: "tools/list for MCP tool discovery", Detail: "Reflection enumerates the registered Connect services."},
 	{Surface: "CLI maintenance (list/ports/release-port/resolve)", Service: "platform", Reason: ExcludeMaintenance, Source: "cmd/carbon-panel/operations.go:19-30", Equivalent: "resolve_operation (mounted RPC)", Detail: "Operator-only maintenance path; the UI-facing RPC equivalent is listed above."},
 	{Surface: "/api/v1/upload/, /api/v1/download/", Service: "UploadService/FileService", Scope: "uploads/*, files/*", Reason: ExcludeNoTypedClient, Source: "internal/rpc/server.go:296-300", Equivalent: "none in this family (byte transport primitives owned by other families)", Detail: "Streaming byte transport, out of family scope."},
 }

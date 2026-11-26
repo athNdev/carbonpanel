@@ -202,24 +202,63 @@ func (o *PackwizOperations) DeleteMod(ctx context.Context, packID, slug string) 
 	return nil
 }
 
-// BatchMods applies one action to a set of slugs. Per-item failures are
-// intentionally ignored, matching the compatibility adapter's best-effort
-// behavior. It returns the number of slugs the caller asked to process.
-func (o *PackwizOperations) BatchMods(ctx context.Context, packID, action string, slugs []string, side string) (int, error) {
+// PackwizBatchResult reports the outcome of one slug in a batch mutation.
+// Per-entry failures stay visible so callers can report truthful outcomes
+// instead of treating the requested count as a success count.
+type PackwizBatchResult struct {
+	Slug      string
+	Success   bool
+	Message   string
+	ErrorCode string
+}
+
+// BatchMods applies one action to a set of slugs. It returns exactly one result
+// per requested slug, in request order. A failure on one slug is captured in
+// that slug's result and never stops the remaining entries, preserving the
+// best-effort behavior shared by both transports. An error is returned only
+// when the operation cannot start at all.
+func (o *PackwizOperations) BatchMods(ctx context.Context, packID, action string, slugs []string, side string) ([]PackwizBatchResult, error) {
 	if !o.Ready() {
-		return 0, packwizError(http.StatusInternalServerError, "pack manager not initialized")
+		return nil, packwizError(http.StatusInternalServerError, "pack manager not initialized")
 	}
+	results := make([]PackwizBatchResult, 0, len(slugs))
 	for _, slug := range slugs {
+		result := PackwizBatchResult{Slug: slug, Success: true}
+		var err error
 		switch action {
 		case "set_side":
-			_ = o.manager.UpdateMod(packID, slug, side, false)
+			err = o.manager.UpdateMod(packID, slug, side, false)
 		case "pin":
-			_ = o.manager.UpdateMod(packID, slug, "", true)
+			err = o.manager.UpdateMod(packID, slug, "", true)
 		case "unpin":
-			_ = o.manager.UpdateMod(packID, slug, "", false)
+			err = o.manager.UpdateMod(packID, slug, "", false)
 		case "remove":
-			_ = o.manager.DeleteMod(packID, slug)
+			err = o.manager.DeleteMod(packID, slug)
+		default:
+			err = packwizError(http.StatusBadRequest, "unknown batch action %q", action)
 		}
+		if err != nil {
+			result.Success = false
+			result.ErrorCode = packwizBatchErrorCode(err)
+			result.Message = err.Error()
+		}
+		results = append(results, result)
 	}
-	return len(slugs), nil
+	return results, nil
+}
+
+// packwizBatchErrorCode maps a shared operation failure to a stable per-entry
+// code. It never includes the raw slug message in the code itself.
+func packwizBatchErrorCode(err error) string {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "mod not found"), strings.Contains(message, "pack not found"):
+		return "not_found"
+	case strings.Contains(message, "write"), strings.Contains(message, "permission"):
+		return "write_failed"
+	case strings.Contains(message, "unknown batch action"):
+		return "invalid_action"
+	default:
+		return "mutation_failed"
+	}
 }

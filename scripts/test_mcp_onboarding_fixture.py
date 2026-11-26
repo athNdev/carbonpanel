@@ -25,9 +25,11 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
+GUIDE = ROOT / "docs/carbon-panel/src/content/docs/guides/mcp-server.mdx"
 MUTATING = ("Create", "Update", "Delete", "Start", "Stop", "Restart", "Recreate", "Kick", "Ban")
 
 
@@ -132,25 +134,26 @@ class CopyablePromptTests(unittest.TestCase):
         self.assertTrue(prompts, "README must contain a copyable text prompt")
         prompt = " ".join(prompts[0].split())
         required = [
-            "EXISTING install or a NEW one",
-            "must NOT replace, reconfigure, migrate or delete",
-            "only I, the operator",
-            "REACHABLE FROM THE MCP PROCESS",
+            "io.github.athNdev/carbon-panel",
+            "Stop if the listing or anonymous pull is unavailable",
+            "Windows, macOS or Linux",
+            "Preserve all existing services, worlds and databases",
+            "Ask before changing the installed panel version or channel",
+            "servers:read", "files:read", "backups:read",
+            "reachable from the MCP container",
             "http://carbon-panel:8080",
-            "must never be used as a fallback",
-            "docker compose down -v",
-            "docker system prune",
-            "CAPABILITY_UNAVAILABLE",
+            "no panel data mounts or Docker socket mounts",
+            "error.kind=capability_unavailable",
+            "minimum_panel_build",
             "/healthz", "/readyz", "/health/detail",
-            "tools/list", "list_servers", "STABLE", "sha256",
-            "combined catalogue mounts 211 tools", "OSS-370", "dp_",
-            "authentication-enabled", "list_files", "list_backups",
+            "tools/list", "list_servers", "Stable", "sha256",
+            "authentication-enabled", "CARBONPANEL_TOKEN", "dp_",
         ]
         for phrase in required:
             self.assertIn(phrase, prompt, f"copyable prompt is missing: {phrase}")
 
     def test_two_reachable_url_cases_are_distinct(self):
-        configs = [json.loads(block) for block in fenced_blocks(readme_section(), "json")]
+        configs = [json.loads(block) for block in fenced_blocks(GUIDE.read_text(encoding="utf-8"), "json")]
         configs = [config for config in configs if "mcpServers" in config]
         self.assertGreaterEqual(len(configs), 2)
         host = next(c for c in configs if c["mcpServers"]["carbon-panel"]["command"] != "docker")
@@ -165,9 +168,31 @@ class CopyablePromptTests(unittest.TestCase):
         )
         self.assertIn("--network", container["mcpServers"]["carbon-panel"]["args"])
         self.assertIn("sha256:<64_HEX_DIGEST>", json.dumps(container))
-        self.assertIn("stdio", host["mcpServers"]["carbon-panel"]["args"])
+        self.assertEqual(host["mcpServers"]["carbon-panel"]["args"], [])
         for config in configs:
             self.assertNotIn("http://localhost:8080", json.dumps(config))
+
+    def test_compose_configuration_forwards_token_by_environment_name(self):
+        blocks = fenced_blocks(GUIDE.read_text(encoding="utf-8"), "json")
+        config = next(json.loads(block)["mcpServers"]["carbon-panel"] for block in blocks if '"docker"' in block)
+        self.assertEqual(config["args"][:3], ["run", "-i", "--rm"])
+        for variable in ("CARBONPANEL_URL", "CARBONPANEL_TOKEN"):
+            index = config["args"].index(variable)
+            self.assertEqual(config["args"][index - 1], "-e")
+        self.assertNotIn(config["env"]["CARBONPANEL_TOKEN"], config["args"])
+
+    def test_guide_links_resolve_inside_each_docs_route(self):
+        guide = GUIDE.read_text(encoding="utf-8")
+        for label, destination in (
+            ("Docker Compose", "getting-started/docker-compose/"),
+            ("Prebuilt binaries", "getting-started/prebuilt-binaries/"),
+            ("Documentation version", "versions/"),
+        ):
+            link = re.search(rf"\[{label}\]\(([^)]+)\)", guide)
+            self.assertIsNotNone(link, f"{label} link is missing")
+            for root in ("/docs/", "/docs/versions/1.0.40/", "/docs/nightly/"):
+                with self.subTest(label=label, root=root):
+                    self.assertEqual(urljoin(f"{root}guides/mcp-server/", link[1]), root + destination)
 
     def test_disposable_mock_panel_fixture(self):
         with MockPanel() as panel:
@@ -201,9 +226,8 @@ def evidence_payload() -> dict[str, Any]:
         "errors": [str(test) for test, _ in output.errors],
         "passed": output.wasSuccessful(),
         "cleanup": "MockPanel.__exit__ shut down and closed the owned HTTP server",
-        "docker_daemon_available": False,
-        "limits": "Docker-network container case not executed: no Docker daemon in this worktree; "
-                  "host-installed URL case and mock health/read-only path exercised locally.",
+        "limits": "This suite validates the configuration examples and exercises health and a read-only "
+                  "request against an HTTP mock. Packaged stdio is exercised by the distribution smoke.",
     }
     result["status"] = "ok" if output.wasSuccessful() else "failed"
     return result

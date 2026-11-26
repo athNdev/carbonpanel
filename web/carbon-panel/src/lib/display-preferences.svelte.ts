@@ -13,16 +13,18 @@
 
 import { writable, type Readable } from 'svelte/store';
 
-export type ThemeChoice = 'dark' | 'light';
+export type Palette = 'dark' | 'light';
+export type ThemeChoice = Palette | 'system';
 export type MotionChoice = 'full' | 'reduced';
 export type DensityChoice = 'comfortable' | 'compact';
 
 // Storage keys are a compatibility contract: keep the existing names.
 export const THEME_KEY = 'carbon-theme';
 export const MOTION_KEY = 'carbon-motion';
+export const SERVER_METRICS_KEY = 'carbon-server-metrics-expanded';
 export const DENSITY_KEY = 'carbon-density';
 
-const THEMES: ThemeChoice[] = ['dark', 'light'];
+const THEMES: ThemeChoice[] = ['system', 'dark', 'light'];
 const MOTIONS: MotionChoice[] = ['full', 'reduced'];
 const DENSITIES: DensityChoice[] = ['comfortable', 'compact'];
 
@@ -56,8 +58,10 @@ export function createDisplayPreferences(
 	storage?: PreferenceStorage | null,
 	doc?: Document | null
 ) {
-	const themeValue = writable<ThemeChoice>('dark');
+	const themeValue = writable<Palette>('dark');
+	const themeChoice = writable<ThemeChoice>('system');
 	const motionValue = writable<MotionChoice>('full');
+	const metricsExpanded = writable(true);
 	const densityValue = writable<DensityChoice>('comfortable');
 
 	const useBrowserStorage = storage === undefined;
@@ -72,10 +76,11 @@ export function createDisplayPreferences(
 		return resolvedStore;
 	}
 
-	let theme: ThemeChoice = 'dark';
+	let choice: ThemeChoice = 'system';
+	let systemMedia: MediaQueryList | undefined;
 	let motion: MotionChoice = 'full';
 	let density: DensityChoice = 'comfortable';
-	themeValue.subscribe((value) => (theme = value));
+	themeChoice.subscribe((value) => (choice = value));
 	motionValue.subscribe((value) => (motion = value));
 	densityValue.subscribe((value) => (density = value));
 
@@ -101,6 +106,8 @@ export function createDisplayPreferences(
 	}
 
 	function apply() {
+		const theme = choice === 'system' ? (systemMedia?.matches ? 'light' : 'dark') : choice;
+		themeValue.set(theme);
 		if (!target) return;
 		const root = target.documentElement;
 		// A theme flip changes color/background/border/shadow on nearly every
@@ -111,6 +118,7 @@ export function createDisplayPreferences(
 			typeof root.getAttribute === 'function' && root.getAttribute('data-carbon-theme') !== theme;
 		if (themeChanged) suppressTransitionsForThemeSwap(target);
 		root.setAttribute('data-carbon-theme', theme);
+		root.classList?.toggle('dark', theme === 'dark');
 		root.setAttribute('data-carbon-motion', motion);
 		root.setAttribute('data-carbon-density', density);
 	}
@@ -143,7 +151,12 @@ export function createDisplayPreferences(
 		const storedTheme = read(THEME_KEY);
 		const storedMotion = read(MOTION_KEY);
 		const storedDensity = read(DENSITY_KEY);
-		if (THEMES.includes(storedTheme as ThemeChoice)) themeValue.set(storedTheme as ThemeChoice);
+		const storedMetrics = read(SERVER_METRICS_KEY);
+		if (storedMetrics === 'true' || storedMetrics === 'false')
+			metricsExpanded.set(storedMetrics === 'true');
+		themeChoice.set(
+			THEMES.includes(storedTheme as ThemeChoice) ? (storedTheme as ThemeChoice) : 'system'
+		);
 		if (MOTIONS.includes(storedMotion as MotionChoice))
 			motionValue.set(storedMotion as MotionChoice);
 		if (DENSITIES.includes(storedDensity as DensityChoice))
@@ -151,9 +164,19 @@ export function createDisplayPreferences(
 		apply();
 	}
 
+	function watchSystemTheme() {
+		systemMedia = target?.defaultView?.matchMedia?.('(prefers-color-scheme: light)');
+		const onChange = () => {
+			if (choice === 'system') apply();
+		};
+		systemMedia?.addEventListener('change', onChange);
+		apply();
+		return () => systemMedia?.removeEventListener('change', onChange);
+	}
+
 	function setTheme(next: ThemeChoice) {
 		if (!THEMES.includes(next)) return;
-		themeValue.set(next);
+		themeChoice.set(next);
 		write(THEME_KEY, next);
 		apply();
 	}
@@ -172,18 +195,28 @@ export function createDisplayPreferences(
 		apply();
 	}
 
+	function setMetricsExpanded(expanded: boolean) {
+		metricsExpanded.set(expanded);
+		write(SERVER_METRICS_KEY, String(expanded));
+	}
+
 	function reset() {
-		themeValue.set('dark');
+		setMetricsExpanded(true);
+		themeChoice.set('system');
 		motionValue.set('full');
 		densityValue.set('comfortable');
-		write(THEME_KEY, theme);
+		write(THEME_KEY, choice);
 		write(MOTION_KEY, motion);
 		write(DENSITY_KEY, density);
 		apply();
 	}
 
 	return {
-		theme: themeValue as Readable<ThemeChoice>,
+		metricsExpanded: metricsExpanded as Readable<boolean>,
+		setMetricsExpanded,
+		theme: themeValue as Readable<Palette>,
+		themeChoice: themeChoice as Readable<ThemeChoice>,
+		watchSystemTheme,
 		motion: motionValue as Readable<MotionChoice>,
 		density: densityValue as Readable<DensityChoice>,
 		hydrate,

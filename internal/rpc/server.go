@@ -422,6 +422,8 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 	backupService.SetEnforcer(s.enforcer)
 	backupService.SetScheduler(s.scheduler)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
+	userService.SetOIDCHandler(s.oidcHandler)
+	userService.SetEnforcer(s.enforcer)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	moduleService.SetEnforcer(s.enforcer)
@@ -462,13 +464,14 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 		docker.NewLocator(s.clientPool, s.docker, s.store),
 		bluemapDiscovery,
 	)
+	nativeMap := worldview.NewNativeMap(s.store, s.storageResolver)
 	worldViewService := worldview.NewService(worldview.ServiceDeps{
-		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,
+		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver, Native: nativeMap,
 		Auditor: worldview.NewAuditLogger(s.store.DB()), Log: s.log,
 	})
 	s.worldViewProxy = worldview.NewProxyHandler(worldview.ProxyDeps{
 		Auth: s.authManager, Authorizer: s.enforcer, Subusers: s.store, Servers: s.store,
-		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Log: s.log,
+		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Native: nativeMap, Log: s.log,
 	})
 
 	// World Library (OSS-347). Its binder takes explicit lifecycle, resolver

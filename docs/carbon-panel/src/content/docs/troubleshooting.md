@@ -53,6 +53,10 @@ Other startup failures:
 - **Mod or loader mismatch.** After changing the Minecraft version or loader,
   the pack can contain incompatible mods. Open the Studio's Migration tab to
   see which entries have a compatible release.
+- **A mod requires a missing dependency.** The server error can identify the
+  missing mod even if the container has already exited. Check the console for
+  the required version. Choose a corrected pack release or install a
+  compatible copy of that dependency before retrying.
 - **Port conflict.** A published additional port is already in use on the host.
   Change or remove it in Additional Ports.
 

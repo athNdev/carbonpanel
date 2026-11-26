@@ -21,6 +21,39 @@ type zipEntry struct {
 	mode os.FileMode
 }
 
+func TestResolveRevisionArchiveFormats(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	library := filepath.Join("data", ".world-library")
+	canonical := filepath.Join(library, "rev_imported", "world.zip")
+	legacy := filepath.Join(library, "rev_generated.zip")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{canonical, legacy, "outside.zip"} {
+		if err := os.WriteFile(name, []byte("archive"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ stored, want string }{
+		{"rev_imported/world.zip", canonical},
+		{legacy, legacy},
+		{filepath.Join(root, legacy), filepath.Join(root, legacy)},
+	} {
+		if got, err := ResolveRevisionArchive(library, tc.stored); err != nil || got != tc.want {
+			t.Errorf("resolve %q = %q, %v; want %q", tc.stored, got, err, tc.want)
+		}
+	}
+	for _, invalid := range []string{
+		"", "../outside.zip", filepath.Join(root, "outside.zip"),
+		"missing.zip", "rev_imported",
+	} {
+		if _, err := ResolveRevisionArchive(library, invalid); !errors.Is(err, ErrArchiveRejected) {
+			t.Errorf("resolve %q = %v; want ErrArchiveRejected", invalid, err)
+		}
+	}
+}
+
 // makeZipBytes builds a real ZIP archive in memory so nested fixtures can be
 // embedded as entries without touching the filesystem.
 func makeZipBytes(t *testing.T, entries ...zipEntry) []byte {

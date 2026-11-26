@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { get } from 'svelte/store';
 import { create } from '@bufbuild/protobuf';
+import { Code, ConnectError } from '@connectrpc/connect';
 import { ServerSchema, ServerStatus } from '../../proto/carbonpanel/v1/common_pb';
 import type { Server } from '../../proto/carbonpanel/v1/common_pb';
 import { createServerInventory } from './inventory.svelte';
@@ -154,6 +155,30 @@ test('an older failure cannot replace a newer successful hydration', async () =>
 	assert.equal(get(inventory.state).hydrated, true);
 	assert.equal(get(inventory.state).loading, false);
 	assert.match(String(get(inventory.state).error), /offline/);
+});
+
+test('fleet access denial survives transient errors, stale list success and authorized detail reads', async () => {
+	const { inventory, lists, details } = fixture();
+	const first = inventory.refresh();
+	lists[0].resolve([server('cached')]);
+	await first;
+	const old = inventory.refresh();
+	const denied = inventory.refresh(true);
+	lists[2].reject(new ConnectError('grant removed', Code.PermissionDenied));
+	await assert.rejects(denied);
+	lists[1].resolve([server('cached')]);
+	await old;
+	const offline = inventory.refresh();
+	lists[3].reject(new ConnectError('offline', Code.Unavailable));
+	await assert.rejects(offline);
+	const detail = inventory.load('cached');
+	details[0].resolve(server('cached'));
+	await detail;
+	assert.equal(get(inventory.state).listAccessDenied, true);
+	const renewed = inventory.refresh();
+	lists[4].resolve([server('allowed')]);
+	await renewed;
+	assert.equal(get(inventory.state).listAccessDenied, false);
 });
 
 test('refresh subscriptions share one timer and close on last unmount', () => {

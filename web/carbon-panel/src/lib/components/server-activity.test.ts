@@ -5,19 +5,46 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
+import { create } from '@bufbuild/protobuf';
+import { ActivityLogEntrySchema } from '$lib/proto/carbonpanel/v1/activity_pb';
+import { describeActivity } from './server-activity';
 
-test('activity list shows the journal request id when present', () => {
-	const activityPath = path.resolve(import.meta.dirname, 'server-activity.svelte');
-	const content = fs.readFileSync(activityPath, 'utf-8');
-	assert.ok(content.includes('Request ID'), 'activity table must have a request id column');
-	assert.ok(
-		content.includes('entry.requestId'),
-		'activity rows must render the persisted request id'
+test('failed mod uploads do not appear as installed or staged', () => {
+	const row = describeActivity(
+		create(ActivityLogEntrySchema, {
+			event: 'mod.install',
+			properties: '{"file":"example.jar","staged":true,"error":"write failed"}'
+		})
 	);
-	assert.ok(
-		!content.includes('listActivityLogs(') || content.includes('serverId: server.id'),
-		'activity list stays scoped to the open server'
+	assert.equal(row.label, 'Install mod');
+	assert.equal(row.outcome.label, 'Failed');
+	assert.deepEqual(row.details, [['Mod', 'example.jar']]);
+});
+
+test('bulk moderation preserves partial outcomes and the journal reference', () => {
+	const row = describeActivity(
+		create(ActivityLogEntrySchema, {
+			event: 'player.bulk',
+			subjectType: 'player',
+			subjectId: 'pl_a,pl_b',
+			requestId: 'req-1',
+			properties: '{"action":"ban","targets":2,"failures":1}'
+		})
 	);
+	assert.equal(row.outcome.label, 'Partial');
+	assert.ok(row.details.some(([key, value]) => key === 'Targets' && value === '1 of 2 applied'));
+	assert.ok(row.details.some(([key, value]) => key === 'Request ID' && value === 'req-1'));
+});
+
+test('historic entries with no outcome or malformed properties stay readable', () => {
+	const row = describeActivity(
+		create(ActivityLogEntrySchema, {
+			event: 'server.start',
+			properties: '{',
+			actorName: 'Operator'
+		})
+	);
+	assert.equal(row.label, 'Start server');
+	assert.equal(row.actor, 'Operator');
+	assert.equal(row.outcome.label, 'Recorded');
 });

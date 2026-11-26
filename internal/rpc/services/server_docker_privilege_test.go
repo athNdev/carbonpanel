@@ -60,19 +60,6 @@ func newDockerPrivilegeTestService(t *testing.T) (*ServerService, *rbac.Enforcer
 		Storage: config.StorageConfig{DataDir: t.TempDir()},
 	}
 
-	// No phantom default node exists anymore: seed an enabled node so
-	// server creation can be placed explicitly in these tests.
-	if err := store.CreateNode(context.Background(), &db.Node{
-		ID:      "test-node",
-		Name:    "Test Node",
-		Host:    "tcp://127.0.0.1:2375",
-		Enabled: true,
-		Status:  db.NodeStatusOnline,
-		IsLocal: true,
-	}); err != nil {
-		t.Fatalf("failed to seed test node: %v", err)
-	}
-
 	// Keep a real Docker API endpoint available so the port preflight can
 	// distinguish an empty allocation set from an unavailable daemon.
 	dockerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +72,20 @@ func newDockerPrivilegeTestService(t *testing.T) (*ServerService, *rbac.Enforcer
 	}))
 	t.Cleanup(dockerAPI.Close)
 	dockerHost := "tcp://" + strings.TrimPrefix(dockerAPI.URL, "http://")
+	cfg.Docker.Host = dockerHost
+	// No phantom default node exists anymore: seed an enabled node so
+	// server creation can be placed explicitly in these tests.
+	if err := store.CreateNode(context.Background(), &db.Node{
+		ID:      "test-node",
+		Name:    "Test Node",
+		Host:    dockerHost,
+		Enabled: true,
+		Status:  db.NodeStatusOnline,
+		IsLocal: true,
+	}); err != nil {
+		t.Fatalf("failed to seed test node: %v", err)
+	}
+
 	dockerCli, err := docker.NewClient(dockerHost, log)
 	if err != nil {
 		t.Fatalf("failed to create docker client stub: %v", err)

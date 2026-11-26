@@ -52,6 +52,9 @@ const (
 	UserServiceUpdateUserProcedure = "/carbonpanel.v1.UserService/UpdateUser"
 	// UserServiceDeleteUserProcedure is the fully-qualified name of the UserService's DeleteUser RPC.
 	UserServiceDeleteUserProcedure = "/carbonpanel.v1.UserService/DeleteUser"
+	// UserServiceBeginOIDCLinkProcedure is the fully-qualified name of the UserService's BeginOIDCLink
+	// RPC.
+	UserServiceBeginOIDCLinkProcedure = "/carbonpanel.v1.UserService/BeginOIDCLink"
 )
 
 // UserServiceClient is a client for the carbonpanel.v1.UserService service.
@@ -66,6 +69,9 @@ type UserServiceClient interface {
 	UpdateUser(context.Context, *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error)
 	// Remove user account
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// Begin explicit local-admin OIDC identity linking. The authenticated local
+	// admin receives a short-lived single-use link token for the OIDC login URL.
+	BeginOIDCLink(context.Context, *connect.Request[v1.BeginOIDCLinkRequest]) (*connect.Response[v1.BeginOIDCLinkResponse], error)
 }
 
 // NewUserServiceClient constructs a client for the carbonpanel.v1.UserService service. By default,
@@ -109,16 +115,23 @@ func NewUserServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(userServiceMethods.ByName("DeleteUser")),
 			connect.WithClientOptions(opts...),
 		),
+		beginOIDCLink: connect.NewClient[v1.BeginOIDCLinkRequest, v1.BeginOIDCLinkResponse](
+			httpClient,
+			baseURL+UserServiceBeginOIDCLinkProcedure,
+			connect.WithSchema(userServiceMethods.ByName("BeginOIDCLink")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // userServiceClient implements UserServiceClient.
 type userServiceClient struct {
-	listUsers  *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
-	getUser    *connect.Client[v1.GetUserRequest, v1.GetUserResponse]
-	createUser *connect.Client[v1.CreateUserRequest, v1.CreateUserResponse]
-	updateUser *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
-	deleteUser *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	listUsers     *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
+	getUser       *connect.Client[v1.GetUserRequest, v1.GetUserResponse]
+	createUser    *connect.Client[v1.CreateUserRequest, v1.CreateUserResponse]
+	updateUser    *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
+	deleteUser    *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	beginOIDCLink *connect.Client[v1.BeginOIDCLinkRequest, v1.BeginOIDCLinkResponse]
 }
 
 // ListUsers calls carbonpanel.v1.UserService.ListUsers.
@@ -146,6 +159,11 @@ func (c *userServiceClient) DeleteUser(ctx context.Context, req *connect.Request
 	return c.deleteUser.CallUnary(ctx, req)
 }
 
+// BeginOIDCLink calls carbonpanel.v1.UserService.BeginOIDCLink.
+func (c *userServiceClient) BeginOIDCLink(ctx context.Context, req *connect.Request[v1.BeginOIDCLinkRequest]) (*connect.Response[v1.BeginOIDCLinkResponse], error) {
+	return c.beginOIDCLink.CallUnary(ctx, req)
+}
+
 // UserServiceHandler is an implementation of the carbonpanel.v1.UserService service.
 type UserServiceHandler interface {
 	// Get all system users
@@ -158,6 +176,9 @@ type UserServiceHandler interface {
 	UpdateUser(context.Context, *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error)
 	// Remove user account
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// Begin explicit local-admin OIDC identity linking. The authenticated local
+	// admin receives a short-lived single-use link token for the OIDC login URL.
+	BeginOIDCLink(context.Context, *connect.Request[v1.BeginOIDCLinkRequest]) (*connect.Response[v1.BeginOIDCLinkResponse], error)
 }
 
 // NewUserServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -197,6 +218,12 @@ func NewUserServiceHandler(svc UserServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(userServiceMethods.ByName("DeleteUser")),
 		connect.WithHandlerOptions(opts...),
 	)
+	userServiceBeginOIDCLinkHandler := connect.NewUnaryHandler(
+		UserServiceBeginOIDCLinkProcedure,
+		svc.BeginOIDCLink,
+		connect.WithSchema(userServiceMethods.ByName("BeginOIDCLink")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.UserService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UserServiceListUsersProcedure:
@@ -209,6 +236,8 @@ func NewUserServiceHandler(svc UserServiceHandler, opts ...connect.HandlerOption
 			userServiceUpdateUserHandler.ServeHTTP(w, r)
 		case UserServiceDeleteUserProcedure:
 			userServiceDeleteUserHandler.ServeHTTP(w, r)
+		case UserServiceBeginOIDCLinkProcedure:
+			userServiceBeginOIDCLinkHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -236,4 +265,8 @@ func (UnimplementedUserServiceHandler) UpdateUser(context.Context, *connect.Requ
 
 func (UnimplementedUserServiceHandler) DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.UserService.DeleteUser is not implemented"))
+}
+
+func (UnimplementedUserServiceHandler) BeginOIDCLink(context.Context, *connect.Request[v1.BeginOIDCLinkRequest]) (*connect.Response[v1.BeginOIDCLinkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.UserService.BeginOIDCLink is not implemented"))
 }

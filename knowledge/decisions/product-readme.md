@@ -31,28 +31,30 @@ asset: native browser captures of the current application
 running in an isolated installation with review data. Never substitute generated
 UI, the homepage's fixture islands or edited telemetry for an application capture.
 
-Use focused crops and native UI controls to make the represented feature readable.
+Use native UI controls and prefer full-window frames for page context.
 Do not repaint labels, invent activity or hide a missing reading behind a plausible
 metric. Capture provenance records the application revision, date, data origin and
 framing. Review exports at README display size and refresh them when that UI changes.
+The README leads with the full dark dashboard and links to the full light
+alternate. The server overview requires decoded terrain in its map preview.
+Capture verifies the app's active theme at each screenshot.
 
-`assets/showcase/` and `landing/assets/showcase/` contain identical PNGs. The standard
-journey maintains the core captures; additional manual feature captures have explicit
-regeneration instructions. Local review stacks preserve worlds and databases during
-shutdown, and never borrow another installation's data for a public screenshot.
+The review stack uses its own fixtures and preserves data on shutdown. The
+Players capture requires a scoped observation from a headless game client
+connected to the fresh review server on a verified loopback binding.
+The journey targets stable tab and panel IDs and pins Bun to the frontend CI
+version. Relevant main pushes run capture automatically, with a weekly backstop
+for missed changes. Default dispatch includes the full set. Subset and non-main
+dispatches produce a validated artifact for inspection.
 
-The capture journey targets stable tab and panel IDs instead of exact text on
-the button's own text nodes. Capture CI runs for application UI changes, not
-homepage-only edits, and pins Bun to the frontend CI version for the website build.
-
-Published images live on a single dedicated asset branch so README raw URLs are
-stable; the README does not link to generated PNGs tracked on main. Capture runs in a read-only job against
-an isolated seeded stack, and a separate minimal `contents:write` job publishes
-only that branch in one commit. The bundle is validated fail-closed against an
-atomic manifest (exact source commit, per-image SHA256, dimensions, size, PNG
-chunk CRCs, alt text, provenance, no credential material, no unexpected files).
-An unchanged content digest is a no-op; a failed capture never removes the
-previous good images. Login-route bootstrap selection must wait for one
-mutually exclusive semantic state rather than counting nodes before hydration.
+Published images live on a dedicated asset branch with stable README raw URLs.
+Capture runs in a read-only job against an isolated seeded stack. A separate
+minimal `contents:write` job publishes the canonical bundle atomically after
+validation (exact source commit, per-image SHA256, dimensions, size, PNG
+chunk CRCs, alt text, provenance, no credential material or unexpected files).
+Publication advances along live main history. A later merge may land during
+capture without invalidating it, and an older, repeated or unchanged capture
+leaves the last published assets intact. Login-route bootstrap waits for one
+mutually exclusive semantic state before capturing.
 The gated World View capture has its own fail-closed rule: see
 [World View capture evidence](world-view-capture-evidence.md).

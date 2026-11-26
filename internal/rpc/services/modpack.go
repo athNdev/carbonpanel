@@ -401,6 +401,7 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 			FileDate:      timestamppb.New(file.FileDate),
 			SortIndex:     int32(file.SortIndex),
 			VersionNumber: file.VersionNumber,
+			GameVersions:  file.GameVersions,
 		})
 	}
 
@@ -456,6 +457,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
 
 		dbModpack := &storage.IndexedModpack{
+			ServerSide:    modpack.ServerSide,
 			ID:            modpack.ID,
 			IndexerID:     modpack.IndexerID,
 			Indexer:       modpack.Indexer,

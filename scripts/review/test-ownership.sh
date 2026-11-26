@@ -12,20 +12,21 @@ neighbor="$root/$other"
 auth_session="$root/${name}-auth"
 node_session="$root/${name}-node"
 empty_session="$root/${name}-empty"
+controller_session="$root/${name}-controller"
 legacy_sha="$(printf '%s' "$name" | sha256sum | cut -c1-40)"
 legacy="$HOME/.cache/carbon-review/${legacy_sha:0:12}"
 mkdir -p "$root" "$test_root/bin"
-[ ! -e "$target" ] && [ ! -e "$neighbor" ] && [ ! -e "$auth_session" ] && [ ! -e "$node_session" ] && [ ! -e "$empty_session" ] && [ ! -e "$legacy" ] || { echo "fixture name collision" >&2; exit 1; }
+[ ! -e "$target" ] && [ ! -e "$neighbor" ] && [ ! -e "$auth_session" ] && [ ! -e "$node_session" ] && [ ! -e "$empty_session" ] && [ ! -e "$controller_session" ] && [ ! -e "$legacy" ] || { echo "fixture name collision" >&2; exit 1; }
 cleanup() {
   # These exact names were derived from a fresh mktemp token and checked above.
   local path resolved
-  for path in "$target" "$neighbor" "$auth_session" "$node_session" "$empty_session"; do
+  for path in "$target" "$neighbor" "$auth_session" "$node_session" "$empty_session" "$controller_session"; do
     resolved="$(realpath -m "$path")"
     case "$resolved" in "$root"/*) ;; *) echo "refusing fixture cleanup outside session root" >&2; return 1 ;; esac
   done
   case "$(realpath -m "$legacy")" in "$(realpath -m "$HOME/.cache/carbon-review")"/*) ;; *) return 1 ;; esac
   case "$(realpath -m "$test_root")" in "$(realpath -m "${TMPDIR:-/tmp}")"/*) ;; *) return 1 ;; esac
-  rm -rf -- "$target" "$neighbor" "$auth_session" "$node_session" "$empty_session" "$legacy" "$test_root"
+  rm -rf -- "$target" "$neighbor" "$auth_session" "$node_session" "$empty_session" "$controller_session" "$legacy" "$test_root"
 }
 trap cleanup EXIT
 
@@ -42,13 +43,25 @@ case "$1" in
       printf '%s %s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$owner"
     fi ;;
   rm) printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG" ;;
-  build|run) exit 0 ;;
+  build) exit 0 ;;
+  run)
+    if [ "${FAKE_CURL_MODE:-}" = controller-only ] && [[ "$*" == *docker.sock* ]]; then
+      echo unexpected > "$FAKE_CONTROLLER_UNEXPECTED"; exit 1
+    elif [[ "${FAKE_CURL_MODE:-}" == starter-* && "$*" != *docker.sock* ]]; then
+      echo "showcase fixture missing Docker socket" >&2; exit 1
+    fi ;;
   *) echo "unexpected Docker call" >&2; exit 1 ;;
 esac
 EOF
 chmod +x "$test_root/bin/docker"
 cat > "$test_root/bin/curl" <<'EOF'
 #!/usr/bin/env bash
+if [ "${FAKE_CURL_MODE:-}" = controller-only ]; then
+  case "$*" in
+    */healthz*|*AuthService/Register*|*AuthService/Login*) ;;
+    *) echo unexpected > "$FAKE_CONTROLLER_UNEXPECTED"; exit 1 ;;
+  esac
+fi
 case "$*" in
   *AuthService/Login*)
     if [ "${FAKE_CURL_MODE:-}" = auth-failure ]; then printf '{}'; else printf '{"token":"fixture"}'; fi ;;
@@ -58,10 +71,11 @@ case "$*" in
   *ServerService/ListServers*)
     count=$(cat "$FAKE_CURL_STATE" 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > "$FAKE_CURL_STATE"
     if [ "$count" = 1 ]; then printf '{"servers":[]}'
-    elif [ "${FAKE_CURL_MODE:-}" = starter-error ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_ERROR"}]}'
-    elif [ "${FAKE_CURL_MODE:-}" = starter-timeout ] || [ "$count" = 2 ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_CREATING"}]}'
-    else printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_STOPPED","containerId":"container"}]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-error ]; then printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_ERROR"}]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-timeout ] || [ "$count" = 2 ]; then printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_CREATING"}]}'
+    else printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_STOPPED","containerId":"container"}]}'
     fi ;;
+  *ServerService/GetServer*) printf '{"server":{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_RUNNING"}}' ;;
   *ServerService/StartServer*)
     [ "$(cat "$FAKE_CURL_STATE")" -ge 3 ] || exit 1
     echo start > "$FAKE_CURL_START"; printf '{}' ;;
@@ -126,6 +140,16 @@ for failure in auth node; do
   fi
   case "$output" in *"review panel:"*) echo "failed $failure fixture reported ready" >&2; exit 1 ;; esac
 done
+
+# A controller-only fixture can report ready after real startup/auth steps
+# in the dispatch, with no Docker socket or game/renderer provisioning calls.
+export REVIEW_STACK_NAME="${name}-controller" FAKE_CURL_MODE=controller-only
+export FAKE_CONTROLLER_UNEXPECTED="$test_root/controller-unexpected"
+controller_output="$(bash "$script_dir/devstack.sh" up-controller)"
+case "$controller_output" in *"review panel:"*) ;; *) echo "controller fixture missing URL" >&2; exit 1 ;; esac
+[ ! -e "$FAKE_CONTROLLER_UNEXPECTED" ] && [ ! -e "$controller_session/server-id" ] ||
+  { echo "controller fixture provisioned game state" >&2; exit 1; }
+
 # Real CreateServer is asynchronous: polling must observe a container before
 # starting; error and timeout must fail without announcing ready or starting.
 export REVIEW_STACK_NAME="${name}-auth" REVIEW_SEED_TIMEOUT_SECONDS=2 REVIEW_GAME_PORT=29261

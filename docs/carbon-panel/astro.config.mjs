@@ -57,6 +57,7 @@ export default defineConfig({
 							label: 'Modpacks and content',
 							items: [
 								{ label: 'Modpack Studio', slug: 'guides/modpack-studio' },
+								{ label: 'Configure a new server', slug: 'guides/server-setup' },
 								{ label: 'Server datapacks', slug: 'guides/server-datapacks' },
 							],
 						},
@@ -72,6 +73,7 @@ export default defineConfig({
 						{
 							label: 'OIDC',
 							items: [
+								{ label: 'Link a local admin', slug: 'guides/oidc/admin-linking' },
 								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },
 								{ label: 'Authelia', slug: 'guides/oidc/authelia' },
 								{ label: 'Okta', slug: 'guides/oidc/okta' },

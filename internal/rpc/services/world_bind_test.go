@@ -2,10 +2,12 @@
 package services
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 )
 
 type worldTestLifecycle struct {
@@ -25,6 +28,10 @@ type worldTestLifecycle struct {
 	stops     int
 	starts    int
 	failStart bool
+}
+
+func (f *worldTestLifecycle) BeginTransition(string) (func(), error) {
+	return func() {}, nil
 }
 
 func (f *worldTestLifecycle) IsRunning(context.Context, string) (bool, error) { return f.running, nil }
@@ -100,6 +107,93 @@ func newWorldRPCService(t *testing.T, store *storage.Store, libraryRoot string, 
 	return svc
 }
 
+func TestImportedWorldCanBePreviewedAndBound(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	dataRoot := filepath.Join(root, "server")
+	server, _ := seedWorldRPC(t, store, dataRoot, libraryRoot, 7)
+	server.MCVersion = "1.21.1"
+	server.ModLoader = storage.ModLoaderVanilla
+	if err := store.UpdateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := worldlib.WriteFreshWorldArchive(map[string]string{"level-name": "world"}, "3953")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := upload.NewManager(t.TempDir(), time.Minute, 10<<20, logger.New())
+	t.Cleanup(manager.Stop)
+	session, err := manager.InitSession("import.zip", int64(len(archive)), int32(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := manager.WriteChunk(session.ID, 0, archive); err != nil || !complete {
+		t.Fatalf("upload completed=%t, error=%v", complete, err)
+	}
+	life := &worldTestLifecycle{running: true}
+	svc := newWorldRPCService(t, store, libraryRoot, life)
+	svc.uploads = manager
+	imported, err := svc.ImportWorld(ctx, connect.NewRequest(&v1.ImportWorldRequest{
+		Source: "upload", UploadId: session.ID, DisplayName: "Imported world",
+		LicenseAttestation: "Test archive is owned by this fixture", Sha256Checksum: sha256Hex(archive),
+		RequestId: "rpc-import-then-bind",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionID := imported.Msg.GetRevision().GetId()
+	preview, err := svc.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+		RevisionId: revisionID, ServerId: server.ID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range preview.Msg.GetReport().GetFindings() {
+		if strings.Contains(finding.GetReason(), "Archive could not be examined") {
+			t.Fatalf("preview did not open the imported archive: %s", finding.GetReason())
+		}
+	}
+	out, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: revisionID, RequestId: "rpc-bind-imported",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Msg.GetOutcome() != "success" || out.Msg.GetBinding().GetRevisionId() != revisionID ||
+		life.stops != 1 || life.starts != 1 {
+		t.Fatalf("imported world was not bound and restarted: %v, lifecycle=%+v", out.Msg, life)
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, "world", "level.dat")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListBindingsReportsConfiguredWorldWithoutCreatingLibraryEntry(t *testing.T) {
+	ctx := t.Context()
+	store := newWorldRPCStore(t)
+	server := &storage.Server{ID: "existing", Name: "Running", Status: storage.StatusRunning}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	props := "level-name=survival"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{ServerID: server.ID, CustomServerProperties: &props}); err != nil {
+		t.Fatal(err)
+	}
+	s := newWorldRPCService(t, store, t.TempDir(), &worldTestLifecycle{})
+	for _, tc := range []struct{ id, want string }{{server.ID, "survival"}, {"", ""}, {"unknown", ""}} {
+		res, err := s.ListBindings(ctx, connect.NewRequest(&v1.ListBindingsRequest{ServerId: tc.id}))
+		if err != nil || res.Msg.ConfiguredLevelName != tc.want || len(res.Msg.Bindings) != 0 {
+			t.Fatalf("scope %q: got %v, %v", tc.id, res, err)
+		}
+	}
+	res, err := s.ListWorldEntries(ctx, connect.NewRequest(&v1.ListWorldEntriesRequest{}))
+	if err != nil || len(res.Msg.Entries) != 0 {
+		t.Fatalf("library changed on observation: %v %v", res, err)
+	}
+}
+
 // TestBindWorldUsesRealNodeGeneration proves a bind succeeds end to end at the
 // RPC seam: the generation comes from the Node row, not a context stub.
 func TestBindWorldUsesRealNodeGeneration(t *testing.T) {
@@ -155,7 +249,6 @@ func TestBindWorldReportsUnknownOutcomeInsteadOfRetryableError(t *testing.T) {
 		t.Fatalf("active = %+v, %v; journal must keep its lock", active, err)
 	}
 }
-
 
 func countWorldEvents(t *testing.T, store *storage.Store, event, serverID, requestID string) int64 {
 	t.Helper()
@@ -271,9 +364,7 @@ func TestBindWorldUncertainOutcomeEmitsNoSuccessEvent(t *testing.T) {
 	if err != nil || len(active) != 1 || active[0].ID != out.Msg.OperationId {
 		t.Fatalf("active = %+v, %v; journal must keep its lock", active, err)
 	}
-	_ = time.Now() // keep time import used only if needed by future edits
 }
-
 
 func TestUnbindWorldEmitsExactlyOneEventOnSuccess(t *testing.T) {
 	ctx := context.Background()
@@ -327,5 +418,95 @@ func TestUnbindWorldReplayEmitsExactlyOneEventWhenBindingAbsent(t *testing.T) {
 	}
 	if got := countWorldEvents(t, store, activity.EventWorldUnbind, server.ID, "rpc-unbind-replay-1"); got != 1 {
 		t.Fatalf("events after replay with absent binding = %d, want 1", got)
+	}
+}
+
+// faultyRPCAccessor fails the second family promotion at the real node
+// accessor boundary so a failed World Library bind can be exercised through
+// the real RPC service without touching host data.
+type faultyRPCAccessor struct {
+	nodestorage.Accessor
+}
+
+func (f *faultyRPCAccessor) Rename(oldRel, newRel string) error {
+	if newRel == "world_nether" && strings.Contains(oldRel, "stage-") {
+		return errors.New("injected promotion fault")
+	}
+	return f.Accessor.Rename(oldRel, newRel)
+}
+
+func TestBindWorldMultiFamilyRollbackPreservesPriorBindingAndEmitsNoEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	families := []string{"world", "world_nether"}
+	prior := &storage.WorldBinding{
+		ID: "prior-binding", ServerID: server.ID, LevelName: "world", RevisionID: "prior-revision",
+		NodeID: server.NodeID, Generation: 7,
+	}
+	if err := store.CreateWorldBinding(ctx, prior); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := os.Create(rev.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = archive.Close() })
+	staged := zip.NewWriter(archive)
+	for _, family := range families {
+		if err := os.MkdirAll(filepath.Join(server.DataPath, family, "region"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range []string{"level.dat", "region/r.0.0.mca"} {
+			if err := os.WriteFile(filepath.Join(server.DataPath, family, file), []byte("old-"+family+"/"+file), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		entry, err := staged.Create(family + "/level.dat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte("new-" + family)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := staged.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	svc.binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+		return &faultyRPCAccessor{Accessor: acc}
+	})
+	req := connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-failed-rollback",
+	})
+	if _, err := svc.BindWorld(ctx, req); err == nil {
+		t.Fatal("expected the injected promotion failure")
+	}
+	for _, family := range families {
+		for _, file := range []string{"level.dat", "region/r.0.0.mca"} {
+			got, err := os.ReadFile(filepath.Join(server.DataPath, family, file))
+			if err != nil || string(got) != "old-"+family+"/"+file {
+				t.Fatalf("rollback %s/%s = %q, %v", family, file, got, err)
+			}
+		}
+	}
+	binding, err := store.GetWorldBinding(ctx, server.ID, "world")
+	if err != nil || binding.ID != prior.ID || binding.RevisionID != prior.RevisionID {
+		t.Fatalf("binding after rollback = %+v, %v; want prior", binding, err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-failed-rollback"); got != 0 {
+		t.Fatalf("events after failed bind = %d, want 0", got)
+	}
+	if _, err := svc.BindWorld(ctx, req); err == nil {
+		t.Fatal("replay of a failed request must not succeed")
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-failed-rollback"); got != 0 {
+		t.Fatalf("events after failed replay = %d, want 0", got)
 	}
 }

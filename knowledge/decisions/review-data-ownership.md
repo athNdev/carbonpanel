@@ -23,6 +23,9 @@ unmarked directories are not adopted. A marker and matching Docker
 label establish ownership before stopping or explicitly cleaning a session.
 Ordinary down preserves its files. Listeners bind to loopback.
 
+The controller-only profile uses the same ownership and teardown rules. It
+seeds the admin account and starts without a Docker socket, game or renderer.
+
 The optional renderer sidecar carries the same session ownership label. Both
 start and teardown inspect the sidecar, verify that label and remove only the
 inspected immutable container ID; a name collision without the expected label

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MPL-2.0
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -27,17 +27,18 @@ import (
 // fakes implement the local ports so service seams can be tested without a
 // live Minecraft server, Docker daemon or third-party skin host.
 type fakeSource struct {
-	name        string
-	kicks       int
-	bans        int
-	pardons     int
-	ops         int
+	name                string
+	kicks               int
+	bans                int
+	pardons             int
+	ops                 int
 	allowlist           int
 	failNext            error
 	lastReason          string
 	lastWhitelistName   string
 	lastWhitelistRemove bool
 	listPlayers         []observedPlayer
+	onPardon            func()
 }
 
 func (f *fakeSource) Source() string { return f.name }
@@ -70,6 +71,9 @@ func (f *fakeSource) Pardon(context.Context, string) error {
 		return err
 	}
 	f.pardons++
+	if f.onPardon != nil {
+		f.onPardon()
+	}
 	return nil
 }
 func (f *fakeSource) SetOperator(context.Context, string, int32, bool) error {
@@ -297,6 +301,30 @@ func TestKickIsAuditedAndIdempotent(t *testing.T) {
 	}
 	if rows[0].SubjectTyp != "player" || rows[0].SubjectID != identity.ID || rows[0].ActorName != "mod" {
 		t.Fatalf("audit row lacks actor/subject: %+v", rows[0])
+	}
+}
+
+func TestUndoAuditSurvivesClientCancellationAfterMutation(t *testing.T) {
+	svc, store, source, _ := newPlayerTestService(t)
+	identity := seedIdentity(t, store, "UndoTarget", "55555555-5555-5555-5555-555555555555", "srv-1", time.Now())
+	actor := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "op-1", Username: "operator"})
+	ban, err := svc.BanPlayer(actor, connect.NewRequest(&v1.BanPlayerRequest{
+		ServerId: "srv-1", IdentityKey: identity.ID, RequestId: "ban-for-undo",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(actor)
+	defer cancel()
+	source.onPardon = cancel
+	if _, err := svc.UndoPlayerAction(ctx, connect.NewRequest(&v1.UndoPlayerActionRequest{
+		ServerId: "srv-1", UndoToken: ban.Msg.Outcome.Results[0].UndoToken, RequestId: "undo-after-disconnect",
+	})); err != nil || source.pardons != 1 {
+		t.Fatalf("undo failed: pardons=%d err=%v", source.pardons, err)
+	}
+	rows, err := activity.List(store.DB(), "srv-1", "operator", time.Time{}, 10)
+	if err != nil || len(rows) != 2 || rows[0].Event != activity.EventPlayerUndo || rows[0].RequestID != "undo-after-disconnect" {
+		t.Fatalf("expected the undo and original ban in the scoped audit log: %+v, %v", rows, err)
 	}
 }
 

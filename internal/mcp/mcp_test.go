@@ -160,7 +160,7 @@ func registerOK[Req, Res any](mux *http.ServeMux, procedure string, ic connect.U
 	var handler func(context.Context, *connect.Request[Req]) (*connect.Response[Res], error)
 	postStable := false
 	if e, ok := DeclaredProcedure(procedure); ok {
-		postStable = e.Build == PanelBuildPostStable
+		postStable = e.Build != PanelBuildStableV140
 	}
 	if olderMode == "domain-notfound" && procedure == "/carbonpanel.v1.ServerService/GetServer" {
 		handler = func(context.Context, *connect.Request[Req]) (*connect.Response[Res], error) {
@@ -216,6 +216,7 @@ func registerAuthHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFunc, a
 // registerToolHandlers mounts one concrete generated procedure per exposed
 // tool with the real production auth interceptor.
 func registerToolHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFunc, olderMode string) {
+	registerOK[v1.ListStagedChangesRequest, v1.ListStagedChangesResponse](mux, stagedConfigListSpec.Procedure, ic, olderMode)
 	registerOK[v1.ListServersRequest, v1.ListServersResponse](mux, "/carbonpanel.v1.ServerService/ListServers", ic, olderMode)
 	registerOK[v1.GetServerRequest, v1.GetServerResponse](mux, "/carbonpanel.v1.ServerService/GetServer", ic, olderMode)
 	registerOK[v1.StartServerRequest, v1.StartServerResponse](mux, "/carbonpanel.v1.ServerService/StartServer", ic, olderMode)
@@ -479,6 +480,7 @@ func newFixture(t *testing.T, olderMode string, authEnabled bool) *fixture {
 	registerAuthHandlers(mux, interceptor, authEnabled)
 	registerToolHandlers(mux, interceptor, olderMode)
 	registerCombinedToolHandlers(mux, interceptor, olderMode)
+	registerPackwizReadFixture(t, mux, interceptor, olderMode)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 
@@ -638,6 +640,11 @@ func TestStableBuildSmokeAndCapabilityErrors(t *testing.T) {
 			}
 			if _, ok := Declared("list_players"); !ok {
 				t.Fatal("tool was hidden from the catalog on an older panel")
+			}
+			staged := assertStructuredError(t, callTool(t, f.sessions["admin"], stagedConfigListSpec.Name,
+				map[string]any{"server_id": "srv-1"}), stagedConfigListSpec.Name, ErrKindCapability)
+			if staged.Code != wantCode || staged.MinimumPanelBuild != string(PanelBuildProductRPCs) {
+				t.Fatalf("staged changes capability error: %+v", staged)
 			}
 			// The catalog is identical: all registered tools are still listed.
 			tools, err := f.sessions["admin"].ListTools(context.Background(), nil)

@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -147,11 +146,15 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 		s.log.Error("Audit log failed for login: %v", aerr)
 	}
 
-	return connect.NewResponse(&v1.LoginResponse{
+	resp := connect.NewResponse(&v1.LoginResponse{
 		Token:     token,
 		User:      dbUserToProto(user, roles),
 		ExpiresAt: timestamppb.New(expiresAt),
-	}), nil
+	})
+	if s.oidcHandler != nil && s.oidcHandler.IsEnabled() {
+		resp.Header().Add("Set-Cookie", s.oidcHandler.ClearLinkCookie().String())
+	}
+	return resp, nil
 }
 
 // clientIP strips the port from a peer address so throttle keys are stable per
@@ -331,8 +334,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get user"))
 	}
 
-	// Fetch roles from db
-	roles, _ := s.store.GetUserRoleNames(ctx, authUser.ID)
+	roles := authUser.Roles
 
 	// Collect permissions from all user roles via the RBAC enforcer
 	var permissions []*v1.Permission
@@ -356,6 +358,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, req *connect.Request[v
 	return connect.NewResponse(&v1.GetCurrentUserResponse{
 		User:        dbUserToProto(dbUser, roles),
 		Permissions: permissions,
+		CanLinkOidc: s.oidcHandler.CanLinkOIDC(ctx, authUser),
 	}), nil
 }
 
@@ -608,6 +611,9 @@ func (s *AuthService) CreateAPIToken(ctx context.Context, req *connect.Request[v
 	}
 
 	plaintext, apiToken, err := s.authManager.GenerateAPIToken(ctx, user.ID, msg.Name, msg.ExpiresInDays)
+	if errors.Is(err, auth.ErrLocalAPITokenSession) {
+		return nil, connect.NewError(connect.CodePermissionDenied, err)
+	}
 	if err != nil {
 		s.log.Error("Failed to create API token: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create API token"))
@@ -623,6 +629,9 @@ func (s *AuthService) ListAPITokens(ctx context.Context, req *connect.Request[v1
 	user := auth.GetUserFromContext(ctx)
 	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+	if err := s.checkAPITokenAccess(ctx, user.ID); err != nil {
+		return nil, err
 	}
 
 	tokens, err := s.store.ListAPITokensByUser(ctx, user.ID)
@@ -646,6 +655,9 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
+	if err := s.checkAPITokenAccess(ctx, user.ID); err != nil {
+		return nil, err
+	}
 
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("token ID is required"))
@@ -657,6 +669,18 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 	}
 
 	return connect.NewResponse(&v1.DeleteAPITokenResponse{}), nil
+}
+
+func (s *AuthService) checkAPITokenAccess(ctx context.Context, userID string) error {
+	err := s.authManager.CheckAPITokenAccess(ctx, userID)
+	if errors.Is(err, auth.ErrLocalAPITokenSession) {
+		return connect.NewError(connect.CodePermissionDenied, err)
+	}
+	if err != nil {
+		s.log.Error("Failed to check API token management access: %v", err)
+		return connect.NewError(connect.CodeInternal, errors.New("failed to check API token access"))
+	}
+	return nil
 }
 
 func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v1.UseRecoveryKeyRequest]) (*connect.Response[v1.UseRecoveryKeyResponse], error) {

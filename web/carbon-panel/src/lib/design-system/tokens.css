@@ -29,6 +29,10 @@
 	--warning-text: #6f5200;
 	--border: #e0e0e0;
 	--input: #737373;
+	--field-surface: #f7f7f7;
+	--field-edge: #878787;
+	--field-hover-edge: #676767;
+	--field-focus: #0f62fe;
 	--ring: #0f62fe;
 	--button-primary-hover: #0353e9;
 	--button-primary-active: #002d9c;
@@ -109,6 +113,10 @@
 	--warning-text: #f1c21b;
 	--border: #393939;
 	--input: #7d7d7d;
+	--field-surface: #242424;
+	--field-edge: #717171;
+	--field-hover-edge: #949494;
+	--field-focus: #78a9ff;
 	--ring: #ffffff;
 	--button-primary-hover: #0353e9;
 	--button-primary-active: #002d9c;
@@ -170,10 +178,12 @@
 	--carbon-control-md: 2.5rem;
 	--carbon-control-lg: 3rem;
 	--carbon-control-xl: 4rem;
-	--carbon-font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-		Helvetica, Arial, sans-serif;
-	--carbon-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular,
-		Menlo, Consolas, monospace;
+	--carbon-font-sans:
+		'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial,
+		sans-serif;
+	--carbon-font-mono:
+		'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+		monospace;
 	--motion-instant: 100ms;
 	--motion-page: 140ms;
 	--motion-fast: 150ms;
@@ -191,7 +201,8 @@
 	--carbon-motion-press-scale: 0.96;
 	--carbon-motion-pulse-duration: 1600ms;
 	--carbon-motion-shimmer-duration: 1400ms;
-	--carbon-transition-color: color var(--motion-instant) var(--ease-out-quart),
+	--carbon-transition-color:
+		color var(--motion-instant) var(--ease-out-quart),
 		background-color var(--motion-instant) var(--ease-out-quart),
 		border-color var(--motion-instant) var(--ease-out-quart);
 	--carbon-transition-press: transform var(--motion-instant) var(--ease-out-quart);

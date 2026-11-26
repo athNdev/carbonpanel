@@ -12,19 +12,19 @@ empty group claim defaults to `deny`: all OIDC-sourced roles are revoked, with
 `defaults_only` as the sole alternative. There is no `keep_previous` behaviour
 and OIDC grants expire with each verified sign-in.
 
-Entitlements are reconciled by `Store.SetUserRolesBySource`, which selects,
-adds and deletes **only** rows with `source='oidc'` inside one transaction and
-returns the resulting delta. The older unscoped `UnassignRole` must not be used
-here because it could delete a local or admin grant with the same role name.
-Locally assigned and admin grants are never modified or reattributed. A desired
-privileged role already held from a different source is a provenance conflict:
-no grant is converted, the sign-in is refused and audited, and an administrator
-must review the mapping.
+The source-scoped reconciliation selects, adds and deletes rows with
+`source='oidc'` in one transaction and returns the delta. A desired privileged
+role already held from a different source generally causes sign-in to be
+refused and audited. The explicitly linked account in ADR 0051 may hold
+independent grants from `local` and `oidc` for the same privileged role, so
+provider group removal revokes the OIDC grant while preserving local
+break-glass access.
 
-Reconciliation precedes session issuance in the same request. If role loss or
-deprovisioning removes a privileged role, every existing session for that user
-is invalidated and the newly issued session carries only the reconciled roles.
-A reconciliation or verification failure creates no session.
+Reconciliation precedes session issuance in the same request. A successful
+ordinary OIDC sign-in rotates prior sessions. When `reject_unmapped` denies
+a verified sign-in for an existing identity, Carbon Panel clears OIDC grants
+and invalidates sessions from that provider on linked accounts. A
+reconciliation or verification failure creates no session.
 
 Role reconciliation and session issuance are adjacent but separate database
 operations, not one transaction. The security boundary after that split is
@@ -32,5 +32,6 @@ operations, not one transaction. The security boundary after that split is
 the user's current roles from the database and returns them in the
 `AuthenticatedUser`, so a JWT minted just before a role change cannot carry
 stale privilege into a later request. The embedded JWT roles are advisory;
-authorization uses the freshly persisted set. This is why the narrow TOCTOU
-between reconciliation and session creation does not grant durable access.
+authorization uses the freshly persisted set allowed by the credential
+origin. On linked local accounts, local credentials use locally owned
+grants and OIDC sessions use OIDC-sourced grants.

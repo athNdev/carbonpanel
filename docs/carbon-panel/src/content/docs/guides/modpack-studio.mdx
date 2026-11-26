@@ -188,6 +188,12 @@ Bake resolves the world folder from `level-name` in `server.properties`
 so bake reports them as client-only instead of writing them to the server; use
 sync mode or an export to deliver them.
 
+CurseForge manifest imports retain the project and file IDs. If a server-side
+entry has no direct download URL, Bake stops before it changes the target server
+and identifies the entry by those IDs. Deploy the original pack from the
+CurseForge modpack library, or replace the entry in Studio with a direct
+download URL you are authorized to use.
+
 ## Maintenance
 
 **Maintenance** rebuilds packwiz indices and shows the live bootstrap URLs for

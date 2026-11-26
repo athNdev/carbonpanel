@@ -3,15 +3,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Command carbon-node is the host-native managed node agent's preflight and
-// doctor entrypoint for the HOST-NATIVE LINUX PRIVATE DAEMON mode (OSS-376).
-//
-// It reads a bounded HostFacts JSON document (produced by an owned probe or a
-// disposable fixture), runs the compatibility gates and prints a redacted
-// plan. It deliberately does NOT install binaries, write host units, start a
-// daemon, change global configuration or mount a real socket. Production
-// enrollment remains an unmounted shared contract; this tool only models the
-// live boundary against owned, synthetic material.
+// Command carbon-node renders a host-native preflight plan and runs the managed
+// node agent after the private daemon and enrollment have been provisioned.
 package main
 
 import (
@@ -27,6 +20,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		if err := runAgent(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "managed agent:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	factsPath := flag.String("facts", "", "path to a bounded HostFacts JSON document (required; no live host is probed)")
 	nodeID := flag.String("node-id", "node-local", "stable node ID for the plan")
 	unitOut := flag.String("print-unit", "", "also print the generated systemd unit to this path (must be inside an owned temp dir)")
@@ -80,6 +80,10 @@ func main() {
 	fmt.Println(string(encoded))
 
 	if *unitOut != "" || *configOut != "" {
+		if plan.Refusal != "" {
+			fmt.Fprintln(os.Stderr, "render manifest refused:", plan.Refusal)
+			os.Exit(2)
+		}
 		manifest, err := plan.Daemon.BuildManifest()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "render manifest:", err)

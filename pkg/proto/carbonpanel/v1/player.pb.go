@@ -1487,8 +1487,10 @@ func (x *PlayerActionResult) GetUndoToken() string {
 // or without dashes) or an exact Minecraft username (1-16 ASCII name chars).
 // No partial, fuzzy or name-history matching is performed.
 type LookupPlayerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Query string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	// Include a best-effort full-body PNG for an online account.
+	IncludeSkin   bool `protobuf:"varint,2,opt,name=include_skin,json=includeSkin,proto3" json:"include_skin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1530,6 +1532,13 @@ func (x *LookupPlayerRequest) GetQuery() string {
 	return ""
 }
 
+func (x *LookupPlayerRequest) GetIncludeSkin() bool {
+	if x != nil {
+		return x.IncludeSkin
+	}
+	return false
+}
+
 // Lookup response. This is an EPHEMERAL public result: a lookup is read-only
 // and never creates an identity, session, access row, roster entry or audit
 // row. Only a separate authorized mutation (for example a per-server allowlist
@@ -1537,14 +1546,17 @@ func (x *LookupPlayerRequest) GetQuery() string {
 // the provider's current name/UUID and provenance; other statuses carry an
 // explicit note and never a partially invented identity.
 type LookupPlayerResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        PlayerLookupStatus     `protobuf:"varint,1,opt,name=status,proto3,enum=carbonpanel.v1.PlayerLookupStatus" json:"status,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	Observation   *PlayerObservation     `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
-	Note          string                 `protobuf:"bytes,5,opt,name=note,proto3" json:"note,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Status      PlayerLookupStatus     `protobuf:"varint,1,opt,name=status,proto3,enum=carbonpanel.v1.PlayerLookupStatus" json:"status,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Uuid        string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	Observation *PlayerObservation     `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
+	Note        string                 `protobuf:"bytes,5,opt,name=note,proto3" json:"note,omitempty"`
+	Skin        *PlayerSkinAsset       `protobuf:"bytes,6,opt,name=skin,proto3" json:"skin,omitempty"`
+	// Existing roster record matched by identity; omitted when no match is known.
+	ObservedIdentityKey string `protobuf:"bytes,7,opt,name=observed_identity_key,json=observedIdentityKey,proto3" json:"observed_identity_key,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *LookupPlayerResponse) Reset() {
@@ -1608,6 +1620,20 @@ func (x *LookupPlayerResponse) GetObservation() *PlayerObservation {
 func (x *LookupPlayerResponse) GetNote() string {
 	if x != nil {
 		return x.Note
+	}
+	return ""
+}
+
+func (x *LookupPlayerResponse) GetSkin() *PlayerSkinAsset {
+	if x != nil {
+		return x.Skin
+	}
+	return nil
+}
+
+func (x *LookupPlayerResponse) GetObservedIdentityKey() string {
+	if x != nil {
+		return x.ObservedIdentityKey
 	}
 	return ""
 }
@@ -3608,15 +3634,18 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"error_code\x18\x04 \x01(\tR\terrorCode\x12%\n" +
 	"\x0eundo_supported\x18\x05 \x01(\bR\rundoSupported\x12\x1d\n" +
 	"\n" +
-	"undo_token\x18\x06 \x01(\tR\tundoToken\"+\n" +
+	"undo_token\x18\x06 \x01(\tR\tundoToken\"N\n" +
 	"\x13LookupPlayerRequest\x12\x14\n" +
-	"\x05query\x18\x01 \x01(\tR\x05query\"\xd3\x01\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12!\n" +
+	"\finclude_skin\x18\x02 \x01(\bR\vincludeSkin\"\xcd\x02\n" +
 	"\x14LookupPlayerResponse\x12:\n" +
 	"\x06status\x18\x01 \x01(\x0e2\".carbonpanel.v1.PlayerLookupStatusR\x06status\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12C\n" +
 	"\vobservation\x18\x04 \x01(\v2!.carbonpanel.v1.PlayerObservationR\vobservation\x12\x12\n" +
-	"\x04note\x18\x05 \x01(\tR\x04note\"\xe7\x01\n" +
+	"\x04note\x18\x05 \x01(\tR\x04note\x123\n" +
+	"\x04skin\x18\x06 \x01(\v2\x1f.carbonpanel.v1.PlayerSkinAssetR\x04skin\x122\n" +
+	"\x15observed_identity_key\x18\a \x01(\tR\x13observedIdentityKeyJ\x04\b\b\x10\tR\tlast_seen\"\xe7\x01\n" +
 	"\x12ListPlayersRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
@@ -3916,62 +3945,63 @@ var file_carbonpanel_v1_player_proto_depIdxs = []int32{
 	14, // 27: carbonpanel.v1.PlayerDetail.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
 	5,  // 28: carbonpanel.v1.LookupPlayerResponse.status:type_name -> carbonpanel.v1.PlayerLookupStatus
 	6,  // 29: carbonpanel.v1.LookupPlayerResponse.observation:type_name -> carbonpanel.v1.PlayerObservation
-	9,  // 30: carbonpanel.v1.ListPlayersResponse.players:type_name -> carbonpanel.v1.PlayerSummary
-	16, // 31: carbonpanel.v1.GetPlayerResponse.detail:type_name -> carbonpanel.v1.PlayerDetail
-	11, // 32: carbonpanel.v1.ListPlayerSessionsResponse.sessions:type_name -> carbonpanel.v1.PlayerSession
-	12, // 33: carbonpanel.v1.ListPlayerAccessResponse.states:type_name -> carbonpanel.v1.PlayerAccessState
-	13, // 34: carbonpanel.v1.ListPlayerHistoryResponse.entries:type_name -> carbonpanel.v1.PlayerHistoryEntry
-	14, // 35: carbonpanel.v1.ListPlayerCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
-	15, // 36: carbonpanel.v1.GetPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
-	15, // 37: carbonpanel.v1.RefreshPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
-	10, // 38: carbonpanel.v1.GetPlayerDeepDataResponse.fields:type_name -> carbonpanel.v1.PlayerField
-	17, // 39: carbonpanel.v1.PlayerActionOutcome.results:type_name -> carbonpanel.v1.PlayerActionResult
-	45, // 40: carbonpanel.v1.KickPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 41: carbonpanel.v1.BanPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 42: carbonpanel.v1.PardonPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 43: carbonpanel.v1.SetOperatorResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 44: carbonpanel.v1.SetWhitelistEntryResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 45: carbonpanel.v1.BulkPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	45, // 46: carbonpanel.v1.UndoPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	18, // 47: carbonpanel.v1.PlayerService.LookupPlayer:input_type -> carbonpanel.v1.LookupPlayerRequest
-	20, // 48: carbonpanel.v1.PlayerService.ListPlayers:input_type -> carbonpanel.v1.ListPlayersRequest
-	22, // 49: carbonpanel.v1.PlayerService.GetPlayer:input_type -> carbonpanel.v1.GetPlayerRequest
-	24, // 50: carbonpanel.v1.PlayerService.ListPlayerSessions:input_type -> carbonpanel.v1.ListPlayerSessionsRequest
-	26, // 51: carbonpanel.v1.PlayerService.ListPlayerAccess:input_type -> carbonpanel.v1.ListPlayerAccessRequest
-	28, // 52: carbonpanel.v1.PlayerService.ListPlayerHistory:input_type -> carbonpanel.v1.ListPlayerHistoryRequest
-	30, // 53: carbonpanel.v1.PlayerService.ListPlayerCapabilities:input_type -> carbonpanel.v1.ListPlayerCapabilitiesRequest
-	32, // 54: carbonpanel.v1.PlayerService.GetPlayerSkin:input_type -> carbonpanel.v1.GetPlayerSkinRequest
-	34, // 55: carbonpanel.v1.PlayerService.RefreshPlayerSkin:input_type -> carbonpanel.v1.RefreshPlayerSkinRequest
-	36, // 56: carbonpanel.v1.PlayerService.GetPlayerDeepData:input_type -> carbonpanel.v1.GetPlayerDeepDataRequest
-	38, // 57: carbonpanel.v1.PlayerService.KickPlayer:input_type -> carbonpanel.v1.KickPlayerRequest
-	39, // 58: carbonpanel.v1.PlayerService.BanPlayer:input_type -> carbonpanel.v1.BanPlayerRequest
-	40, // 59: carbonpanel.v1.PlayerService.PardonPlayer:input_type -> carbonpanel.v1.PardonPlayerRequest
-	41, // 60: carbonpanel.v1.PlayerService.SetOperator:input_type -> carbonpanel.v1.SetOperatorRequest
-	42, // 61: carbonpanel.v1.PlayerService.SetWhitelistEntry:input_type -> carbonpanel.v1.SetWhitelistEntryRequest
-	43, // 62: carbonpanel.v1.PlayerService.BulkPlayerAction:input_type -> carbonpanel.v1.BulkPlayerActionRequest
-	44, // 63: carbonpanel.v1.PlayerService.UndoPlayerAction:input_type -> carbonpanel.v1.UndoPlayerActionRequest
-	19, // 64: carbonpanel.v1.PlayerService.LookupPlayer:output_type -> carbonpanel.v1.LookupPlayerResponse
-	21, // 65: carbonpanel.v1.PlayerService.ListPlayers:output_type -> carbonpanel.v1.ListPlayersResponse
-	23, // 66: carbonpanel.v1.PlayerService.GetPlayer:output_type -> carbonpanel.v1.GetPlayerResponse
-	25, // 67: carbonpanel.v1.PlayerService.ListPlayerSessions:output_type -> carbonpanel.v1.ListPlayerSessionsResponse
-	27, // 68: carbonpanel.v1.PlayerService.ListPlayerAccess:output_type -> carbonpanel.v1.ListPlayerAccessResponse
-	29, // 69: carbonpanel.v1.PlayerService.ListPlayerHistory:output_type -> carbonpanel.v1.ListPlayerHistoryResponse
-	31, // 70: carbonpanel.v1.PlayerService.ListPlayerCapabilities:output_type -> carbonpanel.v1.ListPlayerCapabilitiesResponse
-	33, // 71: carbonpanel.v1.PlayerService.GetPlayerSkin:output_type -> carbonpanel.v1.GetPlayerSkinResponse
-	35, // 72: carbonpanel.v1.PlayerService.RefreshPlayerSkin:output_type -> carbonpanel.v1.RefreshPlayerSkinResponse
-	37, // 73: carbonpanel.v1.PlayerService.GetPlayerDeepData:output_type -> carbonpanel.v1.GetPlayerDeepDataResponse
-	46, // 74: carbonpanel.v1.PlayerService.KickPlayer:output_type -> carbonpanel.v1.KickPlayerResponse
-	47, // 75: carbonpanel.v1.PlayerService.BanPlayer:output_type -> carbonpanel.v1.BanPlayerResponse
-	48, // 76: carbonpanel.v1.PlayerService.PardonPlayer:output_type -> carbonpanel.v1.PardonPlayerResponse
-	49, // 77: carbonpanel.v1.PlayerService.SetOperator:output_type -> carbonpanel.v1.SetOperatorResponse
-	50, // 78: carbonpanel.v1.PlayerService.SetWhitelistEntry:output_type -> carbonpanel.v1.SetWhitelistEntryResponse
-	51, // 79: carbonpanel.v1.PlayerService.BulkPlayerAction:output_type -> carbonpanel.v1.BulkPlayerActionResponse
-	52, // 80: carbonpanel.v1.PlayerService.UndoPlayerAction:output_type -> carbonpanel.v1.UndoPlayerActionResponse
-	64, // [64:81] is the sub-list for method output_type
-	47, // [47:64] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	15, // 30: carbonpanel.v1.LookupPlayerResponse.skin:type_name -> carbonpanel.v1.PlayerSkinAsset
+	9,  // 31: carbonpanel.v1.ListPlayersResponse.players:type_name -> carbonpanel.v1.PlayerSummary
+	16, // 32: carbonpanel.v1.GetPlayerResponse.detail:type_name -> carbonpanel.v1.PlayerDetail
+	11, // 33: carbonpanel.v1.ListPlayerSessionsResponse.sessions:type_name -> carbonpanel.v1.PlayerSession
+	12, // 34: carbonpanel.v1.ListPlayerAccessResponse.states:type_name -> carbonpanel.v1.PlayerAccessState
+	13, // 35: carbonpanel.v1.ListPlayerHistoryResponse.entries:type_name -> carbonpanel.v1.PlayerHistoryEntry
+	14, // 36: carbonpanel.v1.ListPlayerCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
+	15, // 37: carbonpanel.v1.GetPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
+	15, // 38: carbonpanel.v1.RefreshPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
+	10, // 39: carbonpanel.v1.GetPlayerDeepDataResponse.fields:type_name -> carbonpanel.v1.PlayerField
+	17, // 40: carbonpanel.v1.PlayerActionOutcome.results:type_name -> carbonpanel.v1.PlayerActionResult
+	45, // 41: carbonpanel.v1.KickPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 42: carbonpanel.v1.BanPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 43: carbonpanel.v1.PardonPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 44: carbonpanel.v1.SetOperatorResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 45: carbonpanel.v1.SetWhitelistEntryResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 46: carbonpanel.v1.BulkPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 47: carbonpanel.v1.UndoPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	18, // 48: carbonpanel.v1.PlayerService.LookupPlayer:input_type -> carbonpanel.v1.LookupPlayerRequest
+	20, // 49: carbonpanel.v1.PlayerService.ListPlayers:input_type -> carbonpanel.v1.ListPlayersRequest
+	22, // 50: carbonpanel.v1.PlayerService.GetPlayer:input_type -> carbonpanel.v1.GetPlayerRequest
+	24, // 51: carbonpanel.v1.PlayerService.ListPlayerSessions:input_type -> carbonpanel.v1.ListPlayerSessionsRequest
+	26, // 52: carbonpanel.v1.PlayerService.ListPlayerAccess:input_type -> carbonpanel.v1.ListPlayerAccessRequest
+	28, // 53: carbonpanel.v1.PlayerService.ListPlayerHistory:input_type -> carbonpanel.v1.ListPlayerHistoryRequest
+	30, // 54: carbonpanel.v1.PlayerService.ListPlayerCapabilities:input_type -> carbonpanel.v1.ListPlayerCapabilitiesRequest
+	32, // 55: carbonpanel.v1.PlayerService.GetPlayerSkin:input_type -> carbonpanel.v1.GetPlayerSkinRequest
+	34, // 56: carbonpanel.v1.PlayerService.RefreshPlayerSkin:input_type -> carbonpanel.v1.RefreshPlayerSkinRequest
+	36, // 57: carbonpanel.v1.PlayerService.GetPlayerDeepData:input_type -> carbonpanel.v1.GetPlayerDeepDataRequest
+	38, // 58: carbonpanel.v1.PlayerService.KickPlayer:input_type -> carbonpanel.v1.KickPlayerRequest
+	39, // 59: carbonpanel.v1.PlayerService.BanPlayer:input_type -> carbonpanel.v1.BanPlayerRequest
+	40, // 60: carbonpanel.v1.PlayerService.PardonPlayer:input_type -> carbonpanel.v1.PardonPlayerRequest
+	41, // 61: carbonpanel.v1.PlayerService.SetOperator:input_type -> carbonpanel.v1.SetOperatorRequest
+	42, // 62: carbonpanel.v1.PlayerService.SetWhitelistEntry:input_type -> carbonpanel.v1.SetWhitelistEntryRequest
+	43, // 63: carbonpanel.v1.PlayerService.BulkPlayerAction:input_type -> carbonpanel.v1.BulkPlayerActionRequest
+	44, // 64: carbonpanel.v1.PlayerService.UndoPlayerAction:input_type -> carbonpanel.v1.UndoPlayerActionRequest
+	19, // 65: carbonpanel.v1.PlayerService.LookupPlayer:output_type -> carbonpanel.v1.LookupPlayerResponse
+	21, // 66: carbonpanel.v1.PlayerService.ListPlayers:output_type -> carbonpanel.v1.ListPlayersResponse
+	23, // 67: carbonpanel.v1.PlayerService.GetPlayer:output_type -> carbonpanel.v1.GetPlayerResponse
+	25, // 68: carbonpanel.v1.PlayerService.ListPlayerSessions:output_type -> carbonpanel.v1.ListPlayerSessionsResponse
+	27, // 69: carbonpanel.v1.PlayerService.ListPlayerAccess:output_type -> carbonpanel.v1.ListPlayerAccessResponse
+	29, // 70: carbonpanel.v1.PlayerService.ListPlayerHistory:output_type -> carbonpanel.v1.ListPlayerHistoryResponse
+	31, // 71: carbonpanel.v1.PlayerService.ListPlayerCapabilities:output_type -> carbonpanel.v1.ListPlayerCapabilitiesResponse
+	33, // 72: carbonpanel.v1.PlayerService.GetPlayerSkin:output_type -> carbonpanel.v1.GetPlayerSkinResponse
+	35, // 73: carbonpanel.v1.PlayerService.RefreshPlayerSkin:output_type -> carbonpanel.v1.RefreshPlayerSkinResponse
+	37, // 74: carbonpanel.v1.PlayerService.GetPlayerDeepData:output_type -> carbonpanel.v1.GetPlayerDeepDataResponse
+	46, // 75: carbonpanel.v1.PlayerService.KickPlayer:output_type -> carbonpanel.v1.KickPlayerResponse
+	47, // 76: carbonpanel.v1.PlayerService.BanPlayer:output_type -> carbonpanel.v1.BanPlayerResponse
+	48, // 77: carbonpanel.v1.PlayerService.PardonPlayer:output_type -> carbonpanel.v1.PardonPlayerResponse
+	49, // 78: carbonpanel.v1.PlayerService.SetOperator:output_type -> carbonpanel.v1.SetOperatorResponse
+	50, // 79: carbonpanel.v1.PlayerService.SetWhitelistEntry:output_type -> carbonpanel.v1.SetWhitelistEntryResponse
+	51, // 80: carbonpanel.v1.PlayerService.BulkPlayerAction:output_type -> carbonpanel.v1.BulkPlayerActionResponse
+	52, // 81: carbonpanel.v1.PlayerService.UndoPlayerAction:output_type -> carbonpanel.v1.UndoPlayerActionResponse
+	65, // [65:82] is the sub-list for method output_type
+	48, // [48:65] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_player_proto_init() }

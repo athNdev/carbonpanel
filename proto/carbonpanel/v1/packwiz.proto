@@ -251,8 +251,20 @@ message BatchPackModsRequest {
   string side = 4;
 }
 
-// BatchPackModsResponse reports how many slugs were processed.
+// BatchPackModResult reports the outcome of one slug in a batch mutation.
+// A failure on one slug never stops the remaining entries, so callers must
+// inspect every result instead of trusting an aggregate count.
+message BatchPackModResult {
+  string slug = 1;
+  bool success = 2;
+  string message = 3;
+  string error_code = 4;
+}
+
+// BatchPackModsResponse reports per-slug outcomes. count is the number of
+// successful entries; results carries one entry per requested slug in order.
 message BatchPackModsResponse {
   bool success = 1;
   int32 count = 2;
+  repeated BatchPackModResult results = 3;
 }
