@@ -47,8 +47,10 @@ failure before any container mutation compensates the snapshot even if the old
 container is still running. Any other attempted runtime outcome, including a
 transport timeout or an accepted replacement, is retained: a stopped container
 is not proof that it is the old, unstaged one. Config-only finalize never opens
-file recovery storage, and cleanup runs before the batch close so a real cleanup
-failure stays retryable.
+file recovery storage. Applied content rows are durable cleanup evidence: a
+retry finishes that idempotent cleanup instead of republishing, and cleanup
+runs before a cron-coexistence batch is parked so the elapsed timed window can
+retry.
 
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same

@@ -137,7 +137,14 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err != nil {
 			return err
 		}
-		hadContent := len(content) > 0
+		// Applied rows survive a failed cleanup. They are the durable evidence
+		// that this batch already created file recovery, so a retry owes the
+		// idempotent cleanup even though no staged row remains to republish.
+		appliedContent, err := store.CountBatchContentByStatus(ctx, batch.ID, storage.StagedStatusApplied)
+		if err != nil {
+			return err
+		}
+		hadContent := len(content) > 0 || appliedContent > 0
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return err
 		}
@@ -221,16 +228,19 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			}
 		}
 		if len(scheduledConfigs) > 0 {
-			// Keep the cron rows and their batch for their own trigger. Park
-			// the batch on next_restart so the elapsed timed window is not
-			// re-published on every scheduler tick.
+			// Keep the cron rows and their batch for their own trigger. Clean up
+			// the applied timed content before parking the batch: next_restart is
+			// not a retry trigger, so a failed cleanup would otherwise forfeit the
+			// due window that brought us here.
+			if hadContent {
+				if err := cleanupBatchRecovery(ctx, store, server, batch.ID, resolver); err != nil {
+					return err
+				}
+			}
 			if _, err := store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowNextRestart, nil, 0); err != nil {
 				return err
 			}
-			if !hadContent {
-				return nil
-			}
-			return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
+			return nil
 		}
 		// A config-only batch has no undo tree to remove. Do not open file
 		// storage for it, and clean up before closing so a cleanup failure is

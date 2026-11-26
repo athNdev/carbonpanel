@@ -955,3 +955,118 @@ func TestApplyBatchCleanupFailureLeavesBatchRetryable(t *testing.T) {
 	require.NotNil(t, open, "a real cleanup failure must leave retryable state")
 	require.Equal(t, storage.UpdateBatchOpen, open.Status)
 }
+
+func TestApplyBatchCleanupRetryAfterAppliedRowsDoesNotRepublish(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cleanup-retry", Name: "cleanup-retry", DataPath: data, Status: storage.StatusRunning, ContainerID: "c1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageFile(t, store, data, batchID, server.ID, "file.txt", "new")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batchID)
+
+	publishes := 0
+	publish := func(_ context.Context, current *storage.Server, _ Plan) error {
+		publishes++
+		// The live file and config are committed before the publisher runs;
+		// only recovery cleanup should be unavailable from here on.
+		current.NodeID = "missing-node"
+		return nil
+	}
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Error(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes)
+	require.DirExists(t, recovery, "a failed cleanup leaves recovery for the retry")
+
+	// A second attempt while recovery storage is still unreachable must fail
+	// again without publishing the applied rows a second time.
+	batch, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Error(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes, "applied rows are cleaned up, not republished")
+	require.DirExists(t, recovery)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "cleanup failure must keep the batch retryable")
+	require.Equal(t, string(storage.UpdateWindowAtTime), open.Window)
+
+	// Once cleanup is reachable, the retry finishes bookkeeping and closes.
+	server.NodeID = ""
+	batch, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes, "completed publication must not be repeated")
+	require.NoDirExists(t, recovery)
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
+func TestDueModBatchCleanupFailureKeepsTimedRetryBeforeCronPark(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cron-cleanup", Name: "cron-cleanup", DataPath: data, Status: storage.StatusRunning, ContainerID: "c1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+
+	cron, err := store.StageConfigChange(ctx, server.ID,
+		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	when := time.Now().Add(-time.Minute).UTC()
+	_, err = store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cron.BatchID, server.ID, "file.txt", "new")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", cron.BatchID)
+
+	publishes := 0
+	publish := func(_ context.Context, current *storage.Server, _ Plan) error {
+		publishes++
+		current.NodeID = "missing-node"
+		return nil
+	}
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Error(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes)
+
+	// The failed cleanup must not let the cron coexistence path park the batch
+	// on next_restart, where the elapsed timed window would never retry.
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Equal(t, string(storage.UpdateWindowAtTime), open.Window)
+	require.DirExists(t, recovery)
+
+	batch, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Error(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes, "the applied content must not publish again")
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Equal(t, string(storage.UpdateWindowAtTime), open.Window)
+
+	server.NodeID = ""
+	batch, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, publish))
+	require.Equal(t, 1, publishes)
+	require.NoDirExists(t, recovery)
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "the cron row keeps its batch")
+	require.Equal(t, string(storage.UpdateWindowNextRestart), open.Window)
+	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, staged.Status)
+}

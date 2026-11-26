@@ -216,6 +216,44 @@ func TestNextRestartCleanupFailureLeavesRetryableBatch(t *testing.T) {
 	require.Equal(t, storage.UpdateBatchOpen, open.Status)
 }
 
+func TestNextRestartCleanupRetryAfterAppliedRowsClosesWithoutRepublish(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cleanup-next", Name: "cleanup-next", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.True(t, commit.HasContent())
+	server.NodeID = "missing-node"
+	require.Error(t, (&RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil))
+	require.DirExists(t, filepath.Join(data, ".carbon-panel", "undo", batch))
+
+	// The applied row proves cleanup is still owed even though the batch has
+	// no staged content left. A later restart finishes it without touching the
+	// published bytes.
+	require.FileExists(t, filepath.Join(data, "file.txt"))
+	server.NodeID = ""
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, retry, "applied content keeps the next-restart finalize eligible")
+	require.True(t, retry.HasPriorRuntimeState())
+	applied, err := retry.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Empty(t, applied)
+	require.NoError(t, (&RestartPublication{Commit: retry, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil))
+	require.NoDirExists(t, filepath.Join(data, ".carbon-panel", "undo", batch))
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+	body, err := os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+}
+
 func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

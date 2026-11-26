@@ -469,6 +469,17 @@ func (s *Store) ListBatchContent(ctx context.Context, batchID string) ([]StagedC
 	return rows, err
 }
 
+// CountBatchContentByStatus counts one batch's content rows in a status.
+// Applied rows are durable evidence that a publication copied its bytes even
+// after ListBatchContent no longer returns them, so finalization can retry an
+// idempotent recovery cleanup without republishing.
+func (s *Store) CountBatchContentByStatus(ctx context.Context, batchID string, status StagedStatus) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&StagedContentChange{}).
+		Where("batch_id = ? AND status = ?", batchID, status).Count(&count).Error
+	return count, err
+}
+
 // MarkStagedContentApplied records that a content row was committed to the live tree.
 func (s *Store) MarkStagedContentApplied(ctx context.Context, id string) error {
 	now := time.Now()
