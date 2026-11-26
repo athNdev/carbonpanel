@@ -14,7 +14,7 @@ sources:
   - title: Server portability archive format
     resource: ../../docs/server-portability.md
   - title: Architecture decisions — Disposable server-portability acceptance rehearsal
-    resource: ../../docs/adr/0053-disposable-server-archive-acceptance.md
+    resource: ../../docs/adr/0057-disposable-server-archive-acceptance.md
 ---
 
 Run the `Server archive acceptance rehearsal` workflow at the exact candidate
@@ -32,18 +32,17 @@ which also probes nested game ports.
 
 The Python harness requires the hosted caller, a fresh `RUNNER_TEMP`
 subdirectory and an exclusively created fixture record tying the clean exact
-checkout, controller container, loopback base URL and remote endpoint before any
-controller write. It creates a managed Vanilla source without Docker overrides,
-requires both the `failed_precondition` code and the specific running-export
-refusal message, saves a deterministic fixture, exports both native formats,
-verifies every archive file hash and destination byte, previews and creates both
-imports stopped, then starts and joins them with the pinned protocol client.
+checkout to both containers. It verifies their identity, bridge and storage
+mounts through the runner's Docker socket before writes. It creates a managed
+Vanilla source without overrides, verifies the running-export refusal, saves
+the fixture, exports both formats and checks destination hashes before start.
+The pinned protocol client verifies both imported servers can be joined.
 
 Every check fails closed. The report records the backend RPC scope, candidate
 commit, pinned digest, archive hashes, capacities, destination verification and
-readiness. The wrapper removes only its labelled resources. Cleanup is bounded
-and verifies this run's servers are gone; an uncleaned owned resource fails an
-otherwise successful run.
+readiness. The wrapper gates diagnostics and removal on resource IDs and the
+run label. Cleanup checks the run's servers are gone. A failed teardown fails
+the hosted job and is recorded alongside the RPC report.
 
 # Rules
 

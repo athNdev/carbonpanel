@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Disposable server-portability acceptance rehearsal (OSS-426/427, OSS-428).
+"""Disposable server-portability backend rehearsal (OSS-426 and OSS-427).
 
 This harness drives a real Carbon Panel controller through one complete native
 archive round trip. It never creates, changes or publishes a release, image tag,
@@ -21,9 +21,9 @@ world, host service or repository:
 The job that calls this script owns the disposable controller and Docker
 engines. The direct entry point is hosted-only: it requires a GitHub-hosted
 caller, a fresh ``RUNNER_TEMP`` subdirectory and the job's exclusive fixture
-record before any controller write. All paths stay under ``--workspace``; the
-JSON evidence report is written there. A failure always writes a failing report
-and exits non-zero. Offline tests never record a round trip as verified.
+record before any controller write. The verified workspace contains the JSON
+evidence report. Setup refusals print a diagnostic and exit non-zero. Only the
+hosted run can record a successful round trip.
 """
 import argparse
 import base64
@@ -52,6 +52,7 @@ FIXTURE_PATH = "archive-rehearsal/fixture.txt"
 EXCLUDED_PATH = "archive-rehearsal/.env"
 FIXTURE_SCHEMA = "server-archive-rehearsal-fixture-v1"
 RUN_SCHEMA = "server-archive-rehearsal-run-v1"
+LOCAL_DOCKER = "unix:///var/run/docker.sock"
 RUNNING_EXPORT_REFUSAL = "stop the managed server before exporting it"
 CLEANUP_BUDGET_SECONDS = 240
 FIXTURE_BYTES = (
@@ -85,7 +86,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+NO_REDIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 class RehearsalError(RuntimeError):
@@ -485,29 +486,45 @@ def _inside(path, root, label):
 
 
 def inspect_container(container_id, local_docker):
-    """Read the local engine's own record for the fixture controller."""
+    """Read the local engine's own record for an identified fixture container."""
     try:
         result = subprocess.run(
             ["docker", "-H", local_docker, "inspect", "--type", "container", container_id],
             check=True, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
-        raise RehearsalError("could not inspect the fixture controller: %s" % error)
+        raise RehearsalError("could not inspect the fixture container: %s" % error)
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as error:
-        raise RehearsalError("controller inspection returned malformed JSON: %s" % error)
+        raise RehearsalError("fixture container inspection returned malformed JSON: %s" % error)
     if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
-        raise RehearsalError("controller inspection did not return one container")
+        raise RehearsalError("fixture container inspection did not return one container")
     return payload[0]
+
+
+def inspect_owned_container(inspector, local_docker, container_id, name, run_id, label):
+    if not re.fullmatch(r"[a-f0-9]{64}", container_id or "") or not name:
+        raise RehearsalError("%s has no valid container identity" % label)
+    observation = inspector(container_id, local_docker)
+    if observation.get("Id") != container_id or observation.get("Name") != "/" + name:
+        raise RehearsalError("%s container identity does not match" % label)
+    labels = (observation.get("Config") or {}).get("Labels") or {}
+    if labels.get("com.carbon-panel.rehearsal.run") != run_id:
+        raise RehearsalError("%s container does not belong to this run" % label)
+    if not (observation.get("State") or {}).get("Running"):
+        raise RehearsalError("%s container is not running" % label)
+    return observation
 
 
 def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
                    remote_docker, remote_storage_root, controller_storage,
                    local_docker, inspector=None, checkout=None):
     """Bind the run to one checkout, controller container and remote endpoint."""
+    if local_docker != LOCAL_DOCKER:
+        raise RehearsalError("local Docker must be the hosted runner socket")
     workspace = Path(workspace).resolve()
-    fixture = _private_record(fixture_path, FIXTURE_SCHEMA, "fixture provenance")
     _inside(fixture_path, workspace, "fixture provenance")
+    fixture = _private_record(fixture_path, FIXTURE_SCHEMA, "fixture provenance")
     if fixture.get("workspace") != str(workspace):
         raise RehearsalError("fixture workspace does not match --workspace")
     if fixture.get("runner_temp") != str(Path(runner_temp).resolve()):
@@ -524,7 +541,8 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
     run = _private_record(run_file, RUN_SCHEMA, "run record")
     if sha256_file(run_file) != fixture.get("run_sha256"):
         raise RehearsalError("run record changed after the fixture was created")
-    if run.get("run_id") != fixture.get("run_id"):
+    run_id = run.get("run_id")
+    if not run_id or run_id != fixture.get("run_id"):
         raise RehearsalError("fixture and run record disagree about the run id")
 
     if checkout is None:
@@ -590,14 +608,10 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
             ('port: "%d"' % controller_port) not in config_text:
         raise RehearsalError("controller configuration is not the fixture loopback listener")
 
-    observation = (inspector or inspect_container)(
-        fixture.get("controller_id"), local_docker)
-    state = observation.get("State") or {}
-    if not state.get("Running"):
-        raise RehearsalError("fixture controller container is not running")
-    name = str(observation.get("Name", "")).lstrip("/")
-    if name != fixture.get("controller_name"):
-        raise RehearsalError("fixture controller container name does not match")
+    inspector = inspector or inspect_container
+    observation = inspect_owned_container(
+        inspector, local_docker, fixture.get("controller_id"),
+        fixture.get("controller_name"), run_id, "controller")
     if observation.get("Image") != fixture.get("controller_image_id"):
         raise RehearsalError("fixture controller image does not match the built candidate")
     container_config = observation.get("Config") or {}
@@ -607,8 +621,39 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
     command = container_config.get("Cmd") or []
     if str(fixture.get("controller_config")) not in [str(item) for item in command]:
         raise RehearsalError("fixture controller was not started with the recorded config")
+    if (observation.get("HostConfig") or {}).get("NetworkMode") != "host":
+        raise RehearsalError("fixture controller does not share the runner loopback")
+    if not any(mount.get("Type") == "bind" and mount.get("Source") == str(workspace) and
+               mount.get("Destination") == str(workspace)
+               for mount in observation.get("Mounts") or []):
+        raise RehearsalError("fixture controller is missing its workspace mount")
+
+    engine = inspect_owned_container(
+        inspector, local_docker, fixture.get("remote_engine_id"),
+        fixture.get("remote_engine_name"), run_id, "destination engine")
+    if not fixture.get("remote_engine_image_id") or \
+            engine.get("Image") != fixture["remote_engine_image_id"]:
+        raise RehearsalError("destination engine image does not match the pinned image")
+    host_config = engine.get("HostConfig") or {}
+    if host_config.get("NetworkMode") == "host" or host_config.get("PortBindings") or \
+            host_config.get("PublishAllPorts"):
+        raise RehearsalError("destination engine must use an unpublished bridge")
+    networks = (engine.get("NetworkSettings") or {}).get("Networks") or {}
+    network_name = fixture.get("remote_network")
+    if not network_name or set(networks) != {network_name}:
+        raise RehearsalError("destination engine is outside its fixture bridge")
+    bridge = networks[network_name]
+    if not fixture.get("remote_network_id") or \
+            bridge.get("NetworkID") != fixture["remote_network_id"] or \
+            bridge.get("IPAddress") != str(remote_ip):
+        raise RehearsalError("destination engine bridge or address does not match")
+    if not any(mount.get("Type") == "bind" and mount.get("Source") == recorded_storage and
+               mount.get("Destination") == remote_storage_root and mount.get("RW")
+               for mount in engine.get("Mounts") or []):
+        raise RehearsalError("destination engine is missing its fixture storage mount")
 
     return {
+        "run_id": run_id,
         "commit": commit,
         "version": version,
         "image": fixture.get("controller_image_id"),
@@ -617,6 +662,9 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
         "source_binary_sha256": fixture.get("source_binary_sha256"),
         "controller_id": fixture.get("controller_id"),
         "controller_name": fixture.get("controller_name"),
+        "remote_engine_id": fixture.get("remote_engine_id"),
+        "remote_engine_image_id": fixture.get("remote_engine_image_id"),
+        "remote_network_id": fixture.get("remote_network_id"),
         "base_url": fixture.get("base_url"),
         "remote_docker": fixture.get("remote_docker"),
         "remote_address": fixture.get("remote_address"),
@@ -1117,15 +1165,14 @@ def cleanup_owned_servers(controller, server_ids, budget_seconds=CLEANUP_BUDGET_
 
 
 def execute(args):
-    workspace = Path(args.workspace).resolve()
+    runner_temp = require_hosted_environment(dict(os.environ))
+    workspace = validate_hosted_workspace(Path(args.workspace), runner_temp)
     evidence = workspace / "evidence"
     data_dir = workspace / "data"
     controller_storage = Path(args.remote_controller_storage).resolve()
 
     # Bind the run before any controller write: hosted caller, fresh runner temp
     # directory, exact checkout, one controller container and one remote engine.
-    runner_temp = require_hosted_environment(dict(os.environ))
-    validate_hosted_workspace(workspace, runner_temp)
     validate_workspace(workspace, data_dir, controller_storage)
     validate_remote_node(args.remote_docker, args.remote_storage_root,
                          str(controller_storage))
@@ -1134,6 +1181,9 @@ def execute(args):
         args.candidate_commit, args.candidate_version, args.base,
         args.remote_docker, args.remote_storage_root, controller_storage,
         args.local_docker)
+    run_id = os.environ.get("GITHUB_RUN_ID", "") + "-" + os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if not re.fullmatch(r"\d+-\d+", run_id) or fixture["run_id"] != run_id:
+        raise RehearsalError("fixture belongs to a different GitHub Actions attempt")
     if not args.destination_readiness_host:
         args.destination_readiness_host = fixture["destination_probe_host"]
     if args.destination_readiness_host != fixture["destination_probe_host"]:
@@ -1193,6 +1243,7 @@ def execute(args):
     controller = Controller(args.base)
     created_servers = []
     failure = None
+    phase = "controller_setup"
     try:
         report["candidate"]["provenance"] = fixture
         ok("candidate_provenance_matches_head")
@@ -1246,6 +1297,7 @@ def execute(args):
             "tar_gz_port": tar_port,
         })
 
+        phase = "source_creation_and_save"
         source_name = "archive-rehearsal-source"
         result = controller.call("ServerService", "CreateServer", {
             "name": source_name,
@@ -1272,6 +1324,8 @@ def execute(args):
 
         source = wait_status(controller, source_id, "SERVER_STATUS_RUNNING", 600,
                              "source Minecraft startup")
+        if source.get("port") != source_port:
+            raise RehearsalError("source did not retain its allocated game port")
         if not source.get("containerId"):
             raise RehearsalError("source server has no Docker container")
         ok("source_running_on_local_node")
@@ -1356,6 +1410,7 @@ def execute(args):
         for archive_format, rpc_format, suffix, port in (
                 ("zip", "SERVER_ARCHIVE_FORMAT_ZIP", ".zip", zip_port),
                 ("tar.gz", "SERVER_ARCHIVE_FORMAT_TAR_GZ", ".tar.gz", tar_port)):
+            phase = "export_" + archive_format.replace(".", "_")
             exported = controller.call("ServerService", "ExportServerArchive", {
                 "serverId": source_id,
                 "format": rpc_format,
@@ -1381,6 +1436,7 @@ def execute(args):
             report["formats"] = archives
             ok("archive_%s_download_verified" % archive_format.replace(".", "_"))
         report["formats"] = archives
+        phase = "verify_archive_source_parity"
         source_hashes = source_file_hashes(source_dir)
         source_hashes.pop("server.properties", None)
         archived_hashes = {
@@ -1407,6 +1463,7 @@ def execute(args):
 
         imports = {}
         for archive_format, suffix in (("zip", ".zip"), ("tar.gz", ".tar.gz")):
+            phase = "import_" + archive_format.replace(".", "_")
             verified = archives[archive_format]
             archive_path = evidence / ("source" + suffix)
             upload_id = controller.upload_file(archive_path, verified["filename"])
@@ -1458,6 +1515,8 @@ def execute(args):
             imported_id = imported.get("id")
             if not imported_id:
                 raise RehearsalError("%s import returned no server id" % archive_format)
+            if imported_id in created_servers:
+                raise RehearsalError("%s import reused a server id" % archive_format)
             created_servers.append(imported_id)
             if imported.get("nodeId") != remote["id"]:
                 raise RehearsalError("%s import was not placed on the remote node" % archive_format)
@@ -1467,6 +1526,8 @@ def execute(args):
                 controller, imported_id, 600,
                 "%s import container creation" % archive_format)
             assert_not_started(imported, "%s import" % archive_format)
+            if imported.get("port") != verified["port"]:
+                raise RehearsalError("%s import did not retain its remapped game port" % archive_format)
             if imported.get("mcVersion") != args.mc_version:
                 raise RehearsalError("%s import did not inherit the archive version" % archive_format)
             if imported.get("modLoader") != "MOD_LOADER_VANILLA":
@@ -1490,7 +1551,7 @@ def execute(args):
                 "server_id": imported_id,
                 "name": name,
                 "node_id": imported.get("nodeId"),
-                "port": verified["port"],
+                "port": imported["port"],
                 "status_before_start": imported.get("status"),
                 "container_id": imported.get("containerId"),
                 "engine_state_before_start": engine_state,
@@ -1514,6 +1575,7 @@ def execute(args):
             report["imports"] = imports
 
         for archive_format, record in imports.items():
+            phase = "verify_running_" + archive_format.replace(".", "_")
             controller.call("ServerService", "StartServer", {
                 "id": record["server_id"],
                 "requestId": "archive-rehearsal-start-" + archive_format.replace(".", "-"),
@@ -1553,6 +1615,7 @@ def execute(args):
         report["pass"] = all(checks.values())
     except Exception as error:  # noqa: BLE001 - keep partial evidence on failure
         failure = error
+        checks[phase] = False
         report["pass"] = False
         report["error"] = "%s: %s" % (type(error).__name__, error)
     finally:
@@ -1586,7 +1649,7 @@ def main(argv=None):
     parser.add_argument("--base", required=True, help="fixture controller loopback base URL")
     parser.add_argument("--candidate-version", required=True)
     parser.add_argument("--candidate-commit", required=True)
-    parser.add_argument("--local-docker", default="unix:///var/run/docker.sock")
+    parser.add_argument("--local-docker", default=LOCAL_DOCKER)
     parser.add_argument("--remote-docker", required=True)
     parser.add_argument("--remote-storage-root", required=True)
     parser.add_argument("--remote-controller-storage", required=True)
@@ -1605,31 +1668,14 @@ def main(argv=None):
     workspace = Path(args.workspace).resolve()
     try:
         report = execute(args)
-    except Exception as error:  # noqa: BLE001 - fail closed AND leave evidence
-        report = getattr(error, "rehearsal_report", None) or {
-            "schema": "server-archive-rehearsal-ci-v1",
-            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "workspace": str(workspace),
-            "scope": {
-                "tickets": ["OSS-426", "OSS-427"],
-                "surface": "backend RPC with an empty frontend embed",
-                "browser_acceptance": "OSS-428 belongs to #686 and is not exercised here",
-            },
-            "candidate": {
-                "commit": args.candidate_commit,
-                "version": args.candidate_version,
-            },
-        }
-        report["pass"] = False
-        report["error"] = "%s: %s" % (type(error).__name__, error)
-    if not workspace.is_dir():
-        print(json.dumps({
-            "pass": False,
-            "error": report.get("error") or "workspace does not exist",
-        }, indent=2), file=sys.stderr)
-        return 1
-    (workspace / REPORT_NAME).write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception as error:  # noqa: BLE001 - leave evidence only for a verified fixture
+        report = getattr(error, "rehearsal_report", None)
+        if report is None:
+            print("archive fixture refused: %s" % error, file=sys.stderr)
+            return 1
+    with (workspace / REPORT_NAME).open("x", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2, sort_keys=True)
+        handle.write("\n")
     if report.get("pass"):
         print(json.dumps({
             "pass": True,

@@ -9,6 +9,7 @@ rehearsal uses. Docker-dependent orchestration remains a CI-only check.
 import json
 import base64
 import os
+import subprocess
 import tarfile
 import tempfile
 import threading
@@ -17,6 +18,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
+from unittest import mock
 
 from scripts import server_archive_rehearsal_ci as rehearsal
 
@@ -405,14 +407,17 @@ def build_hosted_fixture(runner_temp, commit="a" * 40, version="2.0.1"):
         "image_revision": commit,
         "source_binary_sha256": "b" * 64,
         "controller_name": "server-archive-controller-1",
-        "controller_id": "controller-id",
+        "controller_id": "1" * 64,
         "controller_port": 18080,
         "controller_image_id": "sha256:image",
         "controller_config": str(config.resolve()),
         "controller_config_sha256": rehearsal.sha256_file(config),
         "base_url": "http://127.0.0.1:18080",
         "remote_engine_name": "server-archive-node-1",
-        "remote_engine_id": "remote-id",
+        "remote_engine_id": "2" * 64,
+        "remote_engine_image_id": "sha256:remote-image",
+        "remote_network": "archive-private",
+        "remote_network_id": "3" * 64,
         "remote_docker": "tcp://192.0.2.10:2375",
         "remote_address": "192.0.2.10",
         "remote_management_port": 2375,
@@ -431,14 +436,41 @@ def build_hosted_fixture(runner_temp, commit="a" * 40, version="2.0.1"):
 
 def fixture_inspector(fixture, commit):
     def inspect(container_id, local_docker):
+        assert local_docker == rehearsal.LOCAL_DOCKER
+        run_labels = {"com.carbon-panel.rehearsal.run": fixture["run_id"]}
+        if container_id == fixture["remote_engine_id"]:
+            return {
+                "Id": container_id,
+                "Name": "/" + fixture["remote_engine_name"],
+                "Image": fixture["remote_engine_image_id"],
+                "State": {"Running": True},
+                "Config": {"Labels": run_labels},
+                "HostConfig": {"NetworkMode": fixture["remote_network"]},
+                "NetworkSettings": {"Networks": {fixture["remote_network"]: {
+                    "NetworkID": fixture["remote_network_id"],
+                    "IPAddress": fixture["remote_address"],
+                }}},
+                "Mounts": [{
+                    "Type": "bind", "RW": True,
+                    "Source": fixture["remote_controller_storage"],
+                    "Destination": fixture["remote_storage_root"],
+                }],
+            }
+        assert container_id == fixture["controller_id"]
         return {
+            "Id": container_id,
             "Name": "/" + fixture["controller_name"],
             "Image": fixture["controller_image_id"],
             "State": {"Running": True},
+            "HostConfig": {"NetworkMode": "host"},
             "Config": {
-                "Labels": {"org.opencontainers.image.revision": commit},
+                "Labels": {**run_labels, "org.opencontainers.image.revision": commit},
                 "Cmd": ["./carbon-panel", "-config", fixture["controller_config"]],
             },
+            "Mounts": [{
+                "Type": "bind", "Source": fixture["workspace"],
+                "Destination": fixture["workspace"],
+            }],
         }
     return inspect
 
@@ -486,13 +518,14 @@ class HostedFixtureBindingTests(unittest.TestCase):
             fixture_path, self.workspace, self.runner_temp, commit, self.version,
             base, remote, self.fixture["remote_storage_root"],
             self.fixture["remote_controller_storage"],
-            "unix:///var/run/docker.sock",
+            overrides.get("local_docker", rehearsal.LOCAL_DOCKER),
             inspector=inspector, checkout=lambda wanted: wanted)
 
     def test_fixture_binds_checkout_controller_and_remote_endpoint(self):
         record = self.verify()
         self.assertEqual(record["source"], "hosted-fixture")
-        self.assertEqual(record["controller_id"], "controller-id")
+        self.assertEqual(record["controller_id"], self.fixture["controller_id"])
+        self.assertEqual(record["remote_engine_id"], self.fixture["remote_engine_id"])
         self.assertEqual(record["remote_address"], "192.0.2.10")
         self.assertEqual(record["destination_probe_host"], "192.0.2.10")
 
@@ -532,6 +565,48 @@ class HostedFixtureBindingTests(unittest.TestCase):
         with self.assertRaisesRegex(rehearsal.RehearsalError, "revision"):
             self.verify(inspector=wrong_revision)
 
+    def test_requires_local_runner_docker_socket(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "runner socket"):
+            self.verify(local_docker="tcp://192.0.2.30:2375")
+
+    def test_destination_engine_requires_owned_bridge_address_and_storage(self):
+        base_inspector = fixture_inspector(self.fixture, self.commit)
+        def inspect_changed_engine(mutation):
+            def inspect(container_id, local_docker):
+                observation = base_inspector(container_id, local_docker)
+                if container_id == self.fixture["remote_engine_id"]:
+                    mutation(observation)
+                return observation
+            return inspect
+
+        cases = (
+            ("ownership", "belong", lambda o: o["Config"]["Labels"].clear()),
+            ("image", "pinned image", lambda o: o.update(Image="sha256:another-image")),
+            ("port", "unpublished bridge", lambda o: o["HostConfig"].update(
+                PortBindings={"2375/tcp": [{"HostPort": "2375"}]})),
+            ("address", "bridge or address", lambda o: o["NetworkSettings"]["Networks"][
+                self.fixture["remote_network"]].update(IPAddress="192.0.2.11")),
+            ("mount", "storage mount", lambda o: o["Mounts"].clear()),
+        )
+        for name, expected, mutation in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(rehearsal.RehearsalError, expected):
+                    self.verify(inspector=inspect_changed_engine(mutation))
+
+    def test_setup_refusal_preserves_existing_report(self):
+        report = self.workspace / rehearsal.REPORT_NAME
+        report.write_text("existing content", encoding="utf-8")
+        args = [
+            "--workspace", str(self.workspace), "--fixture", str(self.fixture_path),
+            "--base", self.fixture["base_url"], "--candidate-version", self.version,
+            "--candidate-commit", self.commit, "--remote-docker", self.fixture["remote_docker"],
+            "--remote-storage-root", self.fixture["remote_storage_root"],
+            "--remote-controller-storage", self.fixture["remote_controller_storage"],
+        ]
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+            self.assertEqual(rehearsal.main(args), 1)
+        self.assertEqual(report.read_text(encoding="utf-8"), "existing content")
+
     def test_changed_run_record_is_refused(self):
         (self.workspace / "run.json").write_text(json.dumps({
             "schema": rehearsal.RUN_SCHEMA, "run_id": "changed"}), encoding="utf-8")
@@ -556,6 +631,54 @@ class HostedFixtureBindingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as elsewhere:
             with self.assertRaisesRegex(rehearsal.RehearsalError, "inside RUNNER_TEMP"):
                 rehearsal.validate_hosted_workspace(Path(elsewhere), self.runner_temp)
+
+
+@unittest.skipUnless(os.name == "posix", "hosted cleanup uses Bash on Linux")
+class ShellCleanupTests(unittest.TestCase):
+    def test_wrong_owner_is_untouched_and_failed_removal_fails_the_job(self):
+        script = (rehearsal.ROOT / "scripts" / "qualify-server-archive-hosted.sh").read_text()
+        cleanup_functions = script.split("owned_container() {", 1)[1].split(
+            "trap cleanup EXIT", 1)[0]
+        fixture = r"""
+set -eu
+work="$PWD"
+evidence="$work/evidence"
+mkdir "$evidence"
+run_label=1234-1
+controller=fixture-controller
+remote_engine=fixture-node
+source_network=source-net
+network=destination-net
+source_network_id=
+network_id=
+STAGED_SHA=fixture
+CANDIDATE_VERSION=fixture
+stage=rehearsal
+printf '%064d\n' 1 > "$work/controller.cid"
+timeout() { shift; "$@"; }
+docker() {
+  case "$1" in
+    inspect) printf '/%s %s\n' "$controller" "$observed_label";;
+    logs) echo logs >> "$work/calls";;
+    rm) echo rm >> "$work/calls"; return 1;;
+    *) return 77;;
+  esac
+}
+observed_label=other-run
+if (true; cleanup); then exit 1; fi
+test ! -e "$work/calls"
+observed_label=$run_label
+if (true; cleanup); then exit 1; fi
+grep -qx logs "$work/calls"
+grep -qx rm "$work/calls"
+grep -qx status=1 "$evidence/run-status.txt"
+grep -qx cleanup_failed=1 "$evidence/cleanup.txt"
+"""
+        with tempfile.TemporaryDirectory() as workspace:
+            result = subprocess.run(
+                ["bash", "-s"], input="owned_container() {" + cleanup_functions + fixture,
+                text=True, capture_output=True, cwd=workspace, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class CleanupTests(unittest.TestCase):

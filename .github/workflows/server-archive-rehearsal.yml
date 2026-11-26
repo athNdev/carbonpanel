@@ -49,7 +49,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'docs/server-portability.md'
-      - 'docs/adr/0053-disposable-server-archive-acceptance.md'
+      - 'docs/adr/0057-disposable-server-archive-acceptance.md'
       - 'knowledge/testing/server-archive-rehearsal.md'
 
 permissions:
@@ -111,12 +111,19 @@ jobs:
       - name: Print evidence summary
         if: always()
         run: |
-          report="$RUNNER_TEMP/server-archive-rehearsal/evidence/server-archive-rehearsal.json"
+          evidence="$RUNNER_TEMP/server-archive-rehearsal/evidence"
+          if [[ -f "$evidence/run-status.txt" ]]; then
+            cat "$evidence/run-status.txt"
+          fi
+          if [[ -f "$evidence/cleanup.txt" ]]; then
+            cat "$evidence/cleanup.txt"
+          fi
+          report="$evidence/server-archive-rehearsal.json"
           if [[ -f "$report" ]]; then
             python3 - "$report" <<'PY'
           import json, sys
           report = json.load(open(sys.argv[1], encoding="utf-8"))
-          print("server archive rehearsal pass:", report.get("pass"))
+          print("server archive RPC rehearsal pass:", report.get("pass"))
           scope = report.get("scope") or {}
           print("scope:", scope.get("surface"), scope.get("browser_acceptance"))
           if report.get("error"):

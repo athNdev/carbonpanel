@@ -148,7 +148,7 @@ Vanilla source without Docker overrides, requires the specific running-export
 refusal, saves a deterministic fixture, exports both native formats, verifies
 every archive and destination file hash, previews and creates both imports
 stopped, and then confirms Minecraft readiness on both. See
-[ADR 0053](adr/0053-disposable-server-archive-acceptance.md).
+[ADR 0057](adr/0057-disposable-server-archive-acceptance.md).
 
 The create-from-archive browser workflow (OSS-428) is not exercised by this job
 and is tracked separately in #686. This rehearsal uses RPC with an empty

@@ -17,6 +17,8 @@ work=${1:?usage: qualify-server-archive-hosted.sh <disposable-workspace>}
 : "${STAGED_SHA:?}" "${CANDIDATE_VERSION:?}"
 : "${GITHUB_ACTIONS:?}" "${RUNNER_TEMP:?}" "${RUNNER_ENVIRONMENT:?}"
 [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]]
+export DOCKER_HOST=unix:///var/run/docker.sock
+unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
 work=$(realpath -m "$work")
 runner_temp=$(realpath -m "$RUNNER_TEMP")
 [[ "$work" == "$runner_temp/"* && "$work" != "$runner_temp" ]]
@@ -31,12 +33,13 @@ dind_image="docker:${dind_tag}@${dind_digest}"
 dind_registry_source="https://registry-1.docker.io/v2/${dind_repository}/manifests/${dind_tag}"
 
 label=server-archive
+run_label="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 controller="server-archive-controller-$$"
 remote_engine="server-archive-node-$$"
 network="server-archive-net-$$"
-controller_id=""
-remote_engine_id=""
+source_network="server-archive-source-net-$$"
 network_id=""
+source_network_id=""
 controller_port=${CONTROLLER_PORT:-18080}
 image="server-archive-rehearsal:$STAGED_SHA"
 stage=prepare
@@ -67,64 +70,71 @@ with os.fdopen(fd, "w", encoding="utf-8") as handle:
 PY
 
 owned_container() {
-  local name=$1 expected=$2 observed_label observed_id
-  observed_label=$(docker inspect "$name" \
-    --format '{{index .Config.Labels "com.carbon-panel.rehearsal"}}' 2>/dev/null) || return 1
-  observed_id=$(docker inspect "$name" --format '{{.Id}}' 2>/dev/null) || return 1
-  [[ "$observed_label" == "$label" ]]
-  [[ -z "$expected" || "$observed_id" == "$expected" ]]
+  local name=$1 id=$2 owner
+  [[ "$id" =~ ^[a-f0-9]{64}$ ]] || return 1
+  owner=$(timeout 15 docker inspect --type container "$id" \
+    --format '{{.Name}} {{index .Config.Labels "com.carbon-panel.rehearsal.run"}}' 2>/dev/null) || return 1
+  [[ "$owner" == "/$name $run_label" ]]
 }
 
 owned_network() {
-  local observed_label observed_id
-  observed_label=$(docker network inspect "$network" \
-    --format '{{index .Labels "com.carbon-panel.rehearsal"}}' 2>/dev/null) || return 1
-  observed_id=$(docker network inspect "$network" --format '{{.Id}}' 2>/dev/null) || return 1
-  [[ "$observed_label" == "$label" ]]
-  [[ -z "$network_id" || "$observed_id" == "$network_id" ]]
+  local name=$1 id=$2 owner
+  [[ "$id" =~ ^[a-f0-9]{64}$ ]] || return 1
+  owner=$(timeout 15 docker network inspect "$id" \
+    --format '{{.Name}} {{index .Labels "com.carbon-panel.rehearsal.run"}}' 2>/dev/null) || return 1
+  [[ "$owner" == "$name $run_label" ]]
 }
 
-collect_evidence() {
+write_status() {
   local code=$1
   {
     printf 'stage=%s\nstatus=%s\n' "$stage" "$code"
     printf 'workspace=%s\ncandidate=%s\nversion=%s\n' \
       "$work" "$STAGED_SHA" "$CANDIDATE_VERSION"
   } > "$evidence/run-status.txt"
-  docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}' \
-    > "$evidence/docker-ps.txt" 2>&1 || true
-  docker inspect "$controller" "$remote_engine" \
-    > "$evidence/containers-inspect.json" 2>&1 || true
-  docker logs "$controller" > "$evidence/controller.log" 2>&1 || true
-  docker logs "$remote_engine" > "$evidence/dind.log" 2>&1 || true
-  docker network inspect "$network" > "$evidence/network-inspect.json" 2>&1 || true
-  timeout 20 docker -H "${remote_docker:-tcp://127.0.0.1:1}" info \
-    > "$evidence/remote-engine-info.txt" 2>&1 || true
   cp "$work/server-archive-rehearsal.json" "$evidence/" 2>/dev/null || true
 }
 
+remove_container() {
+  local name=$1 cidfile=$2 output=$3 id=""
+  [[ -e "$cidfile" ]] || return 0
+  read -r id < "$cidfile" || true
+  if ! owned_container "$name" "$id"; then
+    echo "could not verify ownership of $name"
+    return 1
+  fi
+  timeout 20 docker logs "$id" > "$evidence/$output.log" 2>&1 || true
+  timeout 15 docker inspect --type container "$id" --format '{{json .State}}' \
+    > "$evidence/$output-state.json" 2>&1 || true
+  timeout 60 docker rm -f -v "$id"
+}
+
+remove_network() {
+  local name=$1 id=$2
+  [[ -n "$id" ]] || return 0
+  if ! owned_network "$name" "$id"; then
+    echo "could not verify ownership of $name"
+    return 1
+  fi
+  timeout 30 docker network rm "$id"
+}
+
 cleanup() {
-  local code=$?
+  local code=$? cleanup_failed=0
   set +e
   trap - EXIT
-  collect_evidence "$code"
   {
-    if owned_container "$controller" "$controller_id"; then
-      timeout 60 docker rm -f "$controller" || echo "could not remove controller"
-    else
-      echo "controller $controller is not this rehearsal's resource; left in place"
-    fi
-    if owned_container "$remote_engine" "$remote_engine_id"; then
-      timeout 60 docker rm -f "$remote_engine" || echo "could not remove remote engine"
-    else
-      echo "remote engine $remote_engine is not this rehearsal's resource; left in place"
-    fi
-    if owned_network; then
-      timeout 30 docker network rm "$network" || echo "could not remove bridge $network"
-    else
-      echo "bridge $network is not this rehearsal's resource; left in place"
-    fi
+    remove_container "$controller" "$work/controller.cid" controller || cleanup_failed=1
+    remove_container "$remote_engine" "$work/remote-engine.cid" remote-engine || cleanup_failed=1
+    remove_network "$source_network" "$source_network_id" || cleanup_failed=1
+    remove_network "$network" "$network_id" || cleanup_failed=1
+    printf 'cleanup_failed=%s\n' "$cleanup_failed"
   } > "$evidence/cleanup.txt" 2>&1
+  if (( cleanup_failed && code == 0 )); then
+    code=1
+    stage=cleanup
+  fi
+  write_status "$code"
   exit "$code"
 }
 trap cleanup EXIT
@@ -198,25 +208,32 @@ stage=remote-engine
 echo "=== Start the second Docker engine on its own bridge ==="
 network_id=$(docker network create --driver bridge --subnet 172.29.0.0/24 \
   --label "com.carbon-panel.rehearsal=$label" \
-  --label "com.carbon-panel.rehearsal.run=$STAGED_SHA" \
+  --label "com.carbon-panel.rehearsal.run=$run_label" \
   "$network")
+source_network_id=$(docker network create --driver bridge \
+  --label "com.carbon-panel.rehearsal=$label" \
+  --label "com.carbon-panel.rehearsal.run=$run_label" \
+  "$source_network")
 printf '%s\n' "$network_id" > "$evidence/network-id.txt"
-# No host network and no published management port. The controller reaches the
-# engine through the owned bridge; nested game ports are probed at the bridge
-# address of the Docker-in-Docker container.
-docker run -d --name "$remote_engine" --privileged --network "$network" \
+# The controller and game probe reach the nested engine at its bridge address.
+# The explicit dockerd command lets the image initialize it with one listener
+# per transport. The API has no published host port.
+docker run -d --cidfile "$work/remote-engine.cid" --name "$remote_engine" \
+  --privileged --network "$network" \
   --network-alias "$remote_engine" \
   --label "com.carbon-panel.rehearsal=$label" \
-  --label "com.carbon-panel.rehearsal.run=$STAGED_SHA" \
+  --label "com.carbon-panel.rehearsal.run=$run_label" \
   -v "$work/remote-storage:/storage" \
   -e DOCKER_TLS_CERTDIR= \
-  "$dind_image" \
+  "$dind_image" dockerd --tls=false \
   --host=tcp://0.0.0.0:2375 --host=unix:///var/run/docker.sock \
   --bip=172.31.0.1/24 --default-address-pool=base=172.30.0.0/16,size=24 \
   > "$evidence/remote-engine-id.txt"
+remote_engine_id=$(cat "$work/remote-engine.cid")
+owned_container "$remote_engine" "$remote_engine_id"
 remote_address=""
 for _ in $(seq 1 60); do
-  remote_address=$(docker inspect "$remote_engine" \
+  remote_address=$(docker inspect "$remote_engine_id" \
     --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
   [[ -n "$remote_address" ]] && break
   sleep 1
@@ -232,12 +249,7 @@ done
 docker -H "$remote_docker" info > "$evidence/remote-engine-info.txt"
 remote_server_version=$(docker -H "$remote_docker" version --format '{{.Server.Version}}')
 local_server_version=$(docker version --format '{{.Server.Version}}')
-remote_engine_id=$(docker inspect "$remote_engine" --format '{{.Id}}')
-nested_digests=$(docker -H "$remote_docker" image inspect "$dind_image" \
-  --format '{{json .RepoDigests}}' 2>/dev/null || true)
-if [[ -n "$nested_digests" ]]; then
-  printf '%s\n' "$nested_digests" > "$evidence/nested-dind-repo-digests.json"
-fi
+remote_image_id=$(docker image inspect "$dind_image" --format '{{.Id}}')
 
 stage=controller-config
 echo "=== Write the isolated controller configuration ==="
@@ -254,7 +266,7 @@ storage:
   temp_dir: "$work/tmp"
 docker:
   host: "unix:///var/run/docker.sock"
-  network_name: "carbon-panel-archive-rehearsal"
+  network_name: "$source_network"
 minecraft:
   global_config:
     onlineMode: false
@@ -268,18 +280,20 @@ EOF
 
 stage=controller
 echo "=== Start the isolated controller ==="
-docker run -d --name "$controller" --network host \
+docker run -d --cidfile "$work/controller.cid" --name "$controller" --network host \
   --label "com.carbon-panel.rehearsal=$label" \
-  --label "com.carbon-panel.rehearsal.run=$STAGED_SHA" \
+  --label "com.carbon-panel.rehearsal.run=$run_label" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$work:$work" \
   -e TZ=UTC \
   "$image" ./carbon-panel -config "$work/config.yaml" \
   > "$evidence/controller-id.txt"
-controller_id=$(docker inspect "$controller" --format '{{.Id}}')
+controller_id=$(cat "$work/controller.cid")
+owned_container "$controller" "$controller_id"
 ready=0
 for _ in $(seq 1 120); do
-  if curl --silent --fail "http://127.0.0.1:$controller_port/healthz" \
+  if curl --silent --fail --noproxy '*' --max-time 4 \
+      "http://127.0.0.1:$controller_port/healthz" \
       > "$evidence/healthz.json" 2> "$evidence/healthz.err"; then
     ready=1
     break
@@ -291,7 +305,7 @@ if [[ "$ready" != 1 ]]; then
   {
     echo "controller did not become healthy"
     cat "$evidence/healthz.err" 2>/dev/null || true
-    docker inspect "$controller" --format '{{json .State}}' 2>/dev/null || true
+    docker inspect "$controller_id" --format '{{json .State}}' 2>/dev/null || true
   } > "$evidence/controller-health-failure.txt"
   false
 fi
@@ -302,6 +316,7 @@ export IMAGE_REVISION="$image_revision" STAGED_SHA CANDIDATE_VERSION
 export CONTROLLER_NAME="$controller" CONTROLLER_ID="$controller_id"
 export CONTROLLER_PORT="$controller_port" REMOTE_ENGINE_NAME="$remote_engine"
 export REMOTE_ENGINE_ID="$remote_engine_id" REMOTE_DOCKER="$remote_docker"
+export REMOTE_IMAGE_ID="$remote_image_id" REMOTE_NETWORK="$network" REMOTE_NETWORK_ID="$network_id"
 export REMOTE_ADDRESS="$remote_address" REMOTE_MANAGEMENT_PORT=2375
 export DESTINATION_PROBE_HOST="$remote_address"
 export REMOTE_STORAGE_ROOT=/storage
@@ -348,6 +363,9 @@ record = {
     "base_url": "http://127.0.0.1:%s" % os.environ["CONTROLLER_PORT"],
     "remote_engine_name": os.environ["REMOTE_ENGINE_NAME"],
     "remote_engine_id": os.environ["REMOTE_ENGINE_ID"],
+    "remote_engine_image_id": os.environ["REMOTE_IMAGE_ID"],
+    "remote_network": os.environ["REMOTE_NETWORK"],
+    "remote_network_id": os.environ["REMOTE_NETWORK_ID"],
     "remote_docker": os.environ["REMOTE_DOCKER"],
     "remote_address": os.environ["REMOTE_ADDRESS"],
     "remote_management_port": int(os.environ["REMOTE_MANAGEMENT_PORT"]),

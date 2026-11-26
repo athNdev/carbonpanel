@@ -1,4 +1,4 @@
-# ADR 0053: Disposable server-portability acceptance rehearsal in CI
+# ADR 0057: Disposable server-portability acceptance rehearsal in CI
 
 - Status: Accepted
 - Date: 2026-11-26
@@ -46,23 +46,25 @@ The controller starts as a container with an exact same-path workspace mount, a
 loopback listener and a dedicated managed network. Before any controller write,
 `scripts/server_archive_rehearsal_ci.py` requires a GitHub-hosted caller, a fresh
 `RUNNER_TEMP` subdirectory, a clean exact checkout and an exclusively created
-fixture record that ties the checkout, controller container, loopback base URL
-and remote endpoint together. It refuses redirects to other targets.
+fixture record that identifies the exact checkout, controller and destination
+engine. The harness verifies both containers through the local Docker socket,
+including the destination bridge address and storage mount. It uses direct
+connections to the fixture endpoints and refuses redirects.
 
 The harness then creates a managed Vanilla source without Docker overrides,
 requires both the `failed_precondition` code and the specific running-export
 refusal message, saves and populates a deterministic fixture, exports both
 native formats, verifies each archive's schema/runtime/per-file SHA-256 and
 expanded size, uploads and previews each archive against the remote node,
-creates each import stopped, verifies the destination bytes before start, and
-only then starts both imports and joins them with the pinned Minecraft protocol
-client.
+creates each import stopped, checks the new server identity and actual assigned
+port, and verifies destination bytes before starting and joining the imports.
 
 Every check is fail-closed and written to a JSON report. Cleanup is bounded and
 verifies that only servers created by this run are gone; an uncleaned owned
-resource fails an otherwise successful run and is reported. The wrapper removes
-only containers and a bridge carrying its own rehearsal labels, then uploads job
-evidence. It refuses to run outside a hosted job or outside `$RUNNER_TEMP`.
+resource fails an otherwise successful run. The wrapper matches the recorded
+container and network IDs and the run label before collecting resource
+diagnostics or removing anything. The job uploads the final teardown status
+alongside the RPC receipt.
 
 ## Consequences
 
