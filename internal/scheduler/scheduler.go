@@ -850,18 +850,26 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
-	advance := func(nextRun *time.Time) error {
+	advance := func(nextRun *time.Time, persistStatus storage.TaskStatus) error {
 		if task.TaskType == storage.TaskTypeModUpdate {
-			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now)
+			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now, persistStatus)
 		}
 		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
 	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
-		if err := advance(nil); err != nil {
+		persistStatus := storage.TaskStatus("")
+		if task.Schedule == storage.ScheduleTypeOnce {
+			persistStatus = storage.TaskStatusDisabled
+		}
+		if err := advance(nil, persistStatus); err != nil {
 			return fmt.Errorf("clear next run: %w", err)
 		}
 		if task.Schedule == storage.ScheduleTypeOnce {
+			// The one-shot slot and its terminal status are claimed in one
+			// guarded write. Keep the in-memory claim equal to the persisted
+			// state so the dispatch observes one consistent state.
 			task.Status = storage.TaskStatusDisabled
+			task.NextRun = nil
 		}
 		return nil
 	}
@@ -869,7 +877,7 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	if err != nil {
 		return err
 	}
-	if err := advance(nextRun); err != nil {
+	if err := advance(nextRun, ""); err != nil {
 		return fmt.Errorf("store next run: %w", err)
 	}
 	return nil

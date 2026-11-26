@@ -83,9 +83,12 @@ request.
    Connect refusals and records the discard operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused. Mod-update advancement
-   checks the observed deadline and schedule to fence stale due reads after a
-   reschedule. Invalid current schedules are disabled. The planner is installed
-   before the scheduler starts so cold boot sees the real implementation.
+   checks the observed deadline, schedule, status and policy revision to fence
+   stale due reads after a reschedule or policy edit. A one-shot slot persists
+   its disabled status in the same guarded write, so the post-claim
+   revalidation sees one consistent state and the run dispatches exactly once.
+   Invalid current schedules are disabled. The planner is installed before the
+   scheduler starts so cold boot sees the real implementation.
 
 ## Consequences
 

@@ -1604,11 +1604,18 @@ func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *Sched
 }
 
 // AdvanceModUpdateSchedule refuses to advance a stale schedule, status,
-// or deadline. SQL IS also matches a task whose observed deadline was NULL.
-func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time) error {
+// policy revision, or deadline. A one-shot claim persists its terminal status
+// in the same guarded write. SQL IS also matches a task whose observed
+// deadline was NULL.
+func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time, persistStatus TaskStatus) error {
+	updates := map[string]any{"next_run": nextRun, "last_run": lastRun}
+	if persistStatus != "" {
+		updates["status"] = persistStatus
+	}
 	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
+		Where("COALESCE(config, '') = ?", task.Config).
 		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
-		Updates(map[string]any{"next_run": nextRun, "last_run": lastRun})
+		Updates(updates)
 	if result.Error == nil && result.RowsAffected == 0 {
 		return ErrModUpdateScheduleChanged
 	}

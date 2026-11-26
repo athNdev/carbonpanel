@@ -93,6 +93,107 @@ func TestDueModUpdateTaskExecutesOnceAndRecordsOutcome(t *testing.T) {
 	require.Equal(t, 1, planner.calls, "a second tick must not re-run the same task")
 }
 
+func TestOneShotModUpdateDispatchesExactlyOnce(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{staged: 1}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+
+	server := &storage.Server{ID: "srv-mod-once", Name: "mod-once", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-mod-once", ServerID: server.ID, Name: "one-shot mod policy",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeOnce, RunAt: &past, NextRun: &past,
+		Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Equal(t, 1, planner.calls, "a due one-shot policy must dispatch exactly once")
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, storage.ExecutionStatusCompleted, executions[0].Status)
+
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusDisabled, stored.Status, "the claimed one-shot slot persists its terminal state")
+	require.Nil(t, stored.NextRun)
+	require.NotNil(t, stored.LastRun)
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Equal(t, 1, planner.calls, "a disabled one-shot policy must not run again")
+	executions, err = store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+}
+
+func TestOneShotModUpdateClaimRejectsConcurrentPolicyEdit(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-once-race", Name: "once-race", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-once-race", ServerID: server.ID, Name: "one-shot race",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeOnce, RunAt: &past, NextRun: &past,
+		Config: `{"enabled":true,"excluded_projects":["stale"]}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	const editedConfig = `{"enabled":true,"excluded_projects":["current"]}`
+	policyEdited := false
+	require.NoError(t, store.DB().Callback().Update().Before("gorm:update").Register(
+		"fixture:policy-edit-before-one-shot-claim",
+		func(tx *gorm.DB) {
+			if policyEdited || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "scheduled_tasks" {
+				return
+			}
+			updates, ok := tx.Statement.Dest.(map[string]any)
+			if !ok {
+				return
+			}
+			if _, claiming := updates["last_run"]; !claiming {
+				return
+			}
+			policyEdited = true
+			observed, err := store.GetScheduledTask(ctx, task.ID)
+			require.NoError(t, err)
+			edited := *observed
+			edited.Config = editedConfig
+			saved, err := store.UpdateModUpdatePolicy(ctx, observed, &edited, false)
+			require.NoError(t, err)
+			require.True(t, saved)
+		},
+	))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.True(t, policyEdited, "the fixture must race the one-shot claim")
+	require.Zero(t, planner.calls, "a stale one-shot policy must not reach the planner")
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusEnabled, stored.Status, "a rejected claim must not consume the one-shot slot")
+	require.NotNil(t, stored.NextRun)
+	require.True(t, stored.NextRun.Equal(past))
+	require.Nil(t, stored.LastRun)
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Equal(t, 1, planner.calls, "the still-due slot retries with the current policy")
+	require.Equal(t, []string{"current"}, planner.cfg.ExcludedProjects)
+}
+
 func TestDueModUpdateTaskDoesNotDispatchAfterDisableEnable(t *testing.T) {
 	s, store := newTriggerTestScheduler(t)
 	planner := &fakeModPlanner{}

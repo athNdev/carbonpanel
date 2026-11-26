@@ -140,7 +140,7 @@ func TestModUpdatePolicyEditPreservesConcurrentDeadline(t *testing.T) {
 			return
 		}
 		advanced = true
-		require.NoError(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run))
+		require.NoError(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run, ""))
 	}))
 	config := `{"enabled":true,"window":"idle","idle_minutes":18}`
 	unchangedInterval := int32(60)
@@ -160,7 +160,7 @@ func TestModUpdatePolicyEditPreservesConcurrentDeadline(t *testing.T) {
 	require.NoError(t, err)
 	recalculated := response.Msg.GetTask().GetNextRun().AsTime()
 	require.WithinDuration(t, time.Now().Add(15*time.Minute), recalculated, time.Minute)
-	require.ErrorIs(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run), storage.ErrModUpdateScheduleChanged)
+	require.ErrorIs(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run, ""), storage.ErrModUpdateScheduleChanged)
 	stored, err := svc.store.GetScheduledTask(ctx, before.ID)
 	require.NoError(t, err)
 	require.True(t, recalculated.Equal(*stored.NextRun))
