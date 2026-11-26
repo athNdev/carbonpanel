@@ -167,42 +167,44 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="space-y-2">
 				{#each datapacks as d (d.fileName)}
 					<Card class="border-border bg-card">
-						<CardContent class="flex items-center gap-3 p-3">
-							<Package class="h-5 w-5 shrink-0 text-primary" />
-							<div class="min-w-0 flex-1">
-								<p
-									class="truncate font-medium whitespace-nowrap text-foreground"
-									title={d.displayName}
-								>
-									{d.displayName}
-								</p>
-								<p
-									class="truncate text-xs whitespace-nowrap text-muted-foreground"
-									title={d.fileName}
-								>
-									{d.fileName}
-								</p>
-								{#if d.packFormat}
-									<p class="text-xs text-muted-foreground">pack format {d.packFormat}</p>
-								{/if}
-								{#if d.formatWarning}
-									<p class="text-xs text-destructive-text">{d.formatWarning}</p>
-								{/if}
+						<CardContent class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3">
+							<div class="flex min-w-0 flex-1 items-start gap-3">
+								<Package class="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+								<div class="min-w-0 flex-1 space-y-0.5">
+									<p class="font-medium break-words text-foreground" title={d.displayName}>
+										{d.displayName}
+									</p>
+									<p class="text-xs break-words text-muted-foreground" title={d.fileName}>
+										{d.fileName}
+									</p>
+									{#if d.packFormat}
+										<p class="text-xs break-words text-muted-foreground">
+											pack format {d.packFormat}
+										</p>
+									{/if}
+									{#if d.formatWarning}
+										<p class="text-xs break-words text-destructive-text">{d.formatWarning}</p>
+									{/if}
+								</div>
 							</div>
-							<Badge class="border-border bg-muted whitespace-nowrap text-foreground">
-								{(d.size / 1024).toFixed(1)} KB
-							</Badge>
-							<CarbonButton
-								kind="ghost"
-								onclick={() => remove(d.fileName)}
-								disabled={deleting[d.fileName]}
-								class="shrink-0 rounded-none text-destructive-text hover:bg-destructive/20"
-								aria-label={`Delete ${d.displayName}`}
+							<div
+								class="flex w-full shrink-0 items-center justify-between gap-3 pl-8 sm:w-auto sm:justify-end sm:pl-0"
 							>
-								{#if deleting[d.fileName]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Trash2
-										class="h-4 w-4"
-									/>{/if}
-							</CarbonButton>
+								<Badge class="border-border bg-muted whitespace-nowrap text-foreground">
+									{(d.size / 1024).toFixed(1)} KB
+								</Badge>
+								<CarbonButton
+									kind="ghost"
+									onclick={() => remove(d.fileName)}
+									disabled={deleting[d.fileName]}
+									class="shrink-0 rounded-none text-destructive-text hover:bg-destructive/20"
+									aria-label={`Delete ${d.displayName}`}
+								>
+									{#if deleting[d.fileName]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Trash2
+											class="h-4 w-4"
+										/>{/if}
+								</CarbonButton>
+							</div>
 						</CardContent>
 					</Card>
 				{/each}
