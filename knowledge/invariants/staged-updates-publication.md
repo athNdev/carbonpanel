@@ -8,7 +8,7 @@ code_refs: [internal/db/staged_config.go, internal/db/staged_content.go, interna
 sources:
   - title: Parent concept
     resource: staged-updates.md
-verified: { by: agent:opencode, at: 2026-11-26 }
+verified: { by: agent:opencode, at: 2026-11-27 }
 ---
 # Rule
 
