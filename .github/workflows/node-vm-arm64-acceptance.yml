@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: MPL-2.0
+# Disposable arm64 first-boot identity acceptance for the node VM base image.
+#
+# Hosted arm64 runners are ephemeral and have no KVM, so this workflow boots the
+# pinned Ubuntu arm64 cloud image under QEMU TCG on the declared UEFI/virt
+# target. It proves first-boot identity for two distinct instance IDs only. It
+# does not mount the production controller listener, enroll against a live
+# controller or claim reboot persistence. Only a small allowlisted receipt is
+# uploaded; serial logs and overlays stay in the ephemeral runner.
+name: Node VM arm64 boot acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Optional full commit SHA that must match the dispatched event SHA
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-vm-arm64-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  arm64:
+    name: arm64 UEFI/TCG first-boot identity
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - name: Checkout the event's exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Assert the checked-out head is the event SHA
+        env:
+          EVENT_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          test "$head" = "$EVENT_SHA"
+          if [ -n "$EXPECTED_SHA" ]; then
+            test "$head" = "$EXPECTED_SHA"
+          fi
+          printf 'head=%s\n' "$head"
+
+      - name: Install the declared emulator and firmware in the ephemeral runner
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-arm qemu-efi-aarch64 genisoimage ipxe-qemu
+          command -v qemu-system-aarch64
+          test -f /usr/share/AAVMF/AAVMF_CODE.fd
+          test -f /usr/share/AAVMF/AAVMF_VARS.fd
+          qemu-system-aarch64 --version
+          dpkg-query -W -f='${Package}=${Version}\n' \
+            qemu-system-arm qemu-efi-aarch64 genisoimage ipxe-qemu
+
+      - name: Fetch the pinned arm64 image and signed checksum file
+        env:
+          BASE: https://cloud-images.ubuntu.com/releases/noble/release-20261017
+          WORK: ${{ runner.temp }}/node-vm-arm64
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/inputs" "$WORK/run"
+          curl -fSL --retry 3 --max-time 600 \
+            -o "$WORK/inputs/ubuntu-24.04-server-cloudimg-arm64.img" \
+            "$BASE/ubuntu-24.04-server-cloudimg-arm64.img"
+          curl -fSL --retry 3 --max-time 120 \
+            -o "$WORK/inputs/SHA256SUMS" "$BASE/SHA256SUMS"
+          sha256sum "$WORK/inputs/SHA256SUMS"
+          test "$(stat -c %s "$WORK/inputs/ubuntu-24.04-server-cloudimg-arm64.img")" = "616522752"
+
+      - name: Boot two distinct instance IDs and write the receipt
+        env:
+          WORK: ${{ runner.temp }}/node-vm-arm64
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/node_vm_arm64_acceptance.py \
+            --image "$WORK/inputs/ubuntu-24.04-server-cloudimg-arm64.img" \
+            --sha256sums "$WORK/inputs/SHA256SUMS" \
+            --workspace "$WORK/run" \
+            --head "$HEAD_SHA" \
+            --receipt "$WORK/receipt.json"
+
+      - name: Upload the redacted receipt only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: node-vm-arm64-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/node-vm-arm64/receipt.json
+          if-no-files-found: error
+          retention-days: 14
