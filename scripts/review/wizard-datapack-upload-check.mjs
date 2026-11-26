@@ -1578,6 +1578,49 @@ try {
         "held archive create cancels back navigation and disables replacement controls",
     });
   }
+  // A tar.gz archive is a first-class create input, not only an export format.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(base);
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "light");
+    document.documentElement.classList.remove("dark");
+    globalThis.__wizardDenyListNodes = true;
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-1", name: "Fixture Node" },
+    ];
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__archivePreviewFormat = 2;
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-tar-create-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page, "tar.gz");
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await page
+    .getByTestId("archive-preview")
+    .getByText("TAR.GZ (.tar.gz)")
+    .waitFor();
+  for (let step = 0; step < 4; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Server created" }).waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  const tarCreate = calls.find(
+    (call) => call.method === "createServer",
+  ).payload;
+  assert.equal(tarCreate.archiveUploadId, "seeded-session");
+  assert.equal(tarCreate.nodeId, "node-1");
+  assert.equal(tarCreate.placementStrategy, "");
+  summaries.push({
+    scenario: "tar.gz archive previews and creates with its verified runtime",
+    calls,
+  });
+
   // Upload status/progress and stale destination fencing. A delayed failing
   // preview for an abandoned destination must not overwrite the current one.
   await page.setViewportSize({ width: 1440, height: 1000 });

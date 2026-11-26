@@ -68,7 +68,7 @@ async function setTheme(page, theme) {
 }
 
 async function login(page) {
-  await page.goto(`${base}/login`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
   await page
     .locator('input[placeholder="Enter your username"]')
     .fill(user);
@@ -83,7 +83,11 @@ async function login(page) {
 }
 
 async function firstServerPath(page) {
-  await page.goto(`${base}/servers`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/servers`, { waitUntil: "domcontentloaded" });
+  await page
+    .locator('a[href^="/servers/"]')
+    .first()
+    .waitFor({ timeout: 30_000 });
   await page.waitForTimeout(750);
   const href = await page.evaluate(() => {
     const links = [...document.querySelectorAll('a[href^="/servers/"]')];
@@ -167,43 +171,49 @@ async function downloadArchive(page, format, view) {
     .getByLabel("I have reviewed this notice before downloading.")
     .check();
   await page.getByTestId("archive-download").focus();
-  await page.keyboard.press("Enter");
-  evidence.keyboard.push("Enter authorized the archive download");
-
-  const responsePromise = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/v1/download/") &&
-      response.request().method() === "GET",
-    { timeout: 10 * 60 * 1000 },
-  );
   const downloadPromise = page.waitForEvent("download", {
     timeout: 10 * 60 * 1000,
   });
-  const [response, download] = await Promise.all([
-    responsePromise,
-    downloadPromise,
-  ]);
+  await page.keyboard.press("Enter");
+  evidence.keyboard.push("Enter authorized the archive download");
+  const download = await downloadPromise;
   const suggested = download.suggestedFilename();
   const saved = path.join(out, `${view}-${suggested}`);
   await download.saveAs(saved);
   const bytes = await fs.readFile(saved);
+  // Inspect the same authorized session through the browser context so the
+  // evidence can state the HTTP status and headers without transferring the
+  // archive a second time.
+  const response = await page.context().request.fetch(download.url(), {
+    method: "HEAD",
+  });
   const result = {
     format,
     view,
     status: response.status(),
-    url: response.url().replace(base, "<review-base>"),
+    url: download.url().replace(base, "<review-base>"),
     filename: suggested,
     byteLength: bytes.byteLength,
     sha256: sha256(bytes),
     contentType: response.headers()["content-type"] || "",
     disposition: response.headers()["content-disposition"] || "",
+    declaredLength: Number(response.headers()["content-length"] || 0),
   };
+  assert.equal(
+    result.declaredLength,
+    result.byteLength,
+    "the authorized response length matches the downloaded bytes",
+  );
   assert.equal(result.status, 200);
   assert.ok(
     result.filename.endsWith(format === "tar.gz" ? ".tar.gz" : ".zip"),
     `download filename ${result.filename} matches ${format}`,
   );
   assert.ok(result.byteLength > 0, "the authorized transfer carries bytes");
+  assert.ok(
+    result.disposition.includes(suggested),
+    "the download response names the current archive filename",
+  );
   evidence.downloads.push(result);
   await page
     .getByTestId("archive-export-panel")
@@ -212,7 +222,7 @@ async function downloadArchive(page, format, view) {
 }
 
 async function previewArchive(page, archivePath, format, view) {
-  await page.goto(`${base}/servers/new`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/servers/new`, { waitUntil: "domcontentloaded" });
   await page.getByPlaceholder("survival-smp-01").fill("archive-route-fixture");
   const tile = page.getByTestId("create-from-archive-tile");
   await tile.focus();
@@ -229,13 +239,20 @@ async function previewArchive(page, archivePath, format, view) {
     path: path.join(out, `new-preview-${format}-${view}.png`),
     fullPage: true,
   });
+  for (let step = 0; step < 4; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
   const create = page.getByRole("button", { name: "Create Server", exact: true });
+  await create.waitFor();
   evidence.previews.push({
     format,
     view,
     filename: path.basename(archivePath),
     screenshot: `new-preview-${format}-${view}.png`,
     createEnabled: await create.isEnabled(),
+  });
+  await page.screenshot({
+    path: path.join(out, `new-create-${format}-${view}.png`),
+    fullPage: true,
   });
 }
 
@@ -249,6 +266,7 @@ try {
   const page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
   });
+  page.setDefaultTimeout(60_000);
   page.on("pageerror", (error) => evidence.errors.push(error.message));
 
   await login(page);
@@ -261,7 +279,7 @@ try {
     { name: "narrow-light", width: 390, height: 900, theme: "light" },
   ]) {
     await page.setViewportSize({ width: view.width, height: view.height });
-    await page.goto(`${base}${detailPath}`, { waitUntil: "networkidle" });
+    await page.goto(`${base}${detailPath}`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("server-export-archive").waitFor({
       timeout: 30_000,
     });
