@@ -38,13 +38,23 @@ sources:
 
 - A bind request ID identifies one server, level, revision, activation window
   and node generation. A completed replay must still name the binding installed
-  by that operation. Legacy journal rows rely on the binding and timestamps.
+  by that operation, before current config or layout is read. An omitted
+  level can replay only when one retained binding proves the request. Legacy
+  journal rows rely on binding and timestamps; the activation window is
+  unverifiable. Replay audit uses the proved binding's level and revision.
+- Fresh bind requires persisted config and refuses a different explicit level
+  before creating a journal. Bind checks the level again after acquiring
+  the lifecycle transition and after the operation journal admits the bind.
+  Staged level and custom server properties writes check for an active bind
+  within the same transaction, including rollback.
 
 # Revision archives
 
 - Import records a library-relative archive key. Preview and bind resolve it
   under the configured World Library root and accept legacy paths within that
-  root. Bind validates the archive path before stopping the running server.
+  root. Fresh bind validates the same bounded layout as preview before
+  stopping the running server. The copied archive and extraction tree are
+  siblings so root archive entries cannot collide with the staged ZIP.
 - Match Java world data versions to the release JAR's `version.json`
   `world_version`. Java 1.21.1 writes 3955 and Java 1.21 writes 3953, even
   though they share a network protocol version.

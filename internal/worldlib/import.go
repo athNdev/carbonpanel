@@ -47,6 +47,10 @@ const maxImportArchiveBytes int64 = 512 << 20
 
 const importHTTPTimeout = 5 * time.Minute
 
+// ErrInvalidImportRequest classifies operator input separately from storage
+// failures during an otherwise valid import.
+var ErrInvalidImportRequest = errors.New("invalid world import request")
+
 // ImportRequest describes one operator-driven import. Workstation paths are
 // never persisted: only the canonical source descriptor and provenance are.
 type ImportRequest struct {
@@ -168,8 +172,14 @@ func (i *LocalImporter) Import(ctx context.Context, req ImportRequest) (*ImportR
 		return fail(fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expected, checksum))
 	}
 
-	report, err := InspectArchive(archivePath)
+	// One bounded, context-aware pass covers the archive hardening limits and
+	// the world layout gate. Refuse layouts the binder cannot map instead of
+	// storing an immutable revision that can never be bound.
+	report, layout, err := InspectRevisionArchive(ctx, archivePath)
 	if err != nil {
+		return fail(err)
+	}
+	if err := layout.Validate(); err != nil {
 		return fail(err)
 	}
 	archiveSize, err := ArchiveFileSize(archivePath)
@@ -432,25 +442,25 @@ func validateRequest(req ImportRequest) error {
 		return fmt.Errorf("%w: import source %q", ErrUnsupported, req.Source)
 	}
 	if strings.TrimSpace(req.LicenseAttestation) == "" {
-		return errors.New("worldlib: license attestation is required for an imported revision")
+		return fmt.Errorf("%w: license attestation is required for an imported revision", ErrInvalidImportRequest)
 	}
 	if strings.TrimSpace(req.SHA256Checksum) == "" {
-		return errors.New("worldlib: expected whole-archive SHA-256 is required")
+		return fmt.Errorf("%w: expected whole-archive SHA-256 is required", ErrInvalidImportRequest)
 	}
 	if _, err := normalizeChecksum(req.SHA256Checksum); err != nil {
 		return err
 	}
 	if req.Source == SourceURL {
 		if strings.TrimSpace(req.URL) == "" {
-			return errors.New("worldlib: url is required for url source")
+			return fmt.Errorf("%w: url is required for url source", ErrInvalidImportRequest)
 		}
 		if _, err := utils.ValidateURLStatic(req.URL, false); err != nil {
-			return fmt.Errorf("worldlib: invalid source url: %w", err)
+			return fmt.Errorf("%w: invalid source url: %w", ErrInvalidImportRequest, err)
 		}
 		return nil
 	}
 	if strings.TrimSpace(req.URL) == "" && strings.TrimSpace(req.UploadID) == "" {
-		return errors.New("worldlib: local archive path is required for upload source")
+		return fmt.Errorf("%w: local archive path is required for upload source", ErrInvalidImportRequest)
 	}
 	return nil
 }
@@ -459,7 +469,7 @@ func normalizeChecksum(raw string) (string, error) {
 	value := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "sha256:")))
 	decoded, err := hex.DecodeString(value)
 	if err != nil || len(decoded) != sha256Size {
-		return "", fmt.Errorf("worldlib: invalid SHA-256 checksum %q", raw)
+		return "", fmt.Errorf("%w: SHA-256 checksum must contain 64 hexadecimal characters", ErrInvalidImportRequest)
 	}
 	return value, nil
 }

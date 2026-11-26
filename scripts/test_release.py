@@ -953,8 +953,8 @@ class ReleaseTests(unittest.TestCase):
         source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
         self.assertIn("&& inputs.deploy && 'pages-deploy'", source)
         self.assertIn("&& 'pages-deploy' || format('pages-verify-{0}'", source)
-        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
-                      "|| !inputs.deploy }}", source)
+        self.assertIn("format('pages-verify-{0}', github.run_id)", source)
+        self.assertIn("cancel-in-progress: false", source)
         self.assertNotIn("  group: pages\n", source)
         # An opted-in deployment is still gated by the trusted-CI decision, not
         # by which concurrency group the run used.
@@ -2016,17 +2016,13 @@ class ReleaseTests(unittest.TestCase):
         # (b) build-only/rehearsal runs get a distinct per-run key, so ordinary
         # CI is not serialized against another version.
         self.assertIn("format('carbonpanel-stage-{0}', github.run_id)", source)
-        # (c) cancel-in-progress:false protects the RUNNING run only. Default
-        # queue:single retains ONE pending run that a later request replaces;
-        # this lane is single-operator dispatch, never "all queued publishers wait".
+        # (c) Running and pending publishers retain their place in the queue.
         self.assertRegex(source, r"(?m)^  cancel-in-progress: false$")
         self.assertNotIn("cancel-in-progress: true", source)
-        self.assertNotRegex(source, r"(?m)^  queue:")
-        self.assertIn("SINGLE-OPERATOR DISPATCH", source)
-        self.assertIn("REPLACES it", source)
+        self.assertRegex(source, r"(?m)^  queue: max$")
         ops = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
-        self.assertIn("single-operator dispatch", ops)
-        self.assertIn("replaces", ops)
+        self.assertIn("up to 100 waiting jobs or runs", ops)
+        self.assertIn("Inspect the existing run before retrying", ops)
         # (d) no job-level group may release the lock between phases. All jobs,
         # including the three writers, inherit the workflow-level lock.
         for name in ("plan", "frontend", "source-image", "binaries", "image",
@@ -2745,6 +2741,36 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("inputs.publish == true && 'pages-deploy'", source)
         self.assertNotIn("carbonpanel-product-publish", source)
+
+    def test_pages_publishers_preserve_the_shared_queue(self):
+        import yaml
+
+        workflows = release.ROOT / ".github/workflows"
+        publishers = set()
+        for path in sorted(workflows.glob("*.y*ml")):
+            source = path.read_text(encoding="utf-8")
+            if "pages-deploy" not in source:
+                continue
+            workflow = yaml.safe_load(source)
+            scopes = {"workflow": workflow, **workflow["jobs"]}
+            for scope, definition in scopes.items():
+                concurrency = definition.get("concurrency", {})
+                group = concurrency.get("group", "") if isinstance(concurrency, dict) else concurrency
+                if "pages-deploy" not in group:
+                    continue
+                with self.subTest(workflow=path.name, scope=scope):
+                    publishers.add((path.name, scope))
+                    self.assertIs(concurrency.get("cancel-in-progress"), False)
+                    self.assertEqual(concurrency.get("queue"), "max")
+        self.assertTrue({
+            ("release.yml", "workflow"),
+            ("stable-recover.yml", "workflow"),
+            ("landing.yml", "workflow"),
+            ("docs-only-publish.yml", "workflow"),
+            ("cd.yml", "channel-transaction"),
+            ("cd.yml", "plan-nightly-recovery"),
+            ("cd.yml", "recover-nightly"),
+        }.issubset(publishers))
 
 
 class ChannelTransactionTests(unittest.TestCase):

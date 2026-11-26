@@ -127,6 +127,55 @@ func TestColdNodeResolutionCancelsDuringVersionNegotiation(t *testing.T) {
 	}
 }
 
+func TestStorageAllocationChecksTheResolvedDockerEndpoint(t *testing.T) {
+	var workerCreates atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/networks"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"fixture","Name":"carbon-panel-network"}]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			workerCreates.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"message":"allocation fixture stops at create"}`, http.StatusNotFound)
+		default:
+			t.Errorf("unexpected Docker fixture request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer api.Close()
+	current := &models.Node{ID: "archive-node", Host: fakeDockerHost(t, api), StorageRoot: "/node-storage"}
+	pool := NewClientPool(newMockNodeStore(current), nil, logger.New())
+	defer func() { _ = pool.Close() }()
+	transport := NewStorageTransport(pool, logger.New(), "fixture-worker")
+
+	stale := current.StorageInfo()
+	stale.Endpoint = "tcp://operator:fixture-credential@stale.invalid:2375"
+	assertStaleRejected := func(wantCreates int32) {
+		t.Helper()
+		_, err := transport.OpenStorageRoot(context.Background(), stale)
+		if !errors.Is(err, nodestorage.ErrUnavailable) ||
+			!strings.Contains(err.Error(), "endpoint changed") || strings.Contains(err.Error(), "credential") {
+			t.Fatalf("expected a redacted endpoint mismatch, got %v", err)
+		}
+		if got := workerCreates.Load(); got != wantCreates {
+			t.Fatalf("stale snapshot changed the count of created workers to %d, want %d", got, wantCreates)
+		}
+	}
+	assertStaleRejected(0)
+
+	info := current.StorageInfo()
+	info.Endpoint = strings.TrimPrefix(info.Endpoint, "tcp://")
+	_, err := transport.OpenStorageRoot(context.Background(), info)
+	if err == nil || workerCreates.Load() != 1 {
+		t.Fatalf("matching endpoint did not reach the fixture worker create: %v", err)
+	}
+	assertStaleRejected(1)
+}
+
 type contextBlockedNodeStore struct {
 	*mockNodeStore
 	entered chan struct{}

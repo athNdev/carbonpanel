@@ -46,6 +46,7 @@ var exposedTools = []ToolSpec{
 	{Name: "download_init_file", Procedure: "/carbonpanel.v1.FileService/InitFileDownload", Class: Class("safe"), Confirm: false, Description: "Stage one server-relative file via typed InitFileDownload, then transfer its bytes as bounded controller frames. Returns session id, filename, size, SHA-256 and bytes. Read-only.", Source: "download"},
 	{Name: "download_remote_archive", Procedure: "/carbonpanel.v1.FileService/DownloadRemoteArchive", Class: Class("review"), Confirm: true, Description: "Start a checksum-verified remote archive download. Requires confirm=true; the controller applies its own redirect/host policy.", Source: "content"},
 	{Name: "download_stream", Procedure: "/carbonpanel.v1.FileService/GetFile", Class: Class("safe"), Confirm: false, Description: "Composed byte path for an existing download session (rest_download_stream). Reads bounded controller frames via OpenStream/ReadStreamFrame/CloseStream and returns bytes, exact size and cumulative SHA-256. No gateway file storage. Read-only.", Source: "download"},
+	{Name: "export_server_archive", Procedure: "/carbonpanel.v1.ServerService/ExportServerArchive", Class: Class("review"), Confirm: false, Description: "Prepare a verified ZIP or tar.gz export of one stopped server. Returns a scoped download session.", Source: "server"},
 	{Name: "export_world", Procedure: "/carbonpanel.v1.FileService/ExportWorld", Class: Class("review"), Confirm: false, Description: "Prepare a world export session; the world directory stays in place.", Source: "content"},
 	{Name: "extract_archive", Procedure: "/carbonpanel.v1.FileService/ExtractArchive", Class: Class("review"), Confirm: true, Description: "Start a bounded archive extraction. Requires confirm=true; poll with get_extraction_status.", Source: "content"},
 	{Name: "file_service_save_uploaded_file", Procedure: "/carbonpanel.v1.FileService/SaveUploadedFile", Class: Class("review"), Confirm: true, Description: "Commit one owned, completed upload session into one server-relative destination. Requires confirm=true; authorization is re-evaluated by the controller at commit (fresh files:create[server_id]). No byte data is carried by this tool.", Source: "upload"},
@@ -161,6 +162,7 @@ var exposedTools = []ToolSpec{
 	{Name: "player_service_set_operator", Procedure: "/carbonpanel.v1.PlayerService/SetOperator", Class: Class("review"), Confirm: true, Description: "Grant or remove operator level for one exact player identity. Requires confirm=true; level is 0 to 4.", Source: "integration"},
 	{Name: "player_service_set_whitelist_entry", Procedure: "/carbonpanel.v1.PlayerService/SetWhitelistEntry", Class: Class("review"), Confirm: true, Description: "Add or remove one whitelist entry by exact identity key. Requires confirm=true.", Source: "integration"},
 	{Name: "player_service_undo_player_action", Procedure: "/carbonpanel.v1.PlayerService/UndoPlayerAction", Class: Class("review"), Confirm: true, Description: "Undo one prior typed player action by exact undo token. Requires confirm=true.", Source: "integration"},
+	{Name: "preview_server_archive", Procedure: "/carbonpanel.v1.ServerService/PreviewServerArchive", Class: Class("safe"), Confirm: false, Description: "Validate one caller-owned server archive and report destination requirements.", Source: "server"},
 	{Name: "preview_world_config", Procedure: "/carbonpanel.v1.WorldService/PreviewWorldConfig", Class: Class("safe"), Confirm: false, Description: "Validate draft world configuration without applying it.", Source: "first_slice"},
 	{Name: "recreate_module", Procedure: "/carbonpanel.v1.ModuleService/RecreateModule", Class: Class("review"), Confirm: true, Description: "Destroy and recreate one module's container. Destructive; requires confirm=true.", Source: "content"},
 	{Name: "recreate_server", Procedure: "/carbonpanel.v1.ServerService/RecreateServer", Class: Class("review"), Confirm: true, Description: "Destroy and recreate one server container from its retained data. Requires confirm=true.", Source: "server"},
@@ -222,9 +224,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 251
-	IntegrationMountedRPCs = 241
+	IntegrationDeclaredRPCs = 253
+	IntegrationMountedRPCs = 243
 	IntegrationExcludedOps = 76
-	IntegrationSupportedOps = 203
-	IntegrationCombinedTools = 214
+	IntegrationSupportedOps = 205
+	IntegrationCombinedTools = 216
 )

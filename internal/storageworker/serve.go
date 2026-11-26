@@ -115,6 +115,25 @@ func dispatch(fs FS, r Request) Response {
 			out = append(out, DirEntry{Name: e.Name(), IsDir: e.IsDir(), Mode: uint32(e.Type())})
 		}
 		return Response{OK: true, Entries: out}
+	case "mkdir_exclusive":
+		allocator, ok := fs.(interface{ MkdirExclusive(string) error })
+		if !ok {
+			return Response{Error: "storageworker: exclusive allocation unavailable"}
+		}
+		if err := allocator.MkdirExclusive(r.Path); err != nil {
+			return errorResponse(err)
+		}
+		return Response{OK: true}
+	case "free_bytes":
+		disk, ok := fs.(interface{ FreeBytes() (int64, error) })
+		if !ok {
+			return Response{Error: "storageworker: free space unavailable"}
+		}
+		free, err := disk.FreeBytes()
+		if err != nil {
+			return errorResponse(err)
+		}
+		return Response{OK: true, FreeBytes: free}
 	case "mkdir":
 		if r.Perms != 0 {
 			fs, ok := fs.(interface {
@@ -166,6 +185,8 @@ func errorResponse(err error) Response {
 	res := Response{Error: err.Error()}
 	if os.IsNotExist(err) {
 		res.ErrorCode = "not_exist"
+	} else if os.IsExist(err) {
+		res.ErrorCode = "exists"
 	}
 	return res
 }

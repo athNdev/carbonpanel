@@ -176,9 +176,14 @@ try {
     const headingSize = (heading) => heading.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
     assert.ok(await headingSize(detail.getByRole("heading", { level: 1 })) >
       await headingSize(detail.getByRole("heading", { name: "Server Settings" })));
-    const label = await count.locator("dt").boundingBox();
-    const value = await count.locator("dd").boundingBox();
-    assert.ok(value.x - label.x - label.width <= 10);
+    // A viewport resize can animate the shell's margin. Read both positions
+    // together so movement between browser calls cannot inflate the gap.
+    const gap = await count.evaluate((row) => {
+      const label = row.querySelector("dt").getBoundingClientRect();
+      const value = row.querySelector("dd").getBoundingClientRect();
+      return value.left - label.right;
+    });
+    assert.ok(gap >= 0 && gap <= 10, `Players label gap at ${width}px: ${gap}px`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   }
   results.push("detail groups player count, explains stale readings and preserves heading hierarchy at 360/768/1440");

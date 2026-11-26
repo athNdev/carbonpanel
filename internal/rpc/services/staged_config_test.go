@@ -95,3 +95,49 @@ func TestStagedConfigServiceRejectsForeignStagedID(t *testing.T) {
 		t.Fatalf("staged record was mutated despite denial: %v", err)
 	}
 }
+
+func TestStagedWorldLevelRPCRefusesApplyAndRollbackDuringBind(t *testing.T) {
+	store := newWorldRPCStore(t)
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-stage-bind", Name: "srv-stage-bind", NodeID: "local"}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	ops := handlers.NewStagedConfigOperations(store)
+	svc := NewStagedConfigService(store, ops, nil)
+	staged, err := ops.Stage(ctx, server.ID, map[string]any{"level": "new"}, storage.StagedApplyOnRestart, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := connect.NewRequest(&v1.ApplyStagedChangeRequest{ServerId: server.ID, StagedId: staged.ID})
+	rollback := connect.NewRequest(&v1.RollbackStagedChangeRequest{ServerId: server.ID, StagedId: staged.ID})
+	begin := func(key string) *storage.ServerOperation {
+		op, _, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, "", key, "world-bind", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return op
+	}
+	release := func(op *storage.ServerOperation) {
+		if err := store.AdvanceServerOperation(ctx, op.ID, storage.ServerOperationPrepared, storage.ServerOperationFailed, "fixture finished"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	op := begin("apply")
+	if _, err := svc.ApplyStagedChange(ctx, apply); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("apply during world bind = %v", err)
+	}
+	release(op)
+	if reply, err := svc.ApplyStagedChange(ctx, apply); err != nil || !reply.Msg.Success {
+		t.Fatalf("apply after world bind released = %+v, %v", reply, err)
+	}
+	op = begin("rollback")
+	if _, err := svc.RollbackStagedChange(ctx, rollback); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("rollback during world bind = %v", err)
+	}
+	release(op)
+	if reply, err := svc.RollbackStagedChange(ctx, rollback); err != nil || !reply.Msg.Success {
+		t.Fatalf("rollback after world bind released = %+v, %v", reply, err)
+	}
+}

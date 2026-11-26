@@ -230,10 +230,10 @@ The gateway has its own versioned GHCR image and MCP Registry identity.
 has an exact version with a publicly pullable GHCR digest. The guide includes
 client configuration and build compatibility. [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx)
 
-The gateway mounts the generated **214-tool combined catalogue**. The
-controller has 251 declared RPCs across 28 proto services and
-241 mounted/reachable RPCs across 27 services. The strict gate verifies the
-203 supported operations. The audit matrix documents 76 excluded operations
+The gateway mounts the generated **216-tool combined catalogue**. The
+controller has 253 declared RPCs across 28 proto services and
+243 mounted/reachable RPCs across 27 services. The strict gate verifies the
+205 supported operations. The audit matrix documents 76 excluded operations
 and their equivalents where available.
 
 Tool availability depends on the build behind `CARBONPANEL_URL` and the grants

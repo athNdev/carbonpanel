@@ -24,6 +24,16 @@ Record head, commands, results and receipt in the PR. Name fixture-only limits
 plainly; isolate unrelated failures. Claim live acceptance only from the
 intended channel, and move Jira to Done after that evidence exists.
 
+**Visual review.** For any PR that changes user-visible UI, exercise the affected
+routes and workflows in a browser at the exact PR head. This includes changes
+driven by the backend or generated output. Inspect screenshots of the affected
+states at representative desktop and narrow widths in relevant themes. Check
+Carbon design consistency, layout, overflow, and keyboard interactions. Use the
+[browser review harness](scripts/review/README.md) where applicable. Include the
+reviewed head, routes and states, viewport and theme coverage, screenshot links,
+and fixture limits in the PR receipt. Refresh the evidence before merging if
+the head changes.
+
 ## Project boundaries
 
 - Keep developer workstation configuration, credentials, generated state, and
