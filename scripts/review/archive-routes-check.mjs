@@ -239,6 +239,9 @@ async function previewArchive(page, archivePath, format, view) {
     path: path.join(out, `new-preview-${format}-${view}.png`),
     fullPage: true,
   });
+  await page
+    .getByTestId("archive-preview")
+    .screenshot({ path: path.join(out, `new-preview-${format}-${view}-panel.png`) });
   for (let step = 0; step < 4; step++)
     await page.getByRole("button", { name: "Next Step" }).click();
   const create = page.getByRole("button", { name: "Create Server", exact: true });
