@@ -100,13 +100,17 @@ upload, including the chosen destination node's capacity once a node is
 available. The preview shows the archive format, schema and exporter version,
 runtime defaults, file count, expanded and required bytes, destination
 availability, the chosen port and typed blockers or warnings. Archive mode
-requires a concrete destination
-node so the preview can check that node's free space; automatic placement
-remains available for ordinary creates. A create-only operator whose role
-denies node inventory sees the enabled destination IDs and display names from
-the preview instead of the full node list. Create stays disabled until the
-current upload has a successful preview for that exact node, and the create
-request submits precisely the previewed node. The final step names the
+requires a concrete destination node so the preview can check that node's free
+space; automatic placement remains available for ordinary creates. A create-only
+operator whose role denies node inventory sees the enabled destination IDs and
+display names from the preview instead of the full node list. Node inventory,
+when readable, only seeds a preliminary choice: a successful preflight for the
+current upload is authoritative, so nodes enabled since the page loaded appear
+and nodes disabled since then disappear, while a still-eligible selection is
+kept. A settled preflight with no enabled destinations shows an actionable empty
+state with a preflight retry instead of waiting indefinitely. Create stays
+disabled until the current upload has a successful preview for that exact node,
+and the create request submits precisely the previewed node. The final step names the
 remaining blocker when create is unavailable. A replacement upload blocks
 submission while it is in flight, and a late result for a superseded upload or
 destination is ignored. The visible engine and loader identity follows the

@@ -30,31 +30,31 @@ sources:
 - Serialize only explicitly portable runtime fields. Keep deployment identity,
   host paths, overrides and credentials outside the manifest.
 - Validate the complete archive before allocating a destination. Copy only into
-  a newly allocated destination and verify its input against the inspected
-  manifest before keeping the destination.
-- Keep upload ownership, server-create authorization and retry idempotency scoped
-  to the submitting principal. Allocate the destination exclusively on the
-  chosen node before committing the new server row.
+  a newly allocated destination and verify it against the inspected manifest.
+  Keep upload ownership, create authorization and retry idempotency scoped to
+  the submitting principal, and allocate the destination exclusively on the
+  chosen node before committing the server row.
 - Preview is authorized by server-create, not node inventory: return only enabled
-  destination IDs and names, never addresses, credentials, capacity statistics or
-  private inventory, and never require nodes/read. A supplied node still runs the
-  exact-node eligibility and capacity check.
+  destination IDs and names, never addresses, credentials, capacity or private
+  inventory, and never require nodes/read; a supplied node still checks eligibility and capacity.
 - The console offers ZIP and tar.gz export with stopped-server consistency only;
   it never stops a live server. It must show the third-party credential
   disclosure before enabling an authorized download and must not claim to detect
   secrets inside opaque plugin or mod files.
-- Create-from-Archive inspects the upload first, then previews against a
-  concrete destination node and renders typed findings and that node's capacity.
-  Archive mode never uses generic automatic placement; preview and create bind
-  the same node. Fence preview and upload responses by upload and destination.
-  Create stays blocked with an on-screen reason until the current upload has a
-  successful preview for the current node; a failed preview is retryable for the
-  same upload and node, and a replacement upload blocks submission while it is
-  in flight. Reuse one create request ID across retries and retain a completed
+- Create-from-Archive inspects the upload, previews a concrete destination and
+  renders typed findings plus that node's capacity. Archive mode never uses
+  generic automatic placement; preview and create bind the same node. The
+  current upload's successful preflight outranks cached node inventory: newly
+  enabled nodes appear, disabled ones disappear, a still-eligible selection is
+  kept and a settled empty preflight renders an actionable empty state with a
+  retry. Fence preview and upload responses by upload and destination. Create
+  stays blocked with an on-screen reason until the current upload has a
+  successful preview for the current node; a failed preview is retryable for
+  the same upload and node, and a replacement upload blocks submission while in
+  flight. Reuse one create request ID across retries and retain a completed
   upload after a refusal; release that identity only after a committed create.
 - Archive create submits the verified runtime and keeps operator memory and
-  max-player overrides. It hides standalone add-ons and the incompatible image,
-  modpack, detached and Docker-override fields, normalizing stale values out of
-  the request. Leaving archive mode restores the prior placement choice. While
-  create is in flight, navigation is blocked and completion binds to the
-  captured upload, node and preview.
+  max-player overrides, hiding standalone add-ons and the incompatible image,
+  modpack, detached and Docker-override fields, and normalizing stale values
+  out of the request. Leaving archive mode restores the prior placement choice;
+  an in-flight create blocks navigation and binds the captured upload, node and preview.

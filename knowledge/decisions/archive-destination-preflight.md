@@ -24,8 +24,12 @@ sources:
 - The preflight never carries addresses, credentials, capacity statistics or
   other node inventory, and it never qualifies create by itself. A supplied
   node still passes the exact-node enabled and free-space check.
-- The wizard prefers the full node list when `nodes/read` is available and
-  falls back to the narrow preflight when it is not.
+- The wizard treats the current successful preflight as authoritative for the
+  enabled-destination list, because it reflects nodes enabled now. It uses cached
+  inventory only to seed the choice before an upload, preserves a selection that
+  is still offered, and renders an actionable empty state with a preflight retry
+  when the settled preflight has no enabled destination. The narrow preflight
+  remains the only source for a create-only caller denied node inventory.
 
 # Rationale
 
