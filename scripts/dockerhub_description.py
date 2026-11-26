@@ -12,12 +12,14 @@ unauthenticated Docker Hub API.
 It never touches registry tags, images, GitHub releases or deployed services.
 """
 import argparse
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import os
 from pathlib import Path
 import posixpath
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -201,6 +203,109 @@ def fetch_live_index(opener=None, url=LIVE_INDEX_URL, timeout=30):
     except (ValueError, TypeError) as error:
         raise DescriptionError("published version index is not valid JSON: "
                                + str(error)) from error
+
+
+@contextmanager
+def offline_manifest(manifest):
+    """Serve a fixture manifest through the release.py `gh` boundary only."""
+    original = release_contract.github
+
+    def fixture_github(*args):
+        if any("/releases/assets/" in str(arg) for arg in args):
+            return json.dumps(manifest)
+        return original(*args)
+
+    release_contract.github = fixture_github
+    try:
+        yield
+    finally:
+        release_contract.github = original
+
+
+def load_release_records(releases_json=None):
+    """Read GitHub release pages through the shared release.py gh boundary."""
+    if releases_json is not None:
+        return releases_json
+    return json.loads(release_contract.github(
+        "api", "--paginate", "--slurp",
+        "/repos/{owner}/{repo}/releases?per_page=100"))
+
+
+def public_release_record(release_tag, records):
+    """Require a final Stable release record, not an RC or draft.
+
+    A tag can be a product RC while the GitHub record says
+    ``prerelease: false``; the release tag contract decides finality, not the
+    record flag alone. Only a final ``carbonpanel-vMAJOR.MINOR.PATCH`` tag or
+    the known legacy Stable tag is acceptable.
+    """
+    product = release_contract.product_release_or_none(release_tag)
+    if product is None and release_tag != release_contract.LEGACY_STABLE_TAG:
+        return None, "release tag is not a final Stable product tag: " + str(release_tag)
+    if product is not None and product.get("prerelease"):
+        return None, "release tag is a prerelease, not Stable: " + release_tag
+    matches = [item for page in records for item in page
+               if item.get("tag_name") == release_tag]
+    if not matches:
+        return None, "no public release record for " + release_tag
+    record = matches[-1]
+    # Absent flags are not proof of a public, final release.
+    if record.get("draft") is not False:
+        return None, "release draft flag is not explicitly false"
+    if record.get("prerelease") is not False:
+        return None, "release prerelease flag is not explicitly false"
+    return record, ""
+
+
+def prove_stable_publication(stable, releases_json=None, observations=None, manifest=None):
+    """Prove a live docs Stable identity is actually public everywhere.
+
+    A published docs index alone is not sufficient: Stable deploys the candidate
+    index before aliases move and the GitHub release is exposed. Require a
+    public, non-prerelease release record whose manifest matches, plus identical
+    verified `:latest` digest/revision in Docker Hub and GHCR. On any mismatch
+    or unavailable provider, refuse so the last published body is preserved.
+
+    `releases_json`, `observations` and `manifest` are offline opt-in fixtures;
+    production uses the read-only `release.py` boundaries (gh + buildx).
+    """
+    tag = release_contract.version_from_release_tag(stable.get("tag", ""))
+    if tag is None:
+        return False, "stable tag is not a recognised product release tag", {}
+    try:
+        records = load_release_records(releases_json)
+    except (subprocess.CalledProcessError, OSError, ValueError, TypeError) as error:
+        return False, "release records unavailable: " + str(error), {}
+    record, problem = public_release_record(stable["tag"], records)
+    if problem:
+        return False, "release record: " + problem, {}
+    manifest = manifest or record.get("manifest")
+    override = offline_manifest(manifest) if isinstance(manifest, dict) else nullcontext()
+    try:
+        with override:
+            ok, reason, resolved_manifest = release_contract.release_provenance(
+                tag, stable["commit"], stable["digest"],
+                releases_json=records, git_tag=stable["tag"])
+    except (ValueError, TypeError) as error:
+        return False, "release manifest is unreadable: " + str(error), {}
+    if not ok:
+        return False, "release provenance: " + reason, {"manifest": resolved_manifest}
+    if observations is None:
+        try:
+            observations = release_contract.channel_observe("latest")
+        except (OSError, ValueError, TypeError) as error:
+            return False, "registry observation unavailable: " + str(error), {}
+    parity_ok, parity_reason = release_contract.channel_oci_parity(
+        release_contract._coerce_observation_map(observations),
+        stable["digest"], stable["commit"])
+    if not parity_ok:
+        return False, "channel parity: " + parity_reason, {}
+    return True, "public release and both registries agree on Stable", {
+        "manifest_version": resolved_manifest.get("version"),
+        "manifest_commit": resolved_manifest.get("commit"),
+        "manifest_digest": resolved_manifest.get("image_digest"),
+        "observations": observations,
+    }
 
 
 def choose_stable(baseline, live):
@@ -503,7 +608,24 @@ def emit_outputs(values):
             handle.write("{}={}\n".format(key, value))
 
 
+def guard_fixtures(arguments):
+    """Load only the explicit offline guard fixtures that were supplied."""
+    releases = (json.loads(Path(arguments.releases_fixture).read_text(encoding="utf-8"))
+                if getattr(arguments, "releases_fixture", None) else None)
+    observations = (json.loads(Path(arguments.observations_fixture).read_text(encoding="utf-8"))
+                    if getattr(arguments, "observations_fixture", None) else None)
+    manifest = (json.loads(Path(arguments.manifest_fixture).read_text(encoding="utf-8"))
+                if getattr(arguments, "manifest_fixture", None) else None)
+    return releases, observations, manifest
+
+
 def command_generate(arguments):
+    if arguments.skip_publication_guard and not (arguments.skip_live_index
+                                                 or arguments.live_index):
+        # Check before any live index fetch: an unrestricted bypass is never
+        # allowed with a production (live) Stable identity source.
+        raise DescriptionError("--skip-publication-guard is offline-only: use an offline "
+                               "version-index source fixture as well")
     config = load_config(arguments.config)
     baseline = resolve_stable(arguments.version_index or ROOT / config["version_index"])
     if arguments.live_index:
@@ -516,6 +638,17 @@ def command_generate(arguments):
         # A stale baseline after a promotion must never be published.
         live = stable_identity(fetch_live_index(), "live published version index")
     stable = choose_stable(baseline, live)
+    if not arguments.skip_publication_guard:
+        releases_json, observations, manifest = guard_fixtures(arguments)
+        ok, reason, evidence = prove_stable_publication(
+            stable, releases_json=releases_json, observations=observations,
+            manifest=manifest)
+        if not ok:
+            raise DescriptionError(
+                "publication guard refused to advertise Stable " + stable["version"]
+                + ": " + reason + "; preserving the last published description")
+        print("publication guard verified Stable " + stable["version"] + ": "
+              + reason, file=sys.stderr)
     readme = Path(arguments.readme).read_text(encoding="utf-8")
     body = build_body(config, readme, stable)
     Path(arguments.output).write_text(body, encoding="utf-8", newline="\n")
@@ -537,6 +670,7 @@ def command_generate(arguments):
         "expected_sha256": summary["sha256"],
         "stable_version": stable["version"],
         "stable_commit": stable["commit"],
+        "stable_digest": stable["digest"],
         "stable_source": stable["source"],
     })
 
@@ -551,6 +685,39 @@ def command_resolve_main(arguments):
     sha = resolve_main_sha(arguments.repository, arguments.event, arguments.event_sha)
     print(sha)
     emit_outputs({"sha": sha})
+    return 0
+
+
+def command_assert_publication_identity(arguments):
+    """Recheck the candidate Stable identity at the actual Hub write boundary."""
+    config = load_config(arguments.config)
+    baseline = resolve_stable(arguments.version_index or ROOT / config["version_index"])
+    if arguments.live_index:
+        live = stable_identity(json.loads(Path(arguments.live_index).read_text(
+            encoding="utf-8")), "live published version index")
+    else:
+        live = stable_identity(fetch_live_index(), "live published version index")
+    stable = choose_stable(baseline, live)
+    expected = (arguments.expected_version, arguments.expected_commit,
+                arguments.expected_digest)
+    observed = (stable["version"], stable["commit"], stable["digest"])
+    if expected != observed:
+        raise DescriptionError(
+            "public Stable identity changed at the write boundary: generated "
+            + "/".join(expected) + " but live sources report " + "/".join(observed))
+    releases_json, observations, manifest = guard_fixtures(arguments)
+    ok, reason, evidence = prove_stable_publication(
+        stable, releases_json=releases_json, observations=observations,
+        manifest=manifest)
+    if not ok:
+        raise DescriptionError("write-boundary publication guard refused: " + reason)
+    emit_outputs({
+        "stable_version": stable["version"],
+        "stable_commit": stable["commit"],
+        "stable_digest": stable["digest"],
+        "guard_reason": reason,
+    })
+    print("write-boundary guard verified " + stable["version"] + ": " + reason)
     return 0
 
 
@@ -622,8 +789,30 @@ def build_parser():
     generate.add_argument("--live-index", help="offline fixture: published version index")
     generate.add_argument("--skip-live-index", action="store_true",
                           help="use only the checked-in baseline (offline fixtures)")
+    generate.add_argument("--releases-fixture",
+                          help="offline fixture: GitHub releases API pages (JSON list)")
+    generate.add_argument("--observations-fixture",
+                          help="offline fixture: channel_observe map (JSON object)")
+    generate.add_argument("--manifest-fixture",
+                          help="offline fixture: release manifest (JSON object)")
+    generate.add_argument("--skip-publication-guard", action="store_true",
+                          help="explicit offline-only bypass of the live release/registry proof")
     generate.add_argument("--output", required=True)
     generate.set_defaults(handler=command_generate)
+
+    identity = commands.add_parser(
+        "assert-publication-identity",
+        help="prove live Stable and both alias receipts match the generated candidate")
+    identity.add_argument("--config", default="docs/dockerhub-description.json")
+    identity.add_argument("--version-index", help="override the checked-in index (fixtures)")
+    identity.add_argument("--live-index", help="offline fixture: published version index")
+    identity.add_argument("--releases-fixture", help="offline fixture: GitHub releases pages")
+    identity.add_argument("--observations-fixture", help="offline fixture: channel observations")
+    identity.add_argument("--manifest-fixture", help="offline fixture: release manifest")
+    identity.add_argument("--expected-version", required=True)
+    identity.add_argument("--expected-commit", required=True)
+    identity.add_argument("--expected-digest", required=True)
+    identity.set_defaults(handler=command_assert_publication_identity)
 
     check = commands.add_parser("check", help="compare the public body without failing on drift")
     check.add_argument("--config", default="docs/dockerhub-description.json")

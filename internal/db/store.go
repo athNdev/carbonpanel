@@ -185,12 +185,15 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gamepla
 	})
 }
 
+// ErrServerNotFound indicates that no server exists with the requested ID.
+var ErrServerNotFound = errors.New("server not found")
+
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var server Server
 	err := s.db.WithContext(ctx).First(&server, "id = ?", id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("server not found")
+			return nil, ErrServerNotFound
 		}
 		return nil, err
 	}
@@ -329,6 +332,52 @@ func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) er
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
 	return s.db.WithContext(ctx).Save(config).Error
+}
+
+// SaveSyncedServerConfig updates only the fields propagated by global sync.
+// A retained world-bind journal protects both sources of the effective level.
+// The ownership check and write share a SQLite transaction so neither can
+// commit based on a snapshot invalidated by a concurrent journal acquisition.
+// It reports whether a row was updated or an absent default was restored.
+func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig, fields []string) (bool, error) {
+	wrote := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		active, err := hasActiveWorldBind(tx, config.ServerID)
+		if err != nil {
+			return err
+		}
+		if active {
+			allowed := make([]string, 0, len(fields))
+			for _, field := range fields {
+				if !worldLevelConfigField(field) {
+					allowed = append(allowed, field)
+				}
+			}
+			fields = allowed
+		}
+		if len(fields) != 0 {
+			result := tx.Model(&ServerConfig{}).Where("id = ? AND server_id = ?", config.ID, config.ServerID).
+				Select(fields).Updates(config)
+			if result.Error != nil || result.RowsAffected != 0 {
+				wrote = result.RowsAffected != 0
+				return result.Error
+			}
+		}
+		if active {
+			return nil
+		}
+		// A legacy server may not have a config row. Do not create a second
+		// row if one appeared between the caller's read and this transaction.
+		var existing int64
+		err = tx.Model(&ServerConfig{}).Where("server_id = ?", config.ServerID).Count(&existing).Error
+		if err != nil || existing != 0 {
+			return err
+		}
+		result := tx.Create(config)
+		wrote = result.RowsAffected != 0
+		return result.Error
+	})
+	return err == nil && wrote, err
 }
 
 // UpdateServerConfigMemory updates memory settings in ServerConfig

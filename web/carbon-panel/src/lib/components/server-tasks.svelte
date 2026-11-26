@@ -440,7 +440,7 @@ one at https://mozilla.org/MPL/2.0/.
 		retryDelay = task.retryDelay;
 		requireOnline = task.requireOnline;
 
-		let parsed: Record<string, unknown> = {};
+		let parsed: Record<string, unknown>;
 		try {
 			parsed = JSON.parse(task.config || '{}');
 		} catch {
