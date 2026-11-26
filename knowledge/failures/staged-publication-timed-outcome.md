@@ -33,3 +33,20 @@ for the next-restart snapshot path. A timed/idle ambiguous outcome or a crash in
 that config-only window requires operator review; the panel does not report it
 as a safe retry. Closing this gap needs a durable publish-phase marker (or an
 equivalent journal outcome) that both the panel and startup recovery can read.
+
+The bounded next design is a persisted phase on the open batch:
+`prepared` once files, config, and module rows are on the live tree;
+`publishing` immediately before the container mutation; and `published` after
+it succeeds. A retry at `prepared` must resume the publish without copying
+files, reapplying config, or recreating modules again. A retry at `publishing`
+must treat the container outcome as unknown and settle it from an observation,
+not roll the snapshot back or close the batch. `published` only finishes marks,
+cleanup, and close. `prepared` is also what tells a config-only batch that its
+publish is owed; content rows alone cannot prove that.
+
+Required tests before claiming scheduled acceptance: a crash between each phase
+transition, an ambiguous publisher error that leaves `publishing`, a config-only
+crash after apply but before publish, a mixed content-plus-config resume, and
+startup recovery settling an unknown operation against an observed container.
+Until those exist, scheduled timed/idle publication is not a safe automatic
+retry path.
