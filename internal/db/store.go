@@ -1605,21 +1605,36 @@ func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *Sched
 
 // AdvanceModUpdateSchedule refuses to advance a stale schedule, status,
 // policy revision, or deadline. A one-shot claim persists its terminal status
-// in the same guarded write. SQL IS also matches a task whose observed
-// deadline was NULL.
-func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time, persistStatus TaskStatus) error {
+// in the same guarded write. When the scheduled dispatcher supplies an
+// execution, it is inserted in the same transaction: either both are durable
+// or the slot stays due. SQL IS also matches a task whose observed deadline
+// was NULL.
+func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time, persistStatus TaskStatus, execution *TaskExecution) error {
 	updates := map[string]any{"next_run": nextRun, "last_run": lastRun}
 	if persistStatus != "" {
 		updates["status"] = persistStatus
 	}
-	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
-		Where("COALESCE(config, '') = ?", task.Config).
-		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
-		Updates(updates)
-	if result.Error == nil && result.RowsAffected == 0 {
-		return ErrModUpdateScheduleChanged
-	}
-	return result.Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := matchingTaskSchedule(tx.Model(&ScheduledTask{}), task).
+			Where("COALESCE(config, '') = ?", task.Config).
+			Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrModUpdateScheduleChanged
+		}
+		if execution == nil {
+			return nil
+		}
+		// A failure here rolls the claim back, leaving the task due and the
+		// run unclaimed.
+		if err := tx.Create(execution).Error; err != nil {
+			return fmt.Errorf("record claimed task execution: %w", err)
+		}
+		return nil
+	})
 }
 
 // ToggleModUpdateSchedule updates scheduling fields without writing a stale

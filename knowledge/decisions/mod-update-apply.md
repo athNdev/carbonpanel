@@ -57,6 +57,7 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
 - Mod-update dispatch requires the observed deadline, schedule, status and
-  policy revision; a one-shot claim persists its disabled status in the same
-  guarded write and dispatches exactly once. The scheduler installs the planner
-  first and refuses invalid policy windows.
+  policy revision. A one-shot claim records its execution with the disabled
+  slot in the same guarded write; startup recovery closes an interrupted claim
+  and an insert failure keeps it due. The scheduler installs the planner first
+  and refuses invalid policy windows.

@@ -194,6 +194,109 @@ func TestOneShotModUpdateClaimRejectsConcurrentPolicyEdit(t *testing.T) {
 	require.Equal(t, []string{"current"}, planner.cfg.ExcludedProjects)
 }
 
+func TestOneShotModUpdateClaimRecordsExecutionWithSlot(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+
+	server := &storage.Server{ID: "srv-mod-crash", Name: "mod-crash", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-mod-crash", ServerID: server.ID, Name: "crash window",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeOnce, RunAt: &past, NextRun: &past,
+		Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	claim := newScheduledExecution(task, time.Now())
+	require.NoError(t, s.updateNextRun(task, claim))
+
+	// Simulate the process stopping after the durable claim but before the
+	// asynchronous dispatch goroutine writes anything.
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusDisabled, stored.Status)
+	require.Nil(t, stored.NextRun)
+	require.NotNil(t, stored.LastRun)
+	recorded, err := store.GetTaskExecution(ctx, claim.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.ExecutionStatusRunning, recorded.Status)
+	require.Equal(t, "scheduled", recorded.Trigger)
+
+	// Existing startup recovery closes the orphaned running record with an
+	// outcome, so the consumed slot is never silent.
+	count, err := store.FailOrphanedTaskExecutions(ctx, "interrupted by panel restart; run the task again after the server is idle")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	recovered, err := store.GetTaskExecution(ctx, claim.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.ExecutionStatusFailed, recovered.Status)
+	require.NotNil(t, recovered.EndedAt)
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Zero(t, planner.calls, "an interrupted one-shot attempt must not run a second time")
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1, "the interrupted attempt leaves exactly one recoverable outcome")
+}
+
+func TestOneShotModUpdateSlotStaysDueWhenExecutionInsertFails(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{staged: 1}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+
+	server := &storage.Server{ID: "srv-mod-insert", Name: "mod-insert", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	past := time.Now().Add(-time.Minute)
+	task := &storage.ScheduledTask{
+		ID: "task-mod-insert", ServerID: server.ID, Name: "insert failure",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeOnce, RunAt: &past, NextRun: &past,
+		Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	failInsert := true
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(
+		"fixture:fail-claimed-execution-insert",
+		func(tx *gorm.DB) {
+			if failInsert && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_executions" {
+				tx.AddError(errors.New("fixture execution insert failure"))
+			}
+		},
+	))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Zero(t, planner.calls, "a failed execution insert must not dispatch")
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusEnabled, stored.Status, "the failed insert must roll the claim back")
+	require.NotNil(t, stored.NextRun)
+	require.True(t, stored.NextRun.Equal(past))
+	require.Nil(t, stored.LastRun)
+
+	failInsert = false
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Equal(t, 1, planner.calls, "the still-due slot retries after the insert failure clears")
+	executions, err = store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, storage.ExecutionStatusCompleted, executions[0].Status)
+	stored, err = store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusDisabled, stored.Status)
+}
+
 func TestDueModUpdateTaskDoesNotDispatchAfterDisableEnable(t *testing.T) {
 	s, store := newTriggerTestScheduler(t)
 	planner := &fakeModPlanner{}

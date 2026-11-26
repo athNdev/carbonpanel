@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package scheduler
 
 import (
@@ -45,7 +44,7 @@ func TestExecuteTaskRespectsCallerCancellation(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = s.executeTask(cancelCtx, parent, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+		_, _ = s.executeTask(cancelCtx, parent, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, nil)
 	}()
 
 	// Let the chain reach the inter-step wait, then cancel.

@@ -551,6 +551,8 @@ func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.NotNil(t, rows[0].ApplyAt)
 	assert.True(t, rows[0].ApplyAt.Equal(soon))
+}
+
 func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 	for field, value := range map[string]string{"level": "other", "customServerProperties": "level-name=other"} {
 		t.Run(field, func(t *testing.T) {

@@ -85,8 +85,11 @@ request.
    schedule cannot be advanced, dispatch is refused. Mod-update advancement
    checks the observed deadline, schedule, status and policy revision to fence
    stale due reads after a reschedule or policy edit. A one-shot slot persists
-   its disabled status in the same guarded write, so the post-claim
-   revalidation sees one consistent state and the run dispatches exactly once.
+   its disabled status and inserts its execution record in the same guarded
+   write, so the post-claim revalidation sees one consistent state and the run
+   dispatches exactly once. An interruption before the asynchronous dispatch
+   leaves a running record that startup recovery closes, and an execution
+   insert failure rolls the claim back so the slot stays due.
    Invalid current schedules are disabled. The planner is installed before the
    scheduler starts so cold boot sees the real implementation.
 

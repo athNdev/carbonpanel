@@ -44,6 +44,11 @@ import (
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
 
+// errInvalidTaskSchedule distinguishes an invalid schedule definition from a
+// transient failure while persisting a valid schedule. Only the former may
+// disable a task.
+var errInvalidTaskSchedule = errors.New("invalid task schedule")
+
 // ModUpdatePlanner stages reviewed compatible releases. The concrete owner
 // lives in the RPC service layer; the scheduler keeps only this interface so
 // manual and scheduled updates use one operation without an import cycle or a
@@ -419,34 +424,61 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		// Advance the schedule before dispatch. If it cannot be advanced the
 		// task must not run: a still-due row would otherwise be claimed again
 		// on every tick. Disable it with the reason in the log.
-		if err := s.updateNextRun(task); err != nil {
-			if errors.Is(err, storage.ErrModUpdateScheduleChanged) {
-				s.releaseTask(task.ID)
-				continue
-			}
-			s.log.Error("Task %s: cannot advance schedule, refusing dispatch: %v", task.Name, err)
-			var dbErr error
-			if task.TaskType == storage.TaskTypeModUpdate {
-				dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
-			} else {
-				dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
-					Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
-			}
-			if dbErr != nil {
-				s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+		//
+		// A due one-shot mod policy records its execution in the same durable
+		// write as the slot claim. An interruption before the async dispatch
+		// then leaves a recoverable running record instead of a silently
+		// consumed slot, and a failed insert leaves the slot due.
+		var claim *storage.TaskExecution
+		if task.TaskType == storage.TaskTypeModUpdate && task.Schedule == storage.ScheduleTypeOnce {
+			claim = newScheduledExecution(task, time.Now())
+		}
+		if err := s.updateNextRun(task, claim); err != nil {
+			switch {
+			case errors.Is(err, storage.ErrModUpdateScheduleChanged):
+				s.log.Debug("Task %s: schedule changed while claiming its due slot", task.Name)
+			case errors.Is(err, errInvalidTaskSchedule):
+				s.log.Error("Task %s: invalid schedule, refusing dispatch: %v", task.Name, err)
+				var dbErr error
+				if task.TaskType == storage.TaskTypeModUpdate {
+					dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
+				} else {
+					dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+						Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
+				}
+				if dbErr != nil {
+					s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+				}
+			default:
+				s.log.Error("Task %s: cannot persist schedule, leaving it due: %v", task.Name, err)
 			}
 			s.releaseTask(task.ID)
 			continue
 		}
 
+		// A policy edit may win immediately after the atomic slot claim. Read
+		// the current revision before planning and refuse the stale snapshot.
+		if task.TaskType == storage.TaskTypeModUpdate {
+			claimedTask, err := s.revalidateModUpdateClaim(ctx, task)
+			if err != nil {
+				s.log.Error("Task %s: mod update policy changed after claiming its due slot, refusing dispatch: %v", task.Name, err)
+				if claim != nil {
+					s.failClaimedExecution(ctx, claim, "mod update policy changed after claiming its due slot; the stale policy was not dispatched")
+				}
+				s.releaseTask(task.ID)
+				continue
+			}
+			task = claimedTask
+		}
+
 		// Execute task asynchronously
 		s.wg.Add(1)
-		go func(t *storage.ScheduledTask) {
+		go func(t *storage.ScheduledTask, claimed *storage.TaskExecution) {
 			defer s.wg.Done()
 			defer s.releaseTask(t.ID)
 			// A scheduled run is owned by the scheduler, not by any caller.
-			_, _ = s.executeTask(context.Background(), t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
-		}(task)
+			_, _ = s.executeTask(context.Background(), t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, claimed)
+		}(task, claim)
 	}
 }
 
@@ -500,7 +532,7 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 
 	// Thread the caller context so an RPC cancel (or client disconnect)
 	// actually interrupts the task instead of the work outliving the request.
-	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, nil)
 	return execution, err
 }
 
@@ -556,25 +588,30 @@ func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
 // type is threaded through to webhook executors so the rendered payload
 // reflects which event triggered the delivery.
 func (s *Scheduler) executeTaskForEvent(ctx context.Context, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
-	_, _ = s.executeTask(ctx, task, "event", eventType, eventData)
+	_, _ = s.executeTask(ctx, task, "event", eventType, eventData, nil)
 }
 
 // executeTask runs a single task. eventTrigger names the event that drove an
-// event-triggered run (empty for scheduled/manual runs).
-func (s *Scheduler) executeTask(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
-	return s.executeTaskAtDepth(ctx, task, trigger, eventType, eventData, 0)
+// event-triggered run (empty for scheduled/manual runs). claimed is the durable
+// execution recorded with a scheduled slot claim; nil means this call records
+// its own execution.
+func (s *Scheduler) executeTask(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, claimed *storage.TaskExecution) (*storage.TaskExecution, error) {
+	return s.executeTaskAtDepth(ctx, task, trigger, eventType, eventData, 0, claimed)
 }
 
 // maxChainDepth caps reaction-chain nesting (MINE-142).
 const maxChainDepth = 4
 
-func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, depth int) (*storage.TaskExecution, error) {
+func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, depth int, claimed *storage.TaskExecution) (*storage.TaskExecution, error) {
 
 	// Check if server exists
 	server, err := s.store.GetServer(ctx, task.ServerID)
 	if err != nil {
 		s.log.Error("Task %s: server not found: %v", task.Name, err)
-		return nil, err
+		if claimed != nil {
+			s.failClaimedExecution(ctx, claimed, "task execution could not start: server lookup failed")
+		}
+		return claimed, err
 	}
 
 	// Check if server is online (if required). Webhook tasks always fire â€”
@@ -584,18 +621,28 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
 		// Create skipped execution record
-		execution := &storage.TaskExecution{
-			ID:        uuid.New().String(),
-			TaskID:    task.ID,
-			ServerID:  task.ServerID,
-			Status:    storage.ExecutionStatusSkipped,
-			StartedAt: time.Now(),
-			Trigger:   trigger,
-			Error:     "server offline",
-		}
+		execution := claimed
 		now := time.Now()
-		execution.EndedAt = &now
-		s.store.CreateTaskExecution(ctx, execution)
+		if execution == nil {
+			execution = &storage.TaskExecution{
+				ID:        uuid.New().String(),
+				TaskID:    task.ID,
+				ServerID:  task.ServerID,
+				Status:    storage.ExecutionStatusSkipped,
+				StartedAt: now,
+				EndedAt:   &now,
+				Trigger:   trigger,
+				Error:     "server offline",
+			}
+			s.store.CreateTaskExecution(ctx, execution)
+		} else {
+			execution.Status = storage.ExecutionStatusSkipped
+			execution.EndedAt = &now
+			execution.Error = "server offline"
+			if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
+				s.log.Error("Task %s: failed to record skipped execution: %v", task.Name, err)
+			}
+		}
 
 		// Skipped steps still fan out to children (each child applies its
 		// own online gate), so chains degrade to per-step skip records.
@@ -606,7 +653,7 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Update next run time if not already updated at dispatch
 		if trigger != "scheduled" {
-			if err := s.updateNextRun(task); err != nil {
+			if err := s.updateNextRun(task, nil); err != nil {
 				s.log.Error("Task %s: failed to advance schedule after skip: %v", task.Name, err)
 			}
 		}
@@ -614,17 +661,20 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 	}
 
 	// Create execution record
-	execution := &storage.TaskExecution{
-		ID:        uuid.New().String(),
-		TaskID:    task.ID,
-		ServerID:  task.ServerID,
-		Status:    storage.ExecutionStatusRunning,
-		StartedAt: time.Now(),
-		Trigger:   trigger,
-	}
-	if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
-		s.log.Error("Task %s: failed to create execution record: %v", task.Name, err)
-		return nil, err
+	execution := claimed
+	if execution == nil {
+		execution = &storage.TaskExecution{
+			ID:        uuid.New().String(),
+			TaskID:    task.ID,
+			ServerID:  task.ServerID,
+			Status:    storage.ExecutionStatusRunning,
+			StartedAt: time.Now(),
+			Trigger:   trigger,
+		}
+		if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
+			s.log.Error("Task %s: failed to create execution record: %v", task.Name, err)
+			return nil, err
+		}
 	}
 
 	// Create cancellable context with timeout
@@ -724,7 +774,7 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 	// Update next run time if not already updated at dispatch
 	if trigger != "scheduled" {
-		if err := s.updateNextRun(task); err != nil {
+		if err := s.updateNextRun(task, nil); err != nil {
 			s.log.Error("Task %s: failed to advance schedule after execution: %v", task.Name, err)
 		}
 	}
@@ -755,7 +805,7 @@ func (s *Scheduler) runChildChain(ctx context.Context, parent *storage.Scheduled
 			case <-timer.C:
 			}
 		}
-		_, childErr := s.executeTaskAtDepth(ctx, child, trigger, eventType, eventData, depth+1)
+		_, childErr := s.executeTaskAtDepth(ctx, child, trigger, eventType, eventData, depth+1, nil)
 		if childErr != nil && !child.ContinueOnFailure {
 			s.log.Warn("Task %s: chain aborted at step %s: %v", parent.Name, child.Name, childErr)
 			return child.Name, nil
@@ -844,15 +894,47 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return fmt.Errorf("execution not found or already finished")
 }
 
+// newScheduledExecution builds the execution record that a scheduled dispatch
+// records with its due-slot claim. The row is inserted in the same transaction
+// as the claim, so it exists before asynchronous dispatch starts.
+func newScheduledExecution(task *storage.ScheduledTask, now time.Time) *storage.TaskExecution {
+	return &storage.TaskExecution{
+		ID:        uuid.New().String(),
+		TaskID:    task.ID,
+		ServerID:  task.ServerID,
+		Status:    storage.ExecutionStatusRunning,
+		StartedAt: now,
+		Trigger:   "scheduled",
+	}
+}
+
+// failClaimedExecution records a terminal outcome for a slot claim that was
+// refused or could not start, so the consumed slot is never silent and no
+// execution stays stuck in running until the next process start.
+func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage.TaskExecution, reason string) {
+	if execution == nil {
+		return
+	}
+	now := time.Now()
+	execution.Status = storage.ExecutionStatusFailed
+	execution.Error = reason
+	execution.EndedAt = &now
+	execution.Duration = now.Sub(execution.StartedAt).Milliseconds()
+	if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
+		s.log.Error("Task execution %s: failed to record outcome: %v", execution.ID, err)
+	}
+}
+
 // updateNextRun calculates and updates the next run time for a task. It uses
 // CalculateNextRun so dispatch and explicit recalculation honor the same
-// per-task timezone and cannot drift apart.
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
+// per-task timezone and cannot drift apart. claimed, when non-nil, is recorded
+// in the same durable write as a mod-update slot claim.
+func (s *Scheduler) updateNextRun(task *storage.ScheduledTask, claimed *storage.TaskExecution) error {
 	ctx := context.Background()
 	now := time.Now()
 	advance := func(nextRun *time.Time, persistStatus storage.TaskStatus) error {
 		if task.TaskType == storage.TaskTypeModUpdate {
-			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now, persistStatus)
+			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now, persistStatus, claimed)
 		}
 		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
@@ -875,12 +957,36 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	}
 	nextRun, err := s.CalculateNextRun(task)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errInvalidTaskSchedule, err)
 	}
 	if err := advance(nextRun, ""); err != nil {
 		return fmt.Errorf("store next run: %w", err)
 	}
 	return nil
+}
+
+// revalidateModUpdateClaim reads the policy revision after the slot claim.
+// An edit that commits between the claim and this read fails closed instead
+// of reaching the planner with the stale snapshot.
+func (s *Scheduler) revalidateModUpdateClaim(ctx context.Context, claimed *storage.ScheduledTask) (*storage.ScheduledTask, error) {
+	current, err := s.store.GetScheduledTask(ctx, claimed.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.TaskType != claimed.TaskType || current.Status != claimed.Status || current.Config != claimed.Config || !sameScheduledTaskTiming(current, claimed) {
+		return nil, fmt.Errorf("%w: policy revision changed", storage.ErrModUpdateScheduleChanged)
+	}
+	return current, nil
+}
+
+func sameScheduledTaskTiming(a, b *storage.ScheduledTask) bool {
+	if a.Schedule != b.Schedule || a.CronExpr != b.CronExpr || a.Timezone != b.Timezone || a.IntervalSecs != b.IntervalSecs {
+		return false
+	}
+	if a.RunAt == nil || b.RunAt == nil {
+		return a.RunAt == nil && b.RunAt == nil
+	}
+	return a.RunAt.Equal(*b.RunAt)
 }
 
 // Task type executors

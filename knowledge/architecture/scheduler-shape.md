@@ -26,8 +26,9 @@ streamed through the WebSocket hub.
 - A task is not claimed when the running-execution check fails. The due run
   stays due, and a manual trigger returns that error. An unknown check is
   treated as running.
-- Cron runs in the controller's local time. A missed slot is not replayed:
-  one due check runs the task once and stores the next future time.
+- A bare cron expression uses the task timezone; an explicit `TZ=` or `CRON_TZ=` prefix wins. A missed slot is not replayed: one due check runs the task once.
+- A due slot is claimed only when schedule, deadline, status and policy revision match. A one-shot claim records its execution in the same guarded write, so an interruption before dispatch is recovered and an insert failure leaves the slot due.
+- Only invalid schedule definitions disable tasks. Transient next-run persistence failures leave tasks enabled and due.
 - When a chain stops at a step, that execution names the step and says the
   remaining steps were not run.
 - A console command runs once. A configured retry is not repeated, because
