@@ -819,6 +819,251 @@ try {
     calls,
   });
 
+  // A settled preflight with zero enabled destinations must render an
+  // actionable empty state instead of waiting forever, then recover when a
+  // node is enabled, without a new upload.
+  await page.addInitScript(() => {
+    globalThis.__wizardDenyListNodes = true;
+    globalThis.__wizardArchiveDestinations = [];
+    globalThis.__archivePreviewMode = "success";
+  });
+  await page.goto(base);
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__wizardDenyListNodes = true;
+    globalThis.__wizardArchiveDestinations = [];
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-empty-preflight-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" && call.payload.nodeId === "",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  for (let step = 0; step < 3; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page
+    .getByText(/found no enabled destination nodes/)
+    .waitFor({ timeout: 15_000 });
+  await page.getByTestId("archive-destination-empty").waitFor();
+  assert.equal(
+    await page.getByTestId("archive-destination-preflight").count(),
+    0,
+    "a settled empty preflight must not keep its waiting state",
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-option").count(),
+    0,
+    "a zero-destination preflight must not offer a stale cached node",
+  );
+  await page.screenshot({
+    path: path.join(out, "archive-empty-desktop-dark.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() => {
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-1", name: "Fixture Node" },
+    ];
+  });
+  await page.getByTestId("archive-destination-retry").click();
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.nodeId === "node-1",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.getByTestId("archive-destination-option").waitFor();
+  assert.equal(
+    await page.getByTestId("archive-destination-option").count(),
+    1,
+    "retrying the preflight must surface a newly enabled destination",
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-node").textContent(),
+    "node-1",
+    "the recovered destination must be bound for the capacity preview",
+  );
+  summaries.push({
+    scenario:
+      "settled empty archive preflight is actionable and recovers after a node is enabled",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
+  // A current successful preflight outranks stale cached node inventory:
+  // cached-enabled node-1 is gone, cached-disabled node-2 appears, a still
+  // eligible selection survives a refresh and a vanished one is replaced.
+  await page.addInitScript(() => {
+    globalThis.__wizardNodes = [
+      { id: "node-1", name: "Fixture Node", enabled: true, status: 1 },
+      { id: "node-2", name: "Fixture Node B", enabled: false, status: 1 },
+    ];
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-2", name: "Fixture Node B" },
+      { id: "node-3", name: "Fixture Node C" },
+    ];
+    globalThis.__archivePreviewMode = "success";
+  });
+  await page.goto(base);
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    globalThis.__wizardNodes = [
+      { id: "node-1", name: "Fixture Node", enabled: true, status: 1 },
+      { id: "node-2", name: "Fixture Node B", enabled: false, status: 1 },
+    ];
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-2", name: "Fixture Node B" },
+      { id: "node-3", name: "Fixture Node C" },
+    ];
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-preflight-precedence-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  for (let step = 0; step < 3; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('[data-testid="archive-destination-option"]')
+        .length === 2,
+  );
+  const destinationNames = () =>
+    page
+      .getByTestId("archive-destination-option")
+      .evaluateAll((options) =>
+        options.map((option) =>
+          option.querySelector("span")?.textContent.trim(),
+        ),
+      );
+  assert.deepEqual(
+    await destinationNames(),
+    ["Fixture Node B", "Fixture Node C"],
+    "the settled preflight must replace cached inventory in both directions",
+  );
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.nodeId === "node-2",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-node").textContent(),
+    "node-2",
+    "the first preflight destination must replace the stale cached selection",
+  );
+  await page.screenshot({
+    path: path.join(out, "archive-precedence-desktop-dark.png"),
+    fullPage: true,
+  });
+  await page.getByTestId("archive-destination-option").nth(1).click();
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.nodeId === "node-3",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="archive-destination-node"]')
+        ?.textContent === "node-3",
+  );
+  assert.deepEqual(
+    await destinationNames(),
+    ["Fixture Node B", "Fixture Node C"],
+    "a still-eligible selection must survive the refreshed preflight",
+  );
+
+  await page.evaluate(() => {
+    globalThis.__wizardArchiveDestinations = [
+      { id: "node-2", name: "Fixture Node B" },
+    ];
+  });
+  await showWizardStep(page, "Basic Information");
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.uploadId === "seeded-session-2" &&
+          call.payload.nodeId === "node-2",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  for (let step = 0; step < 3; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('[data-testid="archive-destination-option"]')
+        .length === 1,
+  );
+  assert.deepEqual(
+    await destinationNames(),
+    ["Fixture Node B"],
+    "a destination dropped by the new preflight must vanish",
+  );
+  assert.deepEqual(
+    await page.evaluate(() =>
+      globalThis.__wizardCalls
+        .filter(
+          (call) =>
+            call.method === "previewServerArchive" &&
+            call.payload.uploadId === "seeded-session-2",
+        )
+        .map((call) => call.payload.nodeId),
+    ),
+    ["node-3", "node-2"],
+    "the replacement preflight must drop the vanished selection and verify the new one",
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-node").textContent(),
+    "node-2",
+    "the preflight replacement must be the submitted destination",
+  );
+  await showWizardStep(page, "Add-ons");
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Server created" }).waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  const precedenceCreate = calls.find(
+    (call) => call.method === "createServer",
+  ).payload;
+  assert.equal(precedenceCreate.nodeId, "node-2");
+  assert.equal(precedenceCreate.placementStrategy, "");
+  summaries.push({
+    scenario:
+      "current archive preflight outranks cached node inventory and keeps an eligible selection",
+    calls,
+  });
+
   // Representative desktop/narrow and light/dark captures of the archive
   // destination preflight, blocked/refusal/retry states and keyboard selection.
   await page.addInitScript(() => {
@@ -1053,7 +1298,7 @@ try {
     ),
   );
   console.log(
-    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, and archive preview/create retry",
+    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, archive preview/create retry, empty archive preflight recovery and destination-preflight precedence",
   );
 } finally {
   await browser?.close();

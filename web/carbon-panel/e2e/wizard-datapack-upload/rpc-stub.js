@@ -194,7 +194,9 @@ export const rpcClient = {
 				);
 			}
 			return Promise.resolve({
-				nodes: [{ id: 'node-1', name: 'Fixture Node', enabled: true, status: 1 }]
+				nodes: globalThis.__wizardNodes || [
+					{ id: 'node-1', name: 'Fixture Node', enabled: true, status: 1 }
+				]
 			});
 		}
 	},
