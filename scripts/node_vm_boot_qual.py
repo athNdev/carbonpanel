@@ -452,7 +452,9 @@ def scan_serial_log(path):
         except Exception:
             pass
     result["reboot_or_poweroff_signal"] = bool(
-        re.search(r"\b(reboot|powering off|restarting system|system reboot)\b", text, re.IGNORECASE)
+        re.search(r"^\s*(?:\[\s*\d+\.\d+\]\s*)?"
+                  r"reboot: (?:Restarting system|Power down)\s*$",
+                  text, re.MULTILINE)
     )
     # Only flag high-signal literal secret material markers; absence is not proven.
     for marker in SECRET_MARKERS:

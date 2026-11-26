@@ -753,9 +753,10 @@ option. The helper renders `-netdev user,id=net0,restrict=on` with no host
 forward, and the driver asserts that effective argv before accepting a boot.
 The uploaded `receipt.json` is allowlisted to image/firmware/toolchain digests,
 the seed-derived per-instance instance ID and its SHA-256, node ID and key
-fingerprint, per-instance seed ISO SHA-256 and size, cloud-init completion and
-reboot-boundary status, and serial-log size/SHA-256 plus scan status. It refuses
-a node ID that does not derive from the seed instance ID and requires distinct
+fingerprint, per-instance seed ISO SHA-256 and size, cloud-init completion,
+terminal guest reboot/poweroff status, and serial-log size/SHA-256 plus scan
+status. Failures record a fixed phase name and preserve completed verification
+evidence. The driver checks node ID derivation from the seed and requires distinct
 node IDs. It contains no serial logs, seed ISOs, keys, secrets or raw
 subprocess/error output. The workflow was not dispatched or run for this report;
 it is a prepared path, not hosted CI evidence.

@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
+import contextlib
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import node_vm_arm64_acceptance as acceptance
 
@@ -246,31 +249,16 @@ class ReceiptTests(unittest.TestCase):
                 "a" * 40, "aarch64", {"sha256": "b" * 64}, {},
                 [{"node_id": "BEGIN PRIVATE KEY"}])
 
-    def test_failure_receipt_is_still_written_with_zero_checks(self):
+    def test_failure_receipt_preserves_completed_image_verification(self):
         text = acceptance.build_receipt(
-            "a" * 40, "aarch64", {"sha256": "b" * 64}, {}, [], error="image mismatch")
+            "a" * 40, "aarch64", {"sha256": "b" * 64, "verified": True},
+            {}, [], failed_phase="first_boot_1")
         receipt = json.loads(text)
-        self.assertEqual(receipt["error"], "image mismatch")
-        self.assertFalse(receipt["checks"]["image_bytes_verified"])
+        self.assertEqual(receipt["failed_phase"], "first_boot_1")
+        self.assertTrue(receipt["checks"]["image_bytes_verified"])
+        self.assertEqual(receipt["checks"]["first_boot_identity"], "FAIL")
         self.assertFalse(receipt["checks"]["first_boot_completed"])
         self.assertFalse(receipt["checks"]["restricted_user_network"])
-
-
-class ErrorSanitizationTests(unittest.TestCase):
-    def test_sanitizes_newlines_paths_secrets_and_length(self):
-        text = acceptance.sanitize_error(RuntimeError(
-            "helper failed\nBEGIN PRIVATE KEY\nC:\\secret\\state\\key.pem\n"
-            + "x" * 400))
-        self.assertNotIn("\n", text)
-        self.assertNotIn("PRIVATE KEY", text)
-        self.assertNotIn("secret", text)
-        self.assertLessEqual(len(text), acceptance.ERROR_MAX_CHARS)
-
-    def test_keeps_a_useful_bounded_summary(self):
-        self.assertEqual(
-            acceptance.sanitize_error(RuntimeError("image mismatch")),
-            "image mismatch")
-
 
 class ShaTests(unittest.TestCase):
     def test_sha256_file(self):
@@ -307,8 +295,38 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             data = json.loads(receipt.read_text(encoding="utf-8"))
             self.assertFalse(data["checks"]["image_bytes_verified"])
-            self.assertIn("pinned SHA256", data["error"])
+            self.assertEqual(data["failed_phase"], "image_verification")
+            self.assertEqual(data["checks"]["first_boot_identity"], "NOT_RUN")
             self.assertNotIn(str(work), proc.stderr)
+
+    def test_unexpected_helper_error_never_reaches_outputs(self):
+        opaque = "opaque-value-9424"
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            image = work / "firmware"
+            sums = work / "sums"
+            receipt = work / "receipt.json"
+            image.write_bytes(b"fixture")
+            sums.write_text("", encoding="utf-8")
+            verified = {"sha256_actual": "a" * 64, "bytes": 7, "bytes_verified": True}
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                patch("scripts.node_vm_verify_image.verify_pinned_image", return_value=verified),
+                patch("scripts.node_vm_boot_qual.find_uefi_firmware", return_value=(image, image)),
+                patch.object(acceptance, "run_instance", side_effect=RuntimeError(opaque)),
+                patch.object(acceptance.subprocess, "run", side_effect=FileNotFoundError),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                status = acceptance.main([
+                    "--image", str(image), "--sha256sums", str(sums),
+                    "--workspace", str(work / "runs"), "--head", "a" * 40,
+                    "--receipt", str(receipt),
+                ])
+            self.assertEqual(status, 1)
+            artifact = receipt.read_text(encoding="utf-8")
+            self.assertEqual(json.loads(artifact)["failed_phase"], "first_boot_1")
+            self.assertNotIn(opaque, stdout.getvalue() + stderr.getvalue() + artifact)
 
 
 if __name__ == "__main__":

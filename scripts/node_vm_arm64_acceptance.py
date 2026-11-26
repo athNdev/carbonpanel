@@ -19,6 +19,7 @@ instance ID, cloud-init completion and the reboot boundary are recorded there.
 import argparse
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -36,7 +37,7 @@ SECRET_RE = re.compile(
     re.IGNORECASE,
 )
 RESTRICTED_NETDEV = "user,id=net0,restrict=on"
-ERROR_MAX_CHARS = 200
+QEMU_VERSION_RE = re.compile(r"^QEMU emulator version (\d+\.\d+\.\d+)\b")
 DEFAULT_INSTANCE_IDS = (
     "oss377-arm64-accept-0001",
     "oss377-arm64-accept-0002",
@@ -71,21 +72,6 @@ def sha256_file(path):
 def derived_node_id(instance_id):
     """Mirror the guest's deterministic node-ID derivation for a seed ID."""
     return "node-" + hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:32]
-
-
-def sanitize_error(exc):
-    """Reduce a failure to a bounded, path-free summary for artifacts and CI."""
-    text = re.sub(r"\s+", " ", str(exc)).strip()
-    text = re.sub(r"BEGIN [A-Z ]*PRIVATE KEY", "<redacted>", text,
-                  flags=re.IGNORECASE)
-    text = re.sub(
-        r"(?i)\b(enrollment_secret|token|password|private_key)\b[\"']?"
-        r"\s*[:=]\s*[\"']?\S+",
-        r"\1=<redacted>", text)
-    text = re.sub(r"(?:[A-Za-z]:)?(?:[\\/][^\s:'\"]+)+", "<path>", text)
-    if len(text) > ERROR_MAX_CHARS:
-        text = text[:ERROR_MAX_CHARS - 3] + "..."
-    return text or type(exc).__name__
 
 
 def parse_helper_output(stdout):
@@ -171,6 +157,11 @@ def validate_instance_report(report, label, seed_evidence):
             "%s: boot attempt did not complete cleanly: status=%s returncode=%s"
             % (label, attempt.get("status"), attempt.get("returncode")))
     assert_restricted_user_network(attempt.get("command"), label)
+    if (attempt.get("cpu"), attempt.get("accel"), attempt.get("firmware")) != ("max", "tcg", "uefi"):
+        raise AcceptanceError("%s: unexpected QEMU target" % label)
+    elapsed = attempt.get("elapsed_seconds")
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise AcceptanceError("%s: invalid elapsed time" % label)
     serial = gates["serial_console"]
     if serial.get("status") != "SCANNED":
         raise AcceptanceError("%s: serial console was not scanned" % label)
@@ -185,9 +176,9 @@ def validate_instance_report(report, label, seed_evidence):
             "%s: first-boot identity is %s" % (label, identity.get("status")))
     node_id = identity.get("node_id")
     fingerprint = identity.get("fingerprint")
-    if not node_id or not NODE_ID_RE.match(node_id):
+    if not isinstance(node_id, str) or not NODE_ID_RE.fullmatch(node_id):
         raise AcceptanceError("%s: invalid public node ID %r" % (label, node_id))
-    if not fingerprint or not FINGERPRINT_RE.match(fingerprint):
+    if not isinstance(fingerprint, str) or not FINGERPRINT_RE.fullmatch(fingerprint):
         raise AcceptanceError(
             "%s: invalid public key fingerprint %r" % (label, fingerprint))
     expected_node_id = derived_node_id(seed_evidence["instance_id"])
@@ -213,26 +204,22 @@ def validate_instance_report(report, label, seed_evidence):
         "boot_attempt": {
             "status": attempt.get("status"),
             "returncode": attempt.get("returncode"),
-            "elapsed_seconds": attempt.get("elapsed_seconds"),
+            "elapsed_seconds": elapsed,
             "cpu": attempt.get("cpu"),
             "accel": attempt.get("accel"),
             "firmware": attempt.get("firmware"),
             "network_restrict": True,
             "network_host_forward": False,
         },
-        "serial_console": {
-            "size": serial.get("size"),
-            "sha256": serial.get("sha256"),
-        },
         "serial_secret_scan": scan.get("status"),
     }
 
 
-def _all_instances(instances, predicate):
-    return bool(instances) and all(predicate(item) for item in instances)
-
-
-def build_receipt(head, arch, image, firmware, instances, toolchain=None, error=None):
+def build_receipt(head, arch, image, firmware, instances, toolchain=None, failed_phase=None):
+    both_booted = len(instances) == 2
+    first_boot_identity = "PASS" if both_booted else "NOT_RUN"
+    if failed_phase in ("first_boot_1", "first_boot_2"):
+        first_boot_identity = "FAIL"
     receipt = {
         "schema_version": 2,
         "purpose": "disposable arm64 UEFI/TCG first-boot identity acceptance",
@@ -243,29 +230,20 @@ def build_receipt(head, arch, image, firmware, instances, toolchain=None, error=
         "toolchain": toolchain or {},
         "instances": instances,
         "checks": {
-            "image_bytes_verified": error is None,
-            "first_boot_identity": "PASS" if error is None else "FAIL",
-            "first_boot_completed": error is None and _all_instances(
-                instances,
-                lambda item: item.get("first_boot", {}).get("cloud_init_finished") is True),
-            "reboot_boundary_observed": error is None and _all_instances(
-                instances,
-                lambda item: item.get("first_boot", {}).get("reboot_boundary") == "OBSERVED"),
-            "restricted_user_network": error is None and _all_instances(
-                instances,
-                lambda item: item.get("boot_attempt", {}).get("network_restrict") is True
-                and item.get("boot_attempt", {}).get("network_host_forward") is False),
-            "seed_iso_sha256_recorded": error is None and _all_instances(
-                instances,
-                lambda item: len(str(item.get("seed_iso", {}).get("sha256", ""))) == 64),
-            "distinct_node_ids": (
-                _all_instances(instances, lambda item: bool(item.get("node_id")))
-                and len({item.get("node_id") for item in instances}) == len(instances)
-                if error is None else False),
-            "distinct_instance_ids": (
-                _all_instances(instances, lambda item: bool(item.get("instance_id")))
-                and len({item.get("instance_id") for item in instances}) == len(instances)
-                if error is None else False),
+            "image_bytes_verified": image.get("verified") is True,
+            "first_boot_identity": first_boot_identity,
+            "first_boot_completed": both_booted and all(
+                item.get("first_boot", {}).get("cloud_init_finished") is True for item in instances),
+            "reboot_boundary_observed": both_booted and all(
+                item.get("first_boot", {}).get("reboot_boundary") == "OBSERVED" for item in instances),
+            "restricted_user_network": both_booted and all(
+                item.get("boot_attempt", {}).get("network_restrict") is True
+                and item.get("boot_attempt", {}).get("network_host_forward") is False
+                for item in instances),
+            "seed_iso_sha256_recorded": both_booted and all(
+                FINGERPRINT_RE.fullmatch(item.get("seed_iso", {}).get("sha256", "")) for item in instances),
+            "distinct_node_ids": both_booted and len({item.get("node_id") for item in instances}) == 2,
+            "distinct_instance_ids": both_booted and len({item.get("instance_id") for item in instances}) == 2,
             "reboot_persistence": "NOT_RUN",
             "live_controller_enrollment": "NOT_RUN",
         },
@@ -277,8 +255,8 @@ def build_receipt(head, arch, image, firmware, instances, toolchain=None, error=
             "serial logs, seed ISOs, overlays, keys and secrets stay in the ephemeral runner",
         ],
     }
-    if error:
-        receipt["error"] = error
+    if failed_phase:
+        receipt["failed_phase"] = failed_phase
     text = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if SECRET_RE.search(text):
         raise AcceptanceError("refusing to write a receipt containing secret markers")
@@ -324,11 +302,12 @@ def run_instance(args, instance_id, index):
     seed_evidence = collect_seed_evidence(work_dir, instance_id)
     result = validate_instance_report(report, label, seed_evidence)
     serial = work_dir / "serial-console.log"
-    if serial.is_file():
-        result["serial_console"] = {
-            "size": serial.stat().st_size,
-            "sha256": sha256_file(serial),
-        }
+    if not serial.is_file():
+        raise AcceptanceError("%s: serial log is missing" % label)
+    result["serial_console"] = {
+        "size": serial.stat().st_size,
+        "sha256": sha256_file(serial),
+    }
     return result
 
 
@@ -360,15 +339,18 @@ def main(argv=None):
         "verified": False,
     }
     try:
-        qemu_version = subprocess.run(
+        version = subprocess.run(
             ["qemu-system-aarch64", "--version"], capture_output=True,
-            text=True, timeout=30, check=False).stdout.splitlines()[0]
+            text=True, timeout=30, check=True).stdout
+        match = QEMU_VERSION_RE.match(version)
+        qemu_version = match.group(1) if match else None
     except Exception:
         qemu_version = None
     toolchain = {"qemu": qemu_version, "python": sys.version.split()[0]}
     firmware = {"code_sha256": None, "vars_sha256": None}
     instances = []
-    error = None
+    failed_phase = None
+    phase = "image_verification"
     try:
         image.update({
             "sha256": sha256_file(args.image),
@@ -387,6 +369,7 @@ def main(argv=None):
         if not image["verified"]:
             raise AcceptanceError("pinned arm64 image bytes were not verified")
 
+        phase = "firmware_verification"
         from scripts import node_vm_boot_qual as boot_qual
         code, variables = boot_qual.find_uefi_firmware("aarch64")
         firmware = {
@@ -394,19 +377,22 @@ def main(argv=None):
             "vars_sha256": sha256_file(variables),
         }
         for index, instance_id in enumerate(instance_ids, start=1):
+            phase = "first_boot_%d" % index
             instances.append(run_instance(args, instance_id, index))
+        phase = "identity_comparison"
         if len({item["node_id"] for item in instances}) != len(instances):
             raise AcceptanceError("distinct instance IDs produced the same node ID")
-    except Exception as exc:  # keep failure evidence, but fail closed
-        error = sanitize_error(exc)
-        print("node_vm_arm64_acceptance: %s" % error, file=sys.stderr)
+    except Exception:
+        # Guest logs, helper data and exception text can hold arbitrary values.
+        failed_phase = phase
+        print("node_vm_arm64_acceptance: failed during %s" % failed_phase, file=sys.stderr)
 
     receipt = build_receipt(
         args.head, "aarch64", image, firmware, instances,
-        toolchain=toolchain, error=error)
+        toolchain=toolchain, failed_phase=failed_phase)
     args.receipt.write_text(receipt, encoding="utf-8")
     print(receipt, end="")
-    return 1 if error else 0
+    return 1 if failed_phase else 0
 
 
 if __name__ == "__main__":

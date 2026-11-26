@@ -69,15 +69,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-arm qemu-efi-aarch64 genisoimage ipxe-qemu
+            qemu-system-arm qemu-efi-aarch64 qemu-utils genisoimage ipxe-qemu
           command -v qemu-system-aarch64
+          command -v qemu-img
           test -f /usr/share/AAVMF/AAVMF_CODE.fd
           test -f /usr/share/AAVMF/AAVMF_VARS.fd
           qemu-system-aarch64 --version
           dpkg-query -W -f='${Package}=${Version}\n' \
-            qemu-system-arm qemu-efi-aarch64 genisoimage ipxe-qemu
+            qemu-system-arm qemu-efi-aarch64 qemu-utils genisoimage ipxe-qemu
 
-      - name: Fetch the pinned arm64 image and signed checksum file
+      - name: Fetch the pinned arm64 image and checksum file
         env:
           BASE: https://cloud-images.ubuntu.com/releases/noble/release-20261017
           WORK: ${{ runner.temp }}/node-vm-arm64

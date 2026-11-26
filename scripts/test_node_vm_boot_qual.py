@@ -92,6 +92,19 @@ class SerialScanTests(unittest.TestCase):
         self.assertTrue(r["reboot_or_poweroff_signal"])
         self.assertEqual(r["simple_secret_markers_found"], [])
 
+    def test_reboot_boundary_requires_a_terminal_guest_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            serial = Path(directory) / "serial.log"
+            serial.write_text(
+                "[    1.234] systemd: reboot preparation service started\n"
+                "Application is restarting system services\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(boot_qual.scan_serial_log(serial)["reboot_or_poweroff_signal"])
+            with serial.open("a", encoding="utf-8") as handle:
+                handle.write("[   41.012] reboot: Power down\r\n")
+            self.assertTrue(boot_qual.scan_serial_log(serial)["reboot_or_poweroff_signal"])
+
     def test_detects_enroll_stdout_with_default_json_spacing(self):
         # Exact first-boot marker line from the 2026-11-19 boot-attempt-3
         # serial console. enroll.py uses json.dumps defaults (spaces after ':'
