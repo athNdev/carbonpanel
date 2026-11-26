@@ -25,7 +25,7 @@ download; confirmed 404/410 is definitive. Per-item staging storage/IO failures 
 conflicts stay per-item/admission refusals. The publisher owns the server data path exclusively from before the undo snapshot through publication and
 rollback; ordinary writes take a shared lease and are refused meanwhile. A next-restart commit keeps that ownership until `Finish` or `Undo`. A reviewed
 target's live digest is rechecked immediately before its writer commits; an out-of-band process remains outside the typed guard. See ADR 0056.
-A restart selects its file and config rows in one exclusive snapshot. Each next-restart batch owns one durable `server_update_publications` record and
+A restart selects its file and config rows in one exclusive snapshot. A legacy `on_restart` or `scheduled` batch window is normalized to next restart before selection, and legacy unbatched on-restart config joins the same snapshot; timed, idle and independent cron rows stay out. A pending legacy unbatched runtime config is included in the reviewed-mod compatibility check. Each next-restart batch owns one durable `server_update_publications` record and
 attempt generation, with phases preparing, prepared, applying, dispatched, verified, cleaned and abandoned. The record, not mutable status, APPLIED rows
 or container discovery, decides whether a runtime dispatch happened. Dispatch records the exact applied config/content ids before the Docker call and
 captures the replacement identity returned at creation. A retry acknowledges only that exact identity for that attempt; reconciling another canonical

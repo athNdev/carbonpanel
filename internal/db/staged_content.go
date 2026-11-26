@@ -330,6 +330,17 @@ func batchWindowMatches(batch *ServerUpdateBatch, window UpdateWindow, applyAt *
 	return stored == window && batch.IdleMinutes == idleMinutes && sameApplyInstant(batch.ApplyAt, applyAt)
 }
 
+// WindowMatches reports whether the stored window denotes window, including
+// the legacy config-only spellings that map onto the next-restart window. It
+// lets the restart selector reuse the same normalization as admission instead
+// of comparing the raw stored string.
+func (b *ServerUpdateBatch) WindowMatches(window UpdateWindow, applyAt *time.Time, idleMinutes int) bool {
+	if b == nil {
+		return false
+	}
+	return batchWindowMatches(b, window, applyAt, idleMinutes)
+}
+
 func batchWindowConflict(batch *ServerUpdateBatch, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
 	return fmt.Errorf("%w: open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
 		ErrUpdateBatchConflict, batch.ID, batch.Window, batch.ApplyAt, batch.IdleMinutes, window, applyAt, idleMinutes)

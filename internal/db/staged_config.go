@@ -143,11 +143,25 @@ func (s *Store) RequireNoPendingReviewedModRuntimeChanges(ctx context.Context, s
 }
 
 func requireNoPendingReviewedModRuntimeChanges(tx *gorm.DB, serverID, batchID string) error {
+	// The restart selection publishes the claimed batch plus legacy unbatched
+	// on-restart rows. A legacy unbatched runtime change would otherwise be
+	// applied after the reviewed jar without ever being compared with the
+	// reviewed target. Unbatched timed, idle and independently scheduled rows
+	// are not part of this restart.
+	q := tx.Select("payload").Where(
+		"server_id = ? AND status = ? AND apply_mode <> ?",
+		serverID, StagedStatusStaged, StagedApplyScheduled,
+	)
+	if batchID != "" {
+		// Keep every non-cron row owned by the reviewed batch, and add only
+		// legacy unbatched on-restart rows. Unbatched timed rows publish on
+		// their own schedule and are not part of this restart.
+		q = q.Where("(batch_id = ? OR ((batch_id = '' OR batch_id IS NULL) AND apply_mode = ?))", batchID, StagedApplyOnRestart)
+	} else {
+		q = q.Where("(batch_id = '' OR batch_id IS NULL) AND apply_mode = ?", StagedApplyOnRestart)
+	}
 	var configs []StagedConfigChange
-	if err := tx.Select("payload").Where(
-		"server_id = ? AND batch_id = ? AND status = ? AND apply_mode <> ?",
-		serverID, batchID, StagedStatusStaged, StagedApplyScheduled,
-	).Find(&configs).Error; err != nil {
+	if err := q.Find(&configs).Error; err != nil {
 		return err
 	}
 	for _, cfg := range configs {

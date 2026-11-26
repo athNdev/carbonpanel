@@ -554,7 +554,7 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	}
 	batchID := ""
 	published := false
-	if batch != nil && batch.Window == string(storage.UpdateWindowNextRestart) {
+	if batch.WindowMatches(storage.UpdateWindowNextRestart, nil, 0) {
 		batchID = batch.ID
 		published = batch.PublishedAt != nil
 		// Claim admission before reading the snapshot and before any live
