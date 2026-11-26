@@ -2513,10 +2513,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	contentReady := commit.HasContent()
 	publication := staging.RestartPublication{
 		Commit: commit,
-		// A prior retained attempt persists ERROR. Only then does an already
-		// applied snapshot suggest a replacement that a new preflight cannot
-		// prove is the old container.
-		RuntimePriorState: commit.HasPriorRuntimeState() && server.Status == storage.StatusError,
+		// Durable applied rows, not the mutable status, prove that a prior
+		// attempt may already have embedded this snapshot in a replacement.
+		RuntimePriorState: commit.HasPriorRuntimeState(),
 	}
 	defer func() {
 		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
@@ -2944,10 +2943,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	}
 	publication := staging.RestartPublication{
 		Commit: commit,
-		// A prior retained attempt persists ERROR. Only then does an already
-		// applied snapshot suggest a replacement that a new preflight cannot
-		// prove is the old container.
-		RuntimePriorState: commit.HasPriorRuntimeState() && server.Status == storage.StatusError,
+		// Durable applied rows, not the mutable status, prove that a prior
+		// attempt may already have embedded this snapshot in a replacement.
+		RuntimePriorState: commit.HasPriorRuntimeState(),
 	}
 	defer func() {
 		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
