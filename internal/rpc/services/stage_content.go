@@ -81,6 +81,18 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 // stageContentBytesWithPrecondition records the live digest observed at stage
 // time. The journaled publish rechecks it before copying replacement bytes.
 func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+	return stageContentBytesHeld(ctx, store, server, resolver, kind, action, targetRel, fileName, data, expectedLiveSha512)
+}
+
+// stageContentBytesHeld records one staged row while the caller already owns
+// the shared data-write lease. Bulk operations use it so publication cannot
+// take exclusive ownership between items and split one request.
+func stageContentBytesHeld(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -89,11 +101,6 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 	if err != nil {
 		return nil, err
 	}
-	releaseWrite, err := beginDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 
 	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
@@ -234,6 +241,10 @@ func stageContentError(err error) error {
 	switch {
 	case nodestorage.IsUnavailable(err):
 		return connect.NewError(connect.CodeUnavailable, err)
+	case errors.Is(err, storage.ErrUpdateBatchConflict):
+		// Batch state is an admission precondition, matching reviewed-mod and
+		// config staging; keep the operator-facing conflict message intact.
+		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case nodestorage.IsEscape(err), errors.Is(err, errStagedPath):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	default:

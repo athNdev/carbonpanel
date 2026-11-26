@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // A staged publication holds the exclusive data-write lease from before its
@@ -96,4 +98,104 @@ func TestDirectFileWritesAreRefusedDuringStagedPublication(t *testing.T) {
 	body, readErr = os.ReadFile(filepath.Join(dataRoot, "live.jar"))
 	require.NoError(t, readErr)
 	require.Equal(t, "panel-edit", string(body))
+}
+
+// A bulk staged delete is one request-wide shared lease. A publication that
+// starts while the first item is still being recorded must not acquire between
+// items and split the delete.
+func TestStagedBulkDeleteHoldsOneDataWriteLease(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "staged-bulk-delete", storage.StatusStopped)
+	files := NewFileService(store, nil, um, nil, logger.New())
+	t.Cleanup(files.Stop)
+
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var once sync.Once
+	const callbackName = "fixture:block-first-staged-delete"
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		row, ok := tx.Statement.Dest.(*storage.StagedContentChange)
+		if !ok || row.Action != storage.StagedActionDelete {
+			return
+		}
+		once.Do(func() {
+			close(firstEntered)
+			<-releaseFirst
+		})
+	}))
+	t.Cleanup(func() { _ = store.DB().Callback().Create().Remove(callbackName) })
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := files.DeleteFile(ctx, connect.NewRequest(&v1.DeleteFileRequest{
+			ServerId: server.ID, Paths: []string{"a.txt", "b.txt"}, Stage: true,
+		}))
+		done <- err
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("staged delete never reached its first row")
+	}
+
+	exclusive := make(chan *datawrite.Lease, 1)
+	exclusiveErr := make(chan error, 1)
+	go func() {
+		lease, err := datawrite.AcquireExclusive(context.Background(), server.ID)
+		if err != nil {
+			exclusiveErr <- err
+			return
+		}
+		exclusive <- lease
+	}()
+
+	// Wait until the exclusive claim has reserved the drain. It cannot own the
+	// path while the bulk request's shared lease is still held.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		lease, err := datawrite.TryShared(server.ID)
+		if err != nil {
+			require.ErrorIs(t, err, datawrite.ErrExclusiveHeld)
+			break
+		}
+		lease.Release()
+		if time.Now().After(deadline) {
+			t.Fatal("exclusive publication never reserved the data path")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(releaseFirst)
+	require.NoError(t, <-done, "the whole bulk delete must finish under one lease")
+	select {
+	case lease := <-exclusive:
+		lease.Release()
+	case err := <-exclusiveErr:
+		t.Fatalf("exclusive publication failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("exclusive publication did not proceed after the bulk delete finished")
+	}
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+}
+
+// A batch conflict during a staged file write is an admission precondition,
+// not an internal failure, and keeps the operator-facing reason.
+func TestStageContentBatchConflictIsFailedPrecondition(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "staged-conflict-code", storage.StatusStopped)
+	_, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	files := NewFileService(store, nil, um, nil, logger.New())
+	t.Cleanup(files.Stop)
+
+	_, err = files.DeleteFile(ctx, connect.NewRequest(&v1.DeleteFileRequest{
+		ServerId: server.ID, Paths: []string{"a.txt"}, Stage: true,
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "independently scheduled config row")
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
 }

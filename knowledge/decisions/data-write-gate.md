@@ -39,6 +39,8 @@ commits.
 
 - A normal panel write is refused with a retryable error while a staged
   publication owns the path; it does not wait behind a long publication.
+- A bulk staged delete holds one shared lease for every item, so a publication
+  cannot acquire between items and split the operator's request.
 - A staged publication waits for direct writers already in flight, including a
   remote archive download or extraction, instead of reading a partial tree.
 - Direct writes do not create per-file journal rows; the lifecycle journal and

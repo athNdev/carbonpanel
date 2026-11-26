@@ -656,8 +656,16 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	if msg.GetStage() {
+		// One shared lease covers every path in this request. Releasing it per
+		// item would let a publication take exclusive ownership between items
+		// and split what the operator submitted as one bulk delete.
+		releaseWrite, err := s.beginDataWrite(server.ID)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseWrite()
 		for _, p := range paths {
-			if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil); err != nil {
+			if _, err := stageContentBytesHeld(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil, ""); err != nil {
 				return nil, stageContentError(err)
 			}
 		}
