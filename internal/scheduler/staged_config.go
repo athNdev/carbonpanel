@@ -116,6 +116,7 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 // kept as an interface so the restart hook is unit-testable without a DB.
 type stagedConfigStore interface {
 	ListStagedConfigChanges(ctx context.Context, serverID string, status storage.StagedStatus) ([]*storage.StagedConfigChange, error)
+	ListPendingRestartStagedConfigs(ctx context.Context, serverID string, lastStarted *time.Time) ([]*storage.StagedConfigChange, error)
 	ApplyStagedConfigChange(ctx context.Context, id string) (*storage.StagedConfigChange, error)
 	RollbackStagedConfigChange(ctx context.Context, id string) (*storage.StagedConfigChange, error)
 }
@@ -159,21 +160,15 @@ func ApplyOnRestartStagedConfigs(ctx context.Context, store stagedConfigStore, s
 }
 
 // HasPendingRestartStagedConfigRecreate reports whether restart-only staged
-// changes were committed after the server's last successful start. It closes
+// changes were committed after the server's last successful start and still
+// owe a container publication. Rows owned by an acknowledged batch were
+// published with that acceptance; legacy unbatched rows stay pending. It closes
 // the crash/retry window between applying DB changes and recreating the Docker
 // container.
 func HasPendingRestartStagedConfigRecreate(ctx context.Context, store stagedConfigStore, serverID string, lastStarted *time.Time) (bool, error) {
-	changes, err := store.ListStagedConfigChanges(ctx, serverID, storage.StagedStatusApplied)
+	changes, err := store.ListPendingRestartStagedConfigs(ctx, serverID, lastStarted)
 	if err != nil {
 		return false, err
 	}
-	for _, c := range changes {
-		if c.ApplyMode != storage.StagedApplyOnRestart || c.AppliedAt == nil {
-			continue
-		}
-		if lastStarted == nil || c.AppliedAt.After(*lastStarted) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return len(changes) > 0, nil
 }

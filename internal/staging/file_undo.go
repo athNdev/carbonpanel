@@ -168,7 +168,7 @@ func (g liveDriftGuard) verifyLive(ctx context.Context, acc nodestorage.Accessor
 	return nil
 }
 
-func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
+func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange, recoverUnapplied bool) ([]fileSnap, error) {
 	type pending struct {
 		source, target, action string
 		guard                  liveDriftGuard
@@ -228,12 +228,22 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	}
 	recovery := path.Join(undoRoot, batchID)
 	if _, err := acc.Stat(recovery); err == nil {
-		// A retained attempt owns this recovery tree. Its manifest belongs to
-		// rows that may already be applied, so a later attempt must neither
-		// overwrite it nor delete it to make room. Refuse the new rows with an
-		// explicit resolution: discard them if they are still staged, then
-		// retry the lifecycle to finalize the retained snapshot.
-		return nil, fmt.Errorf("staged recovery %q exists from an earlier attempt; discard the newly staged rows and retry the lifecycle to resolve the retained publication", recovery)
+		if !recoverUnapplied {
+			// A retained attempt owns this recovery tree. Its manifest belongs
+			// to rows that may already be applied, so a later attempt must
+			// neither overwrite it nor delete it to make room. Refuse the new
+			// rows with an explicit resolution: discard them if they are still
+			// staged, then retry the lifecycle to finalize the retained
+			// snapshot.
+			return nil, fmt.Errorf("staged recovery %q exists from an earlier attempt; discard the newly staged rows and retry the lifecycle to resolve the retained publication", recovery)
+		}
+		// No APPLIED row exists for this batch, and the next-restart ordering
+		// mutates the runtime only after APPLIED. The tree therefore belongs to
+		// an interrupted copy that never reached the runtime: restore the old
+		// contents from its manifest and reuse the tree for this attempt.
+		if err := restoreInterruptedRecovery(ctx, acc, recovery); err != nil {
+			return nil, err
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -354,6 +364,43 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 		}
 	}
 	return failed
+}
+
+// restoreInterruptedRecovery restores the old contents recorded by a recovery
+// tree whose attempt never recorded an APPLIED row, then removes the tree. The
+// manifest is written before the first live mutation, so every entry it names
+// can be restored. A missing or unreadable manifest fails closed: the tree is
+// never overwritten or deleted without that evidence.
+func restoreInterruptedRecovery(ctx context.Context, acc nodestorage.Accessor, recovery string) error {
+	body, err := acc.ReadFile(path.Join(recovery, "manifest.json"))
+	if err != nil {
+		return fmt.Errorf("interrupted staged recovery %q has no readable manifest: %w", recovery, err)
+	}
+	var manifest struct {
+		Version int         `json:"version"`
+		BatchID string      `json:"batch_id"`
+		Entries []undoEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return fmt.Errorf("interrupted staged recovery %q has a corrupt manifest: %w", recovery, err)
+	}
+	if manifest.Version != 1 {
+		return fmt.Errorf("interrupted staged recovery %q has unsupported manifest version %d", recovery, manifest.Version)
+	}
+	for i := len(manifest.Entries) - 1; i >= 0; i-- {
+		entry := manifest.Entries[i]
+		if !entry.Existed {
+			if err := acc.Remove(entry.Target); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("interrupted staged recovery %q could not remove %q: %w", recovery, entry.Target, err)
+			}
+			continue
+		}
+		want := &undoEntry{Target: entry.Target, Size: entry.Size, SHA256: entry.SHA256}
+		if _, err := copyStream(ctx, acc, entry.Backup, entry.Target, want, "", false, entry.Size); err != nil {
+			return fmt.Errorf("interrupted staged recovery %q could not restore %q: %w", recovery, entry.Target, err)
+		}
+	}
+	return acc.RemoveAll(recovery)
 }
 
 func cleanupBatchRecovery(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver) error {

@@ -2529,15 +2529,32 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		s.log.Error("Failed to apply staged config changes on start for server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged config changes: %w", err))
 	}
-	n := len(appliedStaged)
-	if n > 0 {
+	appliedNow := commit.AppliedConfigsThisAttempt()
+	if n := len(appliedStaged); n > 0 {
 		s.log.Info("Applied %d staged config change(s) on start for server %s", n, server.ID)
 	}
 	pendingRecreate, err := scheduler.HasPendingRestartStagedConfigRecreate(ctx, s.store, server.ID, server.LastStarted)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
 	}
-	needsStagedRecreate := n > 0 || pendingRecreate || contentReady
+	needsStagedRecreate := appliedNow > 0 || pendingRecreate || contentReady
+	identityAdopted := false
+	if commit.RequiresIdentityReconciliation() {
+		// An earlier attempt may have created a replacement whose ID was not
+		// saved. Reconcile the canonical container before any start or
+		// recreate, so neither acts on a stale known-removed ID.
+		identityAdopted, err = serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reconcile server container identity: %w", err))
+		}
+		if identityAdopted {
+			// The replacement already contains this batch's durable applied
+			// evidence; acknowledge it and let the ordinary start below run.
+			publication.RuntimeAccepted = true
+			needsStagedRecreate = false
+			contentReady = false
+		}
+	}
 	stagedContainerStarted := false
 
 	// If server was in deep sleep, release direct knock listener before starting
@@ -2589,7 +2606,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(recreateErr, &outcomeErr) {
 				if outcomeErr.Operation == nil {
-					publication.RuntimeAccepted = true
+					publication.RuntimeIdentityUnresolved = true
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 				}
 				publication.RuntimePreflight = outcomeErr.Preflight
@@ -2666,6 +2683,10 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			publication.RuntimeAttempted = true
 			result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 			if err != nil {
+				var outcomeErr *serverruntime.RecreationError
+				if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
+					publication.RuntimeIdentityUnresolved = true
+				}
 				s.log.Error("Failed to recreate container: %v", err)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", err))
 			}
@@ -2956,7 +2977,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		s.log.Error("Failed to apply staged config changes on restart for server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged config changes: %w", err))
 	}
-	stagedApplied := len(appliedStaged)
+	stagedApplied := commit.AppliedConfigsThisAttempt()
 	// If server is in deep sleep, release direct knock listener before starting
 	if server.Status == storage.StatusDeepSleep && s.proxy != nil {
 		s.proxy.StopDirectKnock(server.ID)
@@ -2964,6 +2985,21 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	pendingRecreate, err := scheduler.HasPendingRestartStagedConfigRecreate(ctx, s.store, server.ID, server.LastStarted)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
+	}
+	if commit.RequiresIdentityReconciliation() {
+		// A previous attempt may have replaced the container after its rows
+		// were applied but before the new ID was saved. Never restart or
+		// recreate on the stale tracked ID: adopt the canonical container and
+		// let the ordinary restart below operate on it.
+		adopted, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server)
+		if reconcileErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr))
+		}
+		if adopted {
+			publication.RuntimeAccepted = true
+			stagedApplied = 0
+			pendingRecreate = false
+		}
 	}
 
 	// If staged config changes were applied and container exists, recreate it with new config
@@ -2982,7 +3018,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(err, &outcomeErr) {
 				if outcomeErr.Operation == nil {
-					publication.RuntimeAccepted = true
+					publication.RuntimeIdentityUnresolved = true
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
 				}
 				publication.RuntimePreflight = outcomeErr.Preflight
@@ -3155,6 +3191,10 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 				return connect.NewResponse(&v1.RestartServerResponse{
 					Status: "starting",
 				}), nil
+			}
+			var outcomeErr *serverruntime.RecreationError
+			if errors.As(recErr, &outcomeErr) && outcomeErr.Operation == nil {
+				publication.RuntimeIdentityUnresolved = true
 			}
 			err = errors.Join(err, recErr)
 		} else {

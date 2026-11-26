@@ -110,7 +110,9 @@ func TestDiscardUpdateBatchWaitsForNextRestartOutcome(t *testing.T) {
 	var conflict *handlers.StagedConfigError
 	require.ErrorAs(t, err, &conflict)
 	require.Equal(t, 409, conflict.Status)
-	require.NoError(t, commit.Undo())
+	require.NoError(t, (&staging.RestartPublication{
+		Commit: commit, RuntimeAttempted: true, RuntimePreflight: true,
+	}).Resolve(ctx, store, errors.New("preflight failed")))
 	_, err = svc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
 	require.NoError(t, err)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)

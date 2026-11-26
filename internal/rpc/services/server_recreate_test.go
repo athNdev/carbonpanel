@@ -189,6 +189,11 @@ func TestStartServer_PausedContainerStaysFrozenWhenStagedConfigReadFails(t *test
 			unpauseCalls++
 			mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			// Identity reconciliation reads the canonical container before a
+			// retry acts on a prior applied row; the tracked ID is still live.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"paused","Names":["/carbon-panel-server-staged-config-read-failure"],"State":"paused"}]`))
 		default:
 			http.NotFound(w, r)
 		}

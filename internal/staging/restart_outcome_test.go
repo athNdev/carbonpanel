@@ -519,6 +519,166 @@ func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(data, "file.txt"))
 }
 
+func TestIdentityUnresolvedReplacementIsSealedNotAcknowledged(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "identity-unresolved", Name: "identity-unresolved", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "applied"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.ErrorContains(t, (&RestartPublication{
+		Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeIdentityUnresolved: true,
+	}).Resolve(ctx, store, errors.New("replacement created but ID was not saved")), "canonical identity")
+
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.NotNil(t, open.SealedAt)
+	require.Nil(t, open.PublishedAt, "a replacement without a persisted identity is not an acknowledgement")
+	require.FileExists(t, filepath.Join(data, "file.txt"))
+
+	// The retry knows a prior replacement may own the canonical container and
+	// must reconcile it before deciding to start or recreate.
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, retry)
+	require.True(t, retry.RequiresIdentityReconciliation())
+}
+
+func TestNextRestartClaimsAdmissionBeforeLiveWritesAndReleasesOnCompensation(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "claim-admission", Name: "claim-admission", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "later"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	// DB config staging does not take the in-process data lease; the durable
+	// claim in the batch transaction must refuse it.
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open.SealedAt, "the claim is durable before the first live write")
+
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.NoError(t, (&RestartPublication{
+		Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimePreflight: true,
+	}).Resolve(ctx, store, errors.New("image pull failed")))
+
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Nil(t, open.SealedAt, "a fully compensated attempt releases its claim")
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err, "normal admission must work after compensation")
+}
+
+func TestNextRestartEmptyBatchDoesNotKeepItsClaim(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "claim-noop", Name: "claim-noop", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.Nil(t, commit)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Equal(t, batch, open.ID)
+	require.Nil(t, open.SealedAt, "a no-op must not wedge admission behind a seal")
+}
+
+func TestInterruptedNextRestartRecoveryIsRestoredBeforeReuse(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "interrupted", Name: "interrupted", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("old"), 0o644))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	rows, err := store.ListBatchContent(ctx, batch)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	// Simulate a crash after the manifest and live copy but before APPLIED:
+	// the rows are still staged and the batch carries the durable claim.
+	acc, err := openAccessor(ctx, store, server, nil)
+	require.NoError(t, err)
+	_, err = commitFiles(ctx, acc, rows)
+	require.NoError(t, err)
+	require.NoError(t, acc.Close())
+	claimed, err := store.ClaimUpdateBatchForPublication(ctx, batch)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	body, err := os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+
+	// The retry restores the interrupted tree, then re-publishes normally.
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.NoError(t, (&RestartPublication{Commit: commit, Configs: applied}).Resolve(ctx, store, nil))
+	body, err = os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+	require.NoDirExists(t, filepath.Join(data, ".carbon-panel", "undo", batch))
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
+func TestAcknowledgementPersistenceFailureDoesNotCleanUpOrClose(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "ack-failure", Name: "ack-failure", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batch)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Exec(
+		`CREATE TRIGGER fail_ack BEFORE UPDATE OF published_at ON server_update_batches
+		 WHEN NEW.published_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`).Error)
+	err = (&RestartPublication{Commit: commit, Configs: applied}).Resolve(ctx, store, nil)
+	require.ErrorContains(t, err, "ack unavailable")
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "a failed acknowledgement must not close the batch")
+	require.Nil(t, open.PublishedAt)
+	require.NotNil(t, open.SealedAt)
+	require.DirExists(t, recovery, "a failed acknowledgement must not run cleanup")
+	require.FileExists(t, filepath.Join(data, "file.txt"))
+}
+
 func TestNextRestartUndoReportsRestagingFailureAndReleasesGate(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)

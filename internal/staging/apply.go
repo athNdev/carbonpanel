@@ -114,7 +114,8 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err != nil {
 			return err
 		}
-		if current == nil || current.ID != batch.ID || current.Window != batch.Window || !current.UpdatedAt.Equal(batch.UpdatedAt) {
+		if current == nil || current.ID != batch.ID || current.Window != batch.Window ||
+			!current.UpdatedAt.Equal(batch.UpdatedAt) || !sameApplyInstant(current.ApplyAt, batch.ApplyAt) || current.IdleMinutes != batch.IdleMinutes {
 			return nil
 		}
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
@@ -254,6 +255,15 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 	})
 }
 
+// sameApplyInstant compares the window's absolute deadline without requiring
+// the same pointer identity.
+func sameApplyInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
+}
+
 func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID string) error {
 	if store == nil || batchID == "" {
 		return nil
@@ -272,9 +282,11 @@ type NextRestartCommit struct {
 	complete       func() error
 	seal           func(context.Context) error
 	acknowledge    func(context.Context) error
+	unseal         func(context.Context) error
 	undoErr        error
 	pendingContent bool
 	published      bool
+	appliedConfigs int
 	configs        []*storage.StagedConfigChange
 	priorConfigs   map[string]bool
 	release        func()
@@ -309,9 +321,29 @@ func (c *NextRestartCommit) ApplyConfigs(ctx context.Context, store configApplie
 		if err != nil {
 			return applied, err
 		}
+		c.appliedConfigs++
 		applied = append(applied, rec)
 	}
 	return applied, nil
+}
+
+// AppliedConfigsThisAttempt reports how many snapshot config rows this attempt
+// applied. Rows that were already applied before the snapshot are prior
+// evidence of an earlier publication and do not count, so an acknowledged
+// retry is finalize-only instead of rebuilding the container again.
+func (c *NextRestartCommit) AppliedConfigsThisAttempt() int {
+	if c == nil {
+		return 0
+	}
+	return c.appliedConfigs
+}
+
+// RequiresIdentityReconciliation reports that an earlier attempt applied rows
+// without an acknowledgement, so its container identity may not match the
+// tracked one. Resolve the canonical container before starting or recreating;
+// a stale known-removed ID is not a valid base for either operation.
+func (c *NextRestartCommit) RequiresIdentityReconciliation() bool {
+	return c != nil && !c.published && c.HasPriorRuntimeState()
 }
 
 // IsPriorConfig reports whether a snapshot config row was already applied
@@ -399,11 +431,22 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	}
 	batchID := ""
 	published := false
-	var content []storage.StagedContentChange
 	if batch != nil && batch.Window == string(storage.UpdateWindowNextRestart) {
 		batchID = batch.ID
 		published = batch.PublishedAt != nil
-		content, err = store.ListBatchContent(ctx, batch.ID)
+		// Claim admission before reading the snapshot and before any live
+		// write. DB config staging checks this same durable seal in its own
+		// transaction, so it cannot join a recovery tree that this attempt is
+		// about to write. A no-op below releases the claim.
+		if !published {
+			if _, err := store.ClaimUpdateBatchForPublication(ctx, batch.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var content []storage.StagedContentChange
+	if batchID != "" {
+		content, err = store.ListBatchContent(ctx, batchID)
 		if err != nil {
 			return nil, err
 		}
@@ -415,12 +458,36 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	if err != nil {
 		return nil, err
 	}
+	var appliedContent int64
+	if batchID != "" {
+		// An earlier attempt may already have published some content rows. The
+		// count is durable evidence independent of staged rows still waiting, of
+		// server status, and of whether the attempt's start outcome was observed.
+		appliedContent, err = store.CountBatchContentByStatus(ctx, batchID, storage.StagedStatusApplied)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if batchID == "" && len(configs) == 0 {
 		return nil, nil
 	}
-	commit := &NextRestartCommit{release: write.Release, configs: configs, published: published}
+	if batchID != "" && !published && appliedContent == 0 && len(content) == 0 && len(configs) == 0 {
+		// Nothing to publish or resolve: do not leave a seal that would block
+		// valid later admission until another lifecycle happens to run. This
+		// also releases a seal left by an interrupted but write-free attempt.
+		if err := store.ReleaseUpdateBatchSeal(ctx, batchID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	commit := &NextRestartCommit{
+		release:   write.Release,
+		configs:   configs,
+		published: published,
+	}
 	if batchID != "" {
 		batchForFinish := batchID
+		commit.pendingContent = appliedContent > 0
 		commit.complete = func() error {
 			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 			defer cancel()
@@ -432,14 +499,9 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		commit.acknowledge = func(ackCtx context.Context) error {
 			return store.MarkUpdateBatchPublished(ackCtx, batchForFinish)
 		}
-		// An earlier attempt may already have published some content rows. The
-		// count is durable evidence independent of staged rows still waiting, of
-		// server status, and of whether the attempt's start outcome was observed.
-		count, err := store.CountBatchContentByStatus(ctx, batchID, storage.StagedStatusApplied)
-		if err != nil {
-			return nil, err
+		commit.unseal = func(unsealCtx context.Context) error {
+			return store.ReleaseUpdateBatchSeal(unsealCtx, batchForFinish)
 		}
-		commit.pendingContent = count > 0
 	}
 	if len(content) > 0 {
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
@@ -448,7 +510,12 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
 			return nil, err
 		}
-		commit.undo, err = commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, resolver)
+		// The next-restart path copies files before recording APPLIED and only
+		// mutates the runtime afterwards. A recovery tree left without any
+		// APPLIED row therefore belongs to an attempt that never reached the
+		// runtime: restore it before reusing the tree. The timed path does not
+		// have that ordering and never opts in.
+		commit.undo, err = commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, appliedContent == 0, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -504,6 +571,17 @@ func (c *NextRestartCommit) markPublished(ctx context.Context) error {
 	return nil
 }
 
+// unsealRetained releases a claim only after a full compensation. It never
+// clears an acknowledgement, so an accepted publication stays sealed.
+func (c *NextRestartCommit) unsealRetained(ctx context.Context) error {
+	if c == nil || c.unseal == nil || c.published {
+		return nil
+	}
+	unsealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return c.unseal(unsealCtx)
+}
+
 // HasPriorRuntimeState reports that an earlier attempt already applied this
 // snapshot's content or config. The evidence is durable persisted rows, not the
 // mutable server status. Such a row may be embedded in a replacement container,
@@ -526,12 +604,15 @@ func (c *NextRestartCommit) HasPriorRuntimeState() bool {
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.
 // The caller owns the exclusive data-write gate through the returned undo.
-func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, resolver *nodestorage.Resolver) (func() error, error) {
+// recoverUnapplied may restore a recovery tree left by an attempt that wrote
+// files but never recorded an APPLIED row; only the next-restart ordering makes
+// that safe.
+func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, recoverUnapplied bool, resolver *nodestorage.Resolver) (func() error, error) {
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}
-	snaps, err := commitFiles(ctx, acc, content)
+	snaps, err := commitFilesRecoveringInterrupted(ctx, acc, content, recoverUnapplied)
 	_ = acc.Close()
 	restoreFilesNow := func() error {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
@@ -676,7 +757,14 @@ func undoApply(ctx context.Context, store *storage.Store, restore func() error, 
 }
 
 func commitFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	return commitStreamingFiles(ctx, acc, rows)
+	return commitStreamingFiles(ctx, acc, rows, false)
+}
+
+// commitFilesRecoveringInterrupted is the next-restart variant. That path
+// records APPLIED before any runtime mutation, so a recovery tree with no
+// APPLIED row can be restored safely before the tree is reused.
+func commitFilesRecoveringInterrupted(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange, recoverUnapplied bool) ([]fileSnap, error) {
+	return commitStreamingFiles(ctx, acc, rows, recoverUnapplied)
 }
 
 func openAccessor(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) (nodestorage.Accessor, error) {

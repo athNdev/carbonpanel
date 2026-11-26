@@ -63,7 +63,7 @@ func TestPublishRefusesDelayedLiveDriftAndPreservesStagedBytes(t *testing.T) {
 	require.NoError(t, os.WriteFile(live, []byte("locally-edited"), 0o600))
 	rows, err := store.ListBatchContent(ctx, batch.ID)
 	require.NoError(t, err)
-	_, err = commitStreamingFiles(ctx, acc, rows)
+	_, err = commitStreamingFiles(ctx, acc, rows, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "changed after staging")
 
@@ -109,7 +109,7 @@ func TestReviewedHashCoversTheActualUndoSnapshot(t *testing.T) {
 		// Modify the already-open inode while the undo write is beginning.
 		return os.WriteFile(filepath.Join(data, filepath.FromSlash(live)), []byte("modified!"), 0o600)
 	}}
-	_, err = commitStreamingFiles(ctx, wrapped, rows)
+	_, err = commitStreamingFiles(ctx, wrapped, rows, false)
 	require.ErrorContains(t, err, "changed after staging")
 	got, err := acc.ReadFile(live)
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestPublishAcceptsUnchangedLiveFile(t *testing.T) {
 	require.NoError(t, acc.WriteFile(".carbon-panel/staged/candidate/mod.jar", []byte("candidate")))
 	rows, err := store.ListBatchContent(ctx, batch.ID)
 	require.NoError(t, err)
-	_, err = commitStreamingFiles(ctx, acc, rows)
+	_, err = commitStreamingFiles(ctx, acc, rows, false)
 	require.NoError(t, err)
 	current, err := os.ReadFile(live)
 	require.NoError(t, err)

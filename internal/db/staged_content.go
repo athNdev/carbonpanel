@@ -476,6 +476,30 @@ func (s *Store) SealUpdateBatch(ctx context.Context, id string) error {
 		Update("sealed_at", now).Error
 }
 
+// ClaimUpdateBatchForPublication durably seals an open, unacknowledged batch
+// before a next-restart attempt copies live files or applies config. Admission
+// checks the same row inside its own transaction, so a DB config stage cannot
+// join the snapshot's recovery tree after this claim. It reports whether this
+// call set the seal, so a caller that fully compensates knows it may release it.
+func (s *Store) ClaimUpdateBatchForPublication(ctx context.Context, id string) (bool, error) {
+	res := s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).
+		Where("id = ? AND status = ? AND sealed_at IS NULL AND published_at IS NULL", id, UpdateBatchOpen).
+		Update("sealed_at", time.Now())
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// ReleaseUpdateBatchSeal clears a seal when an attempt fully compensated and
+// left no durable applied evidence. It never clears PublishedAt, so an
+// acknowledged batch stays closed to admission. It is idempotent.
+func (s *Store) ReleaseUpdateBatchSeal(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).
+		Where("id = ? AND status = ? AND published_at IS NULL", id, UpdateBatchOpen).
+		Update("sealed_at", nil).Error
+}
+
 // MarkUpdateBatchPublished records that a lifecycle accepted the batch's
 // runtime publication. A later retry may finish metadata and recovery cleanup,
 // but must not perform another container publication. It also seals admission

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
 	"github.com/robfig/cron/v3"
 
 	"github.com/athNdev/carbon-panel/internal/activity"
@@ -1234,6 +1235,7 @@ func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage
 type stagedLifecycleDocker interface {
 	RecreateContainer(ctx context.Context, oldContainerID string, server *storage.Server, serverConfig *storage.ServerConfig) (*docker.RecreateContainerResult, error)
 	StartContainer(ctx context.Context, containerID string) error
+	ResolveContainer(ctx context.Context, serverID string) (*container.Summary, error)
 }
 
 // recreateForPendingStagedConfig ensures scheduled lifecycle operations cannot
@@ -1270,6 +1272,7 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	if err != nil {
 		return true, fmt.Errorf("failed to apply staged server configuration: %w", err)
 	}
+	appliedNow := publication.Commit.AppliedConfigsThisAttempt()
 	pending, err := HasPendingRestartStagedConfigRecreate(ctx, store, server.ID, server.LastStarted)
 	if err != nil {
 		return true, fmt.Errorf("failed to check staged configuration recovery: %w", err)
@@ -1278,8 +1281,21 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	// container again; the caller's normal start/wake proceeds on the current
 	// replacement and the deferred Resolve finishes the batch.
 	needsPublication := publication.Commit.NeedsRuntimePublication()
-	if len(appliedRecords) == 0 && !pending && !needsPublication {
+	if appliedNow == 0 && !pending && !needsPublication {
 		return false, nil
+	}
+	if publication.Commit.RequiresIdentityReconciliation() {
+		adopted, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, store, dockerClient, server)
+		if reconcileErr != nil {
+			return true, reconcileErr
+		}
+		if adopted {
+			// The canonical container was created after this batch's durable
+			// applied evidence. Record the acknowledgement and let the caller's
+			// normal lifecycle operate on that container.
+			publication.RuntimeAccepted = true
+			return false, nil
+		}
 	}
 
 	serverConfig, err := store.GetServerConfig(ctx, server.ID)
@@ -1297,7 +1313,7 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 		var outcomeErr *serverruntime.RecreationError
 		if errors.As(recreateErr, &outcomeErr) {
 			if outcomeErr.Operation == nil {
-				publication.RuntimeAccepted = true
+				publication.RuntimeIdentityUnresolved = true
 				// Docker already runs the applied spec. Preserve the pending marker
 				// for retry/reconciliation rather than roll back only the database.
 				return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)

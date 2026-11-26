@@ -9,6 +9,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/moby/moby/api/types/container"
 )
 
 type recreationStore interface {
@@ -54,6 +55,38 @@ func persistRecovery(ctx context.Context, store recreationStore, server *db.Serv
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	return persistFields(recoveryCtx, store, server, fields)
+}
+
+// containerResolver re-finds a server's canonical container by label or name.
+type containerResolver interface {
+	ResolveContainer(context.Context, string) (*container.Summary, error)
+}
+
+// ReconcileContainerIdentity makes the tracked container match the canonical
+// live container before a retry may start or recreate it. It returns true when
+// a different canonical container was adopted and persisted: that container was
+// created after the batch's durable APPLIED rows, so the caller may treat the
+// batch as accepted instead of publishing it again. A missing or unresolvable
+// container is an error, never permission to act on the stale tracked ID.
+func ReconcileContainerIdentity(ctx context.Context, store recreationStore, client containerResolver, server *db.Server) (bool, error) {
+	resolved, err := client.ResolveContainer(ctx, server.ID)
+	if err != nil {
+		if errors.Is(err, docker.ErrContainerNotResolved) {
+			return false, fmt.Errorf("no canonical container for server %s; refusing to act on the stale tracked ID %q: %w", server.ID, server.ContainerID, err)
+		}
+		return false, fmt.Errorf("could not reconcile container identity for server %s: %w", server.ID, err)
+	}
+	if resolved == nil || resolved.ID == "" {
+		return false, fmt.Errorf("container resolution for server %s returned no identity; refusing to act on the stale tracked ID %q", server.ID, server.ContainerID)
+	}
+	if resolved.ID == server.ContainerID {
+		return false, nil
+	}
+	if err := persistRecovery(ctx, store, server, map[string]any{"container_id": resolved.ID}); err != nil {
+		return false, fmt.Errorf("resolved container %s for server %s but could not save it: %w", resolved.ID, server.ID, err)
+	}
+	server.ContainerID = resolved.ID
+	return true, nil
 }
 
 // RecreationError distinguishes a failed daemon outcome from a successful

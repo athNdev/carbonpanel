@@ -22,22 +22,27 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // fakeStagedStore is an in-memory stagedConfigStore for hook tests.
 type fakeStagedStore struct {
-	changes    []*storage.StagedConfigChange
-	applied    []string
-	rolledBack []string
-	failOn     map[string]bool
+	changes          []*storage.StagedConfigChange
+	applied          []string
+	rolledBack       []string
+	failOn           map[string]bool
+	publishedBatches map[string]bool
 }
 
 type fakeLifecycleDocker struct {
-	result *docker.RecreateContainerResult
-	err    error
-	starts []string
+	result        *docker.RecreateContainerResult
+	err           error
+	starts        []string
+	recreateCalls int
+	resolvedID    string
+	resolveErr    error
 }
 
 func (f *fakeLifecycleDocker) GetContainerStatus(context.Context, string) (storage.ServerStatus, error) {
@@ -45,7 +50,18 @@ func (f *fakeLifecycleDocker) GetContainerStatus(context.Context, string) (stora
 }
 
 func (f *fakeLifecycleDocker) RecreateContainer(context.Context, string, *storage.Server, *storage.ServerConfig) (*docker.RecreateContainerResult, error) {
+	f.recreateCalls++
 	return f.result, f.err
+}
+
+func (f *fakeLifecycleDocker) ResolveContainer(context.Context, string) (*container.Summary, error) {
+	if f.resolveErr != nil {
+		return nil, f.resolveErr
+	}
+	if f.resolvedID == "" {
+		return nil, docker.ErrContainerNotResolved
+	}
+	return &container.Summary{ID: f.resolvedID, State: container.StateRunning}, nil
 }
 
 func (f *fakeLifecycleDocker) StartContainer(_ context.Context, id string) error {
@@ -59,6 +75,23 @@ func (f *fakeStagedStore) ListStagedConfigChanges(_ context.Context, serverID st
 		if c.ServerID == serverID && (status == "" || c.Status == status) {
 			out = append(out, c)
 		}
+	}
+	return out, nil
+}
+
+func (f *fakeStagedStore) ListPendingRestartStagedConfigs(_ context.Context, serverID string, lastStarted *time.Time) ([]*storage.StagedConfigChange, error) {
+	var out []*storage.StagedConfigChange
+	for _, c := range f.changes {
+		if c.ServerID != serverID || c.ApplyMode != storage.StagedApplyOnRestart || c.Status != storage.StagedStatusApplied || c.AppliedAt == nil {
+			continue
+		}
+		if lastStarted != nil && !c.AppliedAt.After(*lastStarted) {
+			continue
+		}
+		if c.BatchID != "" && f.publishedBatches[c.BatchID] {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -378,6 +411,61 @@ func TestConsecutiveWakePreparationRetainsAppliedSnapshotWithoutStatus(t *testin
 			lease.Release()
 		})
 	}
+}
+
+func TestAcknowledgedMixedRetryDoesNotRecreate(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	started := time.Now().Add(-time.Hour).Truncate(time.Second)
+	server := &storage.Server{
+		ID: "srv-mixed-retry", Name: "srv-mixed-retry", DataPath: t.TempDir(),
+		ContainerID: "old-id", Status: storage.StatusRunning, LastStarted: &started,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "mixed"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stagePath := ".carbon-panel/staged/mixed/mixed.txt"
+	require.NoError(t, os.MkdirAll(filepath.Join(server.DataPath, filepath.FromSlash(".carbon-panel/staged/mixed")), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, filepath.FromSlash(stagePath)), []byte("mixed"), 0o644))
+	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ServerID: server.ID, Kind: storage.StagedKindFile, Action: storage.StagedActionInstall,
+		TargetPath: "mixed.txt", StagePath: stagePath, FileName: "mixed.txt",
+	})
+	require.NoError(t, err)
+
+	// PersistStarted fails after the acknowledged publication, leaving an old
+	// LastStarted and both content and config applied in the published batch.
+	require.NoError(t, store.DB().Exec(
+		`CREATE TRIGGER fail_starting BEFORE UPDATE OF status ON servers
+		 WHEN NEW.status = 'starting' BEGIN SELECT RAISE(ABORT, 'status save unavailable'); END`).Error)
+	first := &fakeLifecycleDocker{result: &docker.RecreateContainerResult{NewContainerID: "replacement", WasRunning: true}}
+	handled, err := recreateForPendingStagedConfig(ctx, store, first, nil, server, true, true, nil)
+	require.True(t, handled)
+	require.ErrorContains(t, err, "status could not be saved")
+	require.Equal(t, 1, first.recreateCalls)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NotNil(t, batch.PublishedAt)
+
+	require.NoError(t, store.DB().Exec(`DROP TRIGGER fail_starting`).Error)
+	stored, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, "replacement", stored.ContainerID)
+	retry := &fakeLifecycleDocker{result: &docker.RecreateContainerResult{NewContainerID: "unexpected"}}
+	handled, err = recreateForPendingStagedConfig(ctx, store, retry, nil, stored, true, true, nil)
+	require.NoError(t, err)
+	require.False(t, handled, "an acknowledged batch owes cleanup, not another container")
+	require.Zero(t, retry.recreateCalls)
+	batch, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch)
+	body, err := os.ReadFile(filepath.Join(server.DataPath, "mixed.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "mixed", string(body))
 }
 
 func TestSchedulerWakePathsRejectOvercommittedNode(t *testing.T) {
