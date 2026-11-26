@@ -11,6 +11,7 @@ on:
 concurrency:
   group: pages-deploy
   cancel-in-progress: false
+  queue: max
 
 permissions: {}
 

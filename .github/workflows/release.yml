@@ -69,14 +69,13 @@ permissions:
 # publication: every phase (immutable image -> GitHub release -> moving aliases)
 # holds the SAME lock as the CD channel transaction and the docs-only publisher.
 # A stable/latest alias can never move while a Pages or Nightly writer is active.
-# cancel-in-progress:false protects the RUNNING run; with default queue:single only
-# one pending run is retained and a later request REPLACES it. This lane is
-# SINGLE-OPERATOR DISPATCH: do not assume every queued publisher waits; verify
-# the resulting run before retry. Build-only rehearsals, tag pushes, PRs and
-# automatic main events get a per-run key instead, so ordinary CI is not serialized.
+# Preserve pending publishers under the same lock. When a run acquires it,
+# existing live-source checks still decide whether its candidate can publish.
+# Rehearsals, tag pushes and PRs use per-run keys.
 concurrency:
   group: ${{ inputs.publish == true && 'pages-deploy' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   plan:

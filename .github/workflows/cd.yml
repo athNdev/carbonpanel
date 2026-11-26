@@ -445,6 +445,7 @@ jobs:
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       actions: read
@@ -1078,6 +1079,7 @@ jobs:
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
@@ -1162,6 +1164,7 @@ jobs:
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
