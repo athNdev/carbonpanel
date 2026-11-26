@@ -23,6 +23,7 @@ import (
 	models "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/files"
+	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -353,7 +354,13 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 		c.log.Warn("Failed to parse volume configuration: %v", err)
 		return nil, nil
 	}
+	return resolveModuleVolumeMounts(volumes, aliasCtx, c.log)
+}
 
+// resolveModuleVolumeMounts substitutes aliases and validates the resolved
+// mounts. Container creation and the stopped-export writer check share it so
+// both reason about the same effective bind set.
+func resolveModuleVolumeMounts(volumes []ModuleVolumeMount, aliasCtx *alias.Context, log *logger.Logger) ([]ModuleVolumeMount, error) {
 	// Sub aliases in paths
 	for i := range volumes {
 		// Older Modules forms persist this exact template source. Resolve it
@@ -361,7 +368,10 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 		// A source explicitly chosen by the operator follows normal alias rules.
 		if aliasCtx != nil && aliasCtx.Module != nil && aliasCtx.Module.TemplateID == "builtin-bluemap" &&
 			volumes[i].Source == "{{server.data_path}}/{{server.config.level}}" && volumes[i].Target == "/app/world" {
-			level := aliasCtx.ServerConfig.ActualLevelName()
+			level := ""
+			if aliasCtx.ServerConfig != nil {
+				level = aliasCtx.ServerConfig.ActualLevelName()
+			}
 			if aliasCtx.Server == nil || level == "" {
 				return nil, fmt.Errorf("cannot resolve BlueMap world volume without a valid configured level")
 			}
@@ -370,11 +380,11 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 			volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
 		}
 		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
-		if alias.HasUnresolvedVariables(volumes[i].Source) {
-			c.log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)
+		if log != nil && alias.HasUnresolvedVariables(volumes[i].Source) {
+			log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)
 		}
-		if alias.HasUnresolvedVariables(volumes[i].Target) {
-			c.log.Warn("Module volume target path contains unresolved template variable: %s", volumes[i].Target)
+		if log != nil && alias.HasUnresolvedVariables(volumes[i].Target) {
+			log.Warn("Module volume target path contains unresolved template variable: %s", volumes[i].Target)
 		}
 	}
 
@@ -392,6 +402,37 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 	}
 
 	return volumes, nil
+}
+
+// WritableModuleDataSources resolves a module's bind mounts and reports the
+// writable sources inside the owning server's data directory. Stopped export
+// refuses those modules: container stop state does not qualify writer process
+// death, and module lifecycles are not fenced by the server transition.
+func WritableModuleDataSources(module *models.Module, server *models.Server, serverConfig *models.ServerConfig, cfg *config.Config) ([]string, error) {
+	if module == nil || server == nil || server.DataPath == "" ||
+		module.VolumeOverrides == "" || module.VolumeOverrides == "[]" {
+		return nil, nil
+	}
+	var volumes []ModuleVolumeMount
+	if err := json.Unmarshal([]byte(module.VolumeOverrides), &volumes); err != nil {
+		return nil, fmt.Errorf("invalid module volume overrides: %w", err)
+	}
+	resolved, err := resolveModuleVolumeMounts(volumes, &alias.Context{
+		Server: server, ServerConfig: serverConfig, Module: module, Config: cfg,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var sources []string
+	for _, volume := range resolved {
+		if volume.ReadOnly || volume.Source == "" || (volume.Type != "" && volume.Type != "bind") {
+			continue
+		}
+		if files.WithinReal(server.DataPath, volume.Source) {
+			sources = append(sources, volume.Source)
+		}
+	}
+	return sources, nil
 }
 
 func (c *Client) prepareModuleMountSource(serverDataPath, source string, safeRoots []string) error {

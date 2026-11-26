@@ -65,15 +65,22 @@ Precedence is fixed:
    setting that forces an environment value outside this list still wins at
    startup.
 
-The consistency policy requires a stopped server. If third-party software can
-write to the data directory independently, stop those writers before exporting.
+The consistency policy requires a stopped server. Export verifies the game
+container and attached module containers on their owning nodes. It also refuses
+an attached module whose resolved bind mounts can write the server data
+directory, even while that module is stopped: module lifecycles are not fenced
+by the export, and a stopped container does not by itself qualify writer process
+death. Detach such a module or make its data-directory bind mounts read-only
+before exporting. Qualification of independent host processes and other
+out-of-band writers is still pending, so stop those writers before exporting.
 
 ## Export and create from an archive
 
 Use the stopped-server consistency option. Export verifies the game container
-and attached module containers on their owning nodes before reading the data.
-The download session has the same server-scoped file authorization as other
-binary downloads.
+and attached module containers on their owning nodes before reading the data,
+and refuses attached modules with writable data-directory mounts. The download
+session has the same server-scoped file authorization as other binary
+downloads.
 
 Upload the archive through the standard chunked upload service. Preview checks
 every file checksum, reports runtime compatibility and gives the expanded

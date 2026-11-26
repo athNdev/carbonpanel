@@ -49,3 +49,9 @@ transaction so a failed import leaves neither. The gameplay allowlist is
 intentionally small; adding a property requires it to be safe for the
 destination and available in the filtered export. Tests must assert the exact
 persisted config and the effective Docker environment for both ZIP and TAR.
+
+Writer qualification is separate. A stopped container does not prove that an
+independent host writer died, and module lifecycles are not fenced by the
+export. Export therefore refuses attached modules whose resolved mounts can
+write the archived data directory, while process-death qualification remains
+pending.

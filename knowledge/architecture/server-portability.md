@@ -19,6 +19,10 @@ sources:
 
 - Stream server data through the owning node's storage accessor. Export callers
   must hold lifecycle admission and verify the server is stopped.
+- Verify attached module containers on their owning nodes and refuse modules
+  whose resolved bind mounts can write the data directory. Module lifecycles
+  are not fenced by the export, and writer process-death qualification remains
+  pending; independent writers must be stopped by the operator.
 - Serialize only explicitly portable runtime fields. Keep deployment identity,
   host paths, overrides and credentials outside the manifest.
 - Validate the complete archive before allocating a destination. Copy only into

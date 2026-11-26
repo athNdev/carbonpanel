@@ -197,6 +197,38 @@ func TestServerArchiveRoundTripThroughCreateServer(t *testing.T) {
 	}
 }
 
+// A stopped module container is not enough when its configuration can still
+// write the data directory: module lifecycles are not fenced by the export's
+// server transition.
+func TestExportServerArchiveRefusesWritableAttachedModules(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	svc.hostPortBound = func(int) bool { return false }
+	downloads := download.NewManager(t.TempDir(), time.Hour, svc.log)
+	t.Cleanup(downloads.Stop)
+	svc.SetServerArchiveDownloads(downloads)
+
+	ctx := ctxWithRole("operator")
+	server := &db.Server{
+		ID: "archive-module-source", Name: "Module Source", NodeID: "test-node",
+		Status: db.StatusStopped, ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1",
+		Memory: 1024, MaxPlayers: 10, Port: 25701,
+		DataPath: filepath.Join(svc.config.Storage.DataDir, "servers", "archive-module-source"),
+	}
+	require.NoError(t, svc.store.CreateServer(ctx, server))
+	require.NoError(t, svc.store.CreateModule(ctx, &db.Module{
+		ID: "archive-module", Name: "Geyser", ServerID: server.ID,
+		TemplateID: "custom", NodeID: server.NodeID, Status: db.ModuleStatusStopped,
+		VolumeOverrides: `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":false}]`,
+	}))
+
+	_, err := svc.ExportServerArchive(ctx, connect.NewRequest(&v1.ExportServerArchiveRequest{
+		ServerId: server.ID, Format: v1.ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_ZIP,
+		Consistency: v1.ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED,
+	}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "can still write the server data directory")
+}
+
 func environmentByName(env []string) map[string]string {
 	result := make(map[string]string, len(env))
 	for _, entry := range env {

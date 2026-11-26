@@ -70,12 +70,28 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify server modules before export"))
 	}
+	var serverConfig *storage.ServerConfig
+	if len(modules) > 0 {
+		serverConfig, err = s.store.GetServerConfig(ctx, server.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("could not verify attached module mounts before export"))
+		}
+	}
 	for _, module := range modules {
 		if module.Detached || module.Status != storage.ModuleStatusStopped {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("stop attached modules before exporting the server"))
 		}
 		if err := s.verifyArchiveContainerStopped(ctx, module.NodeID, module.ContainerID); err != nil {
 			return nil, err
+		}
+		writable, err := docker.WritableModuleDataSources(module, server, serverConfig, s.config)
+		if err != nil {
+			s.log.Error("Verify module %s mounts before archive export: %v", module.ID, err)
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("could not verify attached module mounts before export"))
+		}
+		if len(writable) > 0 {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("module %q can still write the server data directory; detach it or make its bind mounts read-only before exporting", module.Name))
 		}
 	}
 
