@@ -1018,6 +1018,19 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, storageError(err)
 	}
 
+	// Admission must be held before the destination tree is allocated or
+	// created. It moves to the detached download worker below.
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	writeTransferred := false
+	defer func() {
+		if !writeTransferred {
+			releaseWrite()
+		}
+	}()
+
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
@@ -1042,9 +1055,11 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 	// Run download in background with an owned context: the RPC may end while
 	// the archive is still streaming.
 	detachedCtx, release := s.beginDetached()
+	writeTransferred = true
 	go func() {
 		defer op.markCompletedAt()
 		defer release()
+		defer releaseWrite()
 
 		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, archivePolicy)
 		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
@@ -1179,6 +1194,18 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 // writes or extracts through nodestorage.ForNode. It never calls dataRootFor
 // or os.MkdirAll on the server tree (ADR 0005).
 func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.DownloadRemoteArchiveRequest, rawURL string) (*connect.Response[v1.DownloadRemoteArchiveResponse], error) {
+	// Hold the same server-data admission as the local path, before opening the
+	// accessor or creating the destination directory.
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	writeTransferred := false
+	defer func() {
+		if !writeTransferred {
+			releaseWrite()
+		}
+	}()
 	// The accessor is handed to a detached download job: use the service-owned
 	// context so request cancellation cannot strand a half-written archive.
 	detachedCtx, release := s.beginDetached()
@@ -1221,9 +1248,11 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 
 	archivePolicy := s.archiveEgressPolicy(server.NodeID)
 	handedOff = true
+	writeTransferred = true
 	go func() {
 		defer op.markCompletedAt()
 		defer release()
+		defer releaseWrite()
 		defer func() { _ = acc.Close() }()
 
 		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, archivePolicy)
