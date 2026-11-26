@@ -73,6 +73,35 @@ func TestDirectFileWriteIsRefusedDuringArchiveExport(t *testing.T) {
 	}
 }
 
+func TestCreateFolderRefusalDoesNotAllocateServerData(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "mkdir-export-server", Name: "Folder Export", NodeID: "local",
+		Status: storage.StatusStopped, DataPath: filepath.Join(t.TempDir(), "unallocated"),
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	svc := NewFileService(store, nil, nil, nil, logger.New())
+	t.Cleanup(svc.Stop)
+	fence, err := module.TryBeginServerModuleArchive(server.ID)
+	require.NoError(t, err)
+	t.Cleanup(fence.Release)
+
+	req := connect.NewRequest(&v1.CreateFolderRequest{ServerId: server.ID, Path: "world"})
+	_, err = svc.CreateFolder(ctx, req)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	_, err = os.Stat(server.DataPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	fence.Release()
+	_, err = svc.CreateFolder(ctx, req)
+	require.NoError(t, err)
+	info, err := os.Stat(filepath.Join(server.DataPath, "world"))
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+}
+
 // A remote-archive download allocates and writes the server data tree, so both
 // the local and the transport-only paths must take the same admission as
 // ExtractArchive before creating any destination directory.

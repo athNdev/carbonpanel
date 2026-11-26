@@ -1421,6 +1421,12 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
 		return nil, storageError(err)
@@ -1431,12 +1437,6 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
-
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 
 	if err := acc.MkdirAll(msg.Path); err != nil {
 		s.log.Error("Failed to create folder: %v", err)
