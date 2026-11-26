@@ -99,6 +99,10 @@ type Scheduler struct {
 	// Cron parser
 	cronParser cron.Parser
 
+	// now supplies the scheduler clock. Nil means time.Now; tests replace it so
+	// repeated cron advances are deterministic.
+	now func() time.Time
+
 	// Stats
 	lastCheck time.Time
 	nextCheck time.Time
@@ -194,6 +198,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		runningExecutions: make(map[string]context.CancelFunc),
 		runningTasks:      make(map[string]bool),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		now:               time.Now,
 		snapshotEngine:    snapEngine,
 		admission:         admission,
 		storageResolver:   cfg.StorageResolver,
@@ -716,6 +721,12 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 	var modBudget modUpdateRunBudget
 	for attempt := 0; ; attempt++ {
 		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData, &modBudget)
+		// A staged-batch conflict is an admission refusal owned by another
+		// lifecycle operation, not a transient planner failure; retrying the
+		// same slot would only repeat it.
+		if errors.Is(execErr, storage.ErrUpdateBatchConflict) {
+			break
+		}
 		if execErr == nil || attempt >= retries || execCtx.Err() != nil || modBudget.exhausted {
 			break
 		}
@@ -1513,9 +1524,22 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 	return dockerCli.Exec(ctx, server.ContainerID, append(execCmd, config.Args...))
 }
 
+func (s *Scheduler) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// cronExprHasExplicitTimezone mirrors the shared cron parser: an expression
+// beginning with TZ= or CRON_TZ= carries its own location.
+func cronExprHasExplicitTimezone(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
+}
+
 // CalculateNextRun calculates the next run time for a task based on its schedule
 func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, error) {
-	now := time.Now()
+	now := s.currentTime()
 
 	switch task.Schedule {
 	case storage.ScheduleTypeCron:
@@ -1524,8 +1548,10 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		}
 		// Timezone applies only to cron slots. An interval or one-shot task
 		// must keep its absolute deadline even if a stale zone is configured.
+		// An explicit TZ=/CRON_TZ= prefix belongs to the expression and must not
+		// be overwritten by the task row's timezone.
 		var location *time.Location
-		if zone := strings.TrimSpace(task.Timezone); zone != "" {
+		if zone := strings.TrimSpace(task.Timezone); zone != "" && !cronExprHasExplicitTimezone(task.CronExpr) {
 			location = time.UTC
 			if !strings.EqualFold(zone, "UTC") {
 				loaded, err := time.LoadLocation(zone)
@@ -1549,6 +1575,12 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 			}
 		}
 		next := schedule.Next(now)
+		if next.IsZero() {
+			// A parseable but impossible expression (for example 31 February)
+			// has no future occurrence. Storing the zero value would make the
+			// task look overdue forever, so treat it as a calculation failure.
+			return nil, fmt.Errorf("cron expression has no future occurrence")
+		}
 		return &next, nil
 
 	case storage.ScheduleTypeInterval:

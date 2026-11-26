@@ -50,6 +50,91 @@ func TestCalculateNextRunHonorsTaskTimezone(t *testing.T) {
 	}())
 }
 
+func TestCalculateNextRunKeepsExplicitCronTimezoneAcrossAdvance(t *testing.T) {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	base := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	for _, prefix := range []string{"CRON_TZ=", "TZ="} {
+		t.Run(prefix, func(t *testing.T) {
+			s := &Scheduler{cronParser: parser, log: logger.New(), now: func() time.Time { return base }}
+			task := &storage.ScheduledTask{
+				Schedule: storage.ScheduleTypeCron,
+				CronExpr: prefix + "America/New_York 0 3 * * *",
+				Timezone: "UTC",
+			}
+			first, err := s.CalculateNextRun(task)
+			require.NoError(t, err)
+			wantFirst := time.Date(2026, 1, 16, 3, 0, 0, 0, newYork)
+			require.True(t, first.Equal(wantFirst), "first = %v, want %v", first, wantFirst)
+
+			s.now = func() time.Time { return *first }
+			second, err := s.CalculateNextRun(task)
+			require.NoError(t, err)
+			require.True(t, second.Equal(wantFirst.Add(24*time.Hour)),
+				"the explicit zone must keep the same local fire time, got %v", second)
+		})
+	}
+}
+
+func TestCalculateNextRunAppliesTaskTimezoneWhenUnprefixed(t *testing.T) {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	base := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	s := &Scheduler{cronParser: parser, log: logger.New(), now: func() time.Time { return base }}
+	task := &storage.ScheduledTask{
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "UTC",
+	}
+
+	first, err := s.CalculateNextRun(task)
+	require.NoError(t, err)
+	require.True(t, first.Equal(time.Date(2026, 1, 16, 3, 0, 0, 0, time.UTC)), "first = %v", first)
+
+	s.now = func() time.Time { return *first }
+	second, err := s.CalculateNextRun(task)
+	require.NoError(t, err)
+	require.True(t, second.Equal(first.Add(24*time.Hour)), "second = %v, want the next daily slot", second)
+}
+
+func TestCalculateNextRunRejectsCronWithNoFutureOccurrence(t *testing.T) {
+	s := &Scheduler{
+		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		log:        logger.New(),
+	}
+	_, err := s.CalculateNextRun(&storage.ScheduledTask{
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 31 2 *", Timezone: "UTC",
+	})
+	require.ErrorContains(t, err, "no future occurrence")
+}
+
+func TestImpossibleDueModUpdateScheduleFollowsGuardedDisable(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-impossible-cron", Name: "impossible", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	overdue := time.Now().Add(-time.Hour)
+	task := &storage.ScheduledTask{
+		ID: "task-impossible-cron", ServerID: server.ID, Name: "impossible cron",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 31 2 *", Timezone: "UTC",
+		NextRun: &overdue, Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusDisabled, stored.Status,
+		"an existing impossible cron row must follow the guarded disable path")
+	require.NotNil(t, stored.NextRun, "the guarded disable keeps the observed row identity")
+	require.True(t, stored.NextRun.Equal(overdue))
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+}
+
 func TestDueModUpdateTaskExecutesOnceAndRecordsOutcome(t *testing.T) {
 	s, store := newTriggerTestScheduler(t)
 	planner := &fakeModPlanner{staged: 1, refused: 1, reasons: []string{"mod.jar: provider lookup failed"}}
@@ -643,6 +728,28 @@ func TestModUpdateTaskRetriesUseRemainingExecutionBudget(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestModUpdateBatchConflictIsNotRetried(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{err: storage.ErrUpdateBatchConflict}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-batch-conflict", Name: "batch conflict", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	task := &storage.ScheduledTask{
+		ID: "task-batch-conflict", ServerID: server.ID, Name: "batch conflict",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", RetryCount: 1, RetryDelay: 1,
+		Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	execution, err := s.TriggerTask(ctx, task.ID)
+	require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+	require.Equal(t, 1, planner.calls, "a batch admission conflict must not spend retries")
+	require.Zero(t, execution.RetryNum)
+	require.Equal(t, storage.ExecutionStatusFailed, execution.Status)
 }
 
 func TestValidateModUpdateConfigJSON(t *testing.T) {
