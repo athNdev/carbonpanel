@@ -365,7 +365,7 @@ func TestConsecutiveWakePreparationRetainsAppliedSnapshotWithoutStatus(t *testin
 			}
 			handled, err = prepareStagedLifecycle(ctx, store, preflight, nil, stored, false, false, nil, nil)
 			require.True(t, handled)
-			require.ErrorContains(t, err, "retained")
+			require.Error(t, err)
 			require.Empty(t, preflight.starts)
 
 			retained, err := store.GetStagedConfigChange(ctx, cfg.ID)

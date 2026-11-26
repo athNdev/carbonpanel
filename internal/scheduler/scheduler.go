@@ -1255,12 +1255,6 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 		return true, fmt.Errorf("failed to apply staged content: %w", err)
 	}
 	publication.Commit = commit
-	// Durable applied rows, not the mutable server status, report that a
-	// prior attempt may already have put this snapshot into a replacement.
-	// The wake path can legitimately leave DEEPSLEEP after a verified
-	// compensating stop, and the reconciler can turn a retained ERROR into
-	// STOPPED; either would let a new preflight roll back an embedded snapshot.
-	publication.RuntimePriorState = commit.HasPriorRuntimeState()
 	defer func() {
 		if retErr == nil && handled && transfer != nil {
 			transfer(publication)

@@ -27,10 +27,6 @@ type RestartPublication struct {
 	// container mutation. The old container may still be running; that alone is
 	// not evidence about a failed replacement.
 	RuntimePreflight bool
-	// RuntimePriorState reports that an earlier attempt already applied this
-	// snapshot. Its replacement may still be the current container, so even a
-	// preflight failure cannot prove rollback is safe.
-	RuntimePriorState bool
 }
 
 func (p *RestartPublication) HasChanges() bool { return p.Commit.HasContent() || len(p.Configs) != 0 }
@@ -41,6 +37,11 @@ type restartConfigStore interface {
 
 // Resolve returns additional finalization or recovery errors to the lifecycle
 // caller. It releases exclusive ownership after all observations and repairs.
+// A runtime attempt that may have been accepted retains every row. A failure
+// before this attempt mutated the runtime, or a typed preflight, compensates
+// only the work this attempt did; rows that were already applied before the
+// snapshot (and may be embedded in a prior replacement) stay applied. That
+// evidence comes from the commit's durable rows, not the mutable server status.
 func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigStore, cause error) error {
 	defer p.Commit.Finish()
 	if cause == nil {
@@ -52,7 +53,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	if !p.HasChanges() || p.RuntimeAccepted {
 		return nil
 	}
-	if p.RuntimePriorState || (p.RuntimeAttempted && !p.RuntimePreflight) {
+	if p.RuntimeAttempted && !p.RuntimePreflight {
 		if runtimeOutcomeUncertain(ctx, cause) {
 			return errors.New("staged changes retained because the runtime request outcome is uncertain; retry the lifecycle operation")
 		}
@@ -66,6 +67,9 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	var failed error
 	for i := len(p.Configs) - 1; i >= 0; i-- {
 		id := p.Configs[i].ID
+		if p.Commit.IsPriorConfig(id) {
+			continue
+		}
 		if _, err := store.RevertStagedConfigApplyToStaged(recoveryCtx, id); err != nil {
 			failed = errors.Join(failed, fmt.Errorf("restage config %s: %w", id, err))
 		}

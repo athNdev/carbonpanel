@@ -238,8 +238,8 @@ func TestStagedStartPreflightRetainsAppliedSnapshotWhileStopped(t *testing.T) {
 	// A retained wake can leave DEEPSLEEP and the reconciler can record STOPPED;
 	// neither status proves the prior replacement never embedded the snapshot.
 	_, err = svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
-	if err == nil || !strings.Contains(err.Error(), "retained") {
-		t.Fatalf("StartServer() error = %v, want retained preflight outcome", err)
+	if err == nil {
+		t.Fatal("StartServer() error = nil, want preflight failure")
 	}
 	got, err := svc.store.GetStagedConfigChange(context.Background(), staged.ID)
 	if err != nil {

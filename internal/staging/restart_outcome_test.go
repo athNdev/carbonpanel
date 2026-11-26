@@ -77,13 +77,14 @@ func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 					require.True(t, retry.HasPriorRuntimeState(), "a prior attempt may have left a replacement")
 					pending, applyErr := retry.ApplyConfigs(ctx, store)
 					require.NoError(t, applyErr)
-					// Even a new preflight cannot prove the current container is
-					// the old one after a prior attempt already applied the snapshot.
+					// A new preflight can compensate only the work this attempt
+					// applied. The snapshot's prior applied rows stay, because a
+					// replacement from the earlier attempt may still embed them.
 					retryPublication := RestartPublication{
 						Commit: retry, Configs: pending,
-						RuntimePreflight: true, RuntimePriorState: retry.HasPriorRuntimeState(),
+						RuntimeAttempted: true, RuntimePreflight: true,
 					}
-					require.ErrorContains(t, retryPublication.Resolve(ctx, store, errors.New("preflight failed")), "retained")
+					require.NoError(t, retryPublication.Resolve(ctx, store, errors.New("preflight failed")))
 					retained, readErr := store.GetStagedConfigChange(context.Background(), cfg.ID)
 					require.NoError(t, readErr)
 					require.Equal(t, storage.StagedStatusApplied, retained.Status)
@@ -328,6 +329,25 @@ func TestNextRestartPriorStateIncludesAppliedEvidenceBesideStagedRows(t *testing
 	require.NoError(t, err)
 	require.Len(t, applied, 1)
 	require.Equal(t, storage.StagedStatusApplied, applied[0].Status)
+
+	// A preflight in this new attempt may undo only the newly committed file.
+	// The prior applied row and config stay because an earlier replacement may
+	// already embed them.
+	require.NoError(t, (&RestartPublication{
+		Commit: commit, Configs: applied,
+		RuntimeAttempted: true, RuntimePreflight: true,
+	}).Resolve(ctx, store, errors.New("preflight failed")))
+	prior, err := store.GetStagedContent(ctx, rows[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusApplied, prior.Status)
+	next, err := store.GetStagedContent(ctx, server.ID+"-next.txt")
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, next.Status)
+	require.NoFileExists(t, filepath.Join(data, "next.txt"))
+	live, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, live.MOTD)
+	require.Equal(t, "prior", *live.MOTD)
 }
 
 func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {

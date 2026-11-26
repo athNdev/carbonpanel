@@ -273,6 +273,7 @@ type NextRestartCommit struct {
 	undoErr        error
 	pendingContent bool
 	configs        []*storage.StagedConfigChange
+	priorConfigs   map[string]bool
 	release        func()
 	undone         bool
 	released       bool
@@ -295,6 +296,10 @@ func (c *NextRestartCommit) ApplyConfigs(ctx context.Context, store configApplie
 	for _, cfg := range c.configs {
 		if cfg.Status == storage.StagedStatusApplied {
 			applied = append(applied, cfg)
+			if c.priorConfigs == nil {
+				c.priorConfigs = make(map[string]bool)
+			}
+			c.priorConfigs[cfg.ID] = true
 			continue
 		}
 		rec, err := store.ApplyStagedConfigChange(ctx, cfg.ID)
@@ -304,6 +309,16 @@ func (c *NextRestartCommit) ApplyConfigs(ctx context.Context, store configApplie
 		applied = append(applied, rec)
 	}
 	return applied, nil
+}
+
+// IsPriorConfig reports whether a snapshot config row was already applied
+// before this commit. Such a row may be embedded in a replacement from an
+// earlier attempt, so a failure in this attempt must not revert it.
+func (c *NextRestartCommit) IsPriorConfig(id string) bool {
+	if c == nil || id == "" {
+		return false
+	}
+	return c.priorConfigs[id]
 }
 
 // ConfigSnapshot reports how many config rows were selected for this restart.
@@ -438,10 +453,9 @@ func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != ni
 
 // HasPriorRuntimeState reports that an earlier attempt already applied this
 // snapshot's content or config. The evidence is durable persisted rows, not the
-// mutable server status: a verified compensating stop can leave DEEPSLEEP, and
-// the reconciler can move a retained ERROR to STOPPED. Such an attempt may have
-// left a replacement container embedding the applied snapshot, so a new
-// preflight cannot prove the current container is the old, unstaged one.
+// mutable server status. Such a row may be embedded in a replacement container,
+// so compensation must leave it applied; only work this attempt applied is
+// reverted. Resolve uses the per-row evidence directly.
 func (c *NextRestartCommit) HasPriorRuntimeState() bool {
 	if c == nil {
 		return false
