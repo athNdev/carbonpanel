@@ -24,10 +24,10 @@ actual data root and pins its daemon ID. A lost or changed daemon is reported
 as unavailable under the original identity. The agent submits preflight and
 health using the issued credential and endpoint generations.
 
-`internal/rpc/oss377_managed_fixture_test.go` (Linux-only) exercises this real
-agent against the shared enrollment authority over loopback TLS 1.3: challenge,
-TLS-bound claim, scoped mTLS, preflight, heartbeat, restart reuse and refused
-anonymous/unenrolled/cross-node/revoked credentials. Its daemon is a test-owned
-Docker HTTP API, and its post-enrollment control RPCs are test-only because
-production keeps `NodeControlService` unmounted. It is not evidence of a live
-VM guest, a real daemon or a deployed controller.
+`internal/rpc/oss377_managed_fixture_test.go` exercises the agent on Linux with
+the shared enrollment authority over loopback TLS 1.3. It covers TLS-bound
+claim, scoped mTLS, preflight, a periodic heartbeat, fresh reports after agent
+restart and denial of anonymous, unenrolled, cross-node and revoked clients.
+The fixture supplies its own listener, in-memory enrollment store, control RPCs
+and Docker HTTP API. VM guest enrollment with the deployed controller and a
+real daemon requires separate evidence.

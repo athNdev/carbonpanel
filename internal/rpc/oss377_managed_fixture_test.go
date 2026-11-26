@@ -97,27 +97,34 @@ type managedFixtureService struct {
 }
 
 type managedFixtureRun struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	err    error
+	ctx       context.Context
+	cancel    context.CancelFunc
+	done      chan struct{}
+	startedAt time.Time
+	err       error
 }
 
 func startManagedFixtureRun(t *testing.T, config agent.Config) *managedFixtureRun {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	run := &managedFixtureRun{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	run := &managedFixtureRun{ctx: ctx, cancel: cancel, done: make(chan struct{}), startedAt: time.Now()}
 	go func() {
 		run.err = agent.Run(ctx, config)
 		close(run.done)
 	}()
+	t.Cleanup(func() { run.stop(t) })
 	return run
 }
 
 func (r *managedFixtureRun) stop(t *testing.T) {
 	t.Helper()
 	r.cancel()
-	<-r.done
+	select {
+	case <-r.done:
+	case <-time.After(5 * time.Second):
+		t.Error("managed agent did not stop after cancellation")
+		return
+	}
 	if r.err != nil && !errors.Is(r.err, context.Canceled) && !errors.Is(r.err, context.DeadlineExceeded) {
 		t.Errorf("managed agent stopped with %v", r.err)
 	}
@@ -312,6 +319,9 @@ func awaitManagedFixtureHealth(t *testing.T, run *managedFixtureRun, health <-ch
 	for {
 		select {
 		case report := <-health:
+			if report.GetObservedAt().AsTime().Before(run.startedAt) {
+				continue
+			}
 			if report.GetDaemonId() != managedFixtureDaemonID {
 				t.Fatalf("agent reported an unexpected daemon %q", report.GetDaemonId())
 			}
@@ -328,15 +338,26 @@ func awaitManagedFixtureHealth(t *testing.T, run *managedFixtureRun, health <-ch
 
 func awaitManagedFixturePreflight(t *testing.T, run *managedFixtureRun, reports <-chan *v1.NodePreflightReport) *v1.NodePreflightReport {
 	t.Helper()
-	select {
-	case report := <-reports:
-		return report
-	case <-run.done:
-		t.Fatalf("agent stopped before reporting preflight: %v", run.err)
-	case <-run.ctx.Done():
-		t.Fatalf("no preflight report before the fixture deadline: %v", run.ctx.Err())
+	for {
+		select {
+		case report := <-reports:
+			if !report.GetObservedAt().AsTime().Before(run.startedAt) {
+				return report
+			}
+		case <-run.done:
+			t.Fatalf("agent stopped before reporting preflight: %v", run.err)
+		case <-run.ctx.Done():
+			t.Fatalf("no preflight report before the fixture deadline: %v", run.ctx.Err())
+		}
 	}
-	return nil
+}
+
+func assertManagedFixtureDenial(t *testing.T, err error, reason string) {
+	t.Helper()
+	var rejection *connect.Error
+	if !errors.As(err, &rejection) || rejection.Code() != connect.CodePermissionDenied || rejection.Message() != reason {
+		t.Fatalf("control call returned %v, want permission denied for %q", err, reason)
+	}
 }
 
 func hasManagedCapability(capabilities *v1.NodeCapabilities, want v1.NodeCapability) bool {
@@ -467,6 +488,10 @@ func TestOSS377ManagedControllerAgentFixture(t *testing.T) {
 	if health.GetPreflight() == nil {
 		t.Fatal("health report carried no preflight snapshot")
 	}
+	heartbeat := awaitManagedFixtureHealth(t, first, service.health)
+	if heartbeat.GetNodeId() != bundle.NodeID || !heartbeat.GetObservedAt().AsTime().After(health.GetObservedAt().AsTime()) {
+		t.Fatal("the first run did not send a distinct periodic heartbeat for the enrolled node")
+	}
 	select {
 	case session := <-service.sessions:
 		if session.GetNodeId() != bundle.NodeID || session.GetHeartbeatInterval().AsDuration() <= 0 {
@@ -493,7 +518,11 @@ func TestOSS377ManagedControllerAgentFixture(t *testing.T) {
 	// Restart reuses the persisted credential and never re-enrolls.
 	config.EnrollmentID = ""
 	second := startManagedFixtureRun(t, config)
-	_ = awaitManagedFixtureHealth(t, second, service.health)
+	restartedPreflight := awaitManagedFixturePreflight(t, second, service.preflights)
+	restartedHealth := awaitManagedFixtureHealth(t, second, service.health)
+	if restartedPreflight.GetNodeId() != bundle.NodeID || restartedHealth.GetNodeId() != bundle.NodeID {
+		t.Fatal("the restarted agent did not report as the original node")
+	}
 	second.stop(t)
 	if service.challenges.Load() != 1 || service.claims.Load() != 1 {
 		t.Fatalf("restart re-enrolled: %d challenges, %d claims", service.challenges.Load(), service.claims.Load())
@@ -515,30 +544,24 @@ func TestOSS377ManagedControllerAgentFixture(t *testing.T) {
 	// Anonymous and unenrolled certificates must both be refused before any
 	// node scope is considered.
 	anonymous := conn.NewNodeControlServiceClient(managedFixtureHTTPClient(t, server, nil), server.URL)
-	if _, err := anonymous.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: identity.NodeID})); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatalf("anonymous control call returned %v, want permission denied", err)
-	}
+	_, err = anonymous.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: identity.NodeID}))
+	assertManagedFixtureDenial(t, err, "a verified node client certificate is required")
 	unenrolled := managedFixtureUnenrolledCertificate(t, ca, caKey)
 	unenrolledClient := conn.NewNodeControlServiceClient(managedFixtureHTTPClient(t, server, &unenrolled), server.URL)
-	if _, err := unenrolledClient.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: "node-unenrolled"})); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatalf("unenrolled certificate returned %v, want permission denied", err)
-	}
-	if _, err := enrolledClient.ReportHealth(ctx, connect.NewRequest(&v1.ReportHealthRequest{
-		Report: &v1.NodeHealthReport{NodeId: "node-other"},
-	})); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatalf("cross-node report returned %v, want permission denied", err)
-	}
+	_, err = unenrolledClient.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: "node-unenrolled"}))
+	assertManagedFixtureDenial(t, err, "certificate has no active enrollment grant")
+	_, err = enrolledClient.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: "node-other"}))
+	assertManagedFixtureDenial(t, err, "cross-node object refused")
 
-	// Revocation in the shared durable authority must invalidate the same mTLS
+	// Revocation in the shared authority must invalidate the same mTLS
 	// certificate without restarting the controller.
 	if _, err := boundary.RevokeCredential(ctx, enroll.Credential{Kind: enroll.CredentialOperator}, &v1.RevokeCredentialRequest{
 		NodeId: identity.NodeID, ConfirmationPhrase: "REVOKE " + identity.NodeID,
 	}); err != nil {
 		t.Fatalf("operator revocation failed: %v", err)
 	}
-	if _, err := enrolledClient.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: identity.NodeID})); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatalf("revoked certificate returned %v, want permission denied", err)
-	}
+	_, err = enrolledClient.NegotiateVersion(ctx, connect.NewRequest(&v1.NegotiateVersionRequest{NodeId: identity.NodeID}))
+	assertManagedFixtureDenial(t, err, "certificate has no active enrollment grant")
 }
 
 func managedFixtureUnenrolledCertificate(t *testing.T, ca *x509.Certificate, caKey ed25519.PrivateKey) tls.Certificate {
