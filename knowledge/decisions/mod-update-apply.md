@@ -25,8 +25,8 @@ sources:
 
 An operator selects an already-previewed compatible release; the RPC rechecks
 the installed fingerprint and provider release, downloads the exact candidate
-bytes with a SHA-512 check, and stages them into the server's open batch. The
-planner never writes the live mods directory or restarts the server.
+bytes with a SHA-512 check, and stages them into the server's open batch without
+writing the live mods directory or restarting the server.
 
 JSON-backed `mod_update` policies use the same planner. Save waits for the
 task list. Policy edits preserve schedule state and opt-outs start disabled.
@@ -37,8 +37,7 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   other selected updates still stage.
 - Publishing, backup, rollback, apply windows and per-server serialization are
   the existing staged-batch guarantees.
-- The update flow extends `UpdateMod` rather than adding an RPC, so it reuses
-  `mods/update[server_id]` and is not exposed as an MCP tool.
+- The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
 - Admission records the operator-approved provider release identity (provider,
@@ -48,7 +47,9 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   reviewed live SHA-512 on the undo stream; drift preserves staged bytes. A row
   from before durable approval or release identity is refused with re-review
   and re-stage guidance rather than trusting the mutable sidecar. Unreviewed
-  uploads keep their existing path.
+  uploads keep their existing path. Staging uses the effective Docker
+  `ServerConfig` type/version, not the stale `Server` projection; a runtime
+  rollback is refused while a reviewed candidate is staged.
 - Staged publication holds the per-server data-write lease exclusively from
   before the undo snapshot through rollback. Direct panel writes take the
   shared lease and are refused with a retryable error while publication owns

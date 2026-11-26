@@ -427,6 +427,17 @@ func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedC
 
 // The staged row is claimed with a write before this check. SQLite therefore
 // serializes this config write with the world's durable operation admission.
+// configChangesRuntimeVersionOrLoader reports whether a config payload changes
+// the Docker TYPE or VERSION target.
+func configChangesRuntimeVersionOrLoader(changes map[string]any) bool {
+	if len(changes) == 0 {
+		return false
+	}
+	_, hasType := changes["type"]
+	_, hasVersion := changes["version"]
+	return hasType || hasVersion
+}
+
 func guardStagedWorldLevel(tx *gorm.DB, serverID string, diff map[string]any) error {
 	for field := range diff {
 		if !worldLevelConfigField(field) {
@@ -608,6 +619,14 @@ func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChan
 	}
 	if err := guardStagedWorldLevel(tx, staged.ServerID, prevDiff); err != nil {
 		return err
+	}
+	// Rolling back a runtime config change is a version/loader change too. It
+	// must not invalidate reviewed mod candidates that were staged after the
+	// original change was applied.
+	if configChangesRuntimeVersionOrLoader(prevDiff) {
+		if err := ensureNoStagedReviewedModCandidatesTx(tx, staged.ServerID); err != nil {
+			return err
+		}
 	}
 
 	live := &ServerConfig{}

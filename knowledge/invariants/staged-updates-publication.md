@@ -24,7 +24,9 @@ interrupted publication or an unprovable commit outcome also keeps the full
 snapshot restore. Failed publications keep rows staged and reconcile
 rolled-back batch configs; retries after completed publication only finish
 bookkeeping. A live config field that moved after it was staged stops the
-publish before anything is written.
+publish before anything is written. A reviewed mod candidate is validated
+against the effective Docker `ServerConfig` type and version, and a runtime
+config rollback is refused while such a candidate is still staged.
 
 The publisher owns the server data path exclusively from before the undo
 snapshot through publication and any rollback. Ordinary panel file writes,

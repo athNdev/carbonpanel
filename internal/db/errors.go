@@ -20,6 +20,10 @@ var ErrStagedModApprovalMissing = errors.New("staged reviewed mod has no durable
 // ErrStagedModApprovalInvalid marks an approved digest that is not a SHA-512.
 var ErrStagedModApprovalInvalid = errors.New("staged reviewed mod approved digest is not a SHA-512")
 
+// ErrStagedModVersionChange marks a runtime target change refused while a
+// reviewed mod candidate is still staged against the current target.
+var ErrStagedModVersionChange = errors.New("staged reviewed mod candidate blocks the runtime target change")
+
 // ErrStagedModApprovalIdentityMissing marks a reviewed mod row that recorded an
 // approved digest before the durable provider release identity was persisted.
 // Publication must not infer that identity from the mutable sidecar; the

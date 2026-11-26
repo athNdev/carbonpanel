@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -606,6 +607,66 @@ func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 			release(op)
 			_, err = store.RollbackStagedConfigChange(ctx, change.ID)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func stringPtr(s string) *string { return &s }
+
+func TestStagedConfigRollbackRefusesPendingReviewedMod(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &Server{ID: "srv-rollback-gate", Name: "rollback-gate", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	cfg.Type = stringPtr("FABRIC")
+	cfg.Version = stringPtr("1.21.1")
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	staged, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"version": "1.21.4"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, staged.ID)
+	require.NoError(t, err)
+	_, err = store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID:           server.ID,
+		Kind:               StagedKindMod,
+		Action:             StagedActionReplace,
+		TargetPath:         "mods/mod.jar",
+		StagePath:          ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:           "mod.jar",
+		ExpectedLiveSha512: "deadbeef",
+		ApprovedSha512:     strings.Repeat("ab", 64),
+		ApprovedProvider:   "modrinth",
+		ApprovedProjectID:  "project",
+		ApprovedVersionID:  "release",
+		ApprovedFilename:   "mod.jar",
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "rollback", run: func() error {
+			_, rollbackErr := store.RollbackStagedConfigChange(ctx, staged.ID)
+			return rollbackErr
+		}},
+		{name: "revert", run: func() error {
+			_, revertErr := store.RevertStagedConfigApplyToStaged(ctx, staged.ID)
+			return revertErr
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, tc.run(), ErrStagedModVersionChange)
+			current, err := store.GetServerConfig(ctx, server.ID)
+			require.NoError(t, err)
+			require.NotNil(t, current.Version)
+			require.Equal(t, "1.21.4", *current.Version, "a refused runtime rollback must not change the live target")
+			stored, err := store.GetStagedConfigChange(ctx, staged.ID)
+			require.NoError(t, err)
+			require.Equal(t, StagedStatusApplied, stored.Status)
 		})
 	}
 }

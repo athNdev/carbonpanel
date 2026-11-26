@@ -49,7 +49,11 @@ request.
    together with its SHA-512, only after the bytes written to the stage
    directory have been verified against that digest. Apply validation requires
    that durable identity and digest to match the staged payload and file name;
-   it does not select a version or project from a mutable sidecar. Rows staged
+   it does not select a version or project from a mutable sidecar. Staging uses
+   the effective Docker `ServerConfig` type and version, not the panel `Server`
+   projection, which can lag a config-only edit. Rolling a runtime config change
+   back is itself a type/version change and is refused while a reviewed
+   candidate is still staged. Rows staged
    before this rule have no durable approval or release identity and are
    refused with re-review and re-stage guidance instead of deriving either from
    the current mutable sidecar. Ordinary unreviewed uploads carry neither

@@ -210,7 +210,19 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("server not found: %w", err)
 	}
-	dataRoot, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
+	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
+	if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
+		return nil, nil, nil, fmt.Errorf("failed to load server configuration: %w", err)
+	}
+	if errors.Is(err, storage.ErrServerConfigNotFound) {
+		serverConfig = nil
+	}
+	// The persisted config owns the Docker TYPE/VERSION values. Use that
+	// effective target for the mods directory, provider preview and candidate
+	// metadata instead of the possibly-stale Server projection.
+	runtimeServer := *server
+	runtimeServer.ModLoader, runtimeServer.MCVersion = serverConfig.EffectiveRuntimeTarget(server)
+	dataRoot, err := dataRootFor(ctx, s.store, &runtimeServer, false, s.storageResolver)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -219,7 +231,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return nil, nil, nil, err
 	}
 	defer func() { _ = root.Close() }()
-	modsDir := minecraft.GetModsPath(dataRoot, server.ModLoader)
+	modsDir := minecraft.GetModsPath(dataRoot, runtimeServer.ModLoader)
 	if modsDir == "" {
 		return nil, nil, nil, errors.New("this server type does not support mods")
 	}
@@ -227,11 +239,11 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	loader := string(server.ModLoader)
-	if isModpackPlatformLoader(server.ModLoader) {
-		loader = string(server.ModpackLoader)
+	loader := string(runtimeServer.ModLoader)
+	if isModpackPlatformLoader(runtimeServer.ModLoader) {
+		loader = string(runtimeServer.ModpackLoader)
 	}
-	if loader == "" || server.MCVersion == "" || strings.EqualFold(server.MCVersion, "latest") {
+	if loader == "" || runtimeServer.MCVersion == "" || strings.EqualFold(runtimeServer.MCVersion, "latest") {
 		return nil, nil, nil, errors.New("a known game version and loader are required")
 	}
 	settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
@@ -270,7 +282,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		})
 	}
 	if len(previewMods) > 0 {
-		if err := previewServerModUpdates(ctx, dataRoot, modsDir, server, previewMods, lookup); err != nil {
+		if err := previewServerModUpdates(ctx, dataRoot, modsDir, &runtimeServer, previewMods, lookup); err != nil {
 			return nil, nil, nil, err
 		}
 	}

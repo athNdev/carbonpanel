@@ -40,6 +40,35 @@ func ensureStagedModApprovalAdmission(row *StagedContentChange) error {
 	return nil
 }
 
+// hasStagedReviewedModCandidates reports whether the server has a staged
+// reviewed mod replacement whose live digest precondition identifies a provider
+// candidate.
+func hasStagedReviewedModCandidates(tx *gorm.DB, serverID string) (bool, error) {
+	var rows []StagedContentChange
+	if err := tx.Select("expected_live_sha512").
+		Where("server_id = ? AND kind = ? AND status = ?", serverID, StagedKindMod, StagedStatusStaged).
+		Find(&rows).Error; err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.ExpectedLiveSha512 != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func ensureNoStagedReviewedModCandidatesTx(tx *gorm.DB, serverID string) error {
+	has, err := hasStagedReviewedModCandidates(tx, serverID)
+	if err != nil {
+		return err
+	}
+	if has {
+		return ErrStagedModVersionChange
+	}
+	return nil
+}
+
 func validSHA512Hex(value string) bool {
 	raw, err := hex.DecodeString(value)
 	return err == nil && len(raw) == sha512.Size
