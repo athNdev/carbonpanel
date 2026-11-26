@@ -10,7 +10,7 @@ import (
 
 func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 	store := setupTestStoreForArchiveImport(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	first, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-1", "data/servers/one_srv-1", "digest-a", "upload-a")
@@ -41,7 +41,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 
 func TestArchiveImportNodeAndPhaseAreTargeted(t *testing.T) {
 	store := setupTestStoreForArchiveImport(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest", "upload")
@@ -71,7 +71,7 @@ func TestArchiveImportNodeAndPhaseAreTargeted(t *testing.T) {
 
 func TestReleaseArchiveImportClaimRequiresOwnership(t *testing.T) {
 	store := setupTestStoreForArchiveImport(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest", "upload")
@@ -104,7 +104,7 @@ func TestReleaseArchiveImportClaimRequiresOwnership(t *testing.T) {
 
 func TestServerExistsDistinguishesAbsence(t *testing.T) {
 	store := setupTestStoreForArchiveImport(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	exists, err := store.ServerExists(ctx, "missing")

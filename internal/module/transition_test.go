@@ -124,7 +124,7 @@ func TestCrossedCrossServerDependencyAdmissionDoesNotWait(t *testing.T) {
 // deadlock while each start holds its own server's gate.
 func TestCrossServerDependencyStartFailsWithoutWaiting(t *testing.T) {
 	store := setupTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	for _, id := range []string{"dep-server-a", "dep-server-b"} {
@@ -167,7 +167,7 @@ func TestCrossServerDependencyStartFailsWithoutWaiting(t *testing.T) {
 
 func TestManagerStopModuleHonorsArchiveFence(t *testing.T) {
 	store := setupTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	server := &storage.Server{ID: "server-manager-fence", Name: "fixture"}
 	if err := store.CreateServer(ctx, server); err != nil {
