@@ -71,6 +71,12 @@ func RunJournaled(ctx context.Context, store Journal, log *logger.Logger, server
 	digest := Digest(kind, server)
 	op, reused, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID, StorageKey(requestID, kind), kind, digest)
 	if err != nil {
+		// Another active operation on the server is the same "in progress"
+		// condition as a reused running request, so callers can use one
+		// retryable check instead of knowing which uniqueness path won.
+		if errors.Is(err, db.ErrActiveOperation) {
+			return fmt.Errorf("%w: %w", ErrInProgress, err)
+		}
 		// Failing to persist intent means we must not perform the mutation.
 		return fmt.Errorf("record %s intent: %w", kind, err)
 	}
@@ -122,6 +128,9 @@ func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger,
 	}
 	op, reused, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID, StorageKey(requestID, kind), kind, payloadHash)
 	if err != nil {
+		if errors.Is(err, db.ErrActiveOperation) {
+			return JournalOutcome{}, fmt.Errorf("%w: %w", ErrInProgress, err)
+		}
 		return JournalOutcome{}, fmt.Errorf("record %s intent: %w", kind, err)
 	}
 	if reused {
