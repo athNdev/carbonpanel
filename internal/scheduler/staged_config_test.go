@@ -34,28 +34,6 @@ type fakeStagedStore struct {
 	failOn     map[string]bool
 }
 
-type fakeLifecycleStore struct {
-	*fakeStagedStore
-	serverConfig *storage.ServerConfig
-	server       *storage.Server
-}
-
-func (f *fakeLifecycleStore) GetServerConfig(context.Context, string) (*storage.ServerConfig, error) {
-	return f.serverConfig, nil
-}
-
-func (f *fakeLifecycleStore) GetGlobalSettings(context.Context) (*storage.ServerConfig, bool, error) {
-	return &storage.ServerConfig{}, false, nil
-}
-
-func (f *fakeLifecycleStore) UpdateServer(_ context.Context, server *storage.Server) error {
-	copy := *server
-	f.server = &copy
-	return nil
-}
-
-func (f *fakeLifecycleStore) ClearEphemeralConfigFields(context.Context, string) error { return nil }
-
 type fakeLifecycleDocker struct {
 	result *docker.RecreateContainerResult
 	err    error
@@ -64,14 +42,6 @@ type fakeLifecycleDocker struct {
 
 func (f *fakeLifecycleDocker) GetContainerStatus(context.Context, string) (storage.ServerStatus, error) {
 	return storage.StatusStopped, nil
-}
-
-func (f *fakeLifecycleStore) RevertStagedConfigApplyToStaged(ctx context.Context, id string) (*storage.StagedConfigChange, error) {
-	record, err := f.RollbackStagedConfigChange(ctx, id)
-	if err == nil {
-		record.Status = storage.StagedStatusStaged
-	}
-	return record, err
 }
 
 func (f *fakeLifecycleDocker) RecreateContainer(context.Context, string, *storage.Server, *storage.ServerConfig) (*docker.RecreateContainerResult, error) {
@@ -214,68 +184,92 @@ func TestHasPendingRestartStagedConfigRecreate(t *testing.T) {
 
 func TestRecreateForPendingStagedConfigPersistsPartialContainerID(t *testing.T) {
 	ctx := context.Background()
-	store := &fakeLifecycleStore{
-		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
-			ID: "restart-config", ServerID: "srv-1", ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
-		}}},
-		serverConfig: &storage.ServerConfig{},
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "srv-1", Name: "srv-1", DataPath: t.TempDir(),
+		ContainerID: "old-id", Status: storage.StatusRunning,
 	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "staged"},
+		storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
 	client := &fakeLifecycleDocker{
 		result: &docker.RecreateContainerResult{NewContainerID: "replacement-id", WasRunning: true},
 		err:    fmt.Errorf("replacement start failed"),
 	}
-	server := &storage.Server{ID: "srv-1", ContainerID: "old-id", Status: storage.StatusRunning}
 
 	handled, err := recreateForPendingStagedConfig(ctx, store, client, nil, server, true, true, nil)
 	require.True(t, handled)
 	require.ErrorContains(t, err, "retained")
-	require.NotNil(t, store.server)
-	assert.Equal(t, "replacement-id", store.server.ContainerID)
-	assert.Equal(t, storage.StatusError, store.server.Status)
+	stored, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement-id", stored.ContainerID)
+	assert.Equal(t, storage.StatusError, stored.Status)
+	assert.Nil(t, stored.LastStarted, "failed recreate must leave staged recovery pending")
 	assert.Empty(t, client.starts)
-	assert.Nil(t, server.LastStarted, "failed recreate must leave staged recovery pending")
-	assert.Empty(t, store.rolledBack, "a failed replacement may contain the staged config, so it is retained")
+	record, err := store.GetStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.StagedStatusApplied, record.Status,
+		"a failed replacement may contain the staged config, so it is retained")
 }
 
 func TestRecreatePreflightFailureRestagesStagedConfig(t *testing.T) {
 	ctx := context.Background()
-	store := &fakeLifecycleStore{
-		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
-			ID: "restart-config", ServerID: "srv-1", ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
-		}}},
-		serverConfig: &storage.ServerConfig{},
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "srv-1", Name: "srv-1", DataPath: t.TempDir(),
+		ContainerID: "old-id", Status: storage.StatusRunning,
 	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "staged"},
+		storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
 	client := &fakeLifecycleDocker{
 		result: &docker.RecreateContainerResult{NewContainerID: "old-id"},
 		err:    fmt.Errorf("%w: pull failed", docker.ErrRecreatePreflight),
 	}
-	server := &storage.Server{ID: "srv-1", ContainerID: "old-id", Status: storage.StatusRunning}
 
 	handled, err := recreateForPendingStagedConfig(ctx, store, client, nil, server, true, true, nil)
 	require.True(t, handled)
 	require.Error(t, err)
 	assert.Empty(t, client.starts)
-	assert.Equal(t, []string{"restart-config"}, store.rolledBack, "a typed preflight proves the old container was not mutated")
+	record, err := store.GetStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.StagedStatusStaged, record.Status,
+		"a typed preflight proves the old container was not mutated")
 }
 
 func TestPrepareDeepSleepWakeRecreatesWithoutStartingOrAdvancingLastStarted(t *testing.T) {
 	ctx := context.Background()
-	store := &fakeLifecycleStore{
-		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
-			ID: "restart-config", ServerID: "srv-1", ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
-		}}},
-		serverConfig: &storage.ServerConfig{},
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "srv-1", Name: "srv-1", DataPath: t.TempDir(),
+		ContainerID: "old-id", Status: storage.StatusDeepSleep,
 	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "staged"},
+		storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
 	client := &fakeLifecycleDocker{result: &docker.RecreateContainerResult{NewContainerID: "replacement-id"}}
-	server := &storage.Server{ID: "srv-1", ContainerID: "old-id", Status: storage.StatusDeepSleep}
 
 	handled, err := recreateForPendingStagedConfig(ctx, store, client, nil, server, false, false, nil)
 	require.NoError(t, err)
 	require.True(t, handled)
 	assert.Equal(t, "replacement-id", server.ContainerID)
-	assert.Equal(t, "replacement-id", store.server.ContainerID)
+	stored, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement-id", stored.ContainerID)
 	assert.Empty(t, client.starts, "DeepSleepManager owns the actual start")
-	assert.Nil(t, server.LastStarted, "wake preparation must not mark a start before Docker is ready")
+	assert.Nil(t, stored.LastStarted, "wake preparation must not mark a start before Docker is ready")
+	record, err := store.GetStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.StagedStatusApplied, record.Status)
 }
 
 func TestFreshWakePreflightCompensatesWithoutPriorEvidence(t *testing.T) {
@@ -438,25 +432,32 @@ func TestSchedulerWakePathsRejectOvercommittedNode(t *testing.T) {
 
 func TestRecreateForPendingStagedConfigRetainsStartFailure(t *testing.T) {
 	ctx := context.Background()
-	store := &fakeLifecycleStore{
-		fakeStagedStore: &fakeStagedStore{changes: []*storage.StagedConfigChange{{
-			ID: "restart-config-2", ServerID: "srv-1", ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
-		}}},
-		serverConfig: &storage.ServerConfig{},
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "srv-1", Name: "srv-1", DataPath: t.TempDir(),
+		ContainerID: "old-id", Status: storage.StatusStopped,
 	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "staged"},
+		storage.StagedApplyOnRestart, "")
+	require.NoError(t, err)
 	client := &fakeLifecycleDocker{
 		result: &docker.RecreateContainerResult{NewContainerID: "replacement-id-2", WasRunning: false},
 	}
 	// Make StartContainer fail
 	failClient := &failingStartDocker{fakeLifecycleDocker: client, failOn: "replacement-id-2"}
-	server := &storage.Server{ID: "srv-1", ContainerID: "old-id", Status: storage.StatusStopped}
 
 	handled, err := recreateForPendingStagedConfig(ctx, store, failClient, nil, server, true, true, nil)
 	require.True(t, handled)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start recreated server")
 	assert.Contains(t, err.Error(), "retained")
-	assert.Empty(t, store.rolledBack, "the stopped replacement already contains the staged config")
+	record, err := store.GetStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.StagedStatusApplied, record.Status,
+		"the stopped replacement already contains the staged config")
 }
 
 type failingStartDocker struct {

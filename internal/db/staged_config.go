@@ -501,10 +501,13 @@ func (s *Store) ListNextRestartConfigSnapshot(ctx context.Context, serverID, bat
 	}
 	q := s.db.WithContext(ctx).
 		Where("server_id = ? AND apply_mode = ?", serverID, StagedApplyOnRestart)
+	// Legacy rows predate batches: their batch_id can be either the zero string
+	// written by GORM or SQL NULL from an older schema/migration. Both identify
+	// the same unbatched row and must be selected with the owned batch.
 	if batchID != "" {
-		q = q.Where("batch_id = ? OR batch_id = ''", batchID)
+		q = q.Where("batch_id = ? OR batch_id = '' OR batch_id IS NULL", batchID)
 	} else {
-		q = q.Where("batch_id = ''")
+		q = q.Where("batch_id = '' OR batch_id IS NULL")
 	}
 	if lastStarted == nil {
 		q = q.Where("status = ? OR status = ?", StagedStatusStaged, StagedStatusApplied)

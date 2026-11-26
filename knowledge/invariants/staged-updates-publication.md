@@ -41,8 +41,9 @@ an atomic compare-and-swap. See ADR 0056.
 A restart selects its file and config rows in one exclusive snapshot. When a
 next-restart batch exists, only that batch plus legacy unbatched rows are
 included; an at-time or idle batch is never published by an incidental restart.
-Rows already applied after the last start are included so a safe failure can
-return them to staged without applying them twice. A typed Docker preflight
+Legacy unbatched rows cover both the zero-string batch id and SQL NULL written
+before batches existed. Rows already applied after the last start are included
+so a safe failure can return them to staged without applying them twice. A typed Docker preflight
 failure before any container mutation compensates the snapshot even if the old
 container is still running, but only when no durable applied evidence from an
 earlier attempt exists. Applied content or config rows report that a replacement

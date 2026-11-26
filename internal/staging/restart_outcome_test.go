@@ -109,15 +109,32 @@ func TestNextRestartConfigSnapshotIncludesOwnedAndLegacyRows(t *testing.T) {
 		ID: "legacy", ServerID: server.ID, BatchID: "", Payload: `{"difficulty":"peaceful"}`,
 		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
 	}).Error)
+	// A row written before the batch_id column existed can carry SQL NULL
+	// rather than the zero string. Both are legacy unbatched rows.
+	require.NoError(t, store.DB().Exec(
+		`INSERT INTO staged_config_changes (id, server_id, batch_id, payload, base_payload, apply_mode, cron_expr, status, created_at)
+		 VALUES (?, ?, NULL, ?, '', ?, '', ?, ?)`,
+		"legacy-null", server.ID, `{"hardcore":true}`, string(storage.StagedApplyOnRestart),
+		string(storage.StagedStatusStaged), time.Now(),
+	).Error)
 	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
 		ID: "other-batch", ServerID: server.ID, BatchID: "not-this-restart", Payload: `{"difficulty":"hard"}`,
 		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
+	}).Error)
+	now := time.Now()
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "timed-legacy", ServerID: server.ID, BatchID: "", Payload: `{"motd":"timed"}`,
+		ApplyMode: storage.StagedApplyAtTime, ApplyAt: &now, Status: storage.StagedStatusStaged,
+	}).Error)
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "idle-legacy", ServerID: server.ID, BatchID: "", Payload: `{"motd":"idle"}`,
+		ApplyMode: storage.StagedApplyIdle, IdleMinutes: 5, Status: storage.StagedStatusStaged,
 	}).Error)
 
 	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
 	t.Cleanup(commit.Finish)
-	require.Equal(t, 2, commit.ConfigSnapshot(), "owned batch plus legacy unbatched row")
+	require.Equal(t, 3, commit.ConfigSnapshot(), "owned batch plus legacy '' and NULL unbatched rows")
 
 	// A row staged after the snapshot (direct store access bypasses the gate)
 	// must not enter this restart.
@@ -128,13 +145,15 @@ func TestNextRestartConfigSnapshotIncludesOwnedAndLegacyRows(t *testing.T) {
 
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.Len(t, applied, 2)
+	require.Len(t, applied, 3)
 	live, err := store.GetServerConfig(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, live.MOTD)
 	require.Equal(t, "owned", *live.MOTD)
 	require.NotNil(t, live.Difficulty)
 	require.Equal(t, "peaceful", *live.Difficulty)
+	require.NotNil(t, live.Hardcore)
+	require.True(t, *live.Hardcore)
 
 	other, err := store.GetStagedConfigChange(ctx, "other-batch")
 	require.NoError(t, err)
@@ -142,6 +161,11 @@ func TestNextRestartConfigSnapshotIncludesOwnedAndLegacyRows(t *testing.T) {
 	late, err := store.GetStagedConfigChange(ctx, "late")
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusStaged, late.Status)
+	for _, id := range []string{"timed-legacy", "idle-legacy"} {
+		row, err := store.GetStagedConfigChange(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, storage.StagedStatusStaged, row.Status, "%s is not a next-restart row", id)
+	}
 }
 
 func TestNextRestartWithoutBatchAppliesOnlyLegacyConfig(t *testing.T) {
@@ -154,6 +178,19 @@ func TestNextRestartWithoutBatchAppliesOnlyLegacyConfig(t *testing.T) {
 		ID: "legacy", ServerID: server.ID, BatchID: "", Payload: `{"motd":"legacy"}`,
 		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusStaged,
 	}).Error)
+	require.NoError(t, store.DB().Exec(
+		`INSERT INTO staged_config_changes (id, server_id, batch_id, payload, base_payload, apply_mode, cron_expr, status, created_at)
+		 VALUES (?, ?, NULL, ?, '', ?, '', ?, ?)`,
+		"legacy-null", server.ID, `{"hardcore":true}`, string(storage.StagedApplyOnRestart),
+		string(storage.StagedStatusStaged), time.Now(),
+	).Error)
+	// A timed row with no batch must stay out of an incidental restart even
+	// though it is also unbatched.
+	now := time.Now()
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "legacy-timed", ServerID: server.ID, BatchID: "", Payload: `{"difficulty":"hard"}`,
+		ApplyMode: storage.StagedApplyAtTime, ApplyAt: &now, Status: storage.StagedStatusStaged,
+	}).Error)
 
 	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
@@ -161,11 +198,16 @@ func TestNextRestartWithoutBatchAppliesOnlyLegacyConfig(t *testing.T) {
 	t.Cleanup(commit.Finish)
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.Len(t, applied, 1)
+	require.Len(t, applied, 2)
 	live, err := store.GetServerConfig(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, live.MOTD)
 	require.Equal(t, "legacy", *live.MOTD)
+	require.NotNil(t, live.Hardcore)
+	require.True(t, *live.Hardcore)
+	timed, err := store.GetStagedConfigChange(ctx, "legacy-timed")
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, timed.Status)
 	require.NoError(t, publicationFor(commit, applied).Resolve(ctx, store, nil))
 }
 

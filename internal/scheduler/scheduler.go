@@ -1231,15 +1231,6 @@ func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage
 	})
 }
 
-type stagedLifecycleStore interface {
-	RevertStagedConfigApplyToStaged(context.Context, string) (*storage.StagedConfigChange, error)
-	stagedConfigStore
-	GetServerConfig(ctx context.Context, serverID string) (*storage.ServerConfig, error)
-	GetGlobalSettings(ctx context.Context) (*storage.ServerConfig, bool, error)
-	UpdateServer(ctx context.Context, server *storage.Server) error
-	ClearEphemeralConfigFields(ctx context.Context, serverID string) error
-}
-
 type stagedLifecycleDocker interface {
 	RecreateContainer(ctx context.Context, oldContainerID string, server *storage.Server, serverConfig *storage.ServerConfig) (*docker.RecreateContainerResult, error)
 	StartContainer(ctx context.Context, containerID string) error
@@ -1249,29 +1240,27 @@ type stagedLifecycleDocker interface {
 // start an old container and advance LastStarted past an applied on-restart
 // change. A replacement ID is persisted even when Docker reports a partial
 // recreate failure, allowing the next attempt to recover from the right object.
-func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
+func recreateForPendingStagedConfig(ctx context.Context, store *storage.Store, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
 	return prepareStagedLifecycle(ctx, store, dockerClient, log, server, startReplacement, markStarted, recreateModule, nil, resolvers...)
 }
 
-func prepareStagedLifecycle(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, transfer func(*staging.RestartPublication), resolvers ...*nodestorage.Resolver) (handled bool, retErr error) {
+func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, transfer func(*staging.RestartPublication), resolvers ...*nodestorage.Resolver) (handled bool, retErr error) {
 	var resolver *nodestorage.Resolver
 	if len(resolvers) > 0 {
 		resolver = resolvers[0]
 	}
 	publication := &staging.RestartPublication{}
-	if concrete, ok := store.(*storage.Store); ok {
-		commit, err := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
-		if err != nil {
-			return true, fmt.Errorf("failed to apply staged content: %w", err)
-		}
-		publication.Commit = commit
-		// Durable applied rows, not the mutable server status, report that a
-		// prior attempt may already have put this snapshot into a replacement.
-		// The wake path can legitimately leave DEEPSLEEP after a verified
-		// compensating stop, and the reconciler can turn a retained ERROR into
-		// STOPPED; either would let a new preflight roll back an embedded snapshot.
-		publication.RuntimePriorState = commit.HasPriorRuntimeState()
+	commit, err := staging.CommitNextRestartFiles(ctx, store, server, recreateModule, resolver)
+	if err != nil {
+		return true, fmt.Errorf("failed to apply staged content: %w", err)
 	}
+	publication.Commit = commit
+	// Durable applied rows, not the mutable server status, report that a
+	// prior attempt may already have put this snapshot into a replacement.
+	// The wake path can legitimately leave DEEPSLEEP after a verified
+	// compensating stop, and the reconciler can turn a retained ERROR into
+	// STOPPED; either would let a new preflight roll back an embedded snapshot.
+	publication.RuntimePriorState = commit.HasPriorRuntimeState()
 	defer func() {
 		if retErr == nil && handled && transfer != nil {
 			transfer(publication)
@@ -1282,7 +1271,7 @@ func prepareStagedLifecycle(ctx context.Context, store stagedLifecycleStore, doc
 			retErr = errors.Join(retErr, finishErr)
 		}
 	}()
-	appliedRecords, err := applyNextRestartConfigs(ctx, store, server.ID, publication.Commit)
+	appliedRecords, err := publication.Commit.ApplyConfigs(ctx, store)
 	publication.Configs = appliedRecords
 	if err != nil {
 		return true, fmt.Errorf("failed to apply staged server configuration: %w", err)
