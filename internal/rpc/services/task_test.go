@@ -198,7 +198,21 @@ func TestTaskService_CreateTask_CronValidation(t *testing.T) {
 	assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
 	assert.Contains(t, connectErr.Message(), "invalid cron expression")
 
-	// 3. Cron task with valid cron syntax must succeed and calculate NextRun
+	// 3. Cron task with valid syntax but no future occurrence must fail.
+	_, err = svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+		ServerId: server.ID,
+		Name:     "impossible-cron-task",
+		Schedule: v1.ScheduleType_SCHEDULE_TYPE_CRON,
+		CronExpr: "0 3 31 2 *",
+		TaskType: v1.TaskType_TASK_TYPE_BACKUP,
+	}))
+	require.Error(t, err)
+	connectErr, ok = err.(*connect.Error)
+	require.True(t, ok)
+	assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	assert.Contains(t, connectErr.Message(), "no future occurrence")
+
+	// 4. Cron task with valid cron syntax must succeed and calculate NextRun
 	res, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
 		ServerId: server.ID,
 		Name:     "valid-cron-task",
