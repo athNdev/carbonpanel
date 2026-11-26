@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,6 +61,33 @@ func TestUpdateBatchListsAndDiscardsWithoutTouchingLiveFiles(t *testing.T) {
 	after, err := svc.GetUpdateBatch(ctx, connect.NewRequest(&v1.GetUpdateBatchRequest{ServerId: server.ID}))
 	require.NoError(t, err)
 	require.False(t, after.Msg.GetOpen())
+}
+
+func TestDiscardUpdateBatchRefusesRetainedPublication(t *testing.T) {
+	ctx := context.Background()
+	svc, store := setupConfigTestService(t)
+	data := t.TempDir()
+	server := &storage.Server{ID: "discard-retained", Name: "discard-retained", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	content, err := stageContentBytes(ctx, store, server, nil, storage.StagedKindFile, storage.StagedActionInstall, "retained.txt", "retained.txt", []byte("candidate"))
+	require.NoError(t, err)
+
+	commit, err := staging.CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.ErrorContains(t, (&staging.RestartPublication{Commit: commit, RuntimeAttempted: true}).
+		Resolve(ctx, store, errors.New("runtime outcome unknown")), "retained")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", content.BatchID)
+	require.DirExists(t, recovery)
+
+	// Whole-batch discard would close the batch and orphan the retained
+	// recovery tree. The lifecycle retry must resolve it first.
+	_, err = svc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.DirExists(t, recovery)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
 }
 
 func TestDiscardUpdateBatchWaitsForNextRestartOutcome(t *testing.T) {
