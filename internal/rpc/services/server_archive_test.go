@@ -442,7 +442,7 @@ func writeArchiveFixture(t *testing.T, destination, content string) {
 type archiveFixtureTransport struct {
 	root           string
 	workerRoot     string
-	failMarker     bool
+	failMarker     func(string) error
 	interruptMu    sync.Mutex
 	interruptWrite context.CancelFunc
 }
@@ -509,8 +509,8 @@ type archiveFixtureFS struct {
 }
 
 func (f archiveFixtureFS) WriteFile(rel string, data []byte) error {
-	if f.transport.failMarker && strings.HasSuffix(filepath.ToSlash(rel), "/"+archiveOwnershipMarker) {
-		return errors.New("injected ownership marker write failure")
+	if f.transport.failMarker != nil && strings.HasSuffix(filepath.ToSlash(rel), "/"+archiveOwnershipMarker) {
+		return f.transport.failMarker(rel)
 	}
 	return f.AllocationRoot.WriteFile(rel, data)
 }

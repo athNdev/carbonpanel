@@ -1114,6 +1114,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
 		}
 		if exists {
+			if err := s.verifyCommittedArchiveReplay(ctx, msg.GetArchiveUploadId(), committed.ID, imported.replayKey, imported.replayKind, ""); err != nil {
+				return nil, err
+			}
 			s.settleCommittedArchiveImport(ctx, imported.replayKey)
 			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
 		}
@@ -1148,6 +1151,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
 		}
 		if exists {
+			if err := s.verifyCommittedArchiveReplay(ctx, msg.GetArchiveUploadId(), committed.ID, imported.replayKey, imported.replayKind, ""); err != nil {
+				return nil, err
+			}
 			s.settleCommittedArchiveImport(ctx, imported.replayKey)
 			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
 		}
@@ -1507,14 +1513,6 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("no Docker nodes available: register and enable a node in Settings before creating servers"))
 	}
 	server.NodeID = nodeID
-	if archiveIntent != nil {
-		// Record the chosen node before placing data so recovery knows which
-		// node's storage to inspect after a crash.
-		if err := s.store.SetArchiveImportNode(ctx, archiveIntent.RequestKey, server.NodeID); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, errors.New("could not record the archive destination node"))
-		}
-		archiveIntent.NodeID = server.NodeID
-	}
 
 	requestID := strings.TrimSpace(msg.GetRequestId())
 	if err := operation.ValidateRequestID(requestID); err != nil {
@@ -1661,7 +1659,8 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	createRecord := s.store.CreateServer
 	if imported != nil {
 		createRecord = func(ctx context.Context, server *storage.Server) error {
-			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay), archiveIntent.RequestKey)
+			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay),
+				archiveIntent.RequestKey, imported.digest, imported.uploadID)
 		}
 	}
 	if err := createRecord(ctx, server); err != nil {

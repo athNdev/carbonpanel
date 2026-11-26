@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -99,6 +100,17 @@ func TestInterruptedArchiveSubmissionRecoversProvenDestination(t *testing.T) {
 			require.Equal(t, req.Name, committed.Name)
 			_, err = store.GetArchiveImport(ctxWithRole("operator"), intent.RequestKey)
 			require.ErrorIs(t, err, db.ErrArchiveImportUnproven)
+
+			receipt, err := store.GetIdempotencyKey(ctxWithRole("operator"), imported.replayKey)
+			require.NoError(t, err)
+			require.Equal(t, req.ArchiveUploadId, receipt.ArchiveUploadID)
+			require.Equal(t, retry.ArchiveUploadId, receipt.ArchiveCompletionUploadID)
+			require.NoError(t, svc.archiveUploads.CleanupSessionFor(retry.ArchiveUploadId, uploadOwnerID(ctxWithRole("operator"))))
+			for _, expired := range []*v1.CreateServerRequest{req, retry} {
+				replayed, err := svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(protoCloneRequest(expired)))
+				require.NoError(t, err)
+				require.Equal(t, serverID, replayed.Msg.Server.Id)
+			}
 
 			// A third upload retry is a normal idempotent replay and still
 			// leaves exactly one committed destination.
@@ -283,7 +295,8 @@ func TestCommittedArchiveIntentIsNotReclaimedAfterKeepDataDelete(t *testing.T) {
 		ID: serverID, Name: req.Name, NodeID: env.node.ID, Status: db.StatusStopped,
 		ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1", DataPath: dataPath,
 	}
-	require.NoError(t, store.CreateArchiveServer(ctxWithRole("operator"), server, db.ArchiveGameplay{}, intent.RequestKey))
+	require.NoError(t, store.CreateArchiveServer(ctxWithRole("operator"), server, db.ArchiveGameplay{},
+		intent.RequestKey, imported.digest, imported.uploadID))
 	published := filepath.Join(env.fixtureRoot, filepath.Base(dataPath), "world", "level.dat")
 	writeArchiveFixture(t, published, "published world")
 	marker := filepath.Join(env.fixtureRoot, filepath.Base(dataPath), archiveOwnershipMarker)
@@ -594,36 +607,68 @@ func TestArchiveRecoveryBindsRemoteHostIdentity(t *testing.T) {
 	}
 }
 
-// If the ownership marker write fails there is no durable proof to reopen. The
-// request must still roll back through the exact allocation it just created,
-// leaving no destination and no held claim.
-func TestArchiveMarkerWriteFailureRollsBackOpenAllocation(t *testing.T) {
-	env := newArchiveRecoveryEnv(t, true)
-	archiveData := buildArchiveFixtureBytes(t)
-	store := openArchiveRecoveryStore(t, env.dbPath)
-	defer store.Close()
-	svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
-	env.transport.failMarker = true
-	ctx := ctxWithRole("operator")
-	req := env.request(t, svc, archiveData)
+func TestArchiveMarkerWriteFailureKeepsUnprovenAllocation(t *testing.T) {
+	for _, remap := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stable", true: "remapped"}[remap], func(t *testing.T) {
+			env := newArchiveRecoveryEnv(t, true)
+			archiveData := buildArchiveFixtureBytes(t)
+			store := openArchiveRecoveryStore(t, env.dbPath)
+			defer store.Close()
+			svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
+			env.transport.workerRoot = "/carbon-storage-root"
+			ctx := ctxWithRole("operator")
+			req := env.request(t, svc, archiveData)
+			remappedRoot := t.TempDir()
+			var original, unrelated string
+			var fixtureErr error
+			env.transport.failMarker = func(rel string) error {
+				child := filepath.Base(filepath.Dir(rel))
+				original = filepath.Join(env.fixtureRoot, child, "operator.txt")
+				fixtureErr = os.WriteFile(original, []byte("original storage content"), 0o644)
+				if fixtureErr != nil {
+					return fixtureErr
+				}
+				if remap {
+					unrelated = filepath.Join(remappedRoot, child, "operator.txt")
+					if err := os.MkdirAll(filepath.Dir(unrelated), 0o755); err != nil {
+						fixtureErr = err
+						return err
+					}
+					if err := os.WriteFile(unrelated, []byte("replacement storage content"), 0o644); err != nil {
+						fixtureErr = err
+						return err
+					}
+					remappedNode := *env.node
+					remappedNode.StorageRoot = remappedRoot
+					fixtureErr = store.UpdateNode(ctx, &remappedNode)
+					if fixtureErr != nil {
+						return fixtureErr
+					}
+					env.transport.root = remappedRoot
+				}
+				return errors.New("injected ownership marker write failure")
+			}
 
-	_, err := svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
-	require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
-	require.Contains(t, err.Error(), "could not prepare the destination directory")
+			_, err := svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+			require.NoError(t, fixtureErr)
+			require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
+			require.Contains(t, err.Error(), "inspect the destination node")
+			body, err := os.ReadFile(original)
+			require.NoError(t, err)
+			require.Equal(t, "original storage content", string(body))
+			require.NoFileExists(t, filepath.Join(filepath.Dir(original), archiveOwnershipMarker))
 
-	entries, readErr := os.ReadDir(env.fixtureRoot)
-	require.NoError(t, readErr)
-	require.Empty(t, entries, "a failed marker write must remove the exact open allocation")
-
-	// Releasing the claim means the same request can be retried once the
-	// storage failure is gone, rather than being stuck on an unproven intent.
-	env.transport.failMarker = false
-	retry := protoCloneRequest(req)
-	retry.ArchiveUploadId = env.upload(t, svc, archiveData)
-	created, err := svc.CreateServer(ctx, connect.NewRequest(retry))
-	require.NoError(t, err)
-	require.NotEmpty(t, created.Msg.Server.Id)
-	require.FileExists(t, filepath.Join(env.fixtureRoot, filepath.Base(created.Msg.Server.DataPath), "world", "level.dat"))
+			_, err = svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+			require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+			require.Contains(t, err.Error(), "cannot prove it created")
+			require.FileExists(t, original)
+			if remap {
+				body, err = os.ReadFile(unrelated)
+				require.NoError(t, err)
+				require.Equal(t, "replacement storage content", string(body))
+			}
+		})
+	}
 }
 
 func TestArchiveAllocationEndpointOmitsCredentials(t *testing.T) {
@@ -632,6 +677,10 @@ func TestArchiveAllocationEndpointOmitsCredentials(t *testing.T) {
 	require.NotContains(t, identity, "secret")
 	require.NotContains(t, identity, "operator")
 	require.NotContains(t, identity, "token")
+	proxyA := archiveEndpointIdentity("tcp://10.2.0.11:2375/route-a")
+	proxyB := archiveEndpointIdentity("tcp://10.2.0.11:2375/route-b")
+	require.NotEqual(t, proxyA, proxyB)
+	require.NotContains(t, proxyA, "route-a")
 }
 
 // --- fixtures -----------------------------------------------------------------

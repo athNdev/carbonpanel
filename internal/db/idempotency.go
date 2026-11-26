@@ -29,14 +29,15 @@ type IdempotencyKey struct {
 	RequestID string `gorm:"primaryKey;size:128"`
 	ServerID  string `gorm:"not null"`
 	Kind      string `gorm:"not null"`
-	// ArchiveDigest and ArchiveUploadID are the minimal replay receipt for a
+	// These archive fields are the replay receipt for a
 	// committed server archive import. They are written in the same transaction
 	// as the server row and independently of ownership-marker cleanup. The
-	// digest binds replays to the verified archive content; the upload id allows
-	// the exact original submission to replay after the upload session expires.
-	ArchiveDigest   string
-	ArchiveUploadID string
-	CreatedAt       time.Time
+	// digest binds replays to the verified archive content. Retaining the
+	// original and completing upload IDs permits exact replay after expiry.
+	ArchiveDigest             string
+	ArchiveUploadID           string
+	ArchiveCompletionUploadID string
+	CreatedAt                 time.Time
 }
 
 // ClaimIdempotencyKey records requestID for serverID. The first caller is

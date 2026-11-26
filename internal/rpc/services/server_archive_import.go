@@ -265,7 +265,13 @@ func archiveEndpointIdentity(raw string) string {
 			}
 		default:
 			if parsed.Host != "" {
-				return scheme + "://" + strings.ToLower(parsed.Host)
+				identity := scheme + "://" + strings.ToLower(parsed.Host)
+				if parsed.Path != "" && parsed.Path != "/" {
+					// A daemon proxy can route by path. Retain a digest rather
+					// than putting that routing information in the database.
+					identity += fmt.Sprintf("/%x", sha256.Sum256([]byte(parsed.EscapedPath())))
+				}
+				return identity
 			}
 		}
 	}
@@ -286,28 +292,29 @@ func archiveEndpointIdentityFor(info nodestorage.NodeInfo) string {
 // used. A remote Docker storage worker mounts each host root at a constant
 // worker path, so the accessor's Root() is not the host identity.
 func archiveHostRootFor(info nodestorage.NodeInfo, accessorRoot string) string {
-	if !info.IsLocal && nodestorage.RequiresRemoteTransport(info) {
+	if !info.IsLocal && info.StorageRoot != "" {
 		return filepath.Clean(info.StorageRoot)
 	}
 	return filepath.Clean(accessorRoot)
 }
 
-// verifyArchiveAllocationIdentity refuses to reopen a destination for removal
-// unless the current node endpoint, host source and resolved accessor root all
-// match the allocation recorded at creation. Rows written before the durable
-// host identity existed fail closed rather than guessing.
-func verifyArchiveAllocationIdentity(intent *storage.ArchiveImport, info nodestorage.NodeInfo, accessorRoot string) error {
+// verifyArchiveAllocationMapping checks the recorded mapping before opening
+// a worker. The resolved accessor root is checked separately after opening it.
+func verifyArchiveAllocationMapping(intent *storage.ArchiveImport, info nodestorage.NodeInfo) error {
 	if intent == nil || intent.StorageRoot == "" || intent.AllocationEndpoint == "" || intent.AllocationHostRoot == "" {
-		return errArchiveDestinationUnproven
-	}
-	if !sameArchiveRoot(accessorRoot, intent.StorageRoot) {
 		return errArchiveDestinationUnproven
 	}
 	if archiveEndpointIdentityFor(info) != intent.AllocationEndpoint {
 		return errArchiveDestinationUnproven
 	}
-	if !sameArchiveRoot(archiveHostRootFor(info, accessorRoot), intent.AllocationHostRoot) {
+	if !sameArchiveRoot(archiveHostRootFor(info, intent.StorageRoot), intent.AllocationHostRoot) {
 		return errArchiveDestinationUnproven
+	}
+	if !info.IsLocal && info.ControllerStorageRoot != "" {
+		mapped, err := filepath.Abs(info.ControllerStorageRoot)
+		if err != nil || !sameArchiveRoot(mapped, intent.StorageRoot) {
+			return errArchiveDestinationUnproven
+		}
 	}
 	return nil
 }
@@ -372,7 +379,6 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 	replayKey := fmt.Sprintf("%x", sha256.Sum256([]byte("server-archive-create\x00"+uploadOwnerID(ctx)+"\x00"+requestID)))
 	replayKind := fmt.Sprintf("server-archive-create:%x", sha256.Sum256(body))
 	legacyKind := fmt.Sprintf("server-archive-create:%x", sha256.Sum256(legacyBody))
-	var record *storage.IdempotencyKey
 	existingID, err := s.store.LookupIdempotencyKey(ctx, replayKey, replayKind)
 	if err != nil {
 		if !errors.Is(err, storage.ErrRequestIDReused) {
@@ -381,7 +387,7 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 		// Before durable archive intents, the replay identity included the
 		// upload id. Keep a committed server replayable across that upgrade
 		// only when that exact prior upload identity can still be proven.
-		record, err = s.store.GetIdempotencyKey(ctx, replayKey)
+		record, err := s.store.GetIdempotencyKey(ctx, replayKey)
 		if err != nil {
 			return nil, nil, archiveReplayError(err)
 		}
@@ -400,16 +406,7 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 			if getErr != nil {
 				return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not read the previous server archive submission"))
 			}
-			if record == nil {
-				record, err = s.store.GetIdempotencyKey(ctx, replayKey)
-				if err != nil {
-					return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not read the previous archive replay receipt"))
-				}
-			}
-			if record == nil {
-				return nil, nil, connect.NewError(connect.CodeInternal, errors.New("the previous archive replay receipt is missing"))
-			}
-			if err := s.verifyCommittedArchiveReplay(ctx, req, record, replayKey, legacyKind); err != nil {
+			if err := s.verifyCommittedArchiveReplay(ctx, req.GetArchiveUploadId(), prior.ID, replayKey, replayKind, legacyKind); err != nil {
 				return nil, nil, err
 			}
 			s.settleCommittedArchiveImport(ctx, replayKey)
@@ -444,12 +441,15 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 }
 
 // verifyCommittedArchiveReplay binds an idempotent committed response to the
-// archive that was originally verified. The exact original upload id is
-// accepted after its session expired; any other upload must pass independent
-// verification and match the recorded digest.
-func (s *ServerService) verifyCommittedArchiveReplay(ctx context.Context, req *v1.CreateServerRequest, record *storage.IdempotencyKey, replayKey, legacyKind string) error {
-	if record == nil {
+// archive that was originally verified. The claim and completing upload IDs
+// survive expiry. Any other upload must verify against the recorded digest.
+func (s *ServerService) verifyCommittedArchiveReplay(ctx context.Context, uploadID, serverID, replayKey, replayKind, legacyKind string) error {
+	record, err := s.store.GetIdempotencyKey(ctx, replayKey)
+	if err != nil || record == nil || record.ServerID != serverID {
 		return connect.NewError(connect.CodeInternal, errors.New("archive replay receipt is unavailable"))
+	}
+	if record.Kind != replayKind && (legacyKind == "" || record.Kind != legacyKind) {
+		return archiveReplayError(storage.ErrRequestIDReused)
 	}
 	digest := record.ArchiveDigest
 	originalUploadID := record.ArchiveUploadID
@@ -466,11 +466,11 @@ func (s *ServerService) verifyCommittedArchiveReplay(ctx context.Context, req *v
 			return connect.NewError(connect.CodeInternal, errors.New("could not read the committed archive identity"))
 		}
 	}
-	uploadID := strings.TrimSpace(req.GetArchiveUploadId())
+	uploadID = strings.TrimSpace(uploadID)
 	if digest == "" {
 		// The legacy replay identity included the upload id. A matching stored
 		// kind proves that exact prior upload identity, not merely its options.
-		if record.Kind == legacyKind {
+		if legacyKind != "" && record.Kind == legacyKind {
 			return nil
 		}
 		return connect.NewError(connect.CodeFailedPrecondition,
@@ -480,7 +480,7 @@ func (s *ServerService) verifyCommittedArchiveReplay(ctx context.Context, req *v
 		return connect.NewError(connect.CodeInvalidArgument,
 			errors.New("a completed upload is required to confirm this committed archive submission"))
 	}
-	if uploadID == originalUploadID {
+	if uploadID == originalUploadID || uploadID == record.ArchiveCompletionUploadID {
 		return nil
 	}
 	imported, err := s.openServerArchive(ctx, uploadID)
@@ -630,6 +630,7 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 		return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not record the archive destination"))
 	}
 	intent.StorageRoot = root.Root()
+	intent.NodeID = server.NodeID
 	intent.AllocationEndpoint = endpoint
 	intent.AllocationHostRoot = hostRoot
 	child := filepath.Base(server.DataPath)
@@ -640,18 +641,15 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 		}
 		return nil, nil, connect.NewError(connect.CodeUnavailable, errors.New("could not allocate a fresh destination directory"))
 	}
-	// Keep this exact open allocation for any in-request rollback. It is the
-	// only safe handle when the ownership marker write itself failed, because a
-	// reopened remote allocation may present a different host tree under the
-	// worker's constant root.
+	// Prefer the allocation already opened by this request, while requiring
+	// marker proof on it too. The path may have been replaced after creation.
 	cleanup = func() error {
-		removeErr := s.removeArchiveDestinationAtRoot(intent, root, true)
+		removeErr := s.removeArchiveDestinationAtRoot(intent, root)
 		if removeErr == nil || errors.Is(removeErr, errArchiveDestinationUnproven) {
 			return removeErr
 		}
 		// A canceled request can close the worker session that owns this
-		// allocation. Reopening is allowed only with the durable identity and
-		// marker proof, never with justCreated.
+		// allocation. Reopening also requires the recorded allocation identity.
 		return s.removeArchiveDestination(ctx, intent)
 	}
 	// The marker is the durable proof that this submission, not another
@@ -659,7 +657,8 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 	// and is excluded from the archive format.
 	if err := root.WriteFile(path.Join(child, archiveOwnershipMarker), []byte(intent.ClaimToken+"\n")); err != nil {
 		s.log.Error("Write archive ownership marker for server %s: %v", server.ID, err)
-		return cleanup, closeRoot, connect.NewError(connect.CodeInternal, errors.New("could not prepare the destination directory; retry the submission"))
+		return cleanup, closeRoot, connect.NewError(connect.CodeInternal,
+			errors.New("could not mark the archive destination; inspect the destination node's server storage before retrying"))
 	}
 	if err := s.store.SetArchiveImportPhase(ctx, intent.RequestKey, storage.ArchiveImportStaged); err != nil {
 		s.log.Error("Record archive destination for server %s: %v", server.ID, err)
@@ -740,6 +739,9 @@ func (s *ServerService) removeArchiveDestination(ctx context.Context, intent *st
 	if err != nil {
 		return err
 	}
+	if err := verifyArchiveAllocationMapping(intent, info); err != nil {
+		return err
+	}
 	parent := filepath.Dir(intent.DataPath)
 	if info.IsLocal {
 		if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
@@ -754,34 +756,28 @@ func (s *ServerService) removeArchiveDestination(ctx context.Context, intent *st
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	if err := verifyArchiveAllocationIdentity(intent, info, root.Root()); err != nil {
-		return err
-	}
-	return s.removeArchiveDestinationAtRoot(intent, root, false)
+	return s.removeArchiveDestinationAtRoot(intent, root)
 }
 
-// removeArchiveDestinationAtRoot removes a destination through an allocation
-// this request already opened. justCreated is safe only for the exact open
-// allocation used to create the directory.
-func (s *ServerService) removeArchiveDestinationAtRoot(intent *storage.ArchiveImport, root nodestorage.AllocationRoot, justCreated bool) error {
+// removeArchiveDestinationAtRoot removes a destination only after the
+// allocation root and the durable ownership marker agree.
+func (s *ServerService) removeArchiveDestinationAtRoot(intent *storage.ArchiveImport, root nodestorage.AllocationRoot) error {
 	if intent == nil || intent.DataPath == "" {
 		return errArchiveDestinationUnproven
 	}
-	if intent.StorageRoot != "" && !sameArchiveRoot(root.Root(), intent.StorageRoot) {
+	if !sameArchiveRoot(root.Root(), intent.StorageRoot) {
 		return errArchiveDestinationUnproven
 	}
 	child := filepath.Base(intent.DataPath)
-	if !justCreated {
-		exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return nil
-		}
-		if !proven {
-			return errArchiveDestinationUnproven
-		}
+	exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if !proven {
+		return errArchiveDestinationUnproven
 	}
 	return root.RemoveAll(child)
 }
@@ -796,7 +792,7 @@ func archiveDestinationProof(root nodestorage.AllocationRoot, child, token strin
 	if err != nil {
 		return false, false, err
 	}
-	if !info.IsDir() {
+	if !info.IsDir() || token == "" {
 		return true, false, nil
 	}
 	data, err := root.ReadFile(path.Join(child, archiveOwnershipMarker))
@@ -821,6 +817,9 @@ func (s *ServerService) clearArchiveMarker(ctx context.Context, intent *storage.
 	if err != nil {
 		return err
 	}
+	if err := verifyArchiveAllocationMapping(intent, info); err != nil {
+		return err
+	}
 	parent := filepath.Dir(intent.DataPath)
 	if info.IsLocal {
 		if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
@@ -835,8 +834,8 @@ func (s *ServerService) clearArchiveMarker(ctx context.Context, intent *storage.
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	if err := verifyArchiveAllocationIdentity(intent, info, root.Root()); err != nil {
-		return err
+	if !sameArchiveRoot(root.Root(), intent.StorageRoot) {
+		return errArchiveDestinationUnproven
 	}
 	child := filepath.Base(intent.DataPath)
 	exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)

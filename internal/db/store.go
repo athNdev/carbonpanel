@@ -156,7 +156,7 @@ type ArchiveGameplay struct {
 // placed. Marking the intent committed in the same transaction as publication
 // means recovery can never mistake published data for an interrupted
 // destination. An error leaves no server row and no committed intent.
-func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay, archiveRequestKey string) error {
+func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay, archiveRequestKey, archiveDigest, archiveUploadID string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		scoped := &Store{db: tx, cfg: s.cfg}
 		if err := scoped.CheckArchiveServerName(ctx, server.Name); err != nil {
@@ -171,6 +171,9 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gamepla
 			if err := tx.Where("request_key = ?", key).First(&intent).Error; err != nil {
 				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence: %w", archiveRequestKey, err)
 			}
+			if intent.ServerID != server.ID || archiveDigest == "" || archiveDigest != intent.ArchiveDigest || archiveUploadID == "" {
+				return fmt.Errorf("archive import intent %q does not match the verified archive being published", key)
+			}
 			result := tx.Model(&ArchiveImport{}).
 				Where("request_key = ?", key).
 				Update("phase", ArchiveImportCommitted)
@@ -183,11 +186,16 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gamepla
 			// Persist the replay receipt in the same transaction as the server
 			// row. Marker cleanup may fail or run later; a committed replay must
 			// still be bound to the archive that was verified.
+			completionUploadID := archiveUploadID
+			if completionUploadID == intent.ArchiveUploadID {
+				completionUploadID = ""
+			}
 			receipt := tx.Model(&IdempotencyKey{}).
 				Where("request_id = ? AND server_id = ?", key, server.ID).
 				Updates(map[string]any{
-					"archive_digest":    intent.ArchiveDigest,
-					"archive_upload_id": intent.ArchiveUploadID,
+					"archive_digest":               archiveDigest,
+					"archive_upload_id":            intent.ArchiveUploadID,
+					"archive_completion_upload_id": completionUploadID,
 				})
 			if receipt.Error != nil {
 				return receipt.Error
