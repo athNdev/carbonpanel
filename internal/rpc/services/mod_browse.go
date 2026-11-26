@@ -63,6 +63,8 @@ func modBrowseConnectError(err error) error {
 		code = connect.CodeInvalidArgument
 	case http.StatusNotFound:
 		code = connect.CodeNotFound
+	case http.StatusConflict:
+		code = connect.CodeAborted
 	case http.StatusInternalServerError:
 		code = connect.CodeInternal
 	case http.StatusBadGateway, http.StatusServiceUnavailable:

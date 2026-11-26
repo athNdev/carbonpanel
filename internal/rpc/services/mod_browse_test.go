@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -81,6 +82,23 @@ func TestModBrowseServiceInstallMatchesSharedOperation(t *testing.T) {
 	manager := handlers.NewModOnlineManager(store, logger.New(), nil, nil)
 	svc := NewModBrowseService(store, manager)
 	items := []handlers.InstallModItem{{Name: "Example", FileName: "example.jar", DownloadURL: download.URL}}
+
+	owned, err := datawrite.AcquireExclusive(context.Background(), server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(owned.Release)
+	_, err = svc.InstallMods(context.Background(), connect.NewRequest(&v1.InstallModsRequest{
+		ServerId: server.ID,
+		Items:    []*v1.InstallModEntry{{Name: "Example", FileName: "example.jar", DownloadUrl: download.URL}},
+	}))
+	if connect.CodeOf(err) != connect.CodeAborted {
+		t.Fatalf("owned server code = %v, want Aborted (%v)", connect.CodeOf(err), err)
+	}
+	if _, err := os.Stat(filepath.Join(server.DataPath, "mods")); !os.IsNotExist(err) {
+		t.Fatalf("refused install touched mods directory: %v", err)
+	}
+	owned.Release()
 
 	protoResp, err := svc.InstallMods(context.Background(), connect.NewRequest(&v1.InstallModsRequest{
 		ServerId: server.ID,

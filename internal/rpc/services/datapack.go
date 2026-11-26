@@ -257,6 +257,12 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 		_ = tmp.Close()
 		removeDownload = func() { _ = os.Remove(destPath) }
 	} else {
+		releaseWrite, gateErr := beginDataWrite(server.ID)
+		if gateErr != nil {
+			return nil, gateErr
+		}
+		defer releaseWrite()
+
 		root, rootErr := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 		if rootErr != nil {
 			return nil, storageError(rootErr)
@@ -357,6 +363,13 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		}
 		s.log.Error("Failed to get upload session: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
+	}
+	if !msg.GetStage() {
+		releaseWrite, gateErr := beginDataWrite(server.ID)
+		if gateErr != nil {
+			return nil, gateErr
+		}
+		defer releaseWrite()
 	}
 	// Failures after this point own the temp file and the session.
 	fail := func(err error) (*connect.Response[v1.UploadDatapackResponse], error) {
@@ -494,6 +507,12 @@ func (s *DatapackService) DeleteDatapack(ctx context.Context, req *connect.Reque
 	if err := minecraft.ValidateDatapackFilename(msg.FileName); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
