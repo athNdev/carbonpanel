@@ -155,6 +155,9 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 
 	// Save updated config
 	if err := s.store.SaveServerConfig(ctx, config); err != nil {
+		if errors.Is(err, storage.ErrStagedModVersionChange) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		s.log.Error("Failed to save server config: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server configuration"))
 	}
@@ -368,7 +371,7 @@ func (s *ConfigService) stageServerConfig(ctx context.Context, config *storage.S
 }
 
 func stageErrorCode(err error) connect.Code {
-	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+	if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) {
 		return connect.CodeFailedPrecondition
 	}
 	if strings.Contains(err.Error(), "server not found") {
