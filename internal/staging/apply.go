@@ -103,7 +103,7 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err != nil {
 			return err
 		}
-		if current == nil || current.ID != batch.ID || !current.UpdatedAt.Equal(batch.UpdatedAt) {
+		if current == nil || current.ID != batch.ID || current.Window != batch.Window || !current.UpdatedAt.Equal(batch.UpdatedAt) {
 			return nil
 		}
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
