@@ -467,10 +467,11 @@ def fixture_inspector(fixture, commit):
                 "Labels": {**run_labels, "org.opencontainers.image.revision": commit},
                 "Cmd": ["./carbon-panel", "-config", fixture["workspace"]],
             },
-            "Mounts": [{
-                "Type": "bind", "Source": fixture["workspace"],
-                "Destination": fixture["workspace"],
-            }],
+            "Mounts": [
+                {"Type": "bind", "Source": str(Path(fixture["workspace"]) / name),
+                 "Destination": str(Path(fixture["workspace"]) / name), "RW": name != "config.yaml"}
+                for name in ("config.yaml", "data", "backups", "tmp", "remote-storage")
+            ],
         }
     return inspect
 
@@ -576,6 +577,35 @@ class HostedFixtureBindingTests(unittest.TestCase):
 
         with self.assertRaisesRegex(rehearsal.RehearsalError, "config directory"):
             self.verify(inspector=inspect_file_argument)
+
+    def test_controller_requires_exact_data_bind(self):
+        base_inspector = fixture_inspector(self.fixture, self.commit)
+
+        def inspect_parent_mount(container_id, local_docker):
+            observation = base_inspector(container_id, local_docker)
+            if container_id == self.fixture["controller_id"]:
+                mount = next(item for item in observation["Mounts"]
+                             if Path(item["Destination"]).name == "data")
+                mount.update(Source=self.fixture["workspace"], Destination=self.fixture["workspace"])
+            return observation
+
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "exact data mount"):
+            self.verify(inspector=inspect_parent_mount)
+
+    def test_source_docker_bind_must_match_controller_world_path(self):
+        data_root = self.workspace / "data"
+        server_dir = str(data_root / "servers" / "rehearsal")
+        server = {"dataPath": server_dir, "containerId": "fixture"}
+
+        def inspect_bind(source):
+            def inspector(container_id, local_docker):
+                return {"Mounts": [{"Type": "bind", "Source": source, "Destination": "/data", "RW": True}]}
+            return inspector
+
+        rehearsal.assert_source_data_bind(server, data_root, rehearsal.LOCAL_DOCKER, inspect_bind(server_dir))
+        wrong = str(self.workspace / "servers" / "rehearsal")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "bind differs"):
+            rehearsal.assert_source_data_bind(server, data_root, rehearsal.LOCAL_DOCKER, inspect_bind(wrong))
 
     def test_requires_local_runner_docker_socket(self):
         with self.assertRaisesRegex(rehearsal.RehearsalError, "runner socket"):

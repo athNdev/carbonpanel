@@ -516,6 +516,12 @@ def inspect_owned_container(inspector, local_docker, container_id, name, run_id,
     return observation
 
 
+def has_bind(observation, source, destination, writable):
+    return any(mount.get("Type") == "bind" and mount.get("Source") == source and
+               mount.get("Destination") == destination and mount.get("RW") is writable
+               for mount in observation.get("Mounts") or [])
+
+
 def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
                    remote_docker, remote_storage_root, controller_storage,
                    local_docker, inspector=None, checkout=None):
@@ -623,10 +629,10 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
         raise RehearsalError("fixture controller was not started with the config directory")
     if (observation.get("HostConfig") or {}).get("NetworkMode") != "host":
         raise RehearsalError("fixture controller does not share the runner loopback")
-    if not any(mount.get("Type") == "bind" and mount.get("Source") == str(workspace) and
-               mount.get("Destination") == str(workspace)
-               for mount in observation.get("Mounts") or []):
-        raise RehearsalError("fixture controller is missing its workspace mount")
+    for name in ("config.yaml", "data", "backups", "tmp", "remote-storage"):
+        mount_path = str(workspace / name)
+        if not has_bind(observation, mount_path, mount_path, name != "config.yaml"):
+            raise RehearsalError("fixture controller is missing its exact %s mount" % name)
 
     engine = inspect_owned_container(
         inspector, local_docker, fixture.get("remote_engine_id"),
@@ -647,9 +653,7 @@ def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
             bridge.get("NetworkID") != fixture["remote_network_id"] or \
             bridge.get("IPAddress") != str(remote_ip):
         raise RehearsalError("destination engine bridge or address does not match")
-    if not any(mount.get("Type") == "bind" and mount.get("Source") == recorded_storage and
-               mount.get("Destination") == remote_storage_root and mount.get("RW")
-               for mount in engine.get("Mounts") or []):
+    if not has_bind(engine, recorded_storage, remote_storage_root, True):
         raise RehearsalError("destination engine is missing its fixture storage mount")
 
     return {
@@ -790,6 +794,15 @@ def remote_destination(controller_storage_root, data_path):
     if not base or not portable_relative_path(base):
         raise RehearsalError("server data path has no portable directory name")
     return Path(controller_storage_root) / base
+
+
+def assert_source_data_bind(server, data_dir, local_docker, inspector=inspect_container):
+    data_path = server.get("dataPath")
+    if not data_path:
+        raise RehearsalError("source server did not report its data directory")
+    _inside(data_path, data_dir, "source server directory")
+    if not has_bind(inspector(server["containerId"], local_docker), data_path, "/data", True):
+        raise RehearsalError("source Docker data bind differs from the controller's server directory")
 
 
 def port_is_free(port):
@@ -1328,6 +1341,8 @@ def execute(args):
             raise RehearsalError("source did not retain its allocated game port")
         if not source.get("containerId"):
             raise RehearsalError("source server has no Docker container")
+        assert_source_data_bind(source, data_dir, args.local_docker)
+        ok("source_docker_bind_matches_controller_storage")
         ok("source_running_on_local_node")
 
         wait_for("source console ready", 180,

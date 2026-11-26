@@ -32,10 +32,10 @@ which also probes nested game ports.
 
 The Python harness requires the hosted caller, a fresh `RUNNER_TEMP`
 subdirectory and an exclusively created fixture record tying the clean exact
-checkout to both containers. It verifies their identity, bridge, storage
-mounts and the controller's `-config` directory before writes. It creates a managed
-Vanilla source without overrides, verifies the running-export refusal, saves
-the fixture, exports both formats and checks destination hashes before start.
+checkout to both containers. It checks identity, bridge, exact storage binds
+and the controller's `-config` directory. It creates a managed Vanilla source,
+verifies the game and panel use the same world path and confirms the running
+export refusal. Then it saves, exports both formats and checks destination bytes.
 The pinned protocol client verifies both imported servers can be joined.
 
 Every check fails closed. The report records the backend RPC scope, candidate

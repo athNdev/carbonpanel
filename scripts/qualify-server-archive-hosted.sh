@@ -284,7 +284,11 @@ docker run -d --cidfile "$work/controller.cid" --name "$controller" --network ho
   --label "com.carbon-panel.rehearsal=$label" \
   --label "com.carbon-panel.rehearsal.run=$run_label" \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$work:$work" \
+  --mount "type=bind,source=$work/config.yaml,target=$work/config.yaml,readonly" \
+  --mount "type=bind,source=$work/data,target=$work/data" \
+  --mount "type=bind,source=$work/backups,target=$work/backups" \
+  --mount "type=bind,source=$work/tmp,target=$work/tmp" \
+  --mount "type=bind,source=$work/remote-storage,target=$work/remote-storage" \
   -e TZ=UTC \
   "$image" ./carbon-panel -config "$work" \
   > "$evidence/controller-id.txt"
