@@ -160,13 +160,24 @@ type readyModUpdate struct {
 	resultIndex int
 }
 
+// errModUpdateRunningSkipped reports a scheduled policy that decided at journal
+// admission not to stage because the server is running. It is a policy outcome,
+// not a failure, so the scheduler records a successful skip instead of retrying.
+var errModUpdateRunningSkipped = errors.New("server is running; mod update policy skipped by running-server policy")
+
+// modUpdateAdmission re-reads live server state under the operation journal
+// immediately before a reviewed batch is created or any staged row is written.
+// The scheduled running-server policy uses it so a stopped-to-running change
+// during provider retry or download cannot slip past the earlier snapshot.
+type modUpdateAdmission func(context.Context, *storage.Server) error
+
 // stageReviewedModUpdates re-verifies the installed fingerprint, recomputes
 // the server-owned preview and download, then stages exact bytes into the open
 // batch. The live mods directory is untouched. The apply window, staged rows
 // and target uniqueness are committed together under the per-server operation
 // journal so a restart or a racing manual/scheduled run cannot publish a
 // partially configured or duplicated batch.
-func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID string, selections []*v1.ModUpdateSelection, window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) ([]stagedModUpdate, *storage.ServerUpdateBatch, error, error) {
+func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID string, selections []*v1.ModUpdateSelection, window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32, admission ...modUpdateAdmission) ([]stagedModUpdate, *storage.ServerUpdateBatch, error, error) {
 	if len(selections) == 0 {
 		return nil, nil, nil, errors.New("no mod updates selected")
 	}
@@ -349,6 +360,20 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 
 	var batch *storage.ServerUpdateBatch
 	if err := operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
+		// The scheduler passes an admission check for its running-server
+		// policy. Re-read the server here, while this call owns the journal and
+		// before the batch or any staged byte is written, so a start during
+		// provider retry/download cannot be missed by the earlier snapshot.
+		if len(admission) > 0 && admission[0] != nil {
+			current, err := s.store.GetServer(ctx, server.ID)
+			if err != nil {
+				return fmt.Errorf("reload server before staging: %w", err)
+			}
+			if err := admission[0](ctx, current); err != nil {
+				return err
+			}
+			server = current
+		}
 		// Commit the window before the first staged byte becomes visible.
 		var err error
 		batch, err = s.store.PrepareReviewedContentBatch(ctx, server.ID, windowName, applyAt, idle)

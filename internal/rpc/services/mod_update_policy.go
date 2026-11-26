@@ -30,6 +30,12 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	if err != nil {
 		return 0, 0, nil, errors.New("server not found")
 	}
+	// This early check avoids provider work when the server is already running.
+	// It is not the authoritative decision: a server can start during retry or
+	// download, so the same policy is re-checked at journal admission below.
+	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
+		return 0, 0, []string{errModUpdateRunningSkipped.Error()}, nil
+	}
 	dataRoot, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return 0, 0, nil, err
@@ -146,7 +152,16 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	case "idle":
 		window = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE
 	}
-	results, _, transient, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, int32(cfg.IdleMinutes))
+	results, _, transient, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, int32(cfg.IdleMinutes),
+		func(_ context.Context, current *storage.Server) error {
+			if cfg.SkipWhenRunning && current.Status == storage.StatusRunning {
+				return errModUpdateRunningSkipped
+			}
+			return nil
+		})
+	if errors.Is(err, errModUpdateRunningSkipped) {
+		return 0, 0, []string{errModUpdateRunningSkipped.Error()}, nil
+	}
 	staged := 0
 	for _, result := range results {
 		switch result.Outcome {

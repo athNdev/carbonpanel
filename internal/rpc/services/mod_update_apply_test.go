@@ -770,6 +770,67 @@ func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	require.Equal(t, "installed", string(live), "an automatic policy must not write the live tree")
 }
 
+// TestScheduledRunningPolicyRechecksAtAdmission covers a server that starts
+// while the provider is downloading. The earlier stopped snapshot must not
+// authorize a scheduled policy that opted out of running servers, but the same
+// transition must not change manual staging behavior.
+func TestScheduledRunningPolicyRechecksAtAdmission(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-running-admission", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"mod-2.jar": []byte("next")},
+		onFetch: func(string) {
+			require.NoError(t, store.UpdateServerStatus(ctx, server.ID, storage.StatusRunning))
+		},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(fetcher)
+
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+		Enabled: true, SkipWhenRunning: true,
+	})
+	require.NoError(t, err)
+	require.Zero(t, staged, "a server that started during the download must not be staged by a running-server policy")
+	require.Zero(t, refused)
+	require.Len(t, reasons, 1)
+	require.Contains(t, reasons[0], "running-server policy")
+	require.Equal(t, 1, fetcher.calls, "the transition is detected after the provider work at journal admission")
+	require.Empty(t, stagedFiles(t, server.DataPath))
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch, "a policy skip must not create an empty batch")
+
+	// An already-running server skips before provider work.
+	fetcher.calls = 0
+	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+		Enabled: true, SkipWhenRunning: true,
+	})
+	require.NoError(t, err)
+	require.Zero(t, staged)
+	require.Zero(t, refused)
+	require.GreaterOrEqual(t, len(reasons), 1)
+	require.Contains(t, reasons[0], "running-server policy")
+	require.Zero(t, fetcher.calls, "an already-running server must skip before the provider download")
+
+	// Manual review remains authoritative: it never consults the scheduler's
+	// running-server policy and still stages the reviewed bytes.
+	require.NoError(t, store.UpdateServerStatus(ctx, server.ID, storage.StatusStopped))
+	fetcher.onFetch = func(string) {
+		require.NoError(t, store.UpdateServerStatus(ctx, server.ID, storage.StatusRunning))
+	}
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
+	require.Len(t, stagedFiles(t, server.DataPath), 1)
+}
+
 type failSecondCandidateOnce struct {
 	calls  []string
 	failed bool
