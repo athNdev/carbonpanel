@@ -92,6 +92,24 @@ test('only a successful preview of the current upload and node may create', asyn
 	assert.equal(isArchivePreviewCurrent({ ...session.state, preparing: true }, 'node-2'), false);
 });
 
+test('an inspection preview without a destination never qualifies create', async () => {
+	const session = createArchiveImport({
+		previewServerArchive: () => Promise.resolve(preview('inspection-only'))
+	});
+	session.setUpload('upload-1', 'world.zip');
+
+	await session.refresh('');
+
+	assert.equal(session.state.preview?.mcVersion, 'inspection-only');
+	assert.equal(session.state.previewNodeId, '');
+	assert.equal(
+		isArchivePreviewCurrent(session.state, ''),
+		false,
+		'a generic inspection result must not be treated as node qualification'
+	);
+	assert.equal(isArchivePreviewCurrent(session.state, 'node-2'), false);
+});
+
 test('a same-node retry succeeds after a refused preview without a new upload', async () => {
 	let call = 0;
 	const session = createArchiveImport({

@@ -84,6 +84,80 @@ test('archive create needs the current successful preview and keeps source ident
 	);
 });
 
+test('archive create binds a concrete destination and refuses generic placement', () => {
+	assert.match(
+		wizard,
+		/const archiveNodeId = \$derived\(\s*archiveMode \? selectedNodeId :/,
+		'archive preview and create must use the selected node, not a generic destination'
+	);
+	assert.ok(
+		wizard.includes('Inspection-only preview') || wizard.includes('inspection-only preview'),
+		'upload inspection must remain available before a node is chosen'
+	);
+	assert.match(
+		wizard,
+		/nodeId: archiveMode\s*\?\s*selectedNodeId/,
+		'archive create must submit exactly the previewed node'
+	);
+	assert.match(
+		wizard,
+		/placementStrategy: archiveMode\s*\?\s*''/,
+		'archive create must not ask the controller to place the import automatically'
+	);
+	assert.match(
+		wizard,
+		/function ensureArchiveDestination\(\)[\s\S]*nodePlacementMode = 'manual'/,
+		'entering archive mode must choose a concrete destination'
+	);
+});
+
+test('archive mode locks the runtime and disables standalone add-ons', () => {
+	assert.ok(
+		wizard.includes('data-testid="archive-runtime-mc"'),
+		'the archive runtime must be visible in the engine step'
+	);
+	assert.ok(
+		wizard.includes('data-testid="archive-addons-disabled"'),
+		'archive mode must explain that standalone add-ons are disabled'
+	);
+	assert.match(
+		wizard,
+		/function buildSetupTasks\(\): SetupTask\[\] \{[\s\S]*if \(archiveMode\) return \[\];/,
+		'archive create must not run standalone setup tasks'
+	);
+	assert.match(
+		wizard,
+		/function clearStandaloneAddons\(\)[\s\S]*selectedMods = \[\][\s\S]*selectedDatapacks = \[\][\s\S]*selectedModules = \[\]/,
+		'entering archive mode must clear former standalone add-on selections'
+	);
+});
+
+test('a replacement upload fences an older completion and blocks submission', () => {
+	assert.match(
+		wizard,
+		/let archiveUploadSequence = 0/,
+		'uploads need a generation so a superseded completion cannot win'
+	);
+	assert.match(
+		wizard,
+		/const generation = \+\+archiveUploadSequence/,
+		'each archive upload must take a new generation'
+	);
+	assert.match(
+		wizard,
+		/if \(generation !== archiveUploadSequence\) return;/,
+		'a late upload completion must not replace a newer archive'
+	);
+	assert.ok(
+		wizard.includes('archiveUploading ||'),
+		'create must be blocked while a replacement upload is in flight'
+	);
+	assert.ok(
+		wizard.includes('Wait for the replacement archive upload to finish before creating.'),
+		'the operator must be told why create is blocked during a replacement upload'
+	);
+});
+
 test('the operator export control is mounted on server detail', () => {
 	assert.ok(detail.includes('ServerArchiveExport'), 'server detail must expose the export control');
 	assert.ok(

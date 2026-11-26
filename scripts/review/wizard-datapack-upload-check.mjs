@@ -547,9 +547,9 @@ try {
     calls,
   });
 
-  // Create-from-archive: a failed preview blocks Create, the same node retry
-  // succeeds, a former blueprint image is not submitted, overrides survive and
-  // a refused create retries with the same archive submission id.
+  // Create-from-archive: a failed preview blocks Create, the same concrete node
+  // retry succeeds, a former blueprint image is not submitted, overrides survive
+  // and a refused create retries with the same archive submission id.
   await page.reload();
   await waitForFixtureReady(page);
   await page.evaluate(() => {
@@ -564,10 +564,24 @@ try {
     .getByText(/fixture archive preview refusal/)
     .waitFor({ timeout: 15_000 });
   await page.getByTestId("archive-preview-error").waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === "previewServerArchive")
+      .map((call) => call.payload.nodeId),
+    ["node-1"],
+    "archive preview must check the concrete destination selected for the import",
+  );
   await showWizardStep(page, "Resources & Network");
   await page.locator("#memory").fill("4096");
   await page.locator("#max_players").fill("42");
   await showWizardStep(page, "Add-ons");
+  await page.getByTestId("archive-addons-disabled").waitFor();
+  assert.equal(
+    await page.getByText("Upload local datapack", { exact: true }).count(),
+    0,
+    "archive mode must not offer standalone add-on setup",
+  );
   await page
     .getByRole("button", { name: "Create Server", exact: true })
     .click();
@@ -587,6 +601,28 @@ try {
     .getByRole("button", { name: "Retry preview", exact: true })
     .click();
   await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await showWizardStep(page, "Cluster & Runtime");
+  assert.equal(
+    await page.getByRole("radio", { name: /Auto-Placement/ }).isDisabled(),
+    true,
+    "archive mode must not use generic automatic placement",
+  );
+  assert.equal(
+    await page.getByTestId("archive-destination-node").textContent(),
+    "node-1",
+    "the archive destination must name the concrete node",
+  );
+  await showWizardStep(page, "Game Engine");
+  assert.equal(
+    await page.getByTestId("archive-runtime-mc").inputValue(),
+    "1.20.6",
+    "the engine step must show the verified archive Minecraft version",
+  );
+  assert.equal(
+    await page.getByTestId("archive-runtime-loader").inputValue(),
+    "fabric",
+    "the engine step must lock the verified archive loader",
+  );
   await page.evaluate(() => {
     globalThis.__wizardArchiveFailCreateOnce = true;
   });
@@ -627,6 +663,7 @@ try {
         dockerImage: payload.dockerImage,
         modpackId: payload.modpackId,
         nodeId: payload.nodeId,
+        placementStrategy: payload.placementStrategy,
       },
       {
         archiveUploadId: "seeded-session",
@@ -637,21 +674,144 @@ try {
         maxPlayers: 42,
         dockerImage: "",
         modpackId: "",
-        nodeId: "",
+        nodeId: "node-1",
+        placementStrategy: "",
       },
-      "archive create must use the verified runtime, keep overrides and drop the former blueprint image",
+      "archive create must use the verified node and runtime, keep overrides and drop the former blueprint image",
     );
   }
   assert.deepEqual(
     calls
       .filter((call) => call.method === "previewServerArchive")
       .map((call) => call.payload.nodeId),
-    ["", ""],
-    "the retry must validate the same upload for the same destination",
+    ["node-1", "node-1"],
+    "the retry must validate the same upload for the same concrete destination",
   );
   summaries.push({
     scenario:
       "archive preview refusal blocks create, same-node retry succeeds, refused create keeps its submission id",
+    calls,
+  });
+
+  // A replacement upload blocks submission and only the newest generation may
+  // replace the completed archive; a late older completion is ignored.
+  await page.reload();
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-replacement-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await page.evaluate(() => {
+    globalThis.__wizardUploadMode = "pending";
+  });
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () => globalThis.__wizardPendingUploads.length === 1,
+  );
+  await page.getByRole("button", { name: "Next Step" }).click();
+  await page
+    .getByText("Wait for the replacement archive upload to finish.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await page.getByTestId("archive-preview").count(),
+    1,
+    "the former archive stays visible but cannot be submitted while its replacement uploads",
+  );
+  await uploadServerArchive(page);
+  await page.waitForFunction(
+    () => globalThis.__wizardPendingUploads.length === 2,
+  );
+  await page.evaluate(() => {
+    globalThis.__wizardPendingUploads[1].release("replacement-newer");
+  });
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.uploadId === "replacement-newer",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.evaluate(() => {
+    globalThis.__wizardPendingUploads[0].release("replacement-older");
+  });
+  await page.waitForTimeout(250);
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.equal(
+    calls.some(
+      (call) =>
+        call.method === "previewServerArchive" &&
+        call.payload.uploadId === "replacement-older",
+    ),
+    false,
+    "a late completion for a superseded upload must not replace the newer archive",
+  );
+  for (let step = 0; step < 4; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Server created" }).waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  const replacementCreate = calls.find(
+    (call) => call.method === "createServer",
+  ).payload;
+  assert.equal(replacementCreate.archiveUploadId, "replacement-newer");
+  assert.equal(replacementCreate.nodeId, "node-1");
+  summaries.push({
+    scenario:
+      "replacement upload blocks create and a late older completion is fenced",
+    calls,
+  });
+
+  // An archive whose verified runtime cannot be provisioned stays blocked.
+  await page.reload();
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "unsupported";
+    globalThis.__wizardReset();
+  });
+  await page
+    .getByPlaceholder("survival-smp-01")
+    .fill("archive-incompatible-fixture");
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page
+    .getByText(
+      "The archive uses a loader that this controller does not support.",
+    )
+    .waitFor({ timeout: 15_000 });
+  for (let step = 0; step < 4; step++)
+    await page.getByRole("button", { name: "Next Step" }).click();
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page
+    .getByText(
+      "This archive has blocking findings. Resolve them before creating.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.equal(
+    calls.some((call) => call.method === "createServer"),
+    false,
+    "an archive with an incompatible verified runtime must not be submitted",
+  );
+  summaries.push({
+    scenario: "incompatible verified archive runtime stays blocked",
     calls,
   });
 

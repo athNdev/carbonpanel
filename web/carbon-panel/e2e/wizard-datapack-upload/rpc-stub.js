@@ -116,6 +116,16 @@ export const rpcClient = {
 					new ConnectError('fixture archive preview refusal', Code.Unavailable)
 				);
 			}
+			const findings =
+				mode === 'unsupported'
+					? [
+							{
+								code: 5,
+								severity: 2,
+								message: 'The archive uses a loader that this controller does not support.'
+							}
+						]
+					: [];
 			return Promise.resolve({
 				format: 1,
 				schemaVersion: 1,
@@ -129,7 +139,7 @@ export const rpcClient = {
 				expandedBytes: 1048576n,
 				requiredBytes: 2097152n,
 				availableBytes: payload.nodeId ? 4194304n : undefined,
-				findings: []
+				findings
 			});
 		},
 		getServer(payload) {

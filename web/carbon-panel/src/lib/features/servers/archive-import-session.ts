@@ -46,9 +46,10 @@ export interface ArchiveImportState {
 }
 
 /**
- * Submit may only use a preview that proved this exact upload for this exact
- * destination. A failed or superseded preview leaves `preview` null or tied to
- * an older node, so neither case can unblock create.
+ * Submit may only use a preview that proved this exact upload for this exact,
+ * concrete destination. A failed or superseded preview leaves `preview` null or
+ * tied to an older node, and an inspection-only preview for the automatic
+ * (empty) destination never qualifies create.
  */
 export function isArchivePreviewCurrent(state: ArchiveImportState, nodeId: string): boolean {
 	return Boolean(
@@ -56,6 +57,9 @@ export function isArchivePreviewCurrent(state: ArchiveImportState, nodeId: strin
 		state.preview &&
 		!state.preparing &&
 		!state.error &&
+		// An inspection preview without a node is useful, but it never qualifies
+		// a create: the destination storage check would not have run.
+		nodeId &&
 		state.previewUploadId === state.uploadId &&
 		state.previewNodeId === nodeId
 	);

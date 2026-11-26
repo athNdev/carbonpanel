@@ -39,13 +39,17 @@ sources:
   it never stops a live server. It must show the third-party credential
   disclosure before enabling an authorized download and must not claim to detect
   secrets inside opaque plugin or mod files.
-- Create-from-Archive uploads once, previews after upload and again when the
-  destination changes, and renders typed findings and node capacity. Fence
-  preview responses by upload and destination. Create stays blocked until the
-  current upload has a successful preview for the current destination; a failed
-  preview is retryable for the same upload and node. Reuse one create request ID
-  across retries and retain a completed upload after a refusal; release that
-  identity only after a committed create. Submit the verified runtime version,
-  loader and loader version from that preview while keeping operator memory and
-  max-player overrides, and never carry a former blueprint image into the
-  archive request.
+- Create-from-Archive inspects the upload first, then previews against a
+  concrete destination node and renders typed findings and that node's capacity.
+  Archive mode never uses generic automatic placement; preview and create bind
+  the same node. Fence preview and upload responses by upload and destination.
+  Create stays blocked until the current upload has a successful preview for the
+  current node; a failed preview is retryable for the same upload and node, and
+  a replacement upload blocks submission while it is in flight. Reuse one create
+  request ID across retries and retain a completed upload after a refusal;
+  release that identity only after a committed create.
+- Archive create shows the verified runtime, submits its Minecraft version,
+  loader and loader version, and keeps operator memory and max-player overrides.
+  It disables standalone add-on setup because the archive carries its own
+  content, and never carries a former blueprint image or modpack into the
+  request.

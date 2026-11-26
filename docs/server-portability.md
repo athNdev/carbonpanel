@@ -88,20 +88,26 @@ plugin or mod files for secrets. Export never stops a live server: an operator
 must stop it first, and the controller refuses a running server.
 
 The create-server wizard offers a Create-from-Archive path. It uploads the
-archive through the standard chunked upload service, previews it once after
-upload and again whenever the destination node changes, and shows the archive
-format, schema and exporter version, runtime defaults, file count, expanded
-and required bytes, destination availability, the chosen port and typed
-blockers or warnings. Create stays disabled until the current upload has a
-successful preview for the current destination; a failed preview offers a
-same-node retry, and a late response for an older upload or destination is
-ignored. Runtime defaults can be applied to the editable form, while archive
-creation submits the verified version, loader and loader version with the
-operator's memory and max-player values. The controller revalidates the upload
-and destination on create. A create submission keeps one request ID across
-retries; a refusal retains the completed upload so the operator can correct
-the destination and retry. A successful create discards the submission
-identity. Neither path stops an existing server.
+archive through the standard chunked upload service and previews it after
+upload, including the chosen destination node's capacity once a node is
+available. The preview shows the archive format, schema and exporter version,
+runtime defaults, file count, expanded and required bytes, destination
+availability, the chosen port and typed blockers or warnings. Archive mode
+requires a concrete destination
+node so the preview can check that node's free space; automatic placement
+remains available for ordinary creates. Create stays disabled until the current
+upload has a successful preview for that exact node, and the create request
+submits precisely the previewed node. A replacement upload blocks submission
+while it is in flight, and a late result for a superseded upload or destination
+is ignored. The visible engine and loader identity follows the verified archive
+runtime, while operator memory and max-player overrides remain editable.
+Standalone setup add-ons are disabled for an archive import because the archive
+already carries its mods, plugins, datapacks and configuration; manage them from
+the server page after creation. A failed preview offers a same-node retry. The
+controller revalidates the upload and destination on create. A create
+submission keeps one request ID across retries; a refusal retains the completed
+upload so the operator can correct the destination and retry. A successful
+create discards the submission identity. Neither path stops an existing server.
 
 Export preparation, preview and create-from-archive validation use an extended
 one-hour client deadline and respect earlier cancellation. The console reports
