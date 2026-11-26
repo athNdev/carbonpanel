@@ -599,6 +599,14 @@ type ServerUpdateBatch struct {
 	IdleMinutes int        `json:"idle_minutes,omitempty" gorm:"column:idle_minutes"`
 	IdleSince   *time.Time `json:"idle_since,omitempty" gorm:"column:idle_since"`
 	Status      string     `json:"status" gorm:"not null;index"`
+	// SealedAt marks a batch whose publication produced durable applied rows
+	// without a confirmed lifecycle outcome. Admission must not append new work
+	// to that batch; a retry resolves the retained snapshot first.
+	SealedAt *time.Time `json:"sealed_at,omitempty" gorm:"column:sealed_at"`
+	// PublishedAt records that a lifecycle positively accepted the batch's
+	// runtime publication. Any retry after this point owes only metadata and
+	// recovery cleanup, not another container mutation. It also seals admission.
+	PublishedAt *time.Time `json:"published_at,omitempty" gorm:"column:published_at"`
 	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }

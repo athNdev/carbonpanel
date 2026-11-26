@@ -249,6 +249,13 @@ func requireBatchAdmission(tx *gorm.DB, serverID string) error {
 	if active != 0 {
 		return fmt.Errorf("%w: the batch is being published or discarded; retry after it finishes", ErrUpdateBatchConflict)
 	}
+	batch, err := openUpdateBatch(tx, serverID)
+	if err != nil {
+		return err
+	}
+	if batch != nil && (batch.SealedAt != nil || batch.PublishedAt != nil) {
+		return fmt.Errorf("%w: the open batch %s has a retained publication; retry the lifecycle operation to resolve it before staging more", ErrUpdateBatchConflict, batch.ID)
+	}
 	return nil
 }
 
@@ -457,6 +464,28 @@ func (s *Store) CloseUpdateBatch(ctx context.Context, id, status string) error {
 		"status":   status,
 		"open_key": nil,
 	}).Error
+}
+
+// SealUpdateBatch stops admission into a batch whose publication left durable
+// applied rows without a confirmed lifecycle outcome. The batch stays open so
+// the retry can resolve the original snapshot. It is idempotent.
+func (s *Store) SealUpdateBatch(ctx context.Context, id string) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).
+		Where("id = ? AND status = ? AND sealed_at IS NULL", id, UpdateBatchOpen).
+		Update("sealed_at", now).Error
+}
+
+// MarkUpdateBatchPublished records that a lifecycle accepted the batch's
+// runtime publication. A later retry may finish metadata and recovery cleanup,
+// but must not perform another container publication. It also seals admission
+// because appending new work after acceptance would reuse the recovery tree.
+// It is idempotent and does not change the first acknowledgement time.
+func (s *Store) MarkUpdateBatchPublished(ctx context.Context, id string) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).
+		Where("id = ? AND status = ? AND published_at IS NULL", id, UpdateBatchOpen).
+		Updates(map[string]any{"published_at": now, "sealed_at": now}).Error
 }
 
 // ListBatchContent returns staged content still waiting in one batch.

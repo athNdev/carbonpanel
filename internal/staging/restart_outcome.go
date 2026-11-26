@@ -45,22 +45,44 @@ type restartConfigStore interface {
 func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigStore, cause error) error {
 	defer p.Commit.Finish()
 	if cause == nil {
-		if p.Commit != nil && p.Commit.complete != nil {
-			return p.Commit.complete()
+		if p.Commit == nil {
+			return nil
 		}
+		// A successful lifecycle is the positive acknowledgement that the
+		// runtime contains this batch's files and config. Persist that before
+		// finalization so a later retry can finish cleanup without recreating
+		// the container. The batch is sealed at the same time because new
+		// staged work must not join a recovery tree that is being finalized.
+		var ackErr error
+		if p.HasChanges() {
+			ackErr = p.Commit.markPublished(ctx)
+		}
+		if p.Commit.complete == nil {
+			return ackErr
+		}
+		return errors.Join(ackErr, p.Commit.complete())
+	}
+	if !p.HasChanges() {
 		return nil
 	}
-	if !p.HasChanges() || p.RuntimeAccepted {
-		return nil
+	if p.RuntimeAccepted {
+		// The runtime accepted the publication even though a later lifecycle
+		// step failed. Retain it and record the acknowledgement so the retry is
+		// finalize-only rather than another container mutation.
+		return p.Commit.markPublished(ctx)
 	}
 	if p.RuntimeAttempted && !p.RuntimePreflight {
+		// Seal admission before returning: the applied rows and their recovery
+		// tree belong to this attempt, and a new staged row must not be appended
+		// to the same batch before a retry resolves it.
+		sealErr := p.Commit.sealRetained(ctx)
 		if runtimeOutcomeUncertain(ctx, cause) {
-			return errors.New("staged changes retained because the runtime request outcome is uncertain; retry the lifecycle operation")
+			return errors.Join(sealErr, errors.New("staged changes retained because the runtime request outcome is uncertain; retry the lifecycle operation"))
 		}
 		// The replacement may have been created and may already contain the
 		// staged files/config. A stopped inspect is not proof it is the old
 		// container, so rollback would let that replacement outlive the rows.
-		return errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation")
+		return errors.Join(sealErr, errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation"))
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
@@ -74,7 +96,14 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 			failed = errors.Join(failed, fmt.Errorf("restage config %s: %w", id, err))
 		}
 	}
-	return errors.Join(failed, p.Commit.Undo())
+	failed = errors.Join(failed, p.Commit.Undo())
+	if p.Commit.HasPriorRuntimeState() {
+		// Compensation restored only this attempt's rows. Durable applied rows
+		// from an earlier attempt and their recovery tree remain; keep the batch
+		// sealed so admission cannot add a new file against that tree.
+		failed = errors.Join(failed, p.Commit.sealRetained(ctx))
+	}
+	return failed
 }
 
 func runtimeOutcomeUncertain(ctx context.Context, cause error) bool {

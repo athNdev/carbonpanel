@@ -59,6 +59,10 @@ func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 				require.Equal(t, storage.StagedStatusStaged, record.Status)
 				require.Len(t, rows, 1)
 				require.NoFileExists(t, filepath.Join(data, "file.txt"))
+				open, readErr := store.OpenUpdateBatch(context.Background(), server.ID)
+				require.NoError(t, readErr)
+				require.NotNil(t, open)
+				require.Nil(t, open.SealedAt, "full compensation leaves the batch open to new staging")
 			} else {
 				if !tc.accepted {
 					require.ErrorContains(t, err, "retained")
@@ -284,6 +288,7 @@ func TestNextRestartCleanupRetryAfterAppliedRowsClosesWithoutRepublish(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, retry, "applied content keeps the next-restart finalize eligible")
 	require.True(t, retry.HasPriorRuntimeState())
+	require.False(t, retry.NeedsRuntimePublication(), "acknowledged content owes cleanup, not a new publication")
 	applied, err := retry.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
 	require.Empty(t, applied)
@@ -348,6 +353,136 @@ func TestNextRestartPriorStateIncludesAppliedEvidenceBesideStagedRows(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, live.MOTD)
 	require.Equal(t, "prior", *live.MOTD)
+}
+
+func TestRetainedNextRestartSealsAdmissionAndRetryResolvesSnapshot(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "retain-seal", Name: "retain-seal", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "retained"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "already.txt", "already")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", cfg.BatchID)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Len(t, applied, 1)
+	require.True(t, commit.NeedsRuntimePublication())
+
+	// The Docker request may have been accepted but its outcome was not
+	// observed. The applied row and its recovery manifest must be retained.
+	retained := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.ErrorContains(t, retained.Resolve(ctx, store, errors.New("replacement may contain them")), "retained")
+	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
+	require.FileExists(t, filepath.Join(data, "already.txt"))
+
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.NotNil(t, open.SealedAt, "a retained publication seals the batch")
+	require.Nil(t, open.PublishedAt, "an unobserved outcome is not an acknowledgement")
+
+	// Normal admission must not append a different staged file against the
+	// retained batch recovery tree.
+	require.NoError(t, os.MkdirAll(filepath.Join(data, ".carbon-panel", "staged", "late"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(data, ".carbon-panel", "staged", "late", "late.txt"), []byte("late"), 0o644))
+	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ServerID: server.ID, Kind: storage.StagedKindFile, Action: storage.StagedActionInstall,
+		TargetPath: "late.txt", StagePath: ".carbon-panel/staged/late/late.txt", FileName: "late.txt",
+	})
+	require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+	require.ErrorContains(t, err, "retained publication")
+	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
+	require.FileExists(t, filepath.Join(recovery, "manifest.json"), "refused admission must not touch retained recovery")
+	require.NoFileExists(t, filepath.Join(data, "late.txt"))
+
+	// Retry resolves the original snapshot. It still owes the unobserved
+	// runtime publication, then finalizes the retained cleanup and closes.
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, retry)
+	require.True(t, retry.HasPriorRuntimeState())
+	require.True(t, retry.NeedsRuntimePublication(), "an unacknowledged publication still needs the runtime")
+	retryConfigs, err := retry.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Len(t, retryConfigs, 1)
+	require.NoError(t, (&RestartPublication{Commit: retry, Configs: retryConfigs}).Resolve(ctx, store, nil))
+
+	require.NoDirExists(t, recovery)
+	require.FileExists(t, filepath.Join(data, "already.txt"))
+	require.NoFileExists(t, filepath.Join(data, "late.txt"))
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
+func TestPersistedMixedNextRestartRowsResolveByDiscardThenRetry(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "mixed-legacy", Name: "mixed-legacy", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "prior"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(data, "prior.txt"), []byte("old"), 0o644))
+	stageFile(t, store, data, cfg.BatchID, server.ID, "prior.txt", "prior")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", cfg.BatchID)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.ErrorContains(t, (&RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}).
+		Resolve(ctx, store, errors.New("outcome unknown")), "retained")
+	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
+
+	// Simulate a batch persisted before retention sealed admission: a second
+	// staged file is already in the same batch. Clearing the seal through the
+	// database is the fixture for that pre-existing mixed state; admission and
+	// publication still use the normal production path.
+	require.NoError(t, store.DB().Model(&storage.ServerUpdateBatch{}).
+		Where("id = ?", cfg.BatchID).Update("sealed_at", nil).Error)
+	require.NoError(t, os.MkdirAll(filepath.Join(data, ".carbon-panel", "staged", "mixed"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(data, ".carbon-panel", "staged", "mixed", "mixed.txt"), []byte("mixed"), 0o644))
+	late, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ServerID: server.ID, Kind: storage.StagedKindFile, Action: storage.StagedActionInstall,
+		TargetPath: "mixed.txt", StagePath: ".carbon-panel/staged/mixed/mixed.txt", FileName: "mixed.txt",
+	})
+	require.NoError(t, err)
+
+	// A new commit must not overwrite or delete the retained recovery tree.
+	_, err = CommitNextRestartFiles(ctx, store, server, nil)
+	require.ErrorContains(t, err, "discard the newly staged rows")
+	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
+	require.FileExists(t, filepath.Join(recovery, "000000.data"))
+	require.NoFileExists(t, filepath.Join(data, "mixed.txt"))
+
+	// The explicit resolution: discard the new staged rows, keep the batch
+	// open because applied content still owns recovery, then retry finalize.
+	_, err = store.DiscardStagedContent(ctx, late.ID)
+	require.NoError(t, err)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "applied content keeps the batch open")
+
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, retry)
+	require.True(t, retry.NeedsRuntimePublication())
+	retryConfigs, err := retry.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.NoError(t, (&RestartPublication{Commit: retry, Configs: retryConfigs}).Resolve(ctx, store, nil))
+	require.NoDirExists(t, recovery)
+	require.FileExists(t, filepath.Join(data, "prior.txt"))
+	require.NoFileExists(t, filepath.Join(data, "mixed.txt"))
 }
 
 func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {

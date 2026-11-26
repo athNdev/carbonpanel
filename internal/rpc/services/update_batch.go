@@ -125,6 +125,19 @@ func (s *ConfigService) discardWholeBatch(ctx context.Context, server *storage.S
 	if batch == nil {
 		return nil
 	}
+	// Closing a batch that retains an acknowledged or unresolved publication
+	// would orphan its recovery tree and the applied rows that prove cleanup is
+	// owed. A lifecycle retry must resolve it first.
+	if batch.SealedAt != nil || batch.PublishedAt != nil {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("this update batch has a retained publication; retry the server start or restart before discarding it"))
+	}
+	applied, err := s.store.CountBatchContentByStatus(ctx, batch.ID, storage.StagedStatusApplied)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if applied > 0 {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("this update batch has published content awaiting finalization; retry the server start or restart before discarding it"))
+	}
 	content, err := s.store.ListBatchContent(ctx, batch.ID)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
@@ -187,6 +200,19 @@ func (s *ConfigService) closeBatchIfEmpty(ctx context.Context, serverID string) 
 		return err
 	}
 	if len(content) > 0 || len(configs) > 0 {
+		return nil
+	}
+	// Discarding the last staged row must not close a batch that still owns a
+	// retained publication or applied content recovery. Keep it open so the
+	// next lifecycle retry can finalize it without losing the undo tree.
+	if batch.SealedAt != nil || batch.PublishedAt != nil {
+		return nil
+	}
+	applied, err := s.store.CountBatchContentByStatus(ctx, batch.ID, storage.StagedStatusApplied)
+	if err != nil {
+		return err
+	}
+	if applied > 0 {
 		return nil
 	}
 	return s.store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchDiscarded)

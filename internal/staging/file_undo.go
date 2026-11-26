@@ -228,7 +228,12 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	}
 	recovery := path.Join(undoRoot, batchID)
 	if _, err := acc.Stat(recovery); err == nil {
-		return nil, fmt.Errorf("staged recovery %q exists; recover before retrying", recovery)
+		// A retained attempt owns this recovery tree. Its manifest belongs to
+		// rows that may already be applied, so a later attempt must neither
+		// overwrite it nor delete it to make room. Refuse the new rows with an
+		// explicit resolution: discard them if they are still staged, then
+		// retry the lifecycle to finalize the retained snapshot.
+		return nil, fmt.Errorf("staged recovery %q exists from an earlier attempt; discard the newly staged rows and retry the lifecycle to resolve the retained publication", recovery)
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}

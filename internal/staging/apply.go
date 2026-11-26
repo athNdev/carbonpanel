@@ -270,8 +270,11 @@ type NextRestartCommit struct {
 	mu             sync.Mutex
 	undo           func() error
 	complete       func() error
+	seal           func(context.Context) error
+	acknowledge    func(context.Context) error
 	undoErr        error
 	pendingContent bool
+	published      bool
 	configs        []*storage.StagedConfigChange
 	priorConfigs   map[string]bool
 	release        func()
@@ -395,9 +398,11 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		return nil, err
 	}
 	batchID := ""
+	published := false
 	var content []storage.StagedContentChange
 	if batch != nil && batch.Window == string(storage.UpdateWindowNextRestart) {
 		batchID = batch.ID
+		published = batch.PublishedAt != nil
 		content, err = store.ListBatchContent(ctx, batch.ID)
 		if err != nil {
 			return nil, err
@@ -413,7 +418,7 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	if batchID == "" && len(configs) == 0 {
 		return nil, nil
 	}
-	commit := &NextRestartCommit{release: write.Release, configs: configs}
+	commit := &NextRestartCommit{release: write.Release, configs: configs, published: published}
 	if batchID != "" {
 		batchForFinish := batchID
 		commit.complete = func() error {
@@ -421,12 +426,16 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 			defer cancel()
 			return finishNextRestartBatch(finishCtx, store, server, batchForFinish, resolver, commit.HasContent())
 		}
+		commit.seal = func(sealCtx context.Context) error {
+			return store.SealUpdateBatch(sealCtx, batchForFinish)
+		}
+		commit.acknowledge = func(ackCtx context.Context) error {
+			return store.MarkUpdateBatchPublished(ackCtx, batchForFinish)
+		}
 		// An earlier attempt may already have published some content rows. The
 		// count is durable evidence independent of staged rows still waiting, of
 		// server status, and of whether the attempt's start outcome was observed.
-		var count int64
-		err := store.DB().WithContext(ctx).Model(&storage.StagedContentChange{}).
-			Where("batch_id = ? AND status = ?", batchID, storage.StagedStatusApplied).Count(&count).Error
+		count, err := store.CountBatchContentByStatus(ctx, batchID, storage.StagedStatusApplied)
 		if err != nil {
 			return nil, err
 		}
@@ -448,8 +457,52 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	return commit, nil
 }
 
-// HasContent reports whether this batch has published content awaiting a start.
+// HasContent reports whether this batch has content work: files copied by this
+// attempt or applied rows retained from an earlier one. It is also the durable
+// evidence that recovery cleanup may be owed.
 func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != nil || c.pendingContent) }
+
+// NeedsRuntimePublication separates work that still owes a container publish
+// from a publication an earlier lifecycle already accepted. Files copied by
+// this attempt always need the publish. Retained applied rows need it only
+// while the batch has no durable acknowledgement; after that, a retry owes
+// cleanup alone and must not recreate the container again.
+func (c *NextRestartCommit) NeedsRuntimePublication() bool {
+	if c == nil {
+		return false
+	}
+	if c.undo != nil {
+		return true
+	}
+	return c.pendingContent && !c.published
+}
+
+// sealRetained makes the durable applied rows, and their recovery tree,
+// unreachable to new admissions. A later lifecycle must resolve them first.
+func (c *NextRestartCommit) sealRetained(ctx context.Context) error {
+	if c == nil || c.seal == nil {
+		return nil
+	}
+	sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return c.seal(sealCtx)
+}
+
+// markPublished records a positively acknowledged runtime publication before
+// finalization. If persisting it fails, the retry conservatively repeats the
+// publication rather than closing over an unproven one.
+func (c *NextRestartCommit) markPublished(ctx context.Context) error {
+	if c == nil || c.acknowledge == nil || c.published {
+		return nil
+	}
+	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := c.acknowledge(ackCtx); err != nil {
+		return err
+	}
+	c.published = true
+	return nil
+}
 
 // HasPriorRuntimeState reports that an earlier attempt already applied this
 // snapshot's content or config. The evidence is durable persisted rows, not the
