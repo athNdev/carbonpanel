@@ -563,9 +563,10 @@ func hasActiveWorldBind(tx *gorm.DB, serverID string) (bool, error) {
 
 // ListPendingRestartStagedConfigs returns applied on-restart config rows newer
 // than lastStarted that still owe a container publication. A row owned by an
-// acknowledged (published) batch was already published with that acceptance and
-// does not owe another recreation. Legacy unbatched rows carry no such evidence
-// and stay pending.
+// acknowledged (published) batch was included in that acceptance only when it
+// was applied no later than the acknowledgement; a row applied after it still
+// owes a publication. Legacy unbatched rows carry no such evidence and stay
+// pending.
 func (s *Store) ListPendingRestartStagedConfigs(ctx context.Context, serverID string, lastStarted *time.Time) ([]*StagedConfigChange, error) {
 	q := s.db.WithContext(ctx).
 		Table("staged_config_changes AS c").
@@ -573,7 +574,7 @@ func (s *Store) ListPendingRestartStagedConfigs(ctx context.Context, serverID st
 		Joins("LEFT JOIN server_update_batches AS b ON b.id = c.batch_id").
 		Where("c.server_id = ? AND c.apply_mode = ? AND c.status = ? AND c.applied_at IS NOT NULL",
 			serverID, StagedApplyOnRestart, StagedStatusApplied).
-		Where("c.batch_id = '' OR c.batch_id IS NULL OR b.published_at IS NULL")
+		Where("c.batch_id = '' OR c.batch_id IS NULL OR b.published_at IS NULL OR c.applied_at > b.published_at")
 	if lastStarted != nil {
 		q = q.Where("c.applied_at > ?", *lastStarted)
 	}

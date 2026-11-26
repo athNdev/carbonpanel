@@ -215,6 +215,41 @@ func TestHasPendingRestartStagedConfigRecreate(t *testing.T) {
 	assert.False(t, pending)
 }
 
+func TestHasPendingRestartStagedConfigRecreateUsesAcknowledgementEvidence(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{ID: "srv-ack-evidence", Name: "srv-ack-evidence", DataPath: t.TempDir()}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "ack"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.MarkUpdateBatchPublished(ctx, cfg.BatchID))
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NotNil(t, batch.PublishedAt)
+
+	// An applied row older than the acknowledgement was part of it.
+	before := batch.PublishedAt.Add(-time.Second)
+	require.NoError(t, store.DB().Model(&storage.StagedConfigChange{}).
+		Where("id = ?", cfg.ID).Update("applied_at", before).Error)
+	pending, err := HasPendingRestartStagedConfigRecreate(ctx, store, server.ID, nil)
+	require.NoError(t, err)
+	require.False(t, pending)
+
+	// A row applied after the acknowledgement was not covered by it.
+	after := batch.PublishedAt.Add(time.Second)
+	require.NoError(t, store.DB().Model(&storage.StagedConfigChange{}).
+		Where("id = ?", cfg.ID).Update("applied_at", after).Error)
+	pending, err = HasPendingRestartStagedConfigRecreate(ctx, store, server.ID, nil)
+	require.NoError(t, err)
+	require.True(t, pending)
+}
+
 func TestRecreateForPendingStagedConfigPersistsPartialContainerID(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
