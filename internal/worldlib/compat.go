@@ -384,7 +384,7 @@ func detectRoot(entries []worldEntry) string {
 	return ""
 }
 
-func openWorldFS(archivePath string) (*worldFS, error) {
+func openWorldFS(ctx context.Context, archivePath string) (*worldFS, error) {
 	info, err := os.Stat(archivePath)
 	if err != nil {
 		return nil, fmt.Errorf("worldlib: stat archive: %w", err)
@@ -395,6 +395,9 @@ func openWorldFS(archivePath string) (*worldFS, error) {
 		err = filepath.WalkDir(archivePath, func(p string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
+			}
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 			if d.Type()&os.ModeSymlink != 0 {
 				return nil // never follow links out of the world
@@ -430,13 +433,19 @@ func openWorldFS(archivePath string) (*worldFS, error) {
 	}
 	w.zr = zr
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			_ = w.Close()
+			return nil, err
+		}
 		if len(w.entries) >= maxWorldEntries {
 			_ = w.Close()
 			return nil, fmt.Errorf("worldlib: archive has more than %d entries", maxWorldEntries)
 		}
-		name := strings.TrimPrefix(filepath.ToSlash(f.Name), "./")
-		name = strings.TrimPrefix(name, "/")
-		if name == "" || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
+		if unsafeMemberName(strings.TrimPrefix(f.Name, "./")) {
+			continue
+		}
+		name, err := canonicalWorldZipMember(f.Name)
+		if err != nil {
 			continue
 		}
 		w.entries = append(w.entries, worldEntry{
@@ -1079,8 +1088,11 @@ func (e *Engine) Check(ctx context.Context, archivePath string, target Target) (
 		Unsupported:     unsupportedAll(),
 	}
 
-	world, err := openWorldFS(archivePath)
+	world, err := openWorldFS(ctx, archivePath)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, canceled
+		}
 		reason := "Archive could not be examined: " + err.Error()
 		for _, subject := range []string{"archive", "edition", "data_version", "loader", "dimensions", "datapacks"} {
 			report.Findings = append(report.Findings,

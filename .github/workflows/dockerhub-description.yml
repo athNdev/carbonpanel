@@ -36,9 +36,14 @@ on:
 permissions:
   contents: read
 
+# Sole Hub description writer joins the ONE shared publication lock, matching
+# the queue convention coordinated with #698. Holding it for the whole run
+# covers preflight, the PATCH and the post-write recheck: a Stable promotion
+# cannot move docs/aliases between those steps. No nested second group.
 concurrency:
-  group: dockerhub-description
+  group: pages-deploy
   cancel-in-progress: false
+  queue: max
 
 jobs:
   update:
@@ -86,6 +91,10 @@ jobs:
 
       - name: Generate the expected Docker-focused body
         id: generated
+        env:
+          # Read-only: release provenance is read through the release.py gh CLI
+          # boundary; registry parity uses read-only buildx inspection.
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/dockerhub_description.py generate \
             --config docs/dockerhub-description.json \
@@ -119,6 +128,18 @@ jobs:
             --expected "${{ steps.target.outputs.sha }}" \
             --observed "${{ steps.recheck.outputs.sha }}"
 
+      - name: Assert public Stable identity at the Hub write boundary
+        id: write_guard
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/dockerhub_description.py assert-publication-identity \
+            --config docs/dockerhub-description.json \
+            --expected-version "${{ steps.generated.outputs.stable_version }}" \
+            --expected-commit "${{ steps.generated.outputs.stable_commit }}" \
+            --expected-digest "${{ steps.generated.outputs.stable_digest }}"
+
       - name: Preflight Docker Hub write credentials
         if: steps.drift.outputs.changed == 'true'
         env:
@@ -145,6 +166,17 @@ jobs:
             --repository "${{ github.repository }}" --event schedule)
           python3 scripts/dockerhub_description.py assert-head \
             --expected "${{ steps.target.outputs.sha }}" --observed "$sha"
+
+      - name: Recheck public Stable identity after the Hub write
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/dockerhub_description.py assert-publication-identity \
+            --config docs/dockerhub-description.json \
+            --expected-version "${{ steps.generated.outputs.stable_version }}" \
+            --expected-commit "${{ steps.generated.outputs.stable_commit }}" \
+            --expected-digest "${{ steps.generated.outputs.stable_digest }}"
 
       - name: Verify public read-back
         run: |

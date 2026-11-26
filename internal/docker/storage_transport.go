@@ -30,6 +30,8 @@ const (
 	storageWorkerShutdownGrace = time.Second
 )
 
+var errStorageAllocationEndpointChanged = fmt.Errorf("%w: allocation Docker endpoint changed", nodestorage.ErrUnavailable)
+
 // StorageTransport runs the carbon-storage accessor worker on remote daemons
 // through a one-shot attached container (OSS-281).
 type StorageTransport struct {
@@ -90,9 +92,24 @@ func (t *StorageTransport) OpenStorageRoot(ctx context.Context, node nodestorage
 	if t == nil || t.pool == nil || t.workerImage == "" || node.StorageRoot == "" {
 		return nil, nodestorage.ErrUnavailable
 	}
-	cli, err := t.pool.GetClientStrictContext(ctx, node.ID)
+	expectedHost := nodeDockerHost(node.Endpoint, node.IsLocal)
+	if expectedHost == "" {
+		return nil, fmt.Errorf("%w: allocation node has no configured Docker endpoint", nodestorage.ErrUnavailable)
+	}
+	cli, err := t.pool.getClientStrictContext(ctx, node.ID, expectedHost)
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if errors.Is(err, errStorageAllocationEndpointChanged) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: could not resolve the allocation Docker client", nodestorage.ErrUnavailable)
+	}
+	// The pool can observe a newer node row than the allocation caller did.
+	// Check the host bound to this exact client before starting a worker.
+	if cli == nil || cli.docker == nil || cli.docker.DaemonHost() != expectedHost {
+		return nil, errStorageAllocationEndpointChanged
 	}
 	sess, err := cli.startStorageWorkerAt(ctx, t.workerImage, node.StorageRoot, true, false)
 	if err != nil {

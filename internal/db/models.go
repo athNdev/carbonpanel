@@ -1065,5 +1065,6 @@ func (n *Node) StorageInfo() nodestorage.NodeInfo {
 		IsLocal:               n.IsLocal,
 		StorageRoot:           n.StorageRoot,
 		ControllerStorageRoot: n.ControllerStorageRoot,
+		Endpoint:              n.Host,
 	}
 }

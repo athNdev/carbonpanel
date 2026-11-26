@@ -5,6 +5,7 @@ package nodestorage
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/athNdev/carbon-panel/pkg/files"
@@ -43,21 +44,26 @@ func (r *Resolver) ForAllocation(ctx context.Context, node NodeInfo, localParent
 	if root == "" {
 		return nil, ErrUnavailable
 	}
-	acc, err := NewLocal(root)
+	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	a := acc.(*local)
-	info, err := a.Stat(".")
+	// The allocation root already exists. Pin it directly so rollback cannot
+	// follow a replacement at this path while the allocation is held open.
+	parentPath := filepath.Dir(abs)
+	parent, err := os.OpenRoot(parentPath)
 	if err != nil {
-		_ = a.Close()
 		return nil, err
 	}
-	if !info.IsDir() {
-		_ = a.Close()
-		return nil, ErrUnavailable
+	if parentPath == abs {
+		return &local{root: parent, dir: "."}, nil
 	}
-	return a, nil
+	pinned, err := parent.OpenRoot(filepath.Base(abs))
+	_ = parent.Close()
+	if err != nil {
+		return nil, err
+	}
+	return &local{root: pinned, dir: "."}, nil
 }
 
 func (l *local) MkdirExclusive(child string) error {

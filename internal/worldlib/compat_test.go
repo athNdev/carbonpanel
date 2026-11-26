@@ -228,6 +228,26 @@ func TestCompatCheckInferredLoaderFromTarget(t *testing.T) {
 	}
 }
 
+func TestCompatCheckNormalizesZIPWorldPaths(t *testing.T) {
+	world := compatWorld(t, 3953, "1.21", "fabric.mod.json")
+	target := compatJavaTarget("1.20.4")
+	engine := NewEngine()
+	for _, prefix := range []string{"world/", "world//", "world/./"} {
+		t.Run(prefix, func(t *testing.T) {
+			archive := compatZip(t, world, prefix)
+			report, err := engine.Check(context.Background(), archive, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compatRequireConfidence(t, compatFinding(t, report, "edition"), Detected, "java")
+			compatRequireConfidence(t, compatFinding(t, report, "data_version"), Detected, "3953")
+			if report.Overall != VerdictBlocked {
+				t.Fatalf("downgrade verdict = %q, want %q", report.Overall, VerdictBlocked)
+			}
+		})
+	}
+}
+
 func TestCompatCheckUnknownLoaderGates(t *testing.T) {
 	world := compatWorld(t, 3953, "1.21")
 	target := compatJavaTarget("1.21")
@@ -650,6 +670,60 @@ func TestCompatUnsupportedReasons(t *testing.T) {
 		reason, ok := UnsupportedReason(key)
 		if !ok || reason == "" || reason != MustUnsupported(key) {
 			t.Errorf("UnsupportedReason(%q) = %q, %v", key, reason, ok)
+		}
+	}
+}
+
+// TestCompatRedundantSeparatorsMatchCanonicalSpelling proves the preview report
+// reads a ZIP with a redundant separator (world//level.dat) exactly like the
+// canonical spelling the layout gate accepts, rather than silently skipping
+// level-derived facts.
+func TestCompatRedundantSeparatorsMatchCanonicalSpelling(t *testing.T) {
+	writeArchive := func(name string, memberPrefix string) string {
+		dest := filepath.Join(t.TempDir(), name)
+		out, err := os.Create(dest)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		zw := zip.NewWriter(out)
+		for member, data := range map[string][]byte{
+			memberPrefix + "level.dat":        buildLevelDat(t, 3955, "1.21.1", true),
+			memberPrefix + "region/r.0.0.mca": []byte("region-bytes"),
+		} {
+			w, err := zw.Create(member)
+			if err != nil {
+				t.Fatalf("create member %q: %v", member, err)
+			}
+			if _, err := w.Write(data); err != nil {
+				t.Fatalf("write member %q: %v", member, err)
+			}
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("close %s: %v", name, err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatalf("close file %s: %v", name, err)
+		}
+		return dest
+	}
+
+	engine := NewEngine()
+	check := func(path string) *Report {
+		t.Helper()
+		report, err := engine.Check(context.Background(), path, compatJavaTarget("1.21.1"))
+		if err != nil {
+			t.Fatalf("check %s: %v", path, err)
+		}
+		return report
+	}
+	canonical := check(writeArchive("canonical.zip", "world/"))
+	redundant := check(writeArchive("redundant.zip", "world//"))
+
+	for _, subject := range []string{EditionSubject, "data_version", "dimensions"} {
+		want := compatFinding(t, canonical, subject)
+		got := compatFinding(t, redundant, subject)
+		if got.Confidence != want.Confidence || got.Value != want.Value {
+			t.Errorf("%s = %q/%q, want %q/%q", subject, got.Confidence, got.Value, want.Confidence, want.Value)
 		}
 	}
 }
