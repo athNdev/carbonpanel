@@ -60,8 +60,12 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   deployment matrix also remain open.
 - `scripts/node_vm_boot_qual.py` now resolves OVMF/edk2 for UEFI (failing closed
   instead of falling back to BIOS), copies a fresh private variable store per
-  run, and can request an expanded qcow2 overlay. Those command paths are
-  unit-tested only; they do not close the 20 GiB boot gate.
+  run, and can request an expanded qcow2 overlay. Each attempt requires a fresh
+  work directory: the helper reserves its outputs before writing a seed, overlay
+  or report, refuses reuse without changing prior bytes, rejects unsupported
+  target combinations before outputs, and persists launch-failure evidence.
+  Those command paths are unit-tested only; they do not close the 20 GiB boot
+  gate.
 
 ## Qualification scenarios (remaining runs on owned disposable VMs only)
 

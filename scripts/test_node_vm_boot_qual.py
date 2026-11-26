@@ -1,15 +1,58 @@
 # SPDX-License-Identifier: MPL-2.0
+import contextlib
+import io
 import json
 import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from scripts import node_vm_boot_qual as boot_qual
 except ImportError:  # pragma: no cover
     import node_vm_boot_qual as boot_qual
+
+
+def _write_seed(root):
+    seed = Path(root) / "seed"
+    seed.mkdir(parents=True, exist_ok=True)
+    (seed / "user-data").write_text("#cloud-config\n", encoding="utf-8")
+    (seed / "meta-data").write_text("instance-id: qual-fixture\n", encoding="utf-8")
+    (seed / "network-config").write_text("version: 2\n", encoding="utf-8")
+    return seed
+
+
+def _fake_iso(seed_dir, iso_path):
+    Path(iso_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(iso_path).write_bytes(b"CIDATA fixture")
+    return {"tool": "fixture", "path": str(iso_path)}
+
+
+class _FakeProc:
+    def __init__(self, returncode=0):
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def _run_main(argv):
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        rc = boot_qual.main(argv)
+    return rc, stdout.getvalue(), stderr.getvalue()
 
 
 class SerialScanTests(unittest.TestCase):
@@ -305,38 +348,268 @@ class FirmwareTests(unittest.TestCase):
             written = json.loads((root / "work" / "boot-qual-report.json").read_text())
             self.assertEqual(written["gates"]["firmware"]["status"], "BLOCKED")
 
-    def test_boot_attempt_refuses_prior_disk_before_firmware_setup(self):
+    def test_boot_attempt_refuses_reused_outputs_and_preserves_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            seed = root / "seed"
-            seed.mkdir()
+            seed = _write_seed(root)
             image = root / "base.qcow2"
             image.write_bytes(b"fixture")
             work = root / "work"
             work.mkdir()
-            (work / "boot-disk.qcow2").write_bytes(b"prior boot state")
-            orig_which, orig_iso = boot_qual.which_any, boot_qual.make_seed_iso
-
-            def fake_iso(seed_dir, iso_path):
-                Path(iso_path).write_bytes(b"iso")
-                return {"tool": "fixture", "path": str(iso_path)}
-
-            try:
-                boot_qual.which_any = lambda *names: "/usr/bin/qemu-system-x86_64" if "qemu-system-x86_64" in names else None
-                boot_qual.make_seed_iso = fake_iso
-                report = boot_qual.run_boot_attempt(
-                    image, seed, work, firmware="uefi",
+            prior = {
+                "boot-disk.qcow2": b"prior boot state",
+                "boot-qual-report.json": b'{"prior": true}\n',
+                "seed.iso": b"prior seed iso",
+            }
+            for name, content in prior.items():
+                (work / name).write_bytes(content)
+            with self.assertRaisesRegex(boot_qual.BootQualError,
+                                        "refusing to overwrite"):
+                boot_qual.run_boot_attempt(
+                    image, seed, work, firmware="bios",
                     do_offline_inspect=False)
-            finally:
-                boot_qual.which_any = orig_which
-                boot_qual.make_seed_iso = orig_iso
-            self.assertEqual(report["gates"]["boot_disk"]["status"], "FAIL")
-            self.assertNotIn("firmware", report["gates"])
-            self.assertEqual((work / "boot-disk.qcow2").read_bytes(),
-                             b"prior boot state")
+            for name, content in prior.items():
+                self.assertEqual((work / name).read_bytes(), content)
             self.assertFalse((work / "uefi-vars.fd").exists())
-            written = json.loads((work / "boot-qual-report.json").read_text())
-            self.assertEqual(written["gates"]["boot_disk"]["status"], "FAIL")
+            self.assertFalse((work / boot_qual.ATTEMPT_MARKER).exists())
+
+
+class ReservationTests(unittest.TestCase):
+    def test_reserves_once_and_refuses_second_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory) / "work"
+            marker = boot_qual.reserve_attempt_outputs(work)
+            self.assertTrue(Path(marker).is_file())
+            with self.assertRaisesRegex(boot_qual.BootQualError,
+                                        "already reserved"):
+                boot_qual.reserve_attempt_outputs(work)
+
+    def test_refuses_prior_report_without_touching_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory) / "work"
+            work.mkdir()
+            report = work / "boot-qual-report.json"
+            report.write_bytes(b'{"prior": true}\n')
+            with self.assertRaisesRegex(boot_qual.BootQualError,
+                                        "refusing to overwrite"):
+                boot_qual.reserve_attempt_outputs(work)
+            self.assertEqual(report.read_bytes(), b'{"prior": true}\n')
+            self.assertFalse((work / boot_qual.ATTEMPT_MARKER).exists())
+
+
+class TargetValidationTests(unittest.TestCase):
+    def test_accepts_declared_targets(self):
+        boot_qual.validate_target("x86_64", "uefi", "q35")
+        boot_qual.validate_target("x86_64", "bios", "pc")
+        boot_qual.validate_target("aarch64", "uefi", "virt")
+
+    def test_rejects_bios_on_aarch64(self):
+        with self.assertRaisesRegex(boot_qual.BootQualError,
+                                    "not defined for aarch64"):
+            boot_qual.validate_target("aarch64", "bios")
+
+    def test_rejects_mismatched_machine(self):
+        with self.assertRaisesRegex(boot_qual.BootQualError, "machine"):
+            boot_qual.validate_target("aarch64", "uefi", "q35")
+        with self.assertRaisesRegex(boot_qual.BootQualError, "machine"):
+            boot_qual.validate_target("x86_64", "uefi", "virt")
+
+    def test_rejects_unknown_architecture(self):
+        with self.assertRaisesRegex(boot_qual.BootQualError,
+                                    "unsupported architecture"):
+            boot_qual.validate_target("riscv64", "uefi")
+
+
+class CliTests(unittest.TestCase):
+    def test_prepare_only_valid_fixture_succeeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            work = root / "work"
+            with mock.patch.object(boot_qual, "make_seed_iso", new=_fake_iso):
+                rc, _stdout, _stderr = _run_main([
+                    "--seed-dir", str(seed), "--work-dir", str(work),
+                    "--firmware", "bios",
+                ])
+            self.assertEqual(rc, 0)
+            report = json.loads((work / "boot-qual-report.json").read_text())
+            self.assertEqual(report["mode"], "prepare-only")
+            self.assertEqual(report["gates"]["seed"]["status"], "PASS")
+            self.assertEqual(report["gates"]["seed_iso"]["status"], "PASS")
+            self.assertEqual(report["gates"]["firmware"]["status"], "PASS")
+            self.assertEqual(report["gates"]["boot_attempt"]["status"], "NOT_RUN")
+            self.assertTrue((work / boot_qual.ATTEMPT_MARKER).is_file())
+
+    def test_prepare_only_accepts_prebuilt_seed_iso_as_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            work = root / "work"
+            work.mkdir()
+            iso = work / "seed.iso"
+            iso.write_bytes(b"prebuilt CIDATA")
+            rc, _stdout, _stderr = _run_main([
+                "--seed-dir", str(seed), "--work-dir", str(work),
+                "--seed-iso", str(iso), "--firmware", "bios",
+            ])
+            self.assertEqual(rc, 0)
+            report = json.loads((work / "boot-qual-report.json").read_text())
+            self.assertEqual(report["gates"]["seed_iso"]["tool"], "prebuilt")
+            self.assertEqual(iso.read_bytes(), b"prebuilt CIDATA")
+
+    def test_prepare_only_rejects_arm64_bios_before_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            work = root / "work"
+            rc, _stdout, stderr = _run_main([
+                "--seed-dir", str(seed), "--work-dir", str(work),
+                "--arch", "aarch64", "--firmware", "bios",
+            ])
+            self.assertEqual(rc, boot_qual.EXIT_USAGE)
+            self.assertIn("not defined for aarch64", stderr)
+            self.assertFalse(work.exists())
+
+    def test_boot_mode_rejects_arm64_bios_before_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            rc, _stdout, _stderr = _run_main([
+                "--image", str(image), "--seed-dir", str(seed),
+                "--work-dir", str(work), "--arch", "aarch64",
+                "--firmware", "bios",
+            ])
+            self.assertEqual(rc, boot_qual.EXIT_USAGE)
+            self.assertFalse(work.exists())
+
+    def test_boot_mode_rejects_unsupported_machine_before_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            rc, _stdout, _stderr = _run_main([
+                "--image", str(image), "--seed-dir", str(seed),
+                "--work-dir", str(work), "--machine", "virt",
+            ])
+            self.assertEqual(rc, boot_qual.EXIT_USAGE)
+            self.assertFalse(work.exists())
+
+    def test_cli_refuses_reused_report_and_preserves_prior_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "work"
+            work.mkdir()
+            prior_report = b'{"prior": true}\n'
+            (work / "boot-qual-report.json").write_bytes(prior_report)
+            prior_seed = work / "seed"
+            prior_seed.mkdir()
+            prior_seed_file = prior_seed / "user-data"
+            prior_seed_file.write_bytes(b"prior seed input")
+            with mock.patch.object(
+                    boot_qual.build, "offline_build",
+                    side_effect=AssertionError("seed must not be regenerated")):
+                rc, _stdout, stderr_text = _run_main([
+                    "--work-dir", str(work), "--generate-seed",
+                    "--firmware", "bios",
+                ])
+            self.assertEqual(rc, boot_qual.EXIT_USAGE)
+            self.assertIn("refusing to overwrite", stderr_text)
+            self.assertEqual((work / "boot-qual-report.json").read_bytes(),
+                             prior_report)
+            self.assertEqual(prior_seed_file.read_bytes(), b"prior seed input")
+            self.assertFalse((work / boot_qual.ATTEMPT_MARKER).exists())
+
+    def test_cli_refuses_reuse_before_replacing_seed_when_disk_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            work.mkdir()
+            prior_disk = b"prior boot state"
+            prior_iso = b"prior seed iso"
+            (work / "boot-disk.qcow2").write_bytes(prior_disk)
+            (work / "seed.iso").write_bytes(prior_iso)
+            with mock.patch.object(
+                    boot_qual.build, "offline_build",
+                    side_effect=AssertionError("seed must not be regenerated")):
+                rc, _stdout, _stderr = _run_main([
+                    "--image", str(image), "--work-dir", str(work),
+                    "--generate-seed", "--firmware", "bios",
+                ])
+            self.assertEqual(rc, boot_qual.EXIT_USAGE)
+            self.assertEqual((work / "boot-disk.qcow2").read_bytes(), prior_disk)
+            self.assertEqual((work / "seed.iso").read_bytes(), prior_iso)
+            self.assertFalse((work / "boot-qual-report.json").exists())
+
+    def test_cli_qemu_launch_failure_persists_report_and_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            fake_qemu = root / "qemu-system-x86_64"
+            fake_qemu.write_bytes(b"")
+
+            def fake_which(*names):
+                if "qemu-system-x86_64" in names:
+                    return str(fake_qemu)
+                return None
+
+            with mock.patch.object(boot_qual, "which_any", new=fake_which), \
+                    mock.patch.object(boot_qual, "make_seed_iso", new=_fake_iso), \
+                    mock.patch.object(
+                        boot_qual.subprocess, "Popen",
+                        side_effect=OSError("fixture qemu refused to launch")):
+                rc, _stdout, _stderr = _run_main([
+                    "--image", str(image), "--seed-dir", str(seed),
+                    "--work-dir", str(work), "--firmware", "bios",
+                    "--no-offline-inspect",
+                ])
+            self.assertEqual(rc, boot_qual.EXIT_QUALIFICATION_FAILURE)
+            report = json.loads((work / "boot-qual-report.json").read_text())
+            attempt = report["gates"]["boot_attempt"]
+            self.assertEqual(attempt["status"], "FAIL")
+            self.assertIn("failed to launch qemu", attempt["error"])
+            self.assertIn("fixture qemu refused to launch", attempt["error"])
+            self.assertTrue((work / "qemu.stderr.log").is_file())
+
+    def test_cli_mocked_boot_completes_with_valid_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            fake_qemu = root / "qemu-system-x86_64"
+            fake_qemu.write_bytes(b"")
+
+            def fake_which(*names):
+                if "qemu-system-x86_64" in names:
+                    return str(fake_qemu)
+                return None
+
+            with mock.patch.object(boot_qual, "which_any", new=fake_which), \
+                    mock.patch.object(boot_qual, "make_seed_iso", new=_fake_iso), \
+                    mock.patch.object(boot_qual.subprocess, "Popen",
+                                      return_value=_FakeProc(0)):
+                rc, _stdout, _stderr = _run_main([
+                    "--image", str(image), "--seed-dir", str(seed),
+                    "--work-dir", str(work), "--firmware", "bios",
+                    "--no-offline-inspect",
+                ])
+            self.assertEqual(rc, 0)
+            report = json.loads((work / "boot-qual-report.json").read_text())
+            self.assertEqual(report["gates"]["seed_iso"]["status"], "PASS")
+            self.assertEqual(report["gates"]["boot_attempt"]["status"],
+                             "COMPLETED")
+            self.assertEqual(report["gates"]["boot_attempt"]["returncode"], 0)
 
 
 if __name__ == "__main__":

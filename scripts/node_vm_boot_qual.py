@@ -63,6 +63,121 @@ class BootQualError(RuntimeError):
     pass
 
 
+EXIT_QUALIFICATION_FAILURE = 1
+EXIT_USAGE = 2
+
+# The helper only models targets the checked-in artifact configuration declares.
+# BIOS is deliberately absent for aarch64: the declared arm64 target is UEFI on
+# QEMU's virt machine.
+SUPPORTED_TARGETS = {
+    "x86_64": {
+        "firmware": ("bios", "uefi"),
+        "machines": ("pc", "q35", "isapc", "microvm"),
+    },
+    "aarch64": {
+        "firmware": ("uefi",),
+        "machines": ("virt",),
+    },
+}
+
+ATTEMPT_MARKER = "boot-qual-attempt.json"
+# Every path the helper may create in an attempt work directory. A prior attempt
+# owns these bytes; refusing before the first write keeps its disk, seed and
+# report intact.
+ATTEMPT_OUTPUT_NAMES = (
+    "boot-qual-report.json",
+    "boot-disk.qcow2",
+    "seed.iso",
+    "seed",
+    "uefi-vars.fd",
+    "serial-console.log",
+    "qemu.stderr.log",
+    "qemu-command.json",
+)
+
+
+def _machine_matches(machine, names):
+    return any(machine == name or machine.startswith(name + "-") for name in names)
+
+
+def validate_target(arch, firmware, machine=None):
+    """Reject unsupported architecture/firmware/machine combinations.
+
+    This runs before any output is created so an invalid target cannot leave a
+    misleading PASS firmware gate, a boot overlay or an overwritten report.
+    """
+    target = SUPPORTED_TARGETS.get(arch)
+    if target is None:
+        raise BootQualError(
+            "unsupported architecture %r; supported: %s"
+            % (arch, ", ".join(sorted(SUPPORTED_TARGETS))))
+    if firmware not in ("bios", "uefi"):
+        raise BootQualError("unknown firmware mode: %s" % firmware)
+    if firmware not in target["firmware"]:
+        if arch == "aarch64" and firmware == "bios":
+            raise BootQualError("BIOS firmware is not defined for aarch64; use UEFI")
+        raise BootQualError(
+            "firmware %s is not supported for architecture %s" % (firmware, arch))
+    if machine and not _machine_matches(machine, target["machines"]):
+        raise BootQualError(
+            "machine %r is not supported for %s; use one of: %s"
+            % (machine, arch, ", ".join(target["machines"])))
+
+
+def reserve_attempt_outputs(work_dir, extra_outputs=(), ignore=()):
+    """Reserve a fresh output set before seed, disk or report mutations.
+
+    Raises BootQualError without writing anything when a previous attempt owns
+    any output path, so prior report/disk/seed bytes are preserved. Callers can
+    pass an existing prebuilt seed ISO through ``ignore`` because it is an input,
+    not an output.
+    """
+    work_dir = Path(work_dir)
+    ignored = {Path(path).resolve() for path in ignore}
+    candidates = [work_dir / name for name in ATTEMPT_OUTPUT_NAMES]
+    candidates.extend(Path(path) for path in extra_outputs)
+
+    conflicts = []
+    seen = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in ignored or resolved in seen:
+            continue
+        seen.add(resolved)
+        if candidate.exists() or candidate.is_symlink():
+            conflicts.append(str(candidate))
+    if conflicts:
+        raise BootQualError(
+            "work directory already contains a previous qualification attempt "
+            "(%s); refusing to overwrite existing outputs; use a fresh --work-dir"
+            % ", ".join(sorted(conflicts)))
+
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise BootQualError(
+            "cannot create work directory %s: %s" % (work_dir, exc)) from exc
+
+    marker = work_dir / ATTEMPT_MARKER
+    try:
+        descriptor = os.open(
+            str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise BootQualError(
+            "work directory already reserved a qualification attempt (%s); "
+            "refusing to reuse it; use a fresh --work-dir" % marker) from exc
+    except OSError as exc:
+        raise BootQualError(
+            "cannot reserve qualification outputs in %s: %s"
+            % (work_dir, exc)) from exc
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(
+            {"schema_version": 1, "purpose": "fresh per-attempt output reservation"},
+            handle, sort_keys=True)
+        handle.write("\n")
+    return str(marker)
+
+
 def which_any(*names):
     for name in names:
         path = shutil.which(name)
@@ -232,14 +347,11 @@ def prepare_overlay(image_path, work_dir, size=None):
 def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048,
                  cpus=2, accel=None, firmware="bios", uefi_code=None,
                  uefi_vars=None, machine=None):
+    validate_target(arch, firmware, machine)
     bin_name = "qemu-system-%s" % arch
     qemu = which_any(bin_name)
     if not qemu:
         raise BootQualError("%s not found on PATH" % bin_name)
-    if firmware not in ("bios", "uefi"):
-        raise BootQualError("unknown firmware mode: %s" % firmware)
-    if firmware == "bios" and arch == "aarch64":
-        raise BootQualError("BIOS firmware is not defined for aarch64; use UEFI")
 
     cmd = [
         qemu,
@@ -420,9 +532,18 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
                      memory_mib=2048, cpus=2, arch="x86_64", accel=None,
                      do_offline_inspect=True, verify_ref=None, profile="artifact",
                      sha256sums_text=None, seed_iso_path=None, firmware="uefi",
-                     disk_size=None, machine=None):
+                     disk_size=None, machine=None, output_reservation=None):
     work_dir = Path(work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    validate_target(arch, firmware, machine)
+
+    iso_path = Path(seed_iso_path) if seed_iso_path else (work_dir / "seed.iso")
+    prebuilt_iso = bool(seed_iso_path and iso_path.is_file())
+    if output_reservation is None:
+        output_reservation = reserve_attempt_outputs(
+            work_dir,
+            extra_outputs=() if prebuilt_iso else (iso_path,),
+            ignore=(iso_path,) if prebuilt_iso else (),
+        )
     report = {
         "schema_version": 1,
         "image": str(image_path),
@@ -460,8 +581,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         return _finish()
     report["gates"]["seed"] = {"status": "PASS", "path": str(seed_nocloud_dir)}
 
-    iso_path = Path(seed_iso_path) if seed_iso_path else (work_dir / "seed.iso")
-    if seed_iso_path and iso_path.is_file():
+    if prebuilt_iso:
         iso_info = {"tool": "prebuilt", "path": str(iso_path)}
         report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
     else:
@@ -550,8 +670,21 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         json.dumps(cmd, indent=2) + "\n")
 
     started = time.time()
-    with open(work_dir / "qemu.stderr.log", "w", encoding="utf-8", errors="replace") as err:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err)
+    try:
+        with open(work_dir / "qemu.stderr.log", "w",
+                  encoding="utf-8", errors="replace") as err:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err)
+    except Exception as e:
+        # A launch error (missing executable, permission, bad format) used to
+        # escape without a report. Persist the attempt evidence first and let
+        # main() return nonzero.
+        report["gates"]["boot_attempt"].update({
+            "status": "FAIL",
+            "error": "failed to launch qemu: %s" % e,
+            "elapsed_seconds": round(time.time() - started, 2),
+        })
+        report["notes"].append("qemu launch failed before a guest process started")
+        return _finish()
     wait_result = wait_for_process(proc, timeout_seconds)
     elapsed = round(time.time() - started, 2)
     report["gates"]["boot_attempt"].update({
@@ -683,7 +816,28 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     work_dir = Path(args.work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        validate_target(args.arch, args.firmware, args.machine)
+    except BootQualError as e:
+        print("node_vm_boot_qual: error: %s" % e, file=sys.stderr)
+        return EXIT_USAGE
+
+    boot_iso_path = Path(args.seed_iso) if args.seed_iso else (work_dir / "seed.iso")
+    prebuilt_iso = bool(args.seed_iso and boot_iso_path.is_file())
+    # A supplied seed directory or an existing prebuilt ISO is an input. Every
+    # other attempt path is an output and must not exist yet.
+    ignore = [boot_iso_path] if prebuilt_iso else []
+    if args.seed_dir:
+        ignore.append(Path(args.seed_dir))
+    try:
+        output_reservation = reserve_attempt_outputs(
+            work_dir,
+            extra_outputs=() if prebuilt_iso else (boot_iso_path,),
+            ignore=ignore,
+        )
+    except BootQualError as e:
+        print("node_vm_boot_qual: error: %s" % e, file=sys.stderr)
+        return EXIT_USAGE
 
     seed_dir = args.seed_dir
     if args.generate_seed or not seed_dir:
@@ -700,9 +854,9 @@ def main(argv=None):
             "work_dir": str(work_dir),
             "gates": {"seed": {"status": "PASS", "path": seed_dir}},
         }
-        iso_arg = Path(args.seed_iso) if args.seed_iso else None
-        if iso_arg and iso_arg.is_file():
-            report["gates"]["seed_iso"] = {"status": "PASS", "tool": "prebuilt", "path": str(iso_arg)}
+        if prebuilt_iso:
+            report["gates"]["seed_iso"] = {
+                "status": "PASS", "tool": "prebuilt", "path": str(boot_iso_path)}
         else:
             try:
                 iso_info = make_seed_iso(seed_dir, work_dir / "seed.iso")
@@ -749,16 +903,19 @@ def main(argv=None):
         verify_ref=args.verify_ref, profile=args.profile, sha256sums_text=sums,
         seed_iso_path=args.seed_iso, firmware=args.firmware,
         disk_size=args.disk_size, machine=args.machine,
+        output_reservation=output_reservation,
     )
     print(json.dumps(report, sort_keys=True))
-    # Exit non-zero only for hard failures in preparation/verification inputs;
-    # blocked/unobserved boot gates are reported in JSON for evidence.
+    # Exit non-zero for hard preparation/verification failures and for a boot
+    # attempt that could not be launched or constructed. Blocked/unobserved
+    # gates remain reported in JSON as evidence.
     hard_fail = any(
         g.get("status") == "FAIL"
         for k, g in report.get("gates", {}).items()
-        if k in ("image_bytes_verified", "seed", "seed_iso", "boot_disk")
+        if k in ("image_bytes_verified", "seed", "seed_iso", "boot_disk",
+                 "firmware", "boot_attempt")
     )
-    return 1 if hard_fail else 0
+    return EXIT_QUALIFICATION_FAILURE if hard_fail else 0
 
 
 if __name__ == "__main__":

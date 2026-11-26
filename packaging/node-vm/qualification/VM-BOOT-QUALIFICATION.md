@@ -436,11 +436,19 @@ models the declared UEFI target instead of silently booting SeaBIOS:
   expanded qcow2 overlay and refuses to fall back to an unresized copy.
 - `--firmware {uefi,bios}`, `--machine` and `--disk-size` expose these paths.
   UEFI is the CLI default because it matches `config/build-config.json`.
+- Each attempt requires a fresh `--work-dir`. The helper atomically reserves
+  the attempt output set (`boot-qual-attempt.json`) before generating a seed,
+  overlay or report, and refuses to reuse a prior directory without changing
+  its disk, seed or report bytes.
+- Unsupported architecture/firmware/machine combinations are rejected before
+  any output is created and exit non-zero. BIOS on aarch64 is the explicit
+  example: it is no longer reported as a firmware PASS.
 - Blocked/inconclusive attempts now persist `boot-qual-report.json` before an
   early return, so firmware-missing and prior-disk refusals keep their evidence.
+  A QEMU launch failure also persists that report with a `FAIL` boot-attempt
+  gate and returns non-zero instead of escaping with no JSON.
 
-These paths are unit-tested only: 55 fixtures pass with the two Linux-only
-OpenSSL guest fixtures skipped on Windows, and all 57 pass in the Linux guest
-environment. They do not qualify the 20 GiB q35 profile or any open
-live-enrollment gate; a future run must provide fresh serial/disk evidence on a
-disposable guest.
+These paths are unit-tested only. All 72 node-VM fixtures pass on Windows with
+two Linux-only OpenSSL guest fixtures skipped; they do not qualify the 20 GiB
+q35 profile or any open live-enrollment gate. A future run must provide fresh
+serial/disk evidence on a disposable guest.

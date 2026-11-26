@@ -36,10 +36,14 @@ the shared node-control contract without duplicating it.
   with `--image <verified.qcow2>` on a capable disposable runner (qemu-system with
   TCG or KVM) it attempts a boot, captures serial-console evidence and can
   perform offline disk inspection. UEFI is the default; missing OVMF/edk2 is
-  reported blocked, never silently replaced by BIOS. `--disk-size 20G` exercises
-  the declared expanded profile, which remains unqualified. Report
-  blocked/unobserved gates honestly; never claim live boot, enrollment or
-  network isolation without evidence.
+  reported blocked, never silently replaced by BIOS. Use a fresh work directory
+  per attempt: the helper reserves outputs before writing a seed, overlay or
+  report and refuses reuse, so prior evidence bytes are preserved. Unsupported
+  target combinations and QEMU launch failures return non-zero; launch failures
+  still persist a failure report. `--disk-size 20G` exercises the declared
+  expanded profile, which remains unqualified. Report blocked/unobserved gates
+  honestly; never claim live boot, enrollment or network isolation without
+  evidence.
 - Never substitute a real key, endpoint or world path for a fixture value, and
   never run these drivers against a live VM from this lane.
 

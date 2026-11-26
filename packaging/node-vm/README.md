@@ -103,6 +103,12 @@ profile; that expanded-disk profile is not yet qualified. The helper copies a
 fresh private UEFI variable store per run and never writes system firmware. See
 [QEMU boot qualification](qualification/VM-BOOT-QUALIFICATION.md).
 
+Use a fresh `--work-dir` for every attempt. The helper reserves the attempt
+output set before writing a seed, overlay or report and refuses to reuse a prior
+run without changing its bytes. Invalid architecture/firmware/machine
+combinations (for example aarch64 with BIOS) are rejected before outputs, and a
+QEMU launch failure persists a failure report; both return non-zero.
+
 All commands are local-file operations. They do not call qemu-img, xorriso,
 virt-customize, a hypervisor API, a package registry or a signing service.
 The integrity `signing-plan.json` describes operator-run detached signing only.
