@@ -18,10 +18,13 @@ sources:
 # Choice
 
 `internal/datawrite` keeps one gate per server. Direct editor writes, uploads,
-deletes, renames, moves, copies, folder creation, archive creation, extraction
-and remote archive downloads take a shared lease. A staged publication takes
-the exclusive lease after it owns the batch journal and before it snapshots the
-live tree, and keeps it through publication and any rollback.
+deletes, renames, moves, copies, folder creation, archive creation, extraction,
+remote archive downloads and direct mod enable/disable/delete/stack installs
+take a shared lease. A staged publication takes the exclusive lease after it
+owns the batch journal and before it snapshots the live tree, and keeps it
+through publication and any rollback. An exclusive claim reserves the drain
+from the first observation until it either owns the path or is canceled, so a
+new shared writer cannot slip in between a completed drain and ownership.
 
 `ApplyBatch` releases the lease when its journaled callback finishes.
 `CommitNextRestartFiles` returns a commit handle because the start/restart call

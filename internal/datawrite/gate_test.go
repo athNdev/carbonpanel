@@ -144,6 +144,70 @@ func TestExclusiveWaitHonorsContext(t *testing.T) {
 	lease.Release()
 }
 
+func TestExclusiveDrainReservationRefusesNewSharedWriters(t *testing.T) {
+	for attempt := 0; attempt < 200; attempt++ {
+		const server = "gate-drain-reservation"
+		shared, err := TryShared(server)
+		if err != nil {
+			t.Fatalf("shared lease: %v", err)
+		}
+
+		acquired := make(chan *Lease, 1)
+		failed := make(chan error, 1)
+		go func() {
+			lease, err := AcquireExclusive(context.Background(), server)
+			if err != nil {
+				failed <- err
+				return
+			}
+			acquired <- lease
+		}()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			gate := gateFor(server)
+			gate.mu.Lock()
+			draining := gate.draining
+			gate.mu.Unlock()
+			if draining {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("exclusive claim did not start draining")
+			}
+			time.Sleep(time.Millisecond)
+		}
+
+		shared.Release()
+		for {
+			select {
+			case lease := <-acquired:
+				lease.Release()
+			case err := <-failed:
+				t.Fatalf("exclusive claim: %v", err)
+			default:
+				// Once draining starts, a shared writer may not slip in before
+				// the exclusive claim actually owns the path.
+				if lease, err := TryShared(server); err == nil {
+					lease.Release()
+					select {
+					case exclusive := <-acquired:
+						exclusive.Release()
+					case <-failed:
+					default:
+						t.Fatal("a shared writer entered after the drain completed but before exclusive ownership")
+					}
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("exclusive claim did not finish after the shared writer released")
+				}
+				continue
+			}
+			break
+		}
+	}
+}
+
 func TestGatesArePerServer(t *testing.T) {
 	first, err := AcquireExclusive(context.Background(), "gate-server-a")
 	if err != nil {

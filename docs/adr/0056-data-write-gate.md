@@ -30,9 +30,11 @@ must therefore outlive the commit function without becoming a second journal.
 
 1. `internal/datawrite` owns one per-server data-path gate. Ordinary panel
    mutations take a shared lease; a staged publication takes the exclusive
-   lease. Shared writers may run together. An exclusive claim refuses new
-   shared writers, waits for those already in flight, and then owns the path
-   until release.
+   lease. Shared writers may run together. An exclusive claim reserves the
+   drain from its first observation, refuses new shared writers, waits for
+   those already in flight, and then owns the path until release. The
+   reservation is not cleared between a drain wake-up and ownership, so a new
+   shared writer cannot force a second drain or starve the claim.
 2. Staged `ApplyBatch` acquires the exclusive lease after the batch journal is
    owned and before the undo snapshot, and releases it only after publication
    and any rollback finish. `CommitNextRestartFiles` returns a commit handle
@@ -40,7 +42,8 @@ must therefore outlive the commit function without becoming a second journal.
    `Undo` on failure. `Finish` does not undo, and `Undo` after `Finish` is a
    no-op.
 3. Direct file-service writes, uploads, deletes, renames, moves, copies, folder
-   creation, archive creation, extraction and remote archive download take a
+   creation, archive creation, extraction and remote archive download, plus
+   direct mod enable/disable/delete and optimization-stack installs, take a
    shared lease before they touch the live tree. They are refused with a
    retryable Connect error while a staged publication owns the path. Staging a
    file does not take the lease because it does not write the live tree.

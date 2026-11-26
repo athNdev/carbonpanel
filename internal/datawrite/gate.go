@@ -127,18 +127,23 @@ func AcquireExclusive(ctx context.Context, serverID string) (*Lease, error) {
 		return nil, errors.New("server data write requires a server ID")
 	}
 	gate := gateFor(serverID)
+	gate.mu.Lock()
+	if gate.exclusive || gate.draining {
+		gate.mu.Unlock()
+		return nil, fmt.Errorf("%w: %s", ErrExclusiveBusy, serverID)
+	}
+	if gate.shared == 0 {
+		gate.exclusive = true
+		gate.mu.Unlock()
+		return &Lease{gate: gate, serverID: serverID, exclusive: true}, nil
+	}
+	// Reserve the drain before releasing the lock, and keep it reserved until
+	// ownership is acquired or the wait is canceled. Clearing it between a
+	// wake-up and the next loop iteration would let a new shared writer enter
+	// after the drain had already completed, forcing the exclusive claim to
+	// drain again and potentially starve it.
+	gate.draining = true
 	for {
-		gate.mu.Lock()
-		if gate.exclusive || gate.draining {
-			gate.mu.Unlock()
-			return nil, fmt.Errorf("%w: %s", ErrExclusiveBusy, serverID)
-		}
-		if gate.shared == 0 {
-			gate.exclusive = true
-			gate.mu.Unlock()
-			return &Lease{gate: gate, serverID: serverID, exclusive: true}, nil
-		}
-		gate.draining = true
 		wait := gate.changed
 		gate.mu.Unlock()
 		select {
@@ -152,7 +157,11 @@ func AcquireExclusive(ctx context.Context, serverID string) (*Lease, error) {
 			return nil, ctx.Err()
 		}
 		gate.mu.Lock()
-		gate.draining = false
-		gate.mu.Unlock()
+		if gate.shared == 0 {
+			gate.exclusive = true
+			gate.draining = false
+			gate.mu.Unlock()
+			return &Lease{gate: gate, serverID: serverID, exclusive: true}, nil
+		}
 	}
 }
