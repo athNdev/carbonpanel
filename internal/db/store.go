@@ -141,9 +141,19 @@ func (s *Store) CheckArchiveServerName(ctx context.Context, name string) error {
 	return nil
 }
 
+// ArchiveGameplay is the validated gameplay seed read from an archive's root
+// server.properties. Empty or nil fields keep the destination defaults.
+type ArchiveGameplay struct {
+	LevelName             string
+	Difficulty            string
+	GameMode              string
+	SyncChunkWrites       *bool
+	PauseWhenEmptySeconds *int
+}
+
 // CreateArchiveServer commits the server and its initial config together after
 // its data has been verified and placed. An error leaves no server row.
-func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, levelName string) error {
+func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		scoped := &Store{db: tx, cfg: s.cfg}
 		if err := scoped.CheckArchiveServerName(ctx, server.Name); err != nil {
@@ -152,10 +162,26 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, levelNa
 		if err := scoped.CreateServer(ctx, server); err != nil {
 			return err
 		}
-		if levelName == "" {
+		updates := make(map[string]any, 5)
+		if gameplay.LevelName != "" {
+			updates["level"] = gameplay.LevelName
+		}
+		if gameplay.Difficulty != "" {
+			updates["difficulty"] = gameplay.Difficulty
+		}
+		if gameplay.GameMode != "" {
+			updates["mode"] = gameplay.GameMode
+		}
+		if gameplay.SyncChunkWrites != nil {
+			updates["sync_chunk_writes"] = *gameplay.SyncChunkWrites
+		}
+		if gameplay.PauseWhenEmptySeconds != nil {
+			updates["pause_when_empty_seconds"] = *gameplay.PauseWhenEmptySeconds
+		}
+		if len(updates) == 0 {
 			return nil
 		}
-		return tx.Model(&ServerConfig{}).Where("server_id = ?", server.ID).Update("level", levelName).Error
+		return tx.Model(&ServerConfig{}).Where("server_id = ?", server.ID).Updates(updates).Error
 	})
 }
 

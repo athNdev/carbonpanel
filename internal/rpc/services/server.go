@@ -1533,7 +1533,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	createRecord := s.store.CreateServer
 	if imported != nil {
 		createRecord = func(ctx context.Context, server *storage.Server) error {
-			return s.store.CreateArchiveServer(ctx, server, imported.verified.LevelName)
+			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay))
 		}
 	}
 	if err := createRecord(ctx, server); err != nil {

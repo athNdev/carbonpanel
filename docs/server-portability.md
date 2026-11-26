@@ -41,6 +41,30 @@ plugin and mod data as opaque and cannot identify secrets placed inside those
 files. Review such data before sharing an archive. Supply destination-specific
 plugin connections and credentials separately.
 
+## Restored gameplay settings
+
+The managed image writes its environment back into `server.properties` on
+startup. To keep archived gameplay from being replaced by panel defaults, the
+controller parses a typed allowlist from the already filtered, checksum-validated
+root `server.properties`: `level-name`, `difficulty`, `gamemode`,
+`sync-chunk-writes` and `pause-when-empty-seconds`. It validates each value and
+writes the accepted values into the new server's initial config in the same
+transaction that creates the server row, before the container is created.
+
+Precedence is fixed:
+
+1. Destination RCON, ports, routing, proxy settings, authentication, image and
+   ownership always come from the destination. The archive cannot carry them.
+2. A present and valid archived gameplay value wins over the panel default for
+   that property. This includes the panel's forced portable defaults for
+   `sync-chunk-writes` and `pause-when-empty-seconds`.
+3. An absent, empty or unsupported value keeps the panel default. The import is
+   not refused for it, and the panel never persists a value the game would
+   reject.
+4. Other recognized properties keep their archived bytes. A destination global
+   setting that forces an environment value outside this list still wins at
+   startup.
+
 The consistency policy requires a stopped server. If third-party software can
 write to the data directory independently, stop those writers before exporting.
 

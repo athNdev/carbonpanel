@@ -254,6 +254,26 @@ func applyArchiveDefaults(req *v1.CreateServerRequest, runtime serverarchive.Run
 	return nil
 }
 
+// archiveGameplaySeed copies validated archive settings into the initial
+// config. Missing values fall through to the panel defaults; destination RCON,
+// ports, routing, auth, image and ownership are never derived from the archive.
+func archiveGameplaySeed(gameplay serverarchive.Gameplay) storage.ArchiveGameplay {
+	seed := storage.ArchiveGameplay{
+		LevelName:  gameplay.LevelName,
+		Difficulty: gameplay.Difficulty,
+		GameMode:   gameplay.GameMode,
+	}
+	if gameplay.SyncChunkWrites != nil {
+		value := *gameplay.SyncChunkWrites
+		seed.SyncChunkWrites = &value
+	}
+	if gameplay.PauseWhenEmptySeconds != nil {
+		value := *gameplay.PauseWhenEmptySeconds
+		seed.PauseWhenEmptySeconds = &value
+	}
+	return seed
+}
+
 func archiveReplayError(err error) error {
 	if errors.Is(err, storage.ErrRequestIDReused) {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("request_id already refers to a different server archive submission"))

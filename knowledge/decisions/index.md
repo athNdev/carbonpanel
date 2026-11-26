@@ -9,6 +9,7 @@
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
 - [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
+- [Archived gameplay settings seed the initial server config](server-archive-gameplay-precedence.md) — Valid archived gameplay values beat panel defaults but never replace destination identity, credentials or network settings.
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Channel changelog is generated presentation, not pinned prose](channel-changelog-presentation.md) — The public changelog is rendered from the one version contract plus hash-attested GitHub release notes, with a separate channel-presentation fingerprint for docs-only publication.

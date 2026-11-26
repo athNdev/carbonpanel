@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/download"
@@ -63,7 +64,8 @@ func TestServerArchiveRoundTripThroughCreateServer(t *testing.T) {
 				"mods/fixture.jar":         "mod data",
 				"plugins/fixture.jar":      "plugin data",
 				"config/fixture.yml":       "preserved: true\n",
-				"server.properties":        "level-name=existing-world\nmotd=Restored fixture\n",
+				"server.properties": "level-name=existing-world\ndifficulty=hard\ngamemode=creative\n" +
+					"sync-chunk-writes=true\npause-when-empty-seconds=0\nmotd=Restored fixture\n",
 			}
 			sourceRoot := filepath.Join(nodeRoot, filepath.Base(original.DataPath))
 			for rel, body := range want {
@@ -133,6 +135,37 @@ func TestServerArchiveRoundTripThroughCreateServer(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, config.Level)
 			require.Equal(t, "existing-world", *config.Level)
+			require.NotNil(t, config.Difficulty)
+			require.Equal(t, "hard", *config.Difficulty)
+			require.NotNil(t, config.Mode)
+			require.Equal(t, "creative", *config.Mode)
+			require.NotNil(t, config.SyncChunkWrites)
+			require.True(t, *config.SyncChunkWrites)
+			require.NotNil(t, config.PauseWhenEmptySeconds)
+			require.Equal(t, 0, *config.PauseWhenEmptySeconds)
+
+			// Destination identity, credentials and network settings win.
+			require.Equal(t, 25575, *config.RCONPort)
+			require.NotEmpty(t, *config.RCONPassword)
+			require.Equal(t, 25672, *config.ServerPort)
+			require.Equal(t, 12, *config.MaxPlayers)
+			require.NotNil(t, config.Type)
+			require.Equal(t, "PAPER", *config.Type)
+			require.NotNil(t, config.Version)
+			require.Equal(t, "1.21.1", *config.Version)
+			require.Equal(t,
+				docker.GetOptimalDockerTag("1.21.1", db.ModLoaderPaper, false),
+				created.Msg.Server.DockerImage)
+
+			env := environmentByName(docker.BuildEnvFromConfig(config))
+			require.Equal(t, "existing-world", env["LEVEL"])
+			require.Equal(t, "hard", env["DIFFICULTY"])
+			require.Equal(t, "creative", env["MODE"])
+			require.Equal(t, "true", env["SYNC_CHUNK_WRITES"])
+			require.Equal(t, "0", env["PAUSE_WHEN_EMPTY_SECONDS"])
+			require.Equal(t, "25672", env["SERVER_PORT"])
+			require.Equal(t, "25575", env["RCON_PORT"])
+			require.Equal(t, *config.RCONPassword, env["RCON_PASSWORD"])
 			reset, err := svc.CreateServer(ctx, connect.NewRequest(create))
 			require.NoError(t, err)
 			require.Equal(t, created.Msg.Server.Id, reset.Msg.Server.Id)
@@ -162,6 +195,17 @@ func TestServerArchiveRoundTripThroughCreateServer(t *testing.T) {
 			require.Len(t, roots, 2)
 		})
 	}
+}
+
+func environmentByName(env []string) map[string]string {
+	result := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func writeArchiveFixture(t *testing.T, destination, content string) {
