@@ -139,14 +139,18 @@ free-space queries.
 
 ## Acceptance rehearsal
 
-`.github/workflows/server-archive-rehearsal.yml` is a CI-only round trip at the
-exact candidate head. It builds the controller, starts an isolated local engine
-and a second registered Docker engine with separate storage, and runs
+`.github/workflows/server-archive-rehearsal.yml` is a CI-only backend RPC round
+trip at the exact candidate head. It builds the controller with an empty
+frontend embed, starts an isolated local engine and a second registered Docker
+engine on its own bridge with separate storage, and runs
 `scripts/server_archive_rehearsal_ci.py`. The rehearsal creates a managed
-Vanilla source without Docker overrides, proves a running export is refused,
-saves a deterministic fixture, exports both native formats, verifies every
-archive and destination file hash, previews and creates both imports stopped,
-and then confirms Minecraft readiness on both. See
-[ADR 0053](adr/0053-disposable-server-archive-acceptance.md). It is not a
-production-host or release-publication qualification; the report records those
-limits.
+Vanilla source without Docker overrides, requires the specific running-export
+refusal, saves a deterministic fixture, exports both native formats, verifies
+every archive and destination file hash, previews and creates both imports
+stopped, and then confirms Minecraft readiness on both. See
+[ADR 0053](adr/0053-disposable-server-archive-acceptance.md).
+
+The create-from-archive browser workflow (OSS-428) is not exercised by this job
+and is tracked separately in #686. This rehearsal uses RPC with an empty
+frontend embed; it is not a UI, production-host or release-publication
+qualification, and its report records those limits.

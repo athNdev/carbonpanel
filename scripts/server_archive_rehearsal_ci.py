@@ -19,16 +19,21 @@ world, host service or repository:
   minecraft-protocol client plus a live console roster request.
 
 The job that calls this script owns the disposable controller and Docker
-engines. All paths stay under ``--workspace``; the JSON evidence report is
-written there. A failure always writes a failing report and exits non-zero.
+engines. The direct entry point is hosted-only: it requires a GitHub-hosted
+caller, a fresh ``RUNNER_TEMP`` subdirectory and the job's exclusive fixture
+record before any controller write. All paths stay under ``--workspace``; the
+JSON evidence report is written there. A failure always writes a failing report
+and exits non-zero. Offline tests never record a round trip as verified.
 """
 import argparse
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import tarfile
@@ -45,6 +50,10 @@ MANIFEST_NAME = "manifest.json"
 DATA_PREFIX = "data/"
 FIXTURE_PATH = "archive-rehearsal/fixture.txt"
 EXCLUDED_PATH = "archive-rehearsal/.env"
+FIXTURE_SCHEMA = "server-archive-rehearsal-fixture-v1"
+RUN_SCHEMA = "server-archive-rehearsal-run-v1"
+RUNNING_EXPORT_REFUSAL = "stop the managed server before exporting it"
+CLEANUP_BUDGET_SECONDS = 240
 FIXTURE_BYTES = (
     b"carbon-panel server archive acceptance fixture\n"
     b"format=zip-and-tar.gz\n"
@@ -67,6 +76,16 @@ ARCHIVE_TIMEOUT_SECONDS = 3600
 REPORT_NAME = "server-archive-rehearsal.json"
 MAX_ARCHIVE_FILES = 50000
 MAX_ARCHIVE_BYTES = 32 << 30
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so a fixture controller cannot forward writes elsewhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 class RehearsalError(RuntimeError):
@@ -397,8 +416,235 @@ def _host_is_loopback(host):
         addresses = socket.getaddrinfo(host, None)
     except socket.gaierror:
         return False
-    import ipaddress
     return any(ipaddress.ip_address(item[4][0]).is_loopback for item in addresses)
+
+
+def _literal_loopback(host):
+    """Only a literal loopback address, never a name that DNS could repoint."""
+    try:
+        return ipaddress.ip_address(host or "").is_loopback
+    except ValueError:
+        return False
+
+
+def require_hosted_environment(env):
+    """The direct entry point is only valid inside a GitHub-hosted job."""
+    if env.get("GITHUB_ACTIONS") != "true":
+        raise RehearsalError("the archive rehearsal requires a GitHub Actions caller")
+    if env.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise RehearsalError("the archive rehearsal requires a github-hosted runner")
+    runner_temp = env.get("RUNNER_TEMP", "")
+    if not runner_temp or not Path(runner_temp).is_absolute():
+        raise RehearsalError("the archive rehearsal requires an absolute RUNNER_TEMP")
+    return Path(runner_temp).resolve()
+
+
+def validate_hosted_workspace(workspace, runner_temp):
+    """Require a real, fresh directory strictly below the runner temp root."""
+    workspace = Path(workspace)
+    runner_temp = Path(runner_temp).resolve()
+    if workspace.is_symlink():
+        raise RehearsalError("workspace must not be a symlink")
+    if not workspace.is_dir():
+        raise RehearsalError("workspace must be the fresh directory the hosted job created")
+    resolved = workspace.resolve()
+    if resolved == runner_temp:
+        raise RehearsalError("workspace must be a subdirectory of RUNNER_TEMP")
+    try:
+        resolved.relative_to(runner_temp)
+    except ValueError:
+        raise RehearsalError("workspace must be inside RUNNER_TEMP")
+    return resolved
+
+
+def _private_record(path, schema, label):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise RehearsalError("%s is missing or not a regular file" % label)
+    info = path.stat()
+    if os.name != "nt":
+        getuid = getattr(os, "getuid", None)
+        if getuid is not None and info.st_uid != getuid():
+            raise RehearsalError("%s is not owned by the hosted job user" % label)
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            raise RehearsalError("%s is group or world accessible" % label)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RehearsalError("%s is unreadable: %s" % (label, error))
+    if not isinstance(record, dict) or record.get("schema") != schema:
+        raise RehearsalError("%s does not declare the expected schema" % label)
+    return record
+
+
+def _inside(path, root, label):
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError:
+        raise RehearsalError("%s escapes the disposable workspace" % label)
+
+
+def inspect_container(container_id, local_docker):
+    """Read the local engine's own record for the fixture controller."""
+    try:
+        result = subprocess.run(
+            ["docker", "-H", local_docker, "inspect", "--type", "container", container_id],
+            check=True, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RehearsalError("could not inspect the fixture controller: %s" % error)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RehearsalError("controller inspection returned malformed JSON: %s" % error)
+    if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+        raise RehearsalError("controller inspection did not return one container")
+    return payload[0]
+
+
+def verify_fixture(fixture_path, workspace, runner_temp, commit, version, base,
+                   remote_docker, remote_storage_root, controller_storage,
+                   local_docker, inspector=None, checkout=None):
+    """Bind the run to one checkout, controller container and remote endpoint."""
+    workspace = Path(workspace).resolve()
+    fixture = _private_record(fixture_path, FIXTURE_SCHEMA, "fixture provenance")
+    _inside(fixture_path, workspace, "fixture provenance")
+    if fixture.get("workspace") != str(workspace):
+        raise RehearsalError("fixture workspace does not match --workspace")
+    if fixture.get("runner_temp") != str(Path(runner_temp).resolve()):
+        raise RehearsalError("fixture runner temp does not match RUNNER_TEMP")
+    info = workspace.stat()
+    if fixture.get("workspace_device") != info.st_dev or \
+            fixture.get("workspace_inode") != info.st_ino:
+        raise RehearsalError("fixture was not created for this workspace directory")
+
+    run_file = fixture.get("run_file")
+    if not run_file:
+        raise RehearsalError("fixture has no run record")
+    _inside(run_file, workspace, "run record")
+    run = _private_record(run_file, RUN_SCHEMA, "run record")
+    if sha256_file(run_file) != fixture.get("run_sha256"):
+        raise RehearsalError("run record changed after the fixture was created")
+    if run.get("run_id") != fixture.get("run_id"):
+        raise RehearsalError("fixture and run record disagree about the run id")
+
+    if checkout is None:
+        checkout = verify_checkout
+    checkout(commit)
+    if fixture.get("commit") != commit or fixture.get("image_revision") != commit:
+        raise RehearsalError("fixture does not pin the exact candidate checkout")
+    if fixture.get("version") != version:
+        raise RehearsalError("fixture version does not match --candidate-version")
+
+    controller_port = fixture.get("controller_port")
+    if not isinstance(controller_port, int):
+        raise RehearsalError("fixture has no controller port")
+    parsed = urllib.parse.urlparse(base or "")
+    if parsed.scheme != "http" or parsed.username or parsed.password:
+        raise RehearsalError("controller base must be a plain loopback HTTP URL")
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise RehearsalError("controller base must not carry a path, query or fragment")
+    if not _literal_loopback(parsed.hostname):
+        raise RehearsalError("controller base must be a literal loopback address")
+    try:
+        base_port = parsed.port
+    except ValueError:
+        raise RehearsalError("controller base port is invalid")
+    if base_port != controller_port:
+        raise RehearsalError("controller base port does not match the fixture")
+    if base.rstrip("/") != str(fixture.get("base_url", "")).rstrip("/"):
+        raise RehearsalError("controller base does not match the fixture")
+
+    remote = urllib.parse.urlparse(remote_docker or "")
+    if remote.scheme != "tcp" or not remote.hostname:
+        raise RehearsalError("remote Docker endpoint must be a TCP URL")
+    try:
+        remote_ip = ipaddress.ip_address(remote.hostname)
+    except ValueError:
+        raise RehearsalError("remote Docker endpoint must use a literal address")
+    if remote_ip.is_loopback:
+        raise RehearsalError(
+            "remote Docker endpoint is loopback; the controller would classify it as local")
+    if remote_docker.rstrip("/") != str(fixture.get("remote_docker", "")).rstrip("/"):
+        raise RehearsalError("remote Docker endpoint does not match the fixture")
+    if str(remote_ip) != fixture.get("remote_address"):
+        raise RehearsalError("resolved remote Docker address does not match the fixture")
+    if remote.port != fixture.get("remote_management_port"):
+        raise RehearsalError("remote Docker management port does not match the fixture")
+    if fixture.get("destination_probe_host") != fixture.get("remote_address"):
+        raise RehearsalError("destination probe host is not the dedicated nested engine")
+    if remote_storage_root != fixture.get("remote_storage_root"):
+        raise RehearsalError("remote storage root does not match the fixture")
+    recorded_storage = fixture.get("remote_controller_storage")
+    if not recorded_storage or str(Path(controller_storage).resolve()) != \
+            str(Path(recorded_storage).resolve()):
+        raise RehearsalError("controller-side remote storage does not match the fixture")
+
+    config_path = fixture.get("controller_config")
+    if not config_path:
+        raise RehearsalError("fixture has no controller configuration")
+    _inside(config_path, workspace, "controller configuration")
+    if sha256_file(config_path) != fixture.get("controller_config_sha256"):
+        raise RehearsalError("controller configuration changed after the fixture was created")
+    config_text = Path(config_path).read_text(encoding="utf-8", errors="replace")
+    if 'host: "127.0.0.1"' not in config_text or \
+            ('port: "%d"' % controller_port) not in config_text:
+        raise RehearsalError("controller configuration is not the fixture loopback listener")
+
+    observation = (inspector or inspect_container)(
+        fixture.get("controller_id"), local_docker)
+    state = observation.get("State") or {}
+    if not state.get("Running"):
+        raise RehearsalError("fixture controller container is not running")
+    name = str(observation.get("Name", "")).lstrip("/")
+    if name != fixture.get("controller_name"):
+        raise RehearsalError("fixture controller container name does not match")
+    if observation.get("Image") != fixture.get("controller_image_id"):
+        raise RehearsalError("fixture controller image does not match the built candidate")
+    container_config = observation.get("Config") or {}
+    labels = container_config.get("Labels") or {}
+    if labels.get("org.opencontainers.image.revision") != commit:
+        raise RehearsalError("fixture controller image revision is not the candidate commit")
+    command = container_config.get("Cmd") or []
+    if str(fixture.get("controller_config")) not in [str(item) for item in command]:
+        raise RehearsalError("fixture controller was not started with the recorded config")
+
+    return {
+        "commit": commit,
+        "version": version,
+        "image": fixture.get("controller_image_id"),
+        "image_revision": fixture.get("image_revision"),
+        "image_reference": fixture.get("image_reference"),
+        "source_binary_sha256": fixture.get("source_binary_sha256"),
+        "controller_id": fixture.get("controller_id"),
+        "controller_name": fixture.get("controller_name"),
+        "base_url": fixture.get("base_url"),
+        "remote_docker": fixture.get("remote_docker"),
+        "remote_address": fixture.get("remote_address"),
+        "destination_probe_host": fixture.get("destination_probe_host"),
+        "dind_image": fixture.get("dind_image"),
+        "dind_digest": fixture.get("dind_digest"),
+        "dind_registry_source": fixture.get("dind_registry_source"),
+        "local_docker_server_version": fixture.get("local_docker_server_version"),
+        "remote_docker_server_version": fixture.get("remote_docker_server_version"),
+        "source": "hosted-fixture",
+    }
+
+
+def verify_checkout(commit):
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(ROOT), check=True,
+            capture_output=True, text=True, timeout=30).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=str(ROOT),
+            check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RehearsalError("checkout identity is unreadable: %s" % error)
+    if head != commit:
+        raise RehearsalError("checkout HEAD is not the exact candidate commit")
+    if dirty:
+        raise RehearsalError("tracked files differ from the exact candidate commit")
+    return head
 
 
 def validate_remote_node(host, storage_root, controller_storage_root):
@@ -429,9 +675,14 @@ def remote_container_state(host, container_id, timeout=30):
     url = "%s://%s:%d/containers/%s/json" % (
         scheme, parsed.hostname, port, urllib.parse.quote(container_id, safe=""))
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with NO_REDIRECT_OPENER.open(url, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as error:
+    except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            raise RehearsalError("remote Docker endpoint redirected; refusing to follow")
+        raise RehearsalError("could not inspect imported container on the remote engine: %s"
+                             % error)
+    except (urllib.error.URLError, json.JSONDecodeError) as error:
         raise RehearsalError("could not inspect imported container on the remote engine: %s"
                              % error)
     state = payload.get("State") or {}
@@ -467,6 +718,17 @@ def assert_export_ready(server):
         raise RehearsalError("export requires a stopped server")
     if server.get("detached"):
         raise RehearsalError("export requires a managed server")
+
+
+def assert_running_export_refused(attempt):
+    """Require the exact refusal code *and* message, not either one alone."""
+    try:
+        attempt()
+    except ControllerError as error:
+        if error.code != "failed_precondition" or RUNNING_EXPORT_REFUSAL not in error.message:
+            raise RehearsalError("running export failed for the wrong reason: %s" % error)
+    else:
+        raise RehearsalError("export accepted a running server")
 
 
 def assert_no_docker_overrides(server, label):
@@ -506,8 +768,9 @@ class Controller:
         self.base = base.rstrip("/")
         self.token = ""
 
-    def call(self, service, method, body=None, timeout=120):
+    def call(self, service, method, body=None, timeout=120, retries=3):
         body = body or {}
+        retries = max(1, retries)
         headers = {
             "Content-Type": "application/json",
             "Connect-Protocol-Version": "1",
@@ -521,12 +784,16 @@ class Controller:
             headers=headers,
             method="POST",
         )
-        for attempt in range(3):
+        for attempt in range(retries):
             try:
-                with urllib.request.urlopen(request, timeout=timeout) as response:
+                with NO_REDIRECT_OPENER.open(request, timeout=timeout) as response:
                     payload = response.read()
                 break
             except urllib.error.HTTPError as error:
+                if 300 <= error.code < 400:
+                    raise RehearsalError(
+                        "%s/%s redirected to another target; refusing to follow"
+                        % (service, method))
                 raw = error.read().decode("utf-8", errors="replace")
                 try:
                     parsed = json.loads(raw)
@@ -537,7 +804,7 @@ class Controller:
             except (urllib.error.URLError, TimeoutError) as error:
                 retryable = (method in READ_SAFE_RPCS or body.get("requestId") or
                              (service == "ServerService" and method == "SendCommand"))
-                if attempt == 2 or not retryable:
+                if attempt == retries - 1 or not retryable:
                     raise RehearsalError("%s/%s transport failed: %s"
                                          % (service, method, error))
                 time.sleep(1)
@@ -546,17 +813,31 @@ class Controller:
         return json.loads(payload.decode("utf-8"))
 
     def health(self):
-        with urllib.request.urlopen(self.base + "/healthz", timeout=5) as response:
-            if response.status != 200:
-                raise RehearsalError("controller health is not ok: HTTP %s" % response.status)
-            return json.loads(response.read().decode("utf-8"))
+        try:
+            with NO_REDIRECT_OPENER.open(self.base + "/healthz", timeout=5) as response:
+                if response.status != 200:
+                    raise RehearsalError("controller health is not ok: HTTP %s"
+                                         % response.status)
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if 300 <= error.code < 400:
+                raise RehearsalError("controller health redirected; refusing to follow")
+            raise RehearsalError("controller health is not ok: HTTP %s" % error.code)
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise RehearsalError("controller health transport failed: %s" % error)
 
     def download_to(self, session_id, destination):
         request = urllib.request.Request(
             self.base + "/api/v1/download/" + urllib.parse.quote(session_id),
             headers={"Authorization": "Bearer " + self.token},
         )
-        with urllib.request.urlopen(request, timeout=ARCHIVE_TIMEOUT_SECONDS) as response, \
+        try:
+            response = NO_REDIRECT_OPENER.open(request, timeout=ARCHIVE_TIMEOUT_SECONDS)
+        except urllib.error.HTTPError as error:
+            if 300 <= error.code < 400:
+                raise RehearsalError("archive download redirected; refusing to follow")
+            raise RehearsalError("archive download failed: HTTP %s" % error.code)
+        with response, \
                 Path(destination).open("wb") as target:
             while True:
                 chunk = response.read(1 << 20)
@@ -754,38 +1035,124 @@ def wait_import_container(controller, server_id, seconds, label):
     return wait_for(label, seconds, current)
 
 
-def reset_servers(controller, server_ids):
-    for server_id in server_ids:
-        try:
-            controller.call("ServerService", "StopServer", {
-                "id": server_id, "requestId": "archive-rehearsal-cleanup-stop-" + server_id[:8],
-            }, timeout=180)
-        except (ControllerError, RehearsalError):
-            pass
+def cleanup_owned_servers(controller, server_ids, budget_seconds=CLEANUP_BUDGET_SECONDS):
+    """Delete only servers this run created, bounded in time, and verify they are gone."""
+    deadline = time.monotonic() + max(1, budget_seconds)
+    failures = []
+    actions = []
+    cleaned = []
+    for server_id in dict.fromkeys(server_ids):
+        if not isinstance(server_id, str) or not server_id:
+            failures.append({"server_id": repr(server_id), "reason": "invalid owned server id"})
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            failures.append({"server_id": server_id,
+                             "reason": "cleanup budget exhausted before delete"})
+            continue
+        per_call = max(5, min(60, remaining / 3))
+        if server_id not in cleaned:
+            try:
+                controller.call("ServerService", "StopServer", {
+                    "id": server_id,
+                    "requestId": "archive-rehearsal-cleanup-stop-" + server_id[:8],
+                }, timeout=per_call, retries=1)
+                actions.append({"server_id": server_id, "action": "stop", "result": "ok"})
+            except ControllerError as error:
+                actions.append({"server_id": server_id, "action": "stop",
+                                "result": error.code or "error", "message": error.message})
+            except RehearsalError as error:
+                actions.append({"server_id": server_id, "action": "stop",
+                                "result": "transport_error", "message": str(error)})
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            failures.append({"server_id": server_id,
+                             "reason": "cleanup budget exhausted before delete"})
+            continue
+        per_call = max(5, min(60, remaining / 3))
+        delete_error = None
         try:
             controller.call("ServerService", "DeleteServer", {
-                "id": server_id, "requestId": "archive-rehearsal-cleanup-delete-" + server_id[:8],
-            }, timeout=300)
-        except (ControllerError, RehearsalError):
-            pass
+                "id": server_id,
+                "requestId": "archive-rehearsal-cleanup-delete-" + server_id[:8],
+            }, timeout=per_call, retries=1)
+            actions.append({"server_id": server_id, "action": "delete", "result": "ok"})
+        except ControllerError as error:
+            delete_error = error
+            actions.append({"server_id": server_id, "action": "delete",
+                            "result": error.code or "error", "message": error.message})
+        except RehearsalError as error:
+            delete_error = error
+            actions.append({"server_id": server_id, "action": "delete",
+                            "result": "transport_error", "message": str(error)})
+
+        remaining = deadline - time.monotonic()
+        per_call = max(5, min(30, remaining / 3)) if remaining > 0 else 5
+        try:
+            controller.call("ServerService", "GetServer", {"id": server_id},
+                            timeout=per_call, retries=1)
+        except ControllerError as error:
+            if error.code == "not_found":
+                cleaned.append(server_id)
+                continue
+            failures.append({"server_id": server_id,
+                             "reason": "could not verify deletion: %s" % error})
+        except RehearsalError as error:
+            failures.append({"server_id": server_id,
+                             "reason": "could not verify deletion: %s" % error})
+        else:
+            reason = "owned server still exists after deletion"
+            if delete_error is not None:
+                reason = "%s: %s" % (reason, delete_error)
+            failures.append({"server_id": server_id, "reason": reason})
+    return {
+        "pass": not failures,
+        "budget_seconds": budget_seconds,
+        "requested": len(dict.fromkeys(server_ids)),
+        "cleaned": cleaned,
+        "actions": actions,
+        "failures": failures,
+    }
 
 
 def execute(args):
     workspace = Path(args.workspace).resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
     evidence = workspace / "evidence"
-    evidence.mkdir(parents=True, exist_ok=True)
     data_dir = workspace / "data"
     controller_storage = Path(args.remote_controller_storage).resolve()
+
+    # Bind the run before any controller write: hosted caller, fresh runner temp
+    # directory, exact checkout, one controller container and one remote engine.
+    runner_temp = require_hosted_environment(dict(os.environ))
+    validate_hosted_workspace(workspace, runner_temp)
     validate_workspace(workspace, data_dir, controller_storage)
     validate_remote_node(args.remote_docker, args.remote_storage_root,
                          str(controller_storage))
+    fixture = verify_fixture(
+        args.fixture, workspace, runner_temp,
+        args.candidate_commit, args.candidate_version, args.base,
+        args.remote_docker, args.remote_storage_root, controller_storage,
+        args.local_docker)
+    if not args.destination_readiness_host:
+        args.destination_readiness_host = fixture["destination_probe_host"]
+    if args.destination_readiness_host != fixture["destination_probe_host"]:
+        raise RehearsalError("destination readiness host is not the fixture nested engine")
+    if not _host_is_loopback(args.readiness_host):
+        raise RehearsalError("source readiness host must be loopback on the local engine")
+
+    evidence.mkdir(parents=True, exist_ok=True)
     controller_storage.mkdir(parents=True, exist_ok=True)
 
     report = {
         "schema": "server-archive-rehearsal-ci-v1",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "workspace": str(workspace),
+        "scope": {
+            "tickets": ["OSS-426", "OSS-427"],
+            "surface": "backend RPC with an empty frontend embed",
+            "browser_acceptance": "OSS-428 belongs to #686 and is not exercised here",
+        },
         "candidate": {
             "commit": args.candidate_commit,
             "version": args.candidate_version,
@@ -794,6 +1161,8 @@ def execute(args):
             "base": args.base,
             "minecraft_version": args.mc_version,
             "remote_docker": args.remote_docker,
+            "remote_address": fixture["remote_address"],
+            "destination_probe_host": args.destination_readiness_host,
             "remote_storage_root": args.remote_storage_root,
             "remote_controller_storage": str(controller_storage),
         },
@@ -805,13 +1174,15 @@ def execute(args):
         },
         "formats": {},
         "checks": {},
+        "cleanup": {"pass": False, "requested": 0, "failures": []},
         "pass": False,
         "failed_checks": [],
         "limits": [
-            "Disposable controller and Docker-in-Docker node, not a production remote host or node VM.",
+            "Disposable controller and Docker-in-Docker node on an owned bridge, not a production remote host or node VM.",
             "One managed Vanilla Minecraft version and a synthetic fixture; no mods, modules, proxy, OIDC or operator ingress.",
             "The controller and both engines run only under the hosted job's disposable workspace; no live host, world, registry tag or release is touched.",
-            "Go archive tests use fake Docker; this hosted run is the real-engine acceptance evidence, not a release publication gate.",
+            "This backend RPC rehearsal uses an empty frontend embed and does not exercise the OSS-428 browser workflow, which belongs to #686.",
+            "Offline unit tests validate archive parsing, fixture bindings and refusal paths only; only the hosted JSON report records an actual round trip.",
         ],
     }
     checks = report["checks"]
@@ -821,10 +1192,9 @@ def execute(args):
 
     controller = Controller(args.base)
     created_servers = []
+    failure = None
     try:
-        provenance = verify_provenance(args.candidate_commit, args.candidate_version,
-                                       args.provenance)
-        report["candidate"]["provenance"] = provenance
+        report["candidate"]["provenance"] = fixture
         ok("candidate_provenance_matches_head")
 
         wait_for("controller health", args.health_timeout, controller.health)
@@ -915,19 +1285,15 @@ def execute(args):
                 args.mc_version, args.player_name, args.readiness_timeout))
         ok("source_minecraft_ready")
 
-        # A running server must be refused before any bytes are read.
-        try:
-            controller.call("ServerService", "ExportServerArchive", {
+        # A running server must be refused before any bytes are read. Requiring
+        # both the code and the specific message rejects a generic precondition.
+        assert_running_export_refused(lambda: controller.call(
+            "ServerService", "ExportServerArchive", {
                 "serverId": source_id,
                 "format": "SERVER_ARCHIVE_FORMAT_ZIP",
                 "consistency": "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
-            }, timeout=ARCHIVE_TIMEOUT_SECONDS)
-        except ControllerError as error:
-            if error.code != "failed_precondition" and "stop the managed server" not in error.message:
-                raise RehearsalError("running export failed for the wrong reason: %s" % error)
-            ok("export_refused_while_running")
-        else:
-            raise RehearsalError("export accepted a running server")
+            }, timeout=ARCHIVE_TIMEOUT_SECONDS))
+        ok("export_refused_while_running")
 
         command(controller, source_id, "gamerule keepInventory true")
         command(controller, source_id, "save-all flush")
@@ -1130,6 +1496,7 @@ def execute(args):
                 "engine_state_before_start": engine_state,
                 "data_path": imported.get("dataPath"),
                 "destination": str(destination),
+                "readiness_host": args.destination_readiness_host,
                 "verified_files": len(verified_files),
                 "preview": {
                     "format": preview.get("format"),
@@ -1172,8 +1539,9 @@ def execute(args):
             readiness = wait_for(
                 "%s Minecraft Play state" % archive_format, 300,
                 lambda: run_readiness_probe(
-                    args.readiness_script, args.readiness_host, record["port"],
-                    args.mc_version, args.player_name, args.readiness_timeout))
+                    args.readiness_script, args.destination_readiness_host,
+                    record["port"], args.mc_version, args.player_name,
+                    args.readiness_timeout))
             readiness["console_roster"] = roster.strip()[:200]
             readiness["engine_state"] = engine_state
             record["readiness"] = readiness
@@ -1183,26 +1551,41 @@ def execute(args):
         ok("both_imports_ready")
 
         report["pass"] = all(checks.values())
-        report["failed_checks"] = [name for name, passed in checks.items() if not passed]
     except Exception as error:  # noqa: BLE001 - keep partial evidence on failure
+        failure = error
         report["pass"] = False
         report["error"] = "%s: %s" % (type(error).__name__, error)
-        report["failed_checks"] = [name for name, passed in checks.items() if not passed]
-        error.rehearsal_report = report
-        raise
     finally:
-        reset_servers(controller, created_servers)
+        cleanup = cleanup_owned_servers(controller, created_servers)
+        report["cleanup"] = cleanup
+        checks["fixture_cleanup"] = cleanup["pass"]
+        if not cleanup["pass"]:
+            report["pass"] = False
+            detail = "; ".join(item["reason"] for item in cleanup["failures"][:5])
+            cleanup_error = RehearsalError(
+                "owned fixture cleanup failed: %s" % (detail or "unknown reason"))
+            if failure is None:
+                failure = cleanup_error
+                report["error"] = "%s: %s" % (type(failure).__name__, failure)
+            else:
+                report["cleanup_error"] = "%s: %s" % (
+                    type(cleanup_error).__name__, cleanup_error)
+        report["failed_checks"] = [name for name, passed in checks.items() if not passed]
 
+    if failure is not None:
+        failure.rehearsal_report = report
+        raise failure
     return report
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", required=True, help="caller-owned disposable directory")
-    parser.add_argument("--base", required=True, help="running controller base URL")
+    parser.add_argument("--fixture", required=True,
+                        help="exclusive fixture provenance written by the hosted job")
+    parser.add_argument("--base", required=True, help="fixture controller loopback base URL")
     parser.add_argument("--candidate-version", required=True)
     parser.add_argument("--candidate-commit", required=True)
-    parser.add_argument("--provenance", help="JSON record written by the hosted-job shell")
     parser.add_argument("--local-docker", default="unix:///var/run/docker.sock")
     parser.add_argument("--remote-docker", required=True)
     parser.add_argument("--remote-storage-root", required=True)
@@ -1211,6 +1594,8 @@ def main(argv=None):
     parser.add_argument("--admin-username", default="archive-rehearsal")
     parser.add_argument("--player-name", default="ArchiveQual")
     parser.add_argument("--readiness-host", default="127.0.0.1")
+    parser.add_argument("--destination-readiness-host",
+                        help="dedicated host for game ports on the nested destination engine")
     parser.add_argument("--readiness-script",
                         default=str(ROOT / "scripts" / "qualify-archive-player.mjs"))
     parser.add_argument("--readiness-timeout", type=int, default=120)
@@ -1218,7 +1603,6 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     workspace = Path(args.workspace).resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
     try:
         report = execute(args)
     except Exception as error:  # noqa: BLE001 - fail closed AND leave evidence
@@ -1226,6 +1610,11 @@ def main(argv=None):
             "schema": "server-archive-rehearsal-ci-v1",
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "workspace": str(workspace),
+            "scope": {
+                "tickets": ["OSS-426", "OSS-427"],
+                "surface": "backend RPC with an empty frontend embed",
+                "browser_acceptance": "OSS-428 belongs to #686 and is not exercised here",
+            },
             "candidate": {
                 "commit": args.candidate_commit,
                 "version": args.candidate_version,
@@ -1233,6 +1622,12 @@ def main(argv=None):
         }
         report["pass"] = False
         report["error"] = "%s: %s" % (type(error).__name__, error)
+    if not workspace.is_dir():
+        print(json.dumps({
+            "pass": False,
+            "error": report.get("error") or "workspace does not exist",
+        }, indent=2), file=sys.stderr)
+        return 1
     (workspace / REPORT_NAME).write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if report.get("pass"):

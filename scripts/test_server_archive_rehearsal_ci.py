@@ -8,6 +8,7 @@ rehearsal uses. Docker-dependent orchestration remains a CI-only check.
 """
 import json
 import base64
+import os
 import tarfile
 import tempfile
 import threading
@@ -366,6 +367,284 @@ class ControllerTransportTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+
+def _write_private_json(path, record):
+    path = Path(path)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, sort_keys=True)
+    return path
+
+
+def build_hosted_fixture(runner_temp, commit="a" * 40, version="2.0.1"):
+    workspace = Path(runner_temp) / "server-archive-rehearsal"
+    workspace.mkdir()
+    config = workspace / "config.yaml"
+    config.write_text(
+        'server:\n  host: "127.0.0.1"\n  port: "18080"\n', encoding="utf-8")
+    run_path = _write_private_json(workspace / "run.json", {
+        "schema": rehearsal.RUN_SCHEMA,
+        "run_id": "1234-1",
+    })
+    remote_storage = (workspace / "remote-storage").resolve()
+    info = workspace.stat()
+    fixture = {
+        "schema": rehearsal.FIXTURE_SCHEMA,
+        "workspace": str(workspace.resolve()),
+        "workspace_device": info.st_dev,
+        "workspace_inode": info.st_ino,
+        "runner_temp": str(Path(runner_temp).resolve()),
+        "run_file": str(run_path.resolve()),
+        "run_sha256": rehearsal.sha256_file(run_path),
+        "run_id": "1234-1",
+        "commit": commit,
+        "version": version,
+        "image": "sha256:image",
+        "image_reference": "server-archive-rehearsal:" + commit,
+        "image_revision": commit,
+        "source_binary_sha256": "b" * 64,
+        "controller_name": "server-archive-controller-1",
+        "controller_id": "controller-id",
+        "controller_port": 18080,
+        "controller_image_id": "sha256:image",
+        "controller_config": str(config.resolve()),
+        "controller_config_sha256": rehearsal.sha256_file(config),
+        "base_url": "http://127.0.0.1:18080",
+        "remote_engine_name": "server-archive-node-1",
+        "remote_engine_id": "remote-id",
+        "remote_docker": "tcp://192.0.2.10:2375",
+        "remote_address": "192.0.2.10",
+        "remote_management_port": 2375,
+        "destination_probe_host": "192.0.2.10",
+        "remote_storage_root": "/storage",
+        "remote_controller_storage": str(remote_storage),
+        "dind_image": "docker:dind@sha256:" + "c" * 64,
+        "dind_digest": "sha256:" + "c" * 64,
+        "dind_registry_source": "https://registry-1.docker.io/v2/library/docker/manifests/dind",
+        "local_docker_server_version": "27.0.0",
+        "remote_docker_server_version": "27.0.0",
+    }
+    fixture_path = _write_private_json(workspace / "fixture.json", fixture)
+    return fixture_path, fixture, workspace
+
+
+def fixture_inspector(fixture, commit):
+    def inspect(container_id, local_docker):
+        return {
+            "Name": "/" + fixture["controller_name"],
+            "Image": fixture["controller_image_id"],
+            "State": {"Running": True},
+            "Config": {
+                "Labels": {"org.opencontainers.image.revision": commit},
+                "Cmd": ["./carbon-panel", "-config", fixture["controller_config"]],
+            },
+        }
+    return inspect
+
+
+class RunningExportRefusalTests(unittest.TestCase):
+    def refusal(self, code, message):
+        def attempt():
+            raise rehearsal.ControllerError(
+                "ServerService", "ExportServerArchive", 400, code, message)
+        return attempt
+
+    def test_requires_both_code_and_specific_message(self):
+        rehearsal.assert_running_export_refused(self.refusal(
+            "failed_precondition", rehearsal.RUNNING_EXPORT_REFUSAL))
+        for code, message in (
+                ("invalid_argument", rehearsal.RUNNING_EXPORT_REFUSAL),
+                ("failed_precondition", "server is busy")):
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "wrong reason"):
+                rehearsal.assert_running_export_refused(self.refusal(code, message))
+
+    def test_acceptance_is_refused(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "accepted"):
+            rehearsal.assert_running_export_refused(lambda: None)
+
+
+class HostedFixtureBindingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.runner_temp = Path(self.temp.name)
+        self.commit = "a" * 40
+        self.version = "2.0.1"
+        self.fixture_path, self.fixture, self.workspace = build_hosted_fixture(
+            self.runner_temp, self.commit, self.version)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def verify(self, **overrides):
+        base = overrides.get("base", self.fixture["base_url"])
+        remote = overrides.get("remote", self.fixture["remote_docker"])
+        fixture_path = overrides.get("fixture_path", self.fixture_path)
+        commit = overrides.get("commit", self.commit)
+        inspector = overrides.get("inspector", fixture_inspector(self.fixture, self.commit))
+        return rehearsal.verify_fixture(
+            fixture_path, self.workspace, self.runner_temp, commit, self.version,
+            base, remote, self.fixture["remote_storage_root"],
+            self.fixture["remote_controller_storage"],
+            "unix:///var/run/docker.sock",
+            inspector=inspector, checkout=lambda wanted: wanted)
+
+    def test_fixture_binds_checkout_controller_and_remote_endpoint(self):
+        record = self.verify()
+        self.assertEqual(record["source"], "hosted-fixture")
+        self.assertEqual(record["controller_id"], "controller-id")
+        self.assertEqual(record["remote_address"], "192.0.2.10")
+        self.assertEqual(record["destination_probe_host"], "192.0.2.10")
+
+    def test_missing_fixture_is_refused(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "missing"):
+            self.verify(fixture_path=self.workspace / "absent.json")
+
+    def test_arbitrary_base_is_refused(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "literal loopback"):
+            self.verify(base="http://192.0.2.10:18080")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "port"):
+            self.verify(base="http://127.0.0.1:18081")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "path"):
+            self.verify(base="http://127.0.0.1:18080/other")
+
+    def test_loopback_remote_endpoint_is_refused(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "loopback"):
+            self.verify(remote="tcp://127.0.0.1:2375")
+
+    def test_wrong_commit_and_storage_are_refused(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "candidate checkout"):
+            self.verify(commit="b" * 40)
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "remote storage root"):
+            rehearsal.verify_fixture(
+                self.fixture_path, self.workspace, self.runner_temp, self.commit,
+                self.version, self.fixture["base_url"], self.fixture["remote_docker"],
+                "/other", self.fixture["remote_controller_storage"],
+                "unix:///var/run/docker.sock",
+                inspector=fixture_inspector(self.fixture, self.commit),
+                checkout=lambda wanted: wanted)
+
+    def test_controller_identity_is_required(self):
+        def wrong_revision(container_id, local_docker):
+            payload = fixture_inspector(self.fixture, "b" * 40)(
+                container_id, local_docker)
+            return payload
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "revision"):
+            self.verify(inspector=wrong_revision)
+
+    def test_changed_run_record_is_refused(self):
+        (self.workspace / "run.json").write_text(json.dumps({
+            "schema": rehearsal.RUN_SCHEMA, "run_id": "changed"}), encoding="utf-8")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "run record changed"):
+            self.verify()
+
+    def test_hosted_environment_and_workspace_are_required(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "GitHub Actions"):
+            rehearsal.require_hosted_environment({})
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "github-hosted"):
+            rehearsal.require_hosted_environment({
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_ENVIRONMENT": "self-hosted",
+                "RUNNER_TEMP": str(self.runner_temp),
+            })
+        nested = self.runner_temp / "fresh"
+        nested.mkdir()
+        self.assertEqual(rehearsal.validate_hosted_workspace(nested, self.runner_temp),
+                         nested.resolve())
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "subdirectory"):
+            rehearsal.validate_hosted_workspace(self.runner_temp, self.runner_temp)
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "inside RUNNER_TEMP"):
+                rehearsal.validate_hosted_workspace(Path(elsewhere), self.runner_temp)
+
+
+class CleanupTests(unittest.TestCase):
+    class FakeController:
+        def __init__(self, surviving=()):
+            self.surviving = set(surviving)
+            self.calls = []
+
+        def call(self, service, method, body=None, timeout=120, retries=3):
+            self.calls.append((method, body))
+            if method == "GetServer":
+                if body["id"] in self.surviving:
+                    return {"server": {"id": body["id"]}}
+                raise rehearsal.ControllerError(
+                    service, method, 404, "not_found", "server not found")
+            if method == "DeleteServer" and body["id"] in self.surviving:
+                raise rehearsal.ControllerError(
+                    service, method, 500, "internal", "delete failed")
+            return {}
+
+    def test_owned_servers_are_cleaned_and_deduplicated(self):
+        controller = self.FakeController()
+        result = rehearsal.cleanup_owned_servers(controller, ["s1", "s2", "s1"])
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["requested"], 2)
+        self.assertEqual(result["cleaned"], ["s1", "s2"])
+        self.assertEqual(result["failures"], [])
+
+    def test_surviving_owned_server_fails_cleanup(self):
+        controller = self.FakeController(surviving={"s1"})
+        result = rehearsal.cleanup_owned_servers(controller, ["s1"])
+        self.assertFalse(result["pass"])
+        self.assertIn("still exists", result["failures"][0]["reason"])
+
+    def test_invalid_owned_id_is_reported(self):
+        result = rehearsal.cleanup_owned_servers(self.FakeController(), [""])
+        self.assertFalse(result["pass"])
+        self.assertIn("invalid", result["failures"][0]["reason"])
+
+
+class RedirectTests(unittest.TestCase):
+    def test_controller_refuses_redirects(self):
+        hits = []
+
+        class Target(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                hits.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+        target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+        target_url = "http://127.0.0.1:%d/elsewhere" % target.server_port
+
+        class Redirect(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self.send_response(302)
+                self.send_header("Location", target_url)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+        threads = [
+            threading.Thread(target=server.serve_forever, daemon=True)
+            for server in (target, redirect)
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            controller = rehearsal.Controller(
+                "http://127.0.0.1:%d" % redirect.server_port)
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "redirect"):
+                controller.call("FakeService", "Ping")
+            self.assertEqual(hits, [])
+        finally:
+            for server in (target, redirect):
+                server.shutdown()
+                server.server_close()
+            for thread in threads:
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":
