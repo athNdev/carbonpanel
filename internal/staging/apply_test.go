@@ -1098,3 +1098,31 @@ func TestPublicationRefusesTamperedStagedBytesBeforeLiveWrite(t *testing.T) {
 	require.NoError(t, readErr)
 	require.Equal(t, "installed", string(got), "the live writer must not commit tampered staged bytes")
 }
+
+func TestReviewedRowWithoutCarriedDigestFailsClosedAtPublication(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "no-carried-digest", Name: "no-carried-digest", DataPath: data, Status: storage.StatusDeepSleep}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageReviewedModRow(t, store, data, batchID, server, "candidate")
+	// A mutable sidecar or matching payload bytes cannot substitute for the
+	// digest carried from the verified admission decision.
+	require.NoError(t, store.DB().Model(&storage.StagedContentChange{}).
+		Where("server_id = ?", server.ID).Update("approved_sha512", "").Error)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	err = ApplyBatch(ctx, store, nil, server, *batch, nil)
+	require.ErrorIs(t, err, storage.ErrStagedModApprovalMissing)
+
+	got, readErr := os.ReadFile(live)
+	require.NoError(t, readErr)
+	require.Equal(t, "installed", string(got), "a missing carried digest must fail closed without a live write")
+}

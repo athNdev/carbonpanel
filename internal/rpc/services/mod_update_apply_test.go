@@ -962,7 +962,9 @@ func TestScheduledProviderFailuresRetryEvenWithSomeStagedUpdates(t *testing.T) {
 			})
 			svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
 			staged, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
-			require.ErrorContains(t, err, "lookup unavailable")
+			require.ErrorContains(t, err, "Provider lookup failed: Try again later.")
+			require.NotContains(t, err.Error(), "provider project lookup unavailable",
+				"provider diagnostics stay server-side and out of the refusal reason")
 			require.Equal(t, tc.want, staged)
 		})
 	}

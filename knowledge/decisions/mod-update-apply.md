@@ -36,39 +36,13 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
 - Drift, provider, download and checksum mismatches are per-item refusals;
   other selected updates still stage.
 - Publishing, backup, rollback, apply windows and per-server serialization are
-  the existing staged-batch guarantees.
+  the existing staged-batch guarantees. Durable approval, the data-write lease
+  and window checks are in
+  [Reviewed mod update publication](mod-update-publication.md).
 - The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
-- Admission records the operator-approved provider release identity (provider,
-  project, version and candidate filename) and its SHA-512 in the staged row
-  only after the staged bytes are verified against it. Publish requires that
-  durable identity and digest on the publication stream and checks the
-  reviewed live SHA-512 on the undo stream; drift preserves staged bytes. A row
-  from before durable approval or release identity is refused with re-review
-  and re-stage guidance rather than trusting the mutable sidecar. Unreviewed
-  uploads keep their existing path. Staging uses the effective Docker
-  `ServerConfig` type/version, not the stale `Server` projection; a runtime
-  rollback is refused while a reviewed candidate is staged.
-- Staged publication holds the per-server data-write lease exclusively from
-  before the undo snapshot through rollback. Direct panel writes take the
-  shared lease and are refused with a retryable error while publication owns
-  the path; see [Data-write gate](data-write-gate.md).
-- Reviewed content checks the complete window before work, at batch
-  preparation, and at row insertion. Config targeting an open batch with
-  content or an independent cron row must match its complete window. A
-  config-only retarget resets the idle clock. Admission snapshots live config
-  in the write transaction and excludes pending cron and content symmetrically.
-- Config and content cannot join while publication or discard owns the
-  journal. The publisher rechecks batch changes after acquiring the journal.
-- Due publication of legacy mixed data excludes cron config from base checks,
-  rollback reconciliation and publication. The remaining cron row and its
-  trigger stay intact. Discard shares the operation lock, keeps its typed
-  Connect refusals and records its own operation name.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
 - Due slots and execution claims are in
-  [Mod update scheduling and legacy rows](mod-update-scheduling.md). Mod-update
-  dispatch requires the observed deadline, schedule, status and policy
-  revision. The scheduler installs the planner first and refuses invalid policy
-  windows.
+  [Mod update scheduling and legacy rows](mod-update-scheduling.md).
