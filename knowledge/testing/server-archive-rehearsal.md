@@ -33,10 +33,9 @@ identity, bridge, exact storage binds and the controller's `-config` directory.
 It creates a managed Vanilla source, verifies the game and panel share the world
 path and confirms the running export refusal. Then it saves, exports both
 formats and checks every source and destination byte. Minecraft-owned world
-files are hashed through the same server-scoped `FileService` mounts it proved:
-bounded `ListFiles` inventory, `GetFile` below 8 MiB and authenticated streamed
-`InitFileDownload` above it. The pinned protocol client verifies both imports
-can be joined.
+files are hashed through server-scoped `FileService` reads, streaming above the
+editor cap. Mounted metadata independently checks the bounded inventory and
+rejects links. The pinned protocol client verifies both imports can be joined.
 
 Every check fails closed. The report records the RPC scope, candidate commit,
 pinned digest, archive hashes, capacities, destination verification and

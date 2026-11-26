@@ -306,6 +306,37 @@ class DestinationAndLifecycleTests(unittest.TestCase):
                 {"name": "b.txt", "path": "other/b.txt", "size": 1},
             ])
 
+    def test_inventory_enforces_entry_and_byte_budgets_before_reads(self):
+        entries = [
+            {"name": name, "path": name, "isDir": True}
+            for name in ("one", "two", "three")
+        ]
+        with mock.patch.object(rehearsal, "MAX_TREE_ENTRIES", 2):
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "entry count"):
+                rehearsal.collect_file_tree(lambda _: entries)
+        files = [{"name": name, "path": name, "size": 3} for name in ("a", "b")]
+        with mock.patch.object(rehearsal, "MAX_ARCHIVE_BYTES", 5):
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "before file reads"):
+                rehearsal.collect_file_tree(lambda _: files)
+
+    def test_mount_metadata_detects_entries_missing_from_file_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "visible.txt").write_bytes(b"abc")
+            observed = file_inventory({"visible.txt": b"abc"})
+            rehearsal.verify_mounted_inventory(root, observed)
+            (root / "omitted.txt").write_bytes(b"")
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "inventory disagree"):
+                rehearsal.verify_mounted_inventory(root, observed)
+
+    @unittest.skipUnless(os.name == "posix", "Linux fixture supports symlink metadata")
+    def test_mount_metadata_rejects_link_hidden_by_file_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "broken").symlink_to("absent")
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "link or non-regular"):
+                rehearsal.verify_mounted_inventory(root, {})
+
     def test_lifecycle_gates_fail_closed(self):
         stopped = {"status": "SERVER_STATUS_STOPPED", "containerId": "container"}
         rehearsal.assert_not_started(stopped, "import")

@@ -83,6 +83,7 @@ MAX_ARCHIVE_BYTES = 32 << 30
 # InitFileDownload session instead of raising that cap.
 SMALL_FILE_BYTES = 8 << 20
 MAX_TREE_DEPTH = 64
+MAX_TREE_ENTRIES = 2 * MAX_ARCHIVE_FILES
 DOWNLOAD_CHUNK_BYTES = 1 << 20
 
 
@@ -381,17 +382,17 @@ def collect_file_tree(fetch_dir, max_files=MAX_ARCHIVE_FILES,
         raise RehearsalError("file tree bounds are invalid")
     files = {}
     seen = set()
+    total_bytes = 0
     pending = [("", ".", 0)]
     while pending:
         parent, request_path, depth = pending.pop()
-        entries = fetch_dir(request_path)
-        if not isinstance(entries, list):
-            raise RehearsalError("FileService returned a non-list directory page")
-        for raw in entries:
+        for raw in fetch_dir(request_path):
             info = normalize_file_info(raw, parent)
             rel = info["path"]
             if rel in seen:
                 raise RehearsalError("FileService returned a duplicate path: %s" % rel)
+            if len(seen) >= MAX_TREE_ENTRIES:
+                raise RehearsalError("storage tree exceeds the bounded entry count")
             seen.add(rel)
             if info["is_dir"]:
                 if skip_dir is not None and skip_dir(rel):
@@ -404,8 +405,35 @@ def collect_file_tree(fetch_dir, max_files=MAX_ARCHIVE_FILES,
             if len(files) >= max_files:
                 raise RehearsalError(
                     "source tree exceeds the bounded file count at %s" % rel)
+            total_bytes += info["size"]
+            if total_bytes > MAX_ARCHIVE_BYTES:
+                raise RehearsalError("storage tree exceeds the byte budget before file reads")
             files[rel] = info
     return files
+
+
+def verify_mounted_inventory(root, observed, skip_dir=None):
+    """Check mount entry types independently while leaving reads to FileService."""
+    root = Path(root)
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        raise RehearsalError("fixture storage root is not a directory: %s" % root)
+
+    def directory(relative):
+        with os.scandir(root / relative) as entries:
+            for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                is_dir = stat.S_ISDIR(info.st_mode)
+                rel = posixpath.join(relative, entry.name) if relative != "." else entry.name
+                if not is_dir and not stat.S_ISREG(info.st_mode):
+                    raise RehearsalError("fixture storage contains a link or non-regular entry: %s" % rel)
+                yield {"path": rel, "name": entry.name, "isDir": is_dir,
+                       "size": 0 if is_dir else info.st_size}
+
+    mounted = collect_file_tree(directory, skip_dir=skip_dir)
+    mounted_sizes = {path: entry["size"] for path, entry in mounted.items()}
+    observed_sizes = {path: entry["size"] for path, entry in observed.items()}
+    if mounted_sizes != observed_sizes:
+        raise RehearsalError("mounted storage and FileService inventory disagree")
 
 
 def archive_excluded(rel):
@@ -986,8 +1014,8 @@ class Controller:
         if not portable_relative_path(path):
             raise RehearsalError("refusing a non-portable FileService path: %r" % path)
         expected_size = as_int(expected_size, "expected size for %s" % path)
-        if expected_size < 0:
-            raise RehearsalError("refusing a negative expected size for %s" % path)
+        if not 0 <= expected_size <= MAX_ARCHIVE_BYTES:
+            raise RehearsalError("expected size for %s is outside the file byte budget" % path)
         if expected_size > SMALL_FILE_BYTES:
             return self._streamed_file_digest(server_id, path, expected_size)
         response = self.call("FileService", "GetFile", {
@@ -1571,6 +1599,7 @@ def execute(args):
         # FileService, never the controller-local world path.
         source_inventory = controller.list_tree(source_id,
                                                 skip_dir=archive_excluded)
+        verify_mounted_inventory(source_dir, source_inventory, skip_dir=archive_excluded)
         source_hashes = tree_file_hashes(controller, source_id, source_inventory)
         fixture_record = source_hashes.get(FIXTURE_PATH)
         if not fixture_record or fixture_record["sha256"] != sha256_bytes(FIXTURE_BYTES):
@@ -1731,9 +1760,11 @@ def execute(args):
             if not destination.is_dir():
                 raise RehearsalError("%s destination directory is missing: %s"
                                      % (archive_format, destination))
+            destination_inventory = controller.list_tree(imported_id)
+            verify_mounted_inventory(destination, destination_inventory)
             verified_files = verify_tree_files(
                 controller, imported_id, verified["files"],
-                "%s destination" % archive_format)
+                "%s destination" % archive_format, inventory=destination_inventory)
             if len(verified_files) != verified["file_count"]:
                 raise RehearsalError("%s destination file count differs" % archive_format)
             engine_state = remote_container_state(
