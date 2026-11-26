@@ -2510,7 +2510,10 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		s.log.Error("Failed to apply staged content on start for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
 	}
-	contentReady := commit.HasContent()
+	// Applied content whose publication an earlier lifecycle already accepted
+	// owes cleanup only. It must not trigger a new recreation; the normal start
+	// below still starts the existing container when the user asked for one.
+	contentReady := commit.NeedsRuntimePublication()
 	publication := staging.RestartPublication{
 		Commit: commit,
 	}

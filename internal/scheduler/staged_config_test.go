@@ -334,12 +334,9 @@ func TestConsecutiveWakePreparationRetainsAppliedSnapshotWithoutStatus(t *testin
 			require.Equal(t, "replacement", server.ContainerID)
 			require.NoError(t, store.UpdateServerStatus(ctx, server.ID, storage.StatusDeepSleep))
 			server.Status = storage.StatusDeepSleep
-			completion := func(startAttempted bool, wakeErr error) error {
-				if startAttempted {
-					first.RuntimeAttempted = true
-				}
-				return first.Resolve(ctx, store, wakeErr)
-			}
+			// Use the production completion callback rather than assigning
+			// RuntimeAttempted directly in the test.
+			completion := stagedWakeCompletion(ctx, store, first)
 			require.ErrorContains(t, completion(true, errors.New("failed to update server status to running")), "retained")
 
 			applied, err := store.GetStagedConfigChange(ctx, cfg.ID)

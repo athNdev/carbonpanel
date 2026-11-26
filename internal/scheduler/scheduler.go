@@ -1274,7 +1274,11 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	if err != nil {
 		return true, fmt.Errorf("failed to check staged configuration recovery: %w", err)
 	}
-	if len(appliedRecords) == 0 && !pending && !publication.Commit.HasContent() {
+	// An acknowledged publication only owes cleanup. It must not recreate the
+	// container again; the caller's normal start/wake proceeds on the current
+	// replacement and the deferred Resolve finishes the batch.
+	needsPublication := publication.Commit.NeedsRuntimePublication()
+	if len(appliedRecords) == 0 && !pending && !needsPublication {
 		return false, nil
 	}
 
@@ -1326,6 +1330,19 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	return true, nil
 }
 
+// stagedWakeCompletion is the real DeepSleep wake completion callback. A
+// successful recreate already mutated the runtime, so a later start failure
+// must not erase that fact or the stopped replacement can outlive a config
+// rollback.
+func stagedWakeCompletion(ctx context.Context, store *storage.Store, p *staging.RestartPublication) docker.WakeCompletion {
+	return func(startAttempted bool, wakeErr error) error {
+		if startAttempted {
+			p.RuntimeAttempted = true
+		}
+		return p.Resolve(ctx, store, wakeErr)
+	}
+}
+
 // PrepareDeepSleepWake applies restart-only staged changes and replaces the
 // stopped container before DeepSleepManager starts it. The manager records
 // LastStarted only after Docker reports the replacement running.
@@ -1342,15 +1359,7 @@ func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Se
 	}
 	var complete docker.WakeCompletion
 	handled, err := prepareStagedLifecycle(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, func(p *staging.RestartPublication) {
-		complete = func(startAttempted bool, wakeErr error) error {
-			// A successful recreate already mutated the runtime. A later start
-			// failure must not erase that fact or the stopped replacement can
-			// outlive a config rollback.
-			if startAttempted {
-				p.RuntimeAttempted = true
-			}
-			return p.Resolve(ctx, s.store, wakeErr)
-		}
+		complete = stagedWakeCompletion(ctx, s.store, p)
 	}, s.storageResolver)
 	if err != nil {
 		return nil, err
