@@ -42,9 +42,11 @@ sources:
   receipt publishes. Per-page source links and sha256 of actual built bytes are
   attested in a publication receipt and compared locally and publicly, with no
   hardcoded guide URLs.
-- Rollback uses the exact successful Pages deployment artifact with long
-  retention, validated against live index, per-channel manifests and declared
-  page bytes. Only when that artifact expires may a baseline be reconstructed
+- Rollback resolves the latest successful Pages deploy step in its linked
+  Actions job, skipping environment successes whose deploy steps were all
+  skipped. Use the artifact named by that step, including rollback artifacts,
+  and validate live index, per-channel manifests and declared page bytes.
+  Only when that artifact is no longer retained may a baseline be reconstructed
   from its exact deployment SHA confirmed on `origin/main` in a separate
   worktree with re-qualified live channel state; it is never claimed exact.
 - See [Website and documentation publication](website-docs-decision.md) and the

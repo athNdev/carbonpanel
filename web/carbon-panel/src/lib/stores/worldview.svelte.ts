@@ -13,7 +13,7 @@ export interface WorldViewRequests {
 	listTargets(silent: boolean): Promise<WorldViewTarget[]>;
 	status(
 		serverId: string,
-		worldRef: WorldRef,
+		worldRef: WorldRef | undefined,
 		silent: boolean
 	): Promise<WorldViewTarget | undefined>;
 }
@@ -69,7 +69,7 @@ export function createWorldViewStore(requests: WorldViewRequests, timers: Timers
 			users: number;
 			key: string;
 			serverId: string;
-			worldRef: WorldRef;
+			worldRef: WorldRef | undefined;
 		}
 	>();
 
@@ -115,7 +115,7 @@ export function createWorldViewStore(requests: WorldViewRequests, timers: Timers
 	function loadStatus(
 		key: string,
 		serverId: string,
-		worldRef: WorldRef,
+		worldRef: WorldRef | undefined,
 		silent = false
 	): Promise<WorldViewTarget | undefined> {
 		const existing = statusPending.get(key);
@@ -177,7 +177,12 @@ export function createWorldViewStore(requests: WorldViewRequests, timers: Timers
 	}
 
 	/** Refcounted per-world status poll. Keys are independent. */
-	function watchStatus(key: string, serverId: string, worldRef: WorldRef, interval = 5_000) {
+	function watchStatus(
+		key: string,
+		serverId: string,
+		worldRef: WorldRef | undefined,
+		interval = 5_000
+	) {
 		const identity = `${key}:${interval}`;
 		let entry = statusWatches.get(identity);
 		if (!entry) {

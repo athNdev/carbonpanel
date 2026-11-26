@@ -23,7 +23,6 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
-	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
@@ -455,7 +454,7 @@ func (b *Binder) configuredLevel(ctx context.Context, serverID string) (string, 
 	if cfg == nil {
 		return "", storage.ErrServerConfigNotFound
 	}
-	level := worldview.ActualLevelName(cfg)
+	level := cfg.ActualLevelName()
 	if level == "" {
 		return "", ErrBindLevelUnknown
 	}

@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeNodeStatus, pickPrimaryNode } from './node-status';
+import { describeNodeStatus, summarizeNodes } from './node-status';
 import { NodeStatus } from '$lib/proto/carbonpanel/v1/node_pb';
 
 test('describeNodeStatus maps known statuses to Carbon labels', () => {
@@ -36,22 +36,12 @@ test('node status labels use theme tokens instead of fixed dark-theme hex', () =
 	}
 });
 
-test('pickPrimaryNode returns null when there are no nodes', () => {
-	assert.equal(pickPrimaryNode([]), null);
-});
-
-test('pickPrimaryNode prefers the local node', () => {
-	const nodes = [
-		{ id: 'a', name: 'remote', isLocal: false, status: NodeStatus.ONLINE },
-		{ id: 'b', name: 'local', isLocal: true, status: NodeStatus.OFFLINE }
-	];
-	assert.equal(pickPrimaryNode(nodes)?.id, 'b');
-});
-
-test('pickPrimaryNode prefers an online node over an offline first node', () => {
-	const nodes = [
-		{ id: 'a', name: 'one', isLocal: false, status: NodeStatus.OFFLINE },
-		{ id: 'b', name: 'two', isLocal: false, status: NodeStatus.ONLINE }
-	];
-	assert.equal(pickPrimaryNode(nodes)?.id, 'b');
+test('fleet availability counts every node, including unknown and offline hosts', () => {
+	assert.deepEqual(summarizeNodes([]), { total: 0, online: 0, offline: 0 });
+	const nodes = [NodeStatus.OFFLINE, NodeStatus.ONLINE, NodeStatus.UNSPECIFIED, NodeStatus.ERROR];
+	assert.deepEqual(summarizeNodes(nodes.map((status) => ({ status }))), {
+		total: 4,
+		online: 1,
+		offline: 3
+	});
 });

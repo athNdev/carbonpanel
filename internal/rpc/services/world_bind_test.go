@@ -406,6 +406,43 @@ func TestWorldLayoutRefusalsAreSideEffectFreeWithExistingLiveWorld(t *testing.T)
 	})
 }
 
+// TestCheckCompatibilityRequiresExplicitTargetWithoutServerScope proves the
+// version-only preview form still requires the caller to name a target. The
+// revision's stored MC version is a fallback for reporting, not a substitute
+// for the request field, so omission is InvalidArgument rather than accepted.
+func TestCheckCompatibilityRequiresExplicitTargetWithoutServerScope(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	dataRoot := filepath.Join(root, "server")
+	seedWorldRPC(t, store, dataRoot, libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+
+	path := filepath.Join(libraryRoot, "named-preview.zip")
+	sum := writeLayoutArchive(t, path, map[string]string{"world/level.dat": "nbt"})
+	rev := &storage.WorldRevision{
+		ID: worldlib.RevisionID(sum), WorldEntryID: "wld_named_preview", SHA256: sum,
+		SizeBytes: int64(len(readFileBytes(t, path))), EntryCount: 1,
+		MCVersion: "1.21.1", ModLoader: "VANILLA", StoragePath: path,
+	}
+	if err := store.PutWorldRevision(ctx, rev); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+		RevisionId: rev.ID,
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("omitted target = %v (%v), want invalid_argument", connect.CodeOf(err), err)
+	}
+	if _, err := svc.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+		RevisionId: rev.ID, TargetMcVersion: "1.21.1",
+	})); err != nil {
+		t.Fatalf("explicit target preview: %v", err)
+	}
+}
+
 // TestMountedConnectRefusesFlatWithExistingCompanions exercises the generated
 // Connect handler (not direct method calls) against an existing live world and
 // companion directory, proving a flat revision is refused without mutation.
@@ -891,6 +928,30 @@ func TestStoredFlatRevisionPreviewAndBindRefuseWithoutMutation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataRoot, "world", "level.dat")); !os.IsNotExist(err) {
 		t.Fatalf("refused bind wrote live world data: %v", err)
+	}
+}
+
+func TestListBindingsReportsConfiguredWorldWithoutCreatingLibraryEntry(t *testing.T) {
+	ctx := t.Context()
+	store := newWorldRPCStore(t)
+	server := &storage.Server{ID: "existing", Name: "Running", Status: storage.StatusRunning}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	props := "level-name=survival"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{ServerID: server.ID, CustomServerProperties: &props}); err != nil {
+		t.Fatal(err)
+	}
+	s := newWorldRPCService(t, store, t.TempDir(), &worldTestLifecycle{})
+	for _, tc := range []struct{ id, want string }{{server.ID, "survival"}, {"", ""}, {"unknown", ""}} {
+		res, err := s.ListBindings(ctx, connect.NewRequest(&v1.ListBindingsRequest{ServerId: tc.id}))
+		if err != nil || res.Msg.ConfiguredLevelName != tc.want || len(res.Msg.Bindings) != 0 {
+			t.Fatalf("scope %q: got %v, %v", tc.id, res, err)
+		}
+	}
+	res, err := s.ListWorldEntries(ctx, connect.NewRequest(&v1.ListWorldEntriesRequest{}))
+	if err != nil || len(res.Msg.Entries) != 0 {
+		t.Fatalf("library changed on observation: %v %v", res, err)
 	}
 }
 

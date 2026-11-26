@@ -134,6 +134,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{"source": "{{server.data_path}}/modules/bluemap/config", "target": "/app/config", "read_only": false, "create_dir": true},
 				{"source": "{{server.data_path}}/{{server.config.level}}", "target": "/app/world", "read_only": true},
 				{"source": "{{server.data_path}}/modules/bluemap/data", "target": "/app/data", "read_only": false, "create_dir": true},
+				{"source": "{{server.data_path}}/modules/bluemap/resources", "target": "/app/bluemap", "read_only": false, "create_dir": true},
 				{"source": "{{server.data_path}}/modules/bluemap/web", "target": "/app/web", "read_only": false, "create_dir": true}
 				]`,
 			HealthCheckPath: "/",
@@ -146,6 +147,38 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			// accepted the Minecraft EULA and a Mojang download on the user's
 			// behalf (OSS-388). New installs obtain explicit recorded consent
 			// through ModuleService; adoption never runs an init command.
+		},
+		{
+			ID:             "builtin-resource-pack-host",
+			Name:           "Resource Pack Host",
+			Description:    "Serves resource pack ZIPs from a dedicated server folder so Minecraft players can download them.",
+			Type:           storage.ModuleTemplateTypeBuiltin,
+			DockerImage:    "ghcr.io/static-web-server/static-web-server:2.44.0@sha256:2c1a7c3e0feaea5859307403b74e1c575f3ec1499094fc077344173d11abaae2",
+			Category:       "utility",
+			RequiresServer: true,
+			Icon:           "package",
+			Ports: []*v1.ModulePort{
+				{Name: "Web", ContainerPort: 8080, Protocol: "http"},
+			},
+			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
+			DefaultEnv: `{
+				"SERVER_HOST": "0.0.0.0",
+				"SERVER_PORT": "{{module.ports.Web.container_port}}",
+				"SERVER_ROOT": "/packs",
+				"SERVER_DIRECTORY_LISTING": "false",
+				"SERVER_DISABLE_SYMLINKS": "true",
+				"SERVER_IGNORE_HIDDEN_FILES": "true",
+				"SERVER_HEALTH": "true"
+			}`,
+			DefaultVolumes: `[
+				{"source": "{{server.data_path}}/modules/resource-pack-host/packs", "target": "/packs", "read_only": true, "create_dir": true}
+			]`,
+			HealthCheckPath: "/health",
+			HealthCheckPort: 8080,
+			Documentation:   "Upload public resource pack ZIPs to modules/resource-pack-host/packs using Files. Start the module manually, append /your-pack.zip to the displayed access URL, and use that URL in the server's resource-pack setting. The listener is unauthenticated HTTP, so keep only files you intend to share in that folder. The module mounts it read-only and disallows hidden files, directory listings, and symbolic links.",
+			DefaultMemory:   128,
+			DefaultUID:      "65534",
+			DefaultGID:      "65534",
 		},
 		{
 			ID:             "builtin-status-panel",

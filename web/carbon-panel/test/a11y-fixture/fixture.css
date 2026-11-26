@@ -1,0 +1,6 @@
+/* SPDX-License-Identifier: MPL-2.0 */
+@import '../../src/app.css';
+
+/* The fixture has its own Vite root, so include the real component utilities. */
+@source '../../src';
+@source '.';

@@ -1909,6 +1909,15 @@ func (s *Store) UpdateModuleContainerID(ctx context.Context, id string, containe
 	return s.db.WithContext(ctx).Model(&Module{}).Where("id = ?", id).Update("container_id", containerID).Error
 }
 
+// RecordCreatedModuleContainer recovers the result of Docker create after a
+// canceled write. Record the ID and stopped state together, and leave a row
+// that has already moved beyond creation alone.
+func (s *Store) RecordCreatedModuleContainer(ctx context.Context, id, containerID string) error {
+	return s.db.WithContext(ctx).Model(&Module{}).
+		Where("id = ? AND status = ?", id, ModuleStatusCreating).
+		Updates(map[string]any{"container_id": containerID, "status": ModuleStatusStopped}).Error
+}
+
 // MoveServerModulesToNode retargets every module on a server after the parent
 // migrates. Source sidecar containers are left in place; records follow the
 // parent so the reconciler can recreate on the new node without purging data.

@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -199,8 +200,8 @@ func TestLookupAuthoritativeNotFoundWithLocalObservationIsEphemeral(t *testing.T
 	if err != nil || res.Msg.Status != v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND {
 		t.Fatalf("local fallback: res=%+v err=%v", res, err)
 	}
-	if res.Msg.Observation.Source != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB {
-		t.Fatalf("local fallback provenance = %v", res.Msg.Observation.Source)
+	if res.Msg.Observation.Source != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB || res.Msg.Observation.GetObservedAt() != nil {
+		t.Fatalf("local fallback provenance or timestamp = %v", res.Msg.Observation)
 	}
 	if got := countIdentities(t, store); got != before {
 		t.Fatalf("local fallback persisted an identity: %d -> %d", before, got)
@@ -406,11 +407,133 @@ func TestSetWhitelistManualAddFailureKeepsJournalFailed(t *testing.T) {
 	if row.Phase != storage.PlayerActionFailed {
 		t.Fatalf("journal phase = %q, want failed", row.Phase)
 	}
-	var audit []storage.ActivityLog
-	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventPlayerWhitelistAdd, "wl-manual-fail-1").Find(&audit).Error; err != nil {
-		t.Fatalf("audit query: %v", err)
+	audit, err := activity.List(store.DB(), "srv-1", "", time.Time{}, 10)
+	if err != nil || len(audit) != 1 {
+		t.Fatalf("expected one scoped audit record for the failed attempt: %+v, %v", audit, err)
 	}
-	if len(audit) != 0 {
-		t.Fatalf("failed action wrote %d success audit rows", len(audit))
+	var details struct {
+		Outcome string `json:"outcome"`
+		Target  string `json:"target_name"`
+	}
+	if err := json.Unmarshal([]byte(audit[0].Properties), &details); err != nil {
+		t.Fatal(err)
+	}
+	if audit[0].Event != activity.EventPlayerWhitelistAdd || audit[0].RequestID != "wl-manual-fail-1" ||
+		details.Outcome != "failed" || details.Target != "FailName" {
+		t.Fatalf("incorrect failed-action audit record: %+v", audit[0])
+	}
+}
+
+type portraitLookupProvider struct {
+	fakeSkin
+	get func(context.Context, string, string) (skinAsset, error)
+}
+
+func (p *portraitLookupProvider) Get(ctx context.Context, uuid, kind string) (skinAsset, error) {
+	return p.get(ctx, uuid, kind)
+}
+
+func TestLookupProfileOptInStaysReadOnly(t *testing.T) {
+	svc, store, _, _ := newPlayerTestService(t)
+	ctx := context.Background()
+	seenAt := time.Date(2026, time.September, 7, 4, 0, 0, 0, time.UTC)
+	known := seedIdentity(t, store, "EarlierName", lookupUUID, "srv-1", seenAt)
+	seedIdentity(t, store, "NewPlayer", lookupUUID2, "srv-1", seenAt)
+	calls := 0
+	provider := &portraitLookupProvider{
+		fakeSkin: fakeSkin{lookup: foundLookup},
+		get: func(_ context.Context, uuid, kind string) (skinAsset, error) {
+			calls++
+			if uuid != lookupUUID || kind != "portrait" {
+				t.Fatalf("portrait request got (%q, %q)", uuid, kind)
+			}
+			switch calls {
+			case 1:
+				return skinAsset{Data: []byte("fixture PNG"), ContentType: "image/png", Source: "identity_service", Confidence: "detected"}, nil
+			case 2:
+				return skinAsset{Data: []byte("placeholder"), ContentType: "image/png", Confidence: "unknown"}, nil
+			default:
+				return skinAsset{}, errors.New("texture provider unavailable")
+			}
+		},
+	}
+	svc.SetSkinProvider(provider)
+	count := func(model any) int64 {
+		t.Helper()
+		var n int64
+		if err := store.DB().Model(model).Count(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	models := []any{&storage.PlayerIdentity{}, &storage.PlayerAlias{}, &storage.PlayerSession{}, &storage.PlayerAccessState{}, &storage.PlayerModerationAction{}, &storage.ActivityLog{}}
+	before := make([]int64, len(models))
+	for i, model := range models {
+		before[i] = count(model)
+	}
+	for _, tc := range []struct {
+		includeSkin, wantSkin bool
+	}{
+		{false, false},
+		{true, true},
+		{true, false},
+		{true, false},
+	} {
+		res, err := svc.LookupPlayer(ctx, connect.NewRequest(&v1.LookupPlayerRequest{Query: "NewPlayer", IncludeSkin: tc.includeSkin}))
+		if err != nil || res.Msg.Status != v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND || res.Msg.Name != "NewPlayer" {
+			t.Fatalf("lookup profile: res=%+v error=%v", res, err)
+		}
+		if (res.Msg.Skin != nil) != tc.wantSkin || res.Msg.Observation.GetConflictNote() != "" {
+			t.Fatalf("incorrect asset or observation: %v", res.Msg)
+		}
+		if tc.includeSkin {
+			if res.Msg.ObservedIdentityKey != known.ID {
+				t.Fatalf("profile did not match exact online UUID and observation: %v", res.Msg)
+			}
+		} else if calls != 0 || res.Msg.ObservedIdentityKey != "" {
+			t.Fatal("lookup without opt-in enriched the identity")
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("skin request count=%d, want 3", calls)
+	}
+	for i, model := range models {
+		if after := count(model); after != before[i] {
+			t.Errorf("lookup mutated %T: %d to %d", model, before[i], after)
+		}
+	}
+}
+
+func TestLookupProfileDoesNotFetchSkinForLocalOnlyIdentity(t *testing.T) {
+	svc, store, _, _ := newPlayerTestService(t)
+	known := seedIdentity(t, store, "Observed", lookupUUID, "srv-1", time.Now())
+	svc.SetSkinProvider(&portraitLookupProvider{
+		get: func(context.Context, string, string) (skinAsset, error) {
+			t.Fatal("a local-only account triggered a public skin lookup")
+			return skinAsset{}, nil
+		},
+	})
+	res, err := svc.LookupPlayer(context.Background(), connect.NewRequest(&v1.LookupPlayerRequest{Query: "Observed", IncludeSkin: true}))
+	if err != nil || res.Msg.ObservedIdentityKey != known.ID || res.Msg.Skin != nil ||
+		res.Msg.Observation.GetSource() != v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB ||
+		res.Msg.Observation.GetObservedAt() != nil {
+		t.Fatalf("local profile=%v error=%v", res, err)
+	}
+}
+
+func TestLookupProfilePreservesCallerCancellation(t *testing.T) {
+	svc, _, _, _ := newPlayerTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.SetSkinProvider(&portraitLookupProvider{
+		fakeSkin: fakeSkin{lookup: foundLookup},
+		get: func(_ context.Context, _, _ string) (skinAsset, error) {
+			cancel()
+			return skinAsset{}, context.Canceled
+		},
+	})
+	_, err := svc.LookupPlayer(ctx, connect.NewRequest(&v1.LookupPlayerRequest{Query: "NewPlayer", IncludeSkin: true}))
+	if connect.CodeOf(err) != connect.CodeCanceled {
+		t.Fatalf("canceled lookup produced %v", err)
 	}
 }

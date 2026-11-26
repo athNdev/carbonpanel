@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
 	storage "github.com/athNdev/carbon-panel/internal/db"
-	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/worldview"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -27,11 +28,35 @@ import (
 const (
 	blueMapTemplateID       = worldview.BuiltinBlueMapTemplateID
 	blueMapConsentSignalKey = "bluemap_consent_accepted"
+	blueMapReuseSignalKey   = "bluemap_reuse_config"
+	blueMapSetupHeader      = "Carbonpanel-Bluemap-Setup"
 	// blueMapManagedSignalKey isolates the World View managed action. Existing
 	// operators creating a module from the Modules page do not need the new
 	// consent metadata and keep the legacy generic path; they are not broken.
 	blueMapManagedSignalKey = "bluemap_managed"
+
+	// The lease covers the entire worker, including a cold image pull.
+	defaultBlueMapStartupTimeout = 2 * time.Minute
 )
+
+func blueMapConfigPrecondition(cause error) *connect.Error {
+	var reason, message string
+	switch {
+	case errors.Is(cause, bluemapdiscovery.ErrManagedConfigExists):
+		reason, message = "retained-config", "BlueMap configuration was found. Reuse it to install the renderer with your settings."
+	case errors.Is(cause, bluemapdiscovery.ErrReuseConfigMissing):
+		reason, message = "config-missing", cause.Error()
+	case errors.Is(cause, bluemapdiscovery.ErrReuseDownloadConsent):
+		reason, message = "download-consent", cause.Error()
+	case errors.Is(cause, bluemapdiscovery.ErrReuseWorldConfig):
+		reason, message = "world-config", cause.Error()
+	default:
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("prepare BlueMap configuration: %w", cause))
+	}
+	err := connect.NewError(connect.CodeFailedPrecondition, errors.New(message))
+	err.Meta().Set(blueMapSetupHeader, reason)
+	return err
+}
 
 // prepareBuiltinBlueMap apply the OSS-388 server-side rules to a CreateModule
 // request for the built-in renderer. It runs inside ModuleService under the
@@ -39,8 +64,8 @@ const (
 // parallel unguarded install RPC.
 //
 // handled=true means the caller must return resp/err without creating a module.
-// When handled=false the caller MUST call release() after it has persisted the
-// module, so concurrent retries cannot slip between the check and the create.
+// When handled=false the caller must finalize, committing config and handing
+// the transition to the runtime worker after the module row has persisted.
 // A module that already exists is ADOPTED: no create, start, reconfigure,
 // restart or config overwrite; every concurrent caller receives that same row.
 func (s *ModuleService) prepareBuiltinBlueMap(
@@ -55,24 +80,14 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	}
 
 	s.blueMapInstallMu.Lock()
-	noop := func(bool, string) error { return nil }
-	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], func(bool, string) error, error) {
+	var transition *docker.Transition
+	release := func() {
+		transition.Release()
 		s.blueMapInstallMu.Unlock()
+	}
+	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], func(bool, string) error, error) {
+		release()
 		return true, nil, nil, err
-	}
-
-	// Singleton per server: idempotent retry/concurrent tabs converge on the
-	// exact same module identity. No host port or renderer probe is involved.
-	existing, listErr := s.store.ListModulesByTemplate(ctx, blueMapTemplateID)
-	if listErr != nil {
-		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("check existing renderer: %w", listErr)))
-	}
-	for _, module := range existing {
-		if module != nil && module.ServerID == msg.ServerId {
-			resp, convErr := s.blueMapResponse(ctx, module)
-			s.blueMapInstallMu.Unlock()
-			return true, resp, noop, convErr
-		}
 	}
 
 	user := auth.GetUserFromContext(ctx)
@@ -95,6 +110,66 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		}
 		return fail(connect.NewError(connect.CodePermissionDenied, errors.New(reason)))
 	}
+	// Module creation and config staging must see the same owning world as a
+	// server migration. Re-read under the existing lifecycle transition.
+	startingID := s.blueMapStarting[server.ID]
+	if startingID == "" {
+		transition, err = docker.TryBeginServerTransition(server.ID)
+		if err != nil {
+			return fail(connect.NewError(connect.CodeAborted, err))
+		}
+	}
+	// A managed worker already owns the transition when startingID is set.
+	// Under the singleton lock this path may only adopt that committed row.
+	if err := s.store.AssertNoServerOperation(ctx, server.ID); err != nil {
+		return fail(connect.NewError(connect.CodeAborted, err))
+	}
+	current, err := s.store.GetServer(ctx, server.ID)
+	if err != nil {
+		return fail(connect.NewError(connect.CodeNotFound, errors.New("the server no longer exists")))
+	}
+	*server = *current
+	node, nodeErr := bluemapdiscovery.PrivateRendererNode(ctx, s.store, server.NodeID)
+	if nodeErr != nil {
+		return fail(connect.NewError(connect.CodeFailedPrecondition, nodeErr))
+	}
+	if node.ID != "" && s.docker == nil {
+		return fail(connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("the registered node has no configured controller Docker client for private BlueMap")))
+	}
+	// Singleton per server: idempotent retry/concurrent tabs converge on the
+	// exact same module identity. No host port or renderer probe is involved.
+	existing, listErr := s.store.ListModulesByTemplate(ctx, blueMapTemplateID)
+	if listErr != nil {
+		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("check existing renderer: %w", listErr)))
+	}
+	var currentModule *storage.Module
+	var previousAssignment bool
+	for _, module := range existing {
+		if module == nil || module.ServerID != server.ID {
+			continue
+		}
+		if !bluemapdiscovery.SameRendererNode(module.NodeID, server.NodeID) {
+			previousAssignment = true
+			continue
+		}
+		if currentModule == nil || module.ID < currentModule.ID {
+			currentModule = module
+		}
+	}
+	if startingID != "" && (currentModule == nil || currentModule.ID != startingID) {
+		return fail(connect.NewError(connect.CodeAborted, docker.ErrTransitionInFlight))
+	}
+	if currentModule != nil {
+		resp, convErr := s.blueMapResponse(ctx, currentModule)
+		release()
+		return true, resp, nil, convErr
+	}
+	if previousAssignment {
+		return fail(connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("a BlueMap module belongs to a previous node assignment; reconnect the old node and remove or migrate the module before retrying")))
+	}
+
 	// startImmediately is a SECOND privileged action. Check it here, before
 	// world inspection and before any config staging or DB write.
 	if msg.StartImmediately {
@@ -116,12 +191,6 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 			errors.New("explicit acceptance of the Mojang download and Minecraft EULA is required to install BlueMap")))
 	}
 
-	// Backend eligibility (not a client claim): local node only, because the
-	// private owned-network renderer path does not exist on a remote node.
-	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {
-		return fail(connect.NewError(connect.CodeFailedPrecondition,
-			errors.New("private BlueMap discovery is unavailable on a remote node; configure an explicit node-local world_view endpoint instead")))
-	}
 	cfg, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 	if cfgErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition,
@@ -146,14 +215,14 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		return fail(connect.NewError(connect.CodeFailedPrecondition,
 			errors.New("node-owned storage is unavailable; the world folder cannot be verified for BlueMap")))
 	}
-	world, inspectErr := bluemapdiscovery.InspectManagedWorld(ctx, s.storageResolver, server, level)
+	world, inspectErr := bluemapdiscovery.InspectManagedWorld(ctx, s.storageResolver, node, server, level)
 	if inspectErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 			"BlueMap needs a readable Minecraft Java Edition world at %q: %w", level, inspectErr)))
 	}
 
 	// Construct the managed variant entirely from server-side facts. Client
-	// overrides of ports, volumes, command, init or env are discarded.
+	// overrides of ports, volumes, command, init, dependencies or env are discarded.
 	volumes, volErr := bluemapdiscovery.ManagedVolumes(server, level)
 	if volErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("derive read-only world mount: %w", volErr)))
@@ -166,19 +235,24 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	msg.InitCommand = ""
 	msg.InitCommandDelay = 0
 	msg.RestartAfterInit = false
+	msg.Dependencies = nil
 	msg.AccessUrls = nil
 
 	// Deterministic, consent-gated map config derived from the real readable
 	// world (including custom level folder, _nether/_end and custom dimensions).
 	// It is STAGED now and committed only after the module row persists; an
 	// existing operator config is preserved, never overwritten.
-	stager, stageErr := bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, server, world)
-	if stageErr != nil {
-		if errors.Is(stageErr, bluemapdiscovery.ErrManagedConfigExists) {
-			return fail(connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("existing BlueMap config is preserved; adopt it manually instead: %w", stageErr)))
+	var stager *bluemapdiscovery.ManagedConfigStager
+	if msg.Metadata[blueMapReuseSignalKey] == "true" {
+		if err := bluemapdiscovery.CheckRetainedConfig(ctx, s.storageResolver, node, server); err != nil {
+			return fail(blueMapConfigPrecondition(err))
 		}
-		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("stage managed BlueMap config: %w", stageErr)))
+	} else {
+		var stageErr error
+		stager, stageErr = bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, node, server, world)
+		if stageErr != nil {
+			return fail(blueMapConfigPrecondition(stageErr))
+		}
 	}
 
 	if msg.Metadata == nil {
@@ -199,12 +273,14 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 
 	// finalize is idempotent. ok=true commits staged config after the module
 	// row persists; ok=false (or persistence failure) rolls staging back.
-	// The singleton lock is always released exactly once.
+	// After config commit the worker owns the lifecycle transition, while
+	// concurrent requests can inspect the committed singleton under the mutex.
 	var once sync.Once
+	var commitErr error
+	serverID, startImmediately := server.ID, msg.StartImmediately
 	fin := func(ok bool, moduleID string) error {
-		var commitErr error
 		once.Do(func() {
-			if ok {
+			if ok && stager != nil {
 				commitErr = stager.Commit()
 			}
 			if !ok || commitErr != nil {
@@ -221,11 +297,121 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 				}
 			}
 			_ = stager.Close()
+			if !ok || commitErr != nil {
+				release()
+				return
+			}
+			if s.blueMapStarting == nil {
+				s.blueMapStarting = make(map[string]string)
+			}
+			s.blueMapStarting[serverID] = moduleID
 			s.blueMapInstallMu.Unlock()
+			go func() {
+				defer func() {
+					s.blueMapInstallMu.Lock()
+					delete(s.blueMapStarting, serverID)
+					transition.Release()
+					s.blueMapInstallMu.Unlock()
+				}()
+				s.startManagedBlueMap(moduleID, startImmediately)
+			}()
 		})
 		return commitErr
 	}
 	return false, nil, fin, nil
+}
+
+// The request marker only selects the guarded installer. Persist it from
+// the server's decision, and retain that decision across metadata replacements.
+func blueMapModuleMetadata(requested map[string]string, managed bool) map[string]string {
+	metadata := maps.Clone(requested)
+	delete(metadata, blueMapManagedSignalKey)
+	delete(metadata, blueMapReuseSignalKey)
+	if managed {
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		metadata[blueMapManagedSignalKey] = "true"
+	}
+	return metadata
+}
+
+func isManagedBlueMapModule(module *storage.Module) bool {
+	return module.TemplateID == blueMapTemplateID && module.ServerID != "" &&
+		strings.EqualFold(strings.TrimSpace(module.Metadata[blueMapManagedSignalKey]), "true")
+}
+
+// beginManagedBlueMapStart serializes manual starts with the managed install
+// worker, including its terminal status write, and with server transitions.
+func (s *ModuleService) beginManagedBlueMapStart(ctx context.Context, module *storage.Module) (*storage.Module, *docker.Transition, error) {
+	if !isManagedBlueMapModule(module) {
+		return module, nil, nil
+	}
+	transition, err := docker.TryBeginServerTransition(module.ServerID)
+	if err != nil {
+		return nil, nil, connect.NewError(connect.CodeAborted, err)
+	}
+	fail := func(code connect.Code, err error) (*storage.Module, *docker.Transition, error) {
+		transition.Release()
+		return nil, nil, connect.NewError(code, err)
+	}
+	if err := s.store.AssertNoServerOperation(ctx, module.ServerID); err != nil {
+		return fail(connect.CodeAborted, err)
+	}
+	current, err := s.store.GetModule(ctx, module.ID)
+	if err != nil {
+		return fail(connect.CodeNotFound, errors.New("module not found"))
+	}
+	if current.ServerID != module.ServerID || !isManagedBlueMapModule(current) {
+		return fail(connect.CodeAborted, errors.New("managed renderer assignment changed; retry the request"))
+	}
+	server, err := s.store.GetServer(ctx, current.ServerID)
+	if err != nil {
+		return fail(connect.CodeNotFound, errors.New("renderer server not found"))
+	}
+	if !bluemapdiscovery.SameRendererNode(current.NodeID, server.NodeID) {
+		return fail(connect.CodeFailedPrecondition, errors.New("the managed renderer belongs to a previous node assignment"))
+	}
+	if _, err := bluemapdiscovery.PrivateRendererNode(ctx, s.store, server.NodeID); err != nil {
+		return fail(connect.CodeFailedPrecondition, err)
+	}
+	return current, transition, nil
+}
+
+func (s *ModuleService) guardManagedBlueMapStart(ctx context.Context, moduleID string) (*docker.Transition, error) {
+	module, err := s.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get module: %w", err))
+	}
+	_, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	return transition, err
+}
+
+func (s *ModuleService) managedBlueMapTimeout() time.Duration {
+	if s.blueMapStartupTimeout == 0 {
+		return defaultBlueMapStartupTimeout
+	}
+	return s.blueMapStartupTimeout
+}
+
+func (s *ModuleService) startManagedBlueMap(moduleID string, startImmediately bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.managedBlueMapTimeout())
+	defer cancel()
+	err := s.moduleManager.CreateAndStartModule(ctx, moduleID, startImmediately)
+	if err == nil {
+		return
+	}
+	s.log.Error("Managed BlueMap startup failed for module %s: %v", moduleID, err)
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return
+	}
+
+	// Keep the recorded container after a timeout so an operator can retry Start.
+	statusCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer stop()
+	if err := s.store.UpdateModuleStatus(statusCtx, moduleID, storage.ModuleStatusError); err != nil {
+		s.log.Error("Failed to mark managed BlueMap module %s as errored: %v", moduleID, err)
+	}
 }
 
 func (s *ModuleService) blueMapResponse(ctx context.Context, module *storage.Module) (*connect.Response[v1.CreateModuleResponse], error) {

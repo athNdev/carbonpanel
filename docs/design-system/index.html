@@ -79,7 +79,7 @@
 					</dl>
 					<div class="callout">
 						<p class="spec-label">THEME RESOLUTION</p>
-						<p>Dark is the default. The dark block is written as <code>:where(:root), .dark, [data-carbon-theme='dark']</code>; <code>:where()</code> contributes zero specificity, so an explicit <code>[data-carbon-theme='light']</code> container always wins regardless of source order. A plain <code>:root</code> selector would tie with the light rule and win by order, which is why it is not used.</p>
+						<p>Panel follows the operating system by default. Light and Dark preferences override it in this browser. The root dark class and <code>data-carbon-theme</code> both reflect the effective palette. The shared CSS fallback uses <code>:where(:root)</code> for a dark palette before preferences apply.</p>
 					</div>
 					<div class="hero-meta"><span>01 / FOUNDATIONS</span><span>02 / COMPONENTS</span><span>03 / COMPOSITION</span><span>04 / WORKFLOW</span></div>
 				</section>

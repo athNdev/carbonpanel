@@ -7,9 +7,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
-const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
-const { createClient } = require("minecraft-protocol");
+function minecraftClient() {
+  const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
+  return require("minecraft-protocol").createClient;
+}
+
 const base = "http://127.0.0.1:18080";
 const username = "compose-qualifier";
 const player = "CarbonQual";
@@ -19,12 +23,57 @@ const upgradedDescription = "Compose qualification after upgrade";
 const [phase, stateFile] = process.argv.slice(2);
 let token;
 
+// Undici reports the socket error on error.cause.code, not in error.message.
+export function transportCause(error) {
+  const codes = [];
+  let cause = error && error.cause;
+  for (let depth = 0; cause && depth < 5; depth++) {
+    if (cause.code) codes.push(String(cause.code));
+    cause = cause.cause;
+  }
+  return { codes, text: codes.join(" ") + " " + String((error && error.message) || "") };
+}
+
+export function safeToRetry(service, method, body) {
+  // Reads are always safe. Mutations are retried only with an idempotency key,
+  // or when the only effect is re-issuing a deterministic fixture console
+  // command (gamerule/save-all/list) whose repeated execution is harmless.
+  const reads = new Set(["GetServer", "ListNodes", "GetNextAvailablePort", "GetImportJob",
+    "GetUploadStatus", "GetBinding", "ListBackups", "ListActivityLogs", "CheckCompatibility", "Login"]);
+  if (reads.has(method)) return true;
+  // Connect clients in this harness use both proto (request_id) and JS
+  // (requestId) spellings; either is a stable idempotency key.
+  if (body && ((typeof body.request_id === "string" && body.request_id) ||
+    (typeof body.requestId === "string" && body.requestId))) return true;
+  if (service === "ServerService" && method === "SendCommand") return true;
+  return false;
+}
+
 async function rpc(service, method, body = {}) {
   const headers = { "Content-Type": "application/json", "Connect-Protocol-Version": "1" };
   if (token) headers.Authorization = "Bearer " + token;
-  const response = await fetch(base + "/carbonpanel.v1." + service + "/" + method, {
-    method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
-  });
+  let response;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      response = await fetch(base + "/carbonpanel.v1." + service + "/" + method, {
+        method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
+      });
+      break;
+    } catch (error) {
+      const cause = transportCause(error);
+      const transient = /UND_ERR_SOCKET|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/.test(cause.text);
+      if (!transient || attempt === 2) {
+        console.log("Controller RPC " + service + "/" + method + " failed: " + cause.text);
+        throw error;
+      }
+      if (!safeToRetry(service, method, body)) {
+        console.log("Non-idempotent mutation failed with " + cause.text + "; not replaying");
+        throw error;
+      }
+      console.log("Transient controller socket close (" + cause.text + ") on " + service + "/" + method + "; retrying safely");
+      await sleep(1000);
+    }
+  }
   if (!response.ok) throw new Error(service + "/" + method + ": " + response.status + " " + await response.text());
   return response.json();
 }
@@ -56,7 +105,7 @@ async function command(id, text) {
 
 function connectPlayer(port) {
   return new Promise((resolve, reject) => {
-    const client = createClient({
+    const client = minecraftClient()({
       host: "127.0.0.1", port, version, username: player, auth: "offline",
     });
     const timeout = setTimeout(() => fail(new Error("client never reached Play state")), 12000);
@@ -103,12 +152,20 @@ async function main() {
   assert.ok(token, "fixture admin could not sign in");
 
   if (fresh) {
+    // Shipped Compose has no auto-registered local node row. Register the
+    // Unix-socket node explicitly if absent and place fixture servers on its
+    // real UUID so the supported node-id/endpoint-generation path is tested.
     const { nodes = [] } = await rpc("NodeService", "ListNodes");
-    if (nodes.length === 0) {
-      await rpc("NodeService", "CreateNode", {
-        name: "qualification-local", host: "unix:///var/run/docker.sock", enabled: true, maxMemoryMb: 4096, maxServers: 4,
-      });
+    let node = nodes.find(candidate => candidate.host === "unix:///var/run/docker.sock" && candidate.enabled !== false);
+    if (!node) {
+      node = (await rpc("NodeService", "CreateNode", {
+        name: "qualification-local", host: "unix:///var/run/docker.sock",
+        enabled: true, maxMemoryMb: 4096, maxServers: 4,
+      })).node;
     }
+    assert.equal(node.isLocal, true, "Unix-socket fixture node must be classified local");
+    state.nodeId = node.id;
+    assert.ok(state.nodeId, "fixture node has no id");
     state.port = (await rpc("ServerService", "GetNextAvailablePort")).port;
     assert.ok(state.port, "no game port allocated");
     const result = await rpc("ServerService", "CreateServer", {
@@ -119,6 +176,7 @@ async function main() {
       memory: 1024,
       maxPlayers: 5,
       port: state.port,
+      node_id: state.nodeId,
       startImmediately: true,
       autoStart: true,
       dockerOverrides: { environment: { ONLINE_MODE: "FALSE" } },
@@ -126,6 +184,8 @@ async function main() {
     });
     state.id = result.server.id;
     assert.ok(state.id, "create did not return a server ID");
+    assert.equal(result.server.nodeId, state.nodeId,
+      "server must be placed on the registered local node UUID");
     writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
   }
 
@@ -170,4 +230,6 @@ async function main() {
   writeFileSync(stateFile + ".container", server.containerId + "\n");
 }
 
-await main();
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  await main();
+}

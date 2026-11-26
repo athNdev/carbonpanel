@@ -31,9 +31,34 @@ func newDiscoveredRenderer(facts *InstalledRenderer, hc HTTPDoer) Renderer {
 
 func (d *discoveredRenderer) Type() v1.RendererType { return rendererType(RendererBlueMap) }
 
-// ProxyBaseURL is internal only. The proxy uses it to dial the owned network;
-// the browser only ever sees ProxyPrefix plus an opaque session key.
-func (d *discoveredRenderer) ProxyBaseURL() string { return d.facts.BaseURL }
+func discoveredReady(h *Health, err error) bool {
+	return err == nil && h != nil && h.State == v1.RendererState_RENDERER_STATE_READY
+}
+
+func (d *discoveredRenderer) matchesWorldRef(ref *v1.WorldRef) bool {
+	return (ref.GetKind() == v1.WorldRef_KIND_UNSPECIFIED || ref.GetKind() == v1.WorldRef_KIND_SERVER_LOCAL) &&
+		ref.GetBindingId() == "" && ref.GetSnapshotId() == "" &&
+		(ref.GetLevelName() == "" || ref.GetLevelName() == d.facts.WorldName)
+}
+
+func (d *discoveredRenderer) matchesSessionWorld(key string) bool {
+	f := d.facts
+	return f.WorldMatchesServer && f.AcceptDownload && f.Rendered &&
+		key == worldKey(&v1.WorldRef{
+			Kind: v1.WorldRef_KIND_SERVER_LOCAL, ServerId: f.ServerID, LevelName: f.WorldName,
+		})
+}
+
+// ProxyBaseURL rechecks runtime provenance for every asset, including assets
+// requested with a session issued before the renderer or its mount changed.
+func (d *discoveredRenderer) ProxyBaseURL() string {
+	f := d.facts
+	if f.Lifecycle != ModuleRunning || !f.IdentityVerified || !f.NetworkVerified ||
+		!f.MountVerified || !f.ReadOnlyWorldMount || (f.LegacyTag && !f.ProvenanceVerified) {
+		return ""
+	}
+	return f.BaseURL
+}
 
 func (d *discoveredRenderer) Capabilities() []*v1.Capability {
 	// A discovered module has no explicitly configured player bridge feed, so
@@ -74,8 +99,12 @@ func (d *discoveredRenderer) Health(ctx context.Context) (*Health, error) {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_INSTALLING, "inferred",
 			"BlueMap is being created/started; wait for setup to finish before opening the map"), nil
 	case ModuleStopped:
+		if f.IdentityVerified && !f.MountVerified {
+			return discoveredHealth(v1.RendererState_RENDERER_STATE_STOPPED, "detected",
+				"BlueMap is stopped and its world mount needs repair. In the server’s Modules tab, edit BlueMap’s Volumes so /app/world points to the active level folder read-only. Review the BlueMap logs before restarting."), nil
+		}
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_STOPPED, "detected",
-			"BlueMap module is stopped; start the module from its module card to view this world"), nil
+			"The BlueMap module is stopped. Open the server’s Modules tab to check its logs and start it."), nil
 	case ModuleFailed:
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "detected",
 			"BlueMap module is missing or its container could not be verified on this node; reinstall through ModuleService"), nil
@@ -93,32 +122,30 @@ func (d *discoveredRenderer) Health(ctx context.Context) (*Health, error) {
 	}
 	if !f.MountVerified || !f.ReadOnlyWorldMount {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "detected",
-			"BlueMap world mount does not match this server's actual level folder or is not read-only; reconfigure the target world before viewing"), nil
+			"BlueMap’s world mount does not match the active level or is not read-only. In the server’s Modules tab, edit BlueMap’s Volumes so /app/world points to the active level folder read-only."), nil
 	}
 	if f.LegacyTag && !f.ProvenanceVerified {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "detected",
 			"an existing BlueMap module uses the legacy renderer tag but its identity, mount or world-map provenance could not be established; no config was changed"), nil
 	}
 
-	// A module whose private web endpoint did not answer is unreachable, not
-	// absent: it is installed on this exact server/node.
-	if !f.WebUp || strings.TrimSpace(f.BaseURL) == "" {
-		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "detected",
-			"BlueMap is installed but its private renderer endpoint is unreachable; start or restart the module"), nil
-	}
-
 	// Explicit operator consent is a precondition for a NEW owned install. For
 	// an adopted module it was already recorded; we never rewrite it.
 	if !f.AcceptDownload {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "detected",
-			"BlueMap is installed but has not accepted the Mojang resource download; open BlueMap setup and accept the download/license to finish setup"), nil
+			"BlueMap requires acknowledgement of the Mojang resource download. If you accept the Minecraft EULA and download, set accept-download: true in modules/bluemap/config/core.conf from the server’s Files tab, then restart BlueMap."), nil
 	}
 
 	// A configured world identity is required, and it must be the ACTUAL level
 	// name of this server (including non-default world folders), not "world".
 	if strings.TrimSpace(f.WorldName) == "" || !f.WorldMatchesServer {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "detected",
-			"BlueMap is installed but has no configured map for this server's actual world; open BlueMap setup and configure the target world before viewing"), nil
+			"BlueMap has no configured map for this server’s actual world. Check modules/bluemap/config/maps in the server’s Files tab and point the Overworld map at /app/world."), nil
+	}
+
+	if !f.WebUp || strings.TrimSpace(f.BaseURL) == "" {
+		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "detected",
+			"BlueMap is installed but its private renderer endpoint is unreachable; start or restart the module"), nil
 	}
 
 	// A listening web server with a configured world but no scoped tiles is a

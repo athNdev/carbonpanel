@@ -184,6 +184,27 @@ func TestImportRefusesFlatRootLayout(t *testing.T) {
 	}
 }
 
+// TestImportRefusesAmbiguousRootAndFamilyLayout proves a root level.dat combined
+// with a named family is refused at the same import gate, so import, preview and
+// bind agree on the ambiguous case as well as the flat one.
+func TestImportRefusesAmbiguousRootAndFamilyLayout(t *testing.T) {
+	importer, _, store := newTestImporter(t)
+	archive := writeTestZip(t, filepath.Join(t.TempDir(), "ambiguous.zip"),
+		zipEntry{name: "level.dat", data: []byte("root")},
+		zipEntry{name: "world/level.dat", data: []byte("world")},
+	)
+	result, err := importer.Import(context.Background(), uploadRequest(archive, checksumOf(t, archive), "req-ambiguous-layout"))
+	if err == nil || !errors.Is(err, ErrUnsupportedWorldLayout) || !strings.Contains(err.Error(), "ambiguous archive") {
+		t.Fatalf("Import ambiguous layout = %v, want actionable unsupported-layout error", err)
+	}
+	if result == nil || result.Revision != nil || result.Entry != nil {
+		t.Fatalf("ambiguous archive produced a revision/entry: %+v", result)
+	}
+	if countRows(t, store, &db.WorldRevision{}) != 0 || countRows(t, store, &db.WorldEntry{}) != 0 {
+		t.Fatal("ambiguous archive must not create revision or entry rows")
+	}
+}
+
 func readFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

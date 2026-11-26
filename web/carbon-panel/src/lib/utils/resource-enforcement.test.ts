@@ -106,13 +106,20 @@ test('server resource UI consults RuntimeProfile warnings', () => {
 		path.resolve(import.meta.dirname, '../../routes/servers/new/+page.svelte'),
 		'utf-8'
 	);
+	const runtimeStatus = fs.readFileSync(
+		path.resolve(import.meta.dirname, '../components/server-ui/ServerRuntimeStatus.svelte'),
+		'utf-8'
+	);
 	const overrides = fs.readFileSync(
 		path.resolve(import.meta.dirname, '../components/docker-overrides-editor.svelte'),
 		'utf-8'
 	);
 	assert.ok(detail.includes('memoryLimitCopy'), 'detail RAM tile must use memoryLimitCopy');
 	assert.ok(detail.includes('worldDiskCopy'), 'detail must show world-disk advisory copy');
-	assert.ok(detail.includes('exitFailureCopy'), 'error tile must keep OOM vs forced-stop distinct');
+	assert.ok(
+		detail.includes('<ServerRuntimeStatus') && runtimeStatus.includes('exitFailureCopy'),
+		'error tile must keep OOM vs forced-stop distinct'
+	);
 	assert.ok(
 		create.includes('memoryLimitCopy') || create.includes('not a hard cap'),
 		'create wizard must not present RAM as an always-enforced quota'

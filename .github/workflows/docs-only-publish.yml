@@ -102,14 +102,20 @@ jobs:
       # unrelated merge or a cancelled queue cannot hide a needed guide update:
       # the candidate fingerprint is the declaration plus the real Git blobs at
       # the trusted revision, compared with the receipt actually served live.
-      - name: Fingerprint the maintained guides at the tested revision
+      - name: Fingerprint channel presentation and maintained guides at the tested revision
         id: fingerprint
         env:
           GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
         run: |
+          # Changelog and VersionBanner are channel presentation, NOT release-
+          # independent maintained guides. Their own fingerprint is a separate
+          # input so a switcher-only fix still reconciles Pages.
+          python3 scripts/changelog_page.py presentation-fingerprint \
+            --root "$GITHUB_WORKSPACE" > .presentation-fingerprint.json
           python3 scripts/docs_publication_gate.py guide-fingerprint \
             --declaration docs/maintained-guides.json \
             --revision "$GUIDE_REVISION" --root "$GITHUB_WORKSPACE" \
+            --presentation .presentation-fingerprint.json \
             > .guide-fingerprint.json
           echo "fingerprint=$(jq -r '.fingerprint' .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
           echo "json=$(jq -c . .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
@@ -270,9 +276,8 @@ jobs:
             --commit "$NIGHTLY_COMMIT" --digest "$NIGHTLY_DIGEST" \
             --stable-source .website-build/live-version-index.json
 
-      # Rollback baseline comes from deployment statuses (last successful
-      # github-pages deployment -> exact run/artifact), then the exact artifact
-      # bytes are proven equal to the live public index before any deploy.
+      # Require an actual successful Pages deploy step in the linked job.
+      # The exact artifact used by that step is byte-verified before any deploy.
       - name: Resolve the exact prior Pages baseline from deployment statuses
         id: baseline
         if: steps.decision_record.outputs.publish == 'true'
@@ -292,11 +297,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.baseline.outputs.run_id }}
+          ARTIFACT_ID: ${{ steps.baseline.outputs.artifact_id }}
         run: |
+          test -n "$ARTIFACT_ID"
           python3 scripts/docs_publication_gate.py fetch-prior-pages \
             --site .website-build/prior-site \
             --live-url https://carbonpanel.dev/version-index.json \
-            --repository "$GITHUB_REPOSITORY" --run-id "$RUN_ID"
+            --repository "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --artifact-id "$ARTIFACT_ID"
           RESULT=$(python3 scripts/docs_publication_gate.py verify-prior-bytes \
             --site .website-build/prior-site --base-url https://carbonpanel.dev)
           printf '%s\n' "$RESULT"
@@ -308,7 +315,9 @@ jobs:
       # live bytes are compared; this is a reconstruction, never the artifact.
       - name: Recover a verified prior baseline when the artifact expired
         id: recover
-        if: always() && steps.decision_record.outputs.publish == 'true' && steps.prior.outcome == 'failure'
+        if: >-
+          always() && steps.decision_record.outputs.publish == 'true' &&
+          steps.prior.outcome == 'failure' && steps.baseline.outputs.artifact_id == ''
         continue-on-error: true
         env:
           DEPLOY_SHA: ${{ steps.baseline.outputs.sha }}

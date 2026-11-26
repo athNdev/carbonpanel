@@ -420,6 +420,10 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, lookupContextError(err)
+	}
+
 	switch provider.Status {
 	case "found":
 		if !isCanonicalUUID(provider.UUID) || strings.TrimSpace(provider.Name) == "" {
@@ -428,7 +432,7 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 				Note:   "The identity provider returned incomplete data; refusing to guess an identity.",
 			}), nil
 		}
-		return connect.NewResponse(&v1.LookupPlayerResponse{
+		out := &v1.LookupPlayerResponse{
 			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND,
 			Name:   provider.Name,
 			Uuid:   provider.UUID,
@@ -436,10 +440,26 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 				v1.PlayerDataSource_PLAYER_DATA_SOURCE_IDENTITY_SERVICE,
 				v1.PlayerConfidence_PLAYER_CONFIDENCE_DETECTED,
 				time.Now().UTC(),
-				"Ephemeral provider result; no identity was created.",
+				"",
 			),
 			Note: "Ephemeral result: only the provider's current name is shown. No identity, roster entry or presence was created. Official name history is unavailable.",
-		}), nil
+		}
+		if req.Msg.IncludeSkin {
+			skinCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			asset, err := s.skins.Get(skinCtx, provider.UUID, "portrait")
+			cancel()
+			if err == nil && asset.Confidence == "detected" && asset.ContentType == "image/png" && len(asset.Data) > 0 {
+				out.Skin = skinAssetProto(asset)
+			}
+			matches, err := s.store.FindPlayerIdentitiesByExact(ctx, strings.ToLower(provider.UUID), "")
+			if err == nil && len(matches) == 1 && !matches[0].OfflineUUID {
+				out.ObservedIdentityKey = matches[0].ID
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, lookupContextError(err)
+			}
+		}
+		return connect.NewResponse(out), nil
 	case "ambiguous":
 		return connect.NewResponse(&v1.LookupPlayerResponse{
 			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS,
@@ -457,6 +477,9 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 	// be shown as ephemeral context, but nothing is persisted or presented as
 	// presence; multiple local matches are ambiguous.
 	matches, err := s.store.FindPlayerIdentitiesByExact(ctx, valueForLookup(kind, value), nameForLookup(kind, value))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, lookupContextError(ctxErr)
+	}
 	if err != nil {
 		s.log.Debug("Failed exact local lookup during read-only lookup: %v", err)
 		matches = nil
@@ -469,18 +492,22 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 	}
 	if len(matches) == 1 {
 		identity := matches[0]
-		return connect.NewResponse(&v1.LookupPlayerResponse{
+		out := &v1.LookupPlayerResponse{
 			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND,
 			Name:   identity.CurrentName,
 			Uuid:   identity.PrimaryUUID,
 			Observation: observation(
 				v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
 				v1.PlayerConfidence_PLAYER_CONFIDENCE_STALE,
-				identity.LastSeenAt,
-				"Ephemeral result from this panel's observations; no identity was created.",
+				time.Time{},
+				"",
 			),
 			Note: "No online Mojang profile; shown from this panel's observations only. No identity, roster entry or presence was created.",
-		}), nil
+		}
+		if req.Msg.IncludeSkin {
+			out.ObservedIdentityKey = identity.ID
+		}
+		return connect.NewResponse(out), nil
 	}
 	return connect.NewResponse(&v1.LookupPlayerResponse{
 		Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_NOT_FOUND,
@@ -543,20 +570,16 @@ func classifyPlayerQuery(query string) (kind, value string) {
 	return "invalid", ""
 }
 
+func lookupContextError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	}
+	return connect.NewError(connect.CodeCanceled, err)
+}
+
 func isCanonicalUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	compact := strings.ReplaceAll(value, "-", "")
-	if len(compact) != 32 {
-		return false
-	}
-	for _, r := range compact {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
-			return false
-		}
-	}
-	return strings.Count(value, "-") == 4
+	kind, canonical := classifyPlayerQuery(value)
+	return kind == "uuid" && strings.EqualFold(value, canonical)
 }
 
 // normalizeRosterFilter maps the console's "all" sentinel to an empty filter.
@@ -1003,11 +1026,14 @@ func (s *PlayerService) loadSkin(ctx context.Context, identityKey, kind string, 
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}
-	out := &v1.PlayerSkinAsset{
+	return skinAssetProto(asset), nil
+}
+
+func skinAssetProto(asset skinAsset) *v1.PlayerSkinAsset {
+	return &v1.PlayerSkinAsset{
 		Data: asset.Data, ContentType: asset.ContentType, FromCache: asset.FromCache,
 		Observation: toProtoObservation(asset.Source, asset.Confidence, asset.ObservedAt, asset.Note),
 	}
-	return out, nil
 }
 
 func (s *PlayerService) GetPlayerDeepData(ctx context.Context, req *connect.Request[v1.GetPlayerDeepDataRequest]) (*connect.Response[v1.GetPlayerDeepDataResponse], error) {
@@ -1045,6 +1071,9 @@ func (s *PlayerService) GetPlayerDeepData(ctx context.Context, req *connect.Requ
 // auditPlayer writes one append-only audit row. Audit failure never breaks the
 // operation being audited.
 func (s *PlayerService) auditPlayer(ctx context.Context, ip, event, serverID, identityKey, requestID string, props map[string]any) {
+	// An applied mutation must remain auditable if its client disconnects.
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	actorID, actorName := "", ""
 	if user := auth.GetUserFromContext(ctx); user != nil {
 		actorID, actorName = user.ID, user.Username
@@ -1055,9 +1084,9 @@ func (s *PlayerService) auditPlayer(ctx context.Context, ip, event, serverID, id
 			encoded = string(raw)
 		}
 	}
-	if err := activity.Log(s.store.DB(), activity.Entry{
+	if err := activity.Log(s.store.DB().WithContext(auditCtx), activity.Entry{
 		ActorID: actorID, ActorName: actorName, IP: ip, Event: event,
-		SubjectTyp: "player", SubjectID: identityKey,
+		SubjectTyp: "player", SubjectID: identityKey, ServerID: serverID,
 		Properties: encoded, RequestID: strings.TrimSpace(requestID),
 	}); err != nil {
 		s.log.Error("Audit log failed for %s: %v", event, err)
@@ -1132,8 +1161,13 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 	prior, mutateErr := mutate(source, targetName)
 	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	auditProps := map[string]any{
+		"action": action, "target_name": targetName, "reason": reason, "source": sourceName, "outcome": "success",
+	}
 	if mutateErr != nil {
 		_ = s.store.AdvancePlayerAction(finalCtx, row.ID, storage.PlayerActionExecuting, storage.PlayerActionFailed, mutateErr.Error())
+		auditProps["outcome"] = "failed"
+		s.auditPlayer(ctx, ip, event, serverID, identityKey, requestID, auditProps)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s failed: %w", action, mutateErr))
 	}
 	if err := s.store.AdvancePlayerAction(finalCtx, row.ID, storage.PlayerActionExecuting, storage.PlayerActionComplete, ""); err != nil {
@@ -1144,9 +1178,7 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 	}
 	_ = s.store.DB().WithContext(finalCtx).Model(&storage.PlayerModerationAction{}).Where("id = ?", row.ID).
 		Update("prior_value", prior).Error
-	s.auditPlayer(ctx, ip, event, serverID, identityKey, requestID, map[string]any{
-		"action": action, "reason": reason, "source": sourceName, "outcome": "success",
-	})
+	s.auditPlayer(ctx, ip, event, serverID, identityKey, requestID, auditProps)
 	result := &v1.PlayerActionResult{IdentityKey: identityKey, Success: true, Message: action + " applied via " + sourceName}
 	if undoable {
 		result.UndoSupported = true

@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import os
 import re
 import shlex
 import subprocess
@@ -13,10 +14,12 @@ import tempfile
 import unittest
 import urllib.error
 import zipfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from scripts import release
+from scripts import browser_version_check as bvc
 from scripts import docs_publication_gate as gate
+from scripts import version_contract as vc
 
 
 def registry_writes(command):
@@ -671,7 +674,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("if: steps.preflight.outputs.action == 'publish'", source)
         self.assertIn("python3 scripts/release.py verify-immutable", source)
         self.assertIn("  promote-aliases:\n", source)
-        self.assertIn("needs: [plan, publish-immutable, publish]", source)
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, publish]", source)
         # OSS-413: no independent stable/latest alias write remains; both go
         # through the synced transaction and the deployed exact docs marker.
         self.assertNotIn("promote-stable-alias", source)
@@ -726,7 +729,8 @@ class ReleaseTests(unittest.TestCase):
             release_src.count("needs.plan.outputs.publish == 'true'"), 3)
         # Stable release creation and alias moves are gated on the synced
         # transaction; a prerelease keeps its product-only flow.
-        self.assertIn("needs.stable-channel-transaction.outputs.action != 'rollback'", release_src)
+        self.assertIn("needs.stable-channel-transaction.outputs.action == 'publish'", release_src)
+        self.assertIn("needs.stable-channel-transaction.outputs.action == 'noop'", release_src)
         self.assertIn("needs.publish-immutable.outputs.verified == 'true'", release_src)
         self.assertNotIn("if: github.event_name == 'push'", release_src)
         modules_src = (release.ROOT / ".github/workflows/modules.yml").read_text(encoding="utf-8")
@@ -2212,6 +2216,98 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertFalse(release.channel_oci_parity(
             wrong_revision, self.DIGEST, self.CANDIDATE)[0])
 
+    def test_oci_parity_accepts_json_round_tripped_platform_lists(self):
+        # channel-observe -> JSON -> stable-alias-decision turns platform tuples
+        # into lists of lists. The gate must normalise them instead of raising
+        # TypeError on an unhashable list (observed in publish run 44760231606).
+        observations = self.immutable()
+        for registry in observations:
+            state, info = observations[registry]
+            observations[registry] = (state, {
+                **info,
+                "platforms": [list(pair) for pair in info["platforms"]],
+            })
+        ok, reason = release.channel_oci_parity(
+            observations, self.DIGEST, self.CANDIDATE)
+        self.assertTrue(ok, reason)
+
+    def test_oci_parity_refuses_malformed_platform_entries(self):
+        for bad in ({"linux": "amd64"}, ["linux/amd64"], [("linux", "amd64", "x")],
+                    [("linux", 1)], "linux/amd64"):
+            observations = self.immutable()
+            for registry in observations:
+                state, info = observations[registry]
+                observations[registry] = (state, {**info, "platforms": bad})
+            ok, reason = release.channel_oci_parity(
+                observations, self.DIGEST, self.CANDIDATE)
+            self.assertFalse(ok, (bad, reason))
+            self.assertIn("platform evidence", reason)
+
+    def test_stable_alias_decision_cli_accepts_json_platform_lists(self):
+        def obs(digest):
+            return ("present", {"digest": digest,
+                                "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                "revision": self.CANDIDATE})
+        latest = {"docker_hub": obs(self.DIGEST), "ghcr": obs(self.DIGEST)}
+        stable = {"docker_hub": ("absent", {}), "ghcr": ("absent", {})}
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(latest)]), redirect_stdout(out):
+            release.main()
+        decision = json.loads(out.getvalue())
+        self.assertIn(decision["action"], ("promote", "first-publish"))
+        self.assertEqual(decision["digest"], self.DIGEST)
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": obs(self.DIGEST)}
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(bad)]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
+    def test_verify_channel_parity_cli_refuses_malformed_platform_evidence(self):
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": ("present", {"digest": self.DIGEST,
+                                    "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                    "revision": self.CANDIDATE})}
+        with patch("sys.argv", ["release.py", "verify-channel-parity",
+                                "--observations", json.dumps(bad),
+                                "--digest", self.DIGEST,
+                                "--commit", self.CANDIDATE]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
+    def test_trusted_module_provenance_requires_safe_path(self):
+        # Two checkouts with the same module name: plain PYTHONPATH still lets
+        # the candidate CWD win, so the release workflow must use python -P.
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            for name, marker in (("trusted", "trusted"), ("candidate", "candidate")):
+                scripts = root / name / "scripts"
+                scripts.mkdir(parents=True)
+                (scripts / "__init__.py").write_text("", encoding="utf-8")
+                (scripts / "probe.py").write_text(
+                    "MARKER = " + repr(marker) + "\n", encoding="utf-8")
+            env = {**os.environ, "PYTHONPATH": str(root / "trusted")}
+            code = "import scripts.probe; print(scripts.probe.MARKER)"
+            plain = subprocess.run(["python", "-c", code], cwd=root / "candidate",
+                                   env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(plain.stdout.strip(), "candidate")
+            safe = subprocess.run(["python", "-P", "-c", code], cwd=root / "candidate",
+                                  env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(safe.stdout.strip(), "trusted")
+
+    def test_release_uses_trusted_policy_declaration_and_safe_path(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery",
+                      source)
+        self.assertIn("--declaration .trusted-release/docs/maintained-guides.json", source)
+
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
     def make_move(self, **overrides):
@@ -2434,8 +2530,76 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertEqual(steps["rollback_docs"]["with"]["path"], ".website-build/prior-site")
         self.assertEqual(steps["rollback_deploy"]["with"]["artifact_name"],
                          "github-pages-prior")
+        for step in ("rollback_docs", "rollback_deploy"):
+            self.assertIn("always()", steps[step]["if"])
+        self.assertIn("steps.browser_ui.outcome == 'failure'", rollback["if"])
+        self.assertIn("steps.final_upload.outcome == 'failure'", rollback["if"])
         self.assertIn("steps.preserve_prior.outputs.hash",
                       str(doc["jobs"]["channel-transaction"]["steps"]))
+
+    def test_manual_nightly_dispatch_uses_qualified_channel_transaction(self):
+        import yaml
+        cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        doc = yaml.safe_load(cd)
+        tx = doc["jobs"]["channel-transaction"]
+        cond = str(tx.get("if", ""))
+        self.assertIn("github.event_name == 'workflow_dispatch'", cond)
+        self.assertIn("inputs.nightly", cond)
+        self.assertIn("inputs.recovery == 'off'", cond)
+        self.assertEqual(tx["concurrency"]["group"], "pages-deploy")
+        steps = {s.get("name"): s for s in tx["steps"] if s.get("name")}
+        mirror = steps["Ensure immutable Nightly sha counterpart on GHCR (authorized only)"]
+        self.assertIn("mirror-ghcr-sha", mirror["run"])
+        self.assertIn("--apply", mirror["run"])
+        self.assertEqual(tx.get("permissions", {}).get("packages"), "write")
+        stage = next(s for s in tx["steps"] if s.get("id") == "stage_decision")
+        commit = next(s for s in tx["steps"] if s.get("id") == "commit_decision")
+        self.assertIn("--nightly-opt-in", stage["run"])
+        self.assertIn("--nightly-opt-in", commit["run"])
+        self.assertIn("NIGHTLY_OPT_IN", str(stage.get("env", {})))
+        self.assertIn("NIGHTLY_OPT_IN", str(commit.get("env", {})))
+        guard = [s for s in tx["steps"] if "explicit Nightly transaction was requested but not completed" in str(s.get("name", ""))]
+        self.assertTrue(guard)
+        self.assertIn("always()", guard[0]["if"])
+
+    def test_nightly_stage_preserves_deployed_canonical_docs(self):
+        import yaml
+        workflow = yaml.safe_load((release.ROOT / ".github/workflows/cd.yml").read_text(
+            encoding="utf-8"))
+        steps = {step["id"]: step for step in workflow["jobs"]["channel-transaction"]["steps"]
+                 if "id" in step}
+        self.assertLess(list(steps).index("preserve_prior"), list(steps).index("compose_stage"))
+        self.assertIn("cp -a .website-build/prior-site .website-build/site",
+                      steps["compose_stage"]["run"])
+        self.assertIn("steps.compose_stage.outputs.hash", steps["stage_decision"]["env"]["DOCS_HASH"])
+        self.assertIn("--expect-promotion-state candidate", steps["docs"]["run"])
+        self.assertIn("--expect-nightly-revision", steps["docs"]["run"])
+        for step in ("stage_decision", "markers"):
+            self.assertIn("--stable-commit", steps[step]["run"])
+            self.assertIn("--stable-digest", steps[step]["run"])
+        prior = ".website-build/prior-site/version-index.json"
+        self.assertIn("--stable-source " + prior, steps["markers"]["run"])
+        final = steps["final_artifact"]["run"]
+        self.assertIn("prior_index=" + prior, final)
+        self.assertIn("CARBONPANEL_STABLE_REVISION", final)
+        self.assertIn("--stable-source " + prior, final)
+
+    def test_nightly_alias_move_binds_current_and_prior_observations(self):
+        import yaml
+        from scripts.docs_publication_gate import PAGES_DEPLOY_STEPS
+        workflow = yaml.safe_load((release.ROOT / ".github/workflows/cd.yml").read_text(
+            encoding="utf-8"))
+        steps = {step["id"]: step for step in workflow["jobs"]["channel-transaction"]["steps"]
+                 if "id" in step}
+        alias = steps["alias_move"]
+        self.assertIn("steps.stage_decision.outputs.prior_receipt", alias["env"]["PRIOR"])
+        self.assertIn("channel-observe --reference nightly", alias["run"])
+        self.assertIn('--previous-commit "$PREVIOUS_COMMIT"', alias["run"])
+        self.assertIn('--previous-digest "$PREVIOUS_DIGEST"', alias["run"])
+        self.assertIn("--previous-binding true", alias["run"])
+        self.assertEqual(PAGES_DEPLOY_STEPS[steps["deploy"]["name"]],
+                         steps["deploy"]["with"]["artifact_name"])
+        self.assertNotIn("artifact_name", steps["final_deploy"].get("with", {}))
 
     def test_release_stable_gate_uses_observed_digests_and_compensates(self):
         import yaml
@@ -2494,8 +2658,8 @@ class ChannelPromotionTests(unittest.TestCase):
             job_block = doc["jobs"][job_name]
             self.assertIn("stable-channel-transaction", job_block["needs"])
             condition = str(job_block.get("if", ""))
-            self.assertIn("stable-channel-transaction.outputs.action != 'refuse'", condition)
-            self.assertIn("stable-channel-transaction.outputs.action != 'rollback'", condition)
+            self.assertIn("stable-channel-transaction.outputs.action == 'publish'", condition)
+            self.assertIn("stable-channel-transaction.outputs.action == 'noop'", condition)
 
     def test_no_legacy_alias_write_path_remains_outside_the_qualified_transaction(self):
         import yaml
@@ -2509,7 +2673,8 @@ class ChannelPromotionTests(unittest.TestCase):
         rel = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertEqual(rel.count("python3 scripts/release.py promote-alias --check-only"), 1)
         self.assertEqual(rel.count("python3 scripts/release.py promote-alias --version"), 1)
-        self.assertIn("needs: [plan, publish-immutable, publish]", rel.split("  publish-minor:")[1])
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, publish]",
+                      rel.split("  publish-minor:")[1])
         import re as _re
         for job in ("promote-aliases", "publish"):
             match = _re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", rel)
@@ -2550,7 +2715,8 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         self.assertIn("observed=", by_id["stage"]["run"])
         self.assertEqual(by_id["browser_ui"]["run"],
                          "python3 scripts/browser_version_check.py")
-        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_deploy"]["if"])
+        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_upload"]["if"])
+        self.assertIn("steps.final_upload.outcome == 'success'", by_id["final_deploy"]["if"])
 
     def test_public_release_waits_for_verified_aliases_and_live_browser(self):
         import yaml
@@ -2567,7 +2733,7 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         stable_runs = "\n".join(str(step.get("run", ""))
                                 for step in jobs["stable-channel-transaction"]["steps"])
         self.assertIn("playwright install --with-deps chromium", stable_runs)
-        self.assertIn("browser_version_check.py --base-url https://carbonpanel.dev", stable_runs)
+        self.assertIn(".trusted-release/scripts/browser_version_check.py .website-build/site --base-url https://carbonpanel.dev", stable_runs)
         cd = yaml.safe_load(
             (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8"))
         cd_runs = "\n".join(str(step.get("run", ""))
@@ -2614,10 +2780,11 @@ class ChannelTransactionTests(unittest.TestCase):
             {"ci": "122"}, seq, "2026-11-19T00:00:00Z")
 
     def decide(self, candidate=None, previous=None, live=None, event="workflow_run",
-               ancestry=None):
+               ancestry=None, nightly_opt_in=False):
         return release.channel_transaction_decision(
             candidate or self.candidate(), previous, live or {}, event,
-            ancestry=ancestry or (lambda older, newer: True))
+            ancestry=ancestry or (lambda older, newer: True),
+            nightly_opt_in=nightly_opt_in)
 
     def test_first_publish_stages_both_surfaces_before_recording_receipt(self):
         action, _, receipt, steps = self.decide()
@@ -2690,6 +2857,25 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertIn("already-active", reason)
         action, _, _, _ = self.decide(previous=previous, event="workflow_dispatch")
         self.assertEqual(action, "publish")
+
+    def test_explicit_nightly_manual_dispatch_uses_same_transaction(self):
+        # Generic workflow_dispatch still refuses inactive receipt.
+        action, reason, _, _ = self.decide(event="workflow_dispatch")
+        self.assertEqual(action, "refuse")
+        self.assertIn("already-active", reason)
+        # Explicit trusted Nightly opt-in may advance through the same qualified transaction.
+        action, reason, receipt, steps = self.decide(event="workflow_dispatch", nightly_opt_in="true")
+        self.assertEqual(action, "publish")
+        self.assertEqual(tuple(steps), release.TX_PUBLISH_STEPS)
+        self.assertEqual(receipt["revision"], self.COMMIT)
+        # Never misrepresent event as schedule: decision is based on workflow_dispatch.
+        self.assertNotEqual(reason, "scheduled")
+        # Opt-in does not relax non-nightly or stable channels.
+        action, _, _, _ = self.decide(
+            candidate=self.candidate(channel="stable", commit=self.PREV_COMMIT, digest=self.PREV_DIGEST,
+                                     release_tag="carbonpanel-v1.0.41"),
+            event="workflow_dispatch", nightly_opt_in="true")
+        self.assertEqual(action, "refuse")
 
     def test_stable_channel_only_moves_from_verified_baseline(self):
         action, _, _, _ = self.decide(candidate=self.candidate(
@@ -3190,11 +3376,13 @@ class PriorPagesDeploymentTests(unittest.TestCase):
             "800": [{"state": "success",
                      "target_url": "https://github.com/o/r/actions/runs/100/job/1"}],
         }
-        run_artifacts = {
-            "100": [{"id": 1, "name": gate.PAGES_ARTIFACT_NAME, "expired": False}],
-        }
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, run_artifacts)
+        job = {"id": 1, "run_id": 100, "head_sha": "a" * 40, "steps": [
+            {"number": 1, "name": "Deploy the final canonical artifact", "conclusion": "success"},
+        ]}
+        identity, reason = gate.pages_deployment_identity(deployments, statuses, lambda _: job)
+        self.assertTrue(identity, reason)
+        baseline, reason = gate.pages_baseline_artifact(
+            identity, [{"id": 1, "name": gate.PAGES_ARTIFACT_NAME, "expired": False}])
         self.assertTrue(baseline, reason)
         self.assertEqual(baseline["artifact_id"], "1")
         self.assertEqual(baseline["deployment_id"], "800")
@@ -3285,6 +3473,106 @@ class NightlyActivationTests(unittest.TestCase):
         self.assertEqual(result["action"], "activate")
         self.assertEqual(result["digest"], self.DIGEST)
         self.assertEqual(result["revision"], self.COMMIT)
+
+
+class NightlyGhcrMirrorTests(unittest.TestCase):
+    """Authorized Nightly sha mirroring to GHCR is digest-preserving and fail-closed."""
+
+    COMMIT = "1" * 40
+    DIGEST = "sha256:" + "a" * 64
+    OTHER = "sha256:" + "b" * 64
+
+    def hub_obs(self, digest=None, commit=None):
+        return ("present", {"digest": digest or self.DIGEST,
+                            "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+
+    def revisions(self, commit=None):
+        c = commit or self.COMMIT
+        return (self.DIGEST, {
+            ("linux", "amd64"): {"digest": "sha256:" + "1" * 64, "revision": c},
+            ("linux", "arm64"): {"digest": "sha256:" + "2" * 64, "revision": c},
+        })
+
+    def test_authorization_matrix(self):
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "workflow_dispatch", nightly_opt_in=True, ref="refs/heads/main",
+            ci_verified=True, recovery=False)
+        self.assertTrue(ok)
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "schedule", ref="refs/heads/main", ci_verified=True,
+            pin_stable=True, schedule_opt_in=True)
+        self.assertTrue(ok)
+        ok, _ = release.nightly_ghcr_mirror_authorized(
+            "workflow_run", ref="refs/heads/main", ci_verified=True)
+        self.assertTrue(ok)
+        for kwargs in [
+            dict(event_name="workflow_dispatch", nightly_opt_in=False, ref="refs/heads/main", ci_verified=True),
+            dict(event_name="workflow_dispatch", nightly_opt_in=True, ref="refs/heads/main", ci_verified=True, recovery=True),
+            dict(event_name="schedule", ref="refs/heads/main", ci_verified=True, pin_stable=True, schedule_opt_in=False),
+            dict(event_name="push", ref="refs/heads/main", ci_verified=True),
+        ]:
+            ok, _ = release.nightly_ghcr_mirror_authorized(**kwargs)
+            self.assertFalse(ok, kwargs)
+
+    def test_decision_blocks_unauthorized_absent_and_refuses_conflicts(self):
+        hub = self.hub_obs()
+        with patch.object(release, "platform_manifest_revisions", return_value=self.revisions()):
+            action, digest, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("absent", {}), authorized=False)
+            self.assertEqual(action, "blocked")
+            self.assertEqual(digest, self.DIGEST)
+            action, _, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("unknown", {}), authorized=True)
+            self.assertEqual(action, "refuse")
+            self.assertIn("unknown", reason.lower())
+            action, _, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("present", {"digest": self.OTHER}), authorized=True)
+            self.assertEqual(action, "refuse")
+            self.assertIn("conflict", reason.lower())
+
+    def test_decision_allows_copy_and_idempotent_reuse(self):
+        hub = self.hub_obs()
+        ghcr = ("present", {"digest": self.DIGEST, "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+        with patch.object(release, "platform_manifest_revisions", return_value=self.revisions()):
+            action, digest, _ = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ("absent", {}), authorized=True)
+            self.assertEqual((action, digest), ("copy", self.DIGEST))
+            action, digest, reason = release.ghcr_sha_mirror_decision(
+                self.COMMIT, hub, ghcr, authorized=False)
+            self.assertEqual(action, "reuse")
+            self.assertEqual(digest, self.DIGEST)
+            self.assertIn("matches", reason.lower())
+
+    def test_ensure_mirror_copies_by_digest_and_reverifies(self):
+        hub = self.hub_obs()
+        ghcr_absent = ("absent", {})
+        ghcr_present = ("present", {"digest": self.DIGEST, "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+        calls = []
+
+        def observe(ref, strict=False):
+            calls.append(("observe", ref))
+            if ref.startswith(release.DOCKER_HUB_IMAGE):
+                return hub
+            return ghcr_present if len([c for c in calls if c[1].startswith("ghcr.io/")]) > 1 else ghcr_absent
+
+        with patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", return_value=self.revisions()), \
+             patch.object(release.subprocess, "run") as run:
+            values = release.ensure_ghcr_sha_mirror(self.COMMIT, authorized=True, apply=True, emit=False)
+        self.assertEqual(values["action"], "copy")
+        self.assertEqual(values["digest"], self.DIGEST)
+        cmd = run.call_args[0][0]
+        self.assertEqual(cmd[:4], ["docker", "buildx", "imagetools", "create"])
+        self.assertIn(f"{release.DOCKER_HUB_IMAGE}@{self.DIGEST}", cmd)
+        self.assertTrue(any("ghcr.io/" in str(x) for x in cmd))
+
+    def test_ensure_mirror_unauthorized_absent_writes_nothing(self):
+        with patch.object(release, "observe_reference", side_effect=[self.hub_obs(), ("absent", {})]), \
+             patch.object(release, "platform_manifest_revisions", return_value=self.revisions()), \
+             patch.object(release.subprocess, "run") as run:
+            values = release.ensure_ghcr_sha_mirror(self.COMMIT, authorized=False, apply=True, emit=False)
+        self.assertEqual(values["action"], "blocked")
+        run.assert_not_called()
 
 
 class StableReleasePublicationTests(unittest.TestCase):
@@ -3625,6 +3913,368 @@ class LocalOciCandidateTests(unittest.TestCase):
             self.verify(self.layout(malformed=True)[0])
         with self.assertRaisesRegex(ValueError, "!="):
             self.verify(self.layout(ambiguous=True)[0])
+
+
+class PublicationDagPathTests(unittest.TestCase):
+    """Durable evidence that an explicit publish cannot silently no-op.
+
+    Regression for the 2026-11-20 trusted publish runs 44738205399 /
+    44739581869: immutable verification succeeded but the deliberately skipped
+    build ancestors made the write phases skip under implicit success(), so a
+    green run published no GitHub release, docs or aliases.
+    """
+
+    OK_OUTPUTS = {
+        "out_publish-immutable_verified": "true",
+        "out_publish-immutable_digest": "sha256:" + "a" * 64,
+        "out_prepare-draft_release_id": "123456789",
+        "out_stable-channel-transaction_action": "publish",
+        "out_promote-aliases_aliases_verified": "true",
+    }
+
+    def state(self, publish="true", channel="stable", staged=True,
+              event="workflow_dispatch", request_publish="true", **overrides):
+        results = {
+            "result_plan": "success",
+            "result_image": "skipped" if staged else "success",
+            "result_publish-immutable": "success",
+            "result_prepare-draft": "success",
+            "result_stable-channel-transaction": "success" if channel == "stable" else "skipped",
+            "result_promote-aliases": "success",
+            "result_publish": "success",
+            "result_publish-minor": "success" if channel == "stable" else "skipped",
+        }
+        results.update({k: v for k, v in overrides.items() if k.startswith("result_")})
+        values = {"event": event, "request_publish": request_publish,
+                  "publish": publish, "channel": channel,
+                  **results, **self.OK_OUTPUTS}
+        values.update({k: v for k, v in overrides.items() if not k.startswith("result_")})
+        return values
+
+    def test_staged_stable_publish_path_is_allowed(self):
+        ok, reason = release.publication_phases_decision(self.state())
+        self.assertTrue(ok, reason)
+
+    def test_ordinary_non_stable_publish_requires_real_image(self):
+        ok, reason = release.publication_phases_decision(
+            self.state(channel="prerelease", staged=False))
+        self.assertTrue(ok, reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(channel="prerelease", staged=False, **{"result_image": "skipped"}))
+        self.assertFalse(ok)
+        self.assertIn("image", reason)
+
+    def test_skipped_failed_or_cancelled_write_phase_fails_closed(self):
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases", "publish"):
+            for result in ("skipped", "failure", "cancelled"):
+                ok, reason = release.publication_phases_decision(
+                    self.state(**{"result_" + phase: result}))
+                self.assertFalse(ok, (phase, result, reason))
+                self.assertIn(phase, reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_stable-channel-transaction": "skipped"}))
+        self.assertFalse(ok)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_publish-minor": "skipped"}))
+        self.assertFalse(ok)
+
+    def test_missing_verification_outputs_fail_closed(self):
+        for key in self.OK_OUTPUTS:
+            ok, reason = release.publication_phases_decision(self.state(**{key: ""}))
+            self.assertFalse(ok, (key, reason))
+
+    def test_rehearsal_cannot_run_any_write_phase(self):
+        state = self.state(publish="false", request_publish="false")
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases",
+                      "publish", "stable-channel-transaction", "publish-minor"):
+            state["result_" + phase] = "skipped"
+        ok, reason = release.publication_phases_decision(state)
+        self.assertTrue(ok, reason)
+        state["result_prepare-draft"] = "success"
+        ok, reason = release.publication_phases_decision(state)
+        self.assertFalse(ok)
+        self.assertIn("prepare-draft", reason)
+
+    def test_explicit_request_never_trusts_a_blank_or_false_plan_decision(self):
+        for decision in ("", "false", "unknown"):
+            ok, reason = release.publication_phases_decision(
+                self.state(publish=decision))
+            self.assertFalse(ok, (decision, reason))
+            self.assertIn("affirmative", reason)
+
+    def test_explicit_request_requires_plan_success_and_known_channel(self):
+        for result in ("", "skipped", "failure", "cancelled"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"result_plan": result}))
+            self.assertFalse(ok, (result, reason))
+            self.assertIn("plan result", reason)
+        for channel in ("", "v1.0.40", "preview", "mod-v2.0.6"):
+            ok, reason = release.publication_phases_decision(self.state(channel=channel))
+            self.assertFalse(ok, (channel, reason))
+            self.assertIn("channel", reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(event="push", request_publish="true", publish="true"))
+        self.assertFalse(ok)
+        self.assertIn("explicit request", reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_prepare-draft": "not_a_status"}))
+        self.assertFalse(ok)
+        self.assertIn("unknown result", reason)
+
+    def test_transaction_action_allowlist(self):
+        for action in ("publish", "noop"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"out_stable-channel-transaction_action": action}))
+            self.assertTrue(ok, (action, reason))
+        for action in ("", "reconcile", "rollback", "refuse", "stage"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"out_stable-channel-transaction_action": action}))
+            self.assertFalse(ok, (action, reason))
+            self.assertIn("allowlist", reason)
+
+    def test_terminal_cli_rejects_blank_plan_on_explicit_request(self):
+        # Real CLI path, not just the pure decision function: a blank plan
+        # decision with an explicit trusted request must fail closed.
+        argv = ["release.py", "verify-publication-phases",
+                "--event", "workflow_dispatch", "--request-publish", "true",
+                "--publish", "", "--channel", "stable",
+                "--result-plan", "success", "--result-image", "skipped",
+                "--result-immutable", "success", "--result-draft", "success",
+                "--result-transaction", "success", "--result-aliases", "success",
+                "--result-publish", "success", "--result-minor", "success",
+                "--verified", "true", "--digest", "sha256:" + "a" * 64,
+                "--release-id", "123", "--transaction-action", "publish",
+                "--aliases-verified", "true"]
+        out = io.StringIO()
+        with patch("sys.argv", argv), redirect_stdout(out):
+            with self.assertRaisesRegex(ValueError, "affirmative plan decision"):
+                release.main()
+
+    def test_single_positive_transaction_contract_across_all_write_guards(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        jobs = yaml.safe_load(source)["jobs"]
+        transaction = jobs["stable-channel-transaction"]
+        self.assertEqual(transaction["outputs"]["action"],
+                         "${{ steps.action_gate.outputs.action }}")
+        steps = transaction["steps"]
+        gate = next(s for s in steps if s.get("id") == "action_gate")
+        gate_run = str(gate["run"])
+        self.assertIn("publish|noop", gate_run)
+        for outcome in ("reconcile", "rollback", "refuse", ""):
+            self.assertIn("::error::unsupported stable transaction action", gate_run)
+        compensate = next(s for s in steps if s.get("id") == "docs_compensate")
+        compensation = " ".join(str(compensate["if"]).split())
+        self.assertIn("steps.action_gate.outcome != 'success'", compensation)
+        self.assertIn("steps.transaction.outputs.action == 'reconcile'", compensation)
+        for job in ("promote-aliases", "publish"):
+            condition = " ".join(str(jobs[job]["if"]).split())
+            self.assertIn("action == 'publish'", condition, job)
+            self.assertIn("action == 'noop'", condition, job)
+            self.assertNotIn("action != 'refuse'", condition, job)
+            self.assertNotIn("action != 'rollback'", condition, job)
+
+    def test_reconcile_is_refused_before_writes_not_only_at_terminal(self):
+        # DAG outcome case: the engine's qualified 'reconcile' must be stopped by
+        # the pre-write action gate, and the terminal rejects it even if reached.
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"out_stable-channel-transaction_action": "reconcile"}))
+        self.assertFalse(ok)
+        self.assertIn("allowlist", reason)
+
+    def test_terminal_gate_receives_raw_event_and_request_from_workflow(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        terminal = yaml.safe_load(source)["jobs"]["verify-publication-phases"]
+        step = next(s for s in terminal["steps"]
+                    if "verify-publication-phases" in str(s.get("run", "")))
+        env = step["env"]
+        self.assertEqual(env["RELEASE_EVENT"], "${{ github.event_name }}")
+        self.assertEqual(env["REQUEST_PUBLISH"], "${{ inputs.publish }}")
+        self.assertEqual(env["RESULT_PLAN"], "${{ needs.plan.result }}")
+        self.assertEqual(env["RELEASE_PUBLISH"], "${{ needs.plan.outputs.publish }}")
+
+    def test_workflow_uses_explicit_phase_guards_and_trusted_terminal_gate(self):
+        import yaml
+        path = release.ROOT / ".github/workflows/release.yml"
+        source = path.read_text(encoding="utf-8")
+        doc = yaml.safe_load(source)
+        jobs = doc["jobs"]
+        for name in ("prepare-draft", "stable-channel-transaction",
+                     "promote-aliases", "publish", "publish-minor"):
+            condition = " ".join(str(jobs[name]["if"]).split())
+            self.assertIn("always()", condition, name)
+            self.assertIn("!cancelled()", condition, name)
+            self.assertIn("needs.plan.result == 'success'", condition, name)
+        self.assertIn("needs.prepare-draft.result == 'success'",
+                      " ".join(str(jobs["publish-minor"]["if"]).split()))
+        terminal = jobs["verify-publication-phases"]
+        self.assertIn("always()", " ".join(str(terminal["if"]).split()))
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases",
+                      "publish", "publish-minor"):
+            self.assertIn(phase, terminal["needs"])
+        steps = terminal["steps"]
+        trusted = [s for s in steps if str(s.get("with", {}).get("path", "")) == ".trusted-release"]
+        self.assertEqual(len(trusted), 1)
+        self.assertEqual(trusted[0]["with"]["ref"], "${{ github.sha }}")
+        self.assertTrue(any("verify-publication-phases" in str(s.get("run", ""))
+                            for s in steps))
+
+
+class BrowserDomGateTests(unittest.TestCase):
+    """The browser gate uses one pinned Playwright session, not dump-dom loops."""
+
+    def test_pinned_helper_and_python_wrapper(self):
+        root = release.ROOT
+        helper = root / "scripts/manual-review/e2e/version-check-dom.mjs"
+        self.assertTrue(helper.is_file())
+        source = helper.read_text(encoding="utf-8")
+        self.assertIn('from "playwright"', source)
+        self.assertIn("chromium.launch(", source)
+        self.assertIn('waitUntil: "domcontentloaded"', source)
+        self.assertIn("hasOwnProperty.call(results, request.key)", source)
+        self.assertIn("response.status()", source)
+        self.assertIn("const url = page.url()", source)
+        self.assertIn("unknown browser error", source)
+        self.assertNotIn("executablePath:", source)
+        self.assertNotIn("CHROME_PATH", source)
+        wrapper = (root / "scripts/browser_version_check.py").read_text(encoding="utf-8")
+        self.assertIn("collect_dom(", wrapper)
+        self.assertIn("version-check-dom.mjs", wrapper)
+        self.assertNotIn("--dump-dom", wrapper)
+        self.assertNotIn("disable-javascript", wrapper)
+        self.assertIn("An empty DOM is a browser failure", wrapper)
+
+    def test_privileged_workflow_provisions_trusted_e2e_package(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        jobs = yaml.safe_load(source)["jobs"]
+        provision = next(s for s in jobs["stable-channel-transaction"]["steps"]
+                         if s.get("id") == "stable_chromium")
+        self.assertEqual(provision["working-directory"],
+                         ".trusted-release/scripts/manual-review/e2e")
+        rehearsal = next(s for s in jobs["rehearse-stable-docs"]["steps"]
+                         if s.get("name", "").startswith("Provision pinned Playwright"))
+        self.assertEqual(rehearsal["working-directory"], "scripts/manual-review/e2e")
+        cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/browser_version_check.py", cd)
+        cd_jobs = yaml.safe_load(cd)["jobs"]
+        cd_steps = cd_jobs["channel-transaction"]["steps"]
+        provision = next(i for i, s in enumerate(cd_steps)
+                         if s.get("name") == "Provision Chromium for browser QA")
+        local = next(i for i, s in enumerate(cd_steps)
+                     if s.get("name", "").startswith("Browser-qualify Stable/Nightly"))
+        self.assertLess(provision, local)
+
+
+class BrowserCollectorFailClosedTests(unittest.TestCase):
+    """A broken nightly snapshot must abort the checker with a real diagnostic."""
+
+    def sample_index(self):
+        digest = "sha256:" + "b" * 64
+        return {
+            "schema_version": 3,
+            "repository": "https://github.com/athNdev/carbonpanel",
+            "channels": {
+                "stable": {
+                    "display": "Stable", "version": "1.0.40", "route": "/docs/",
+                    "commit": "a" * 40,
+                    "image": {"digest": digest,
+                              "docker_hub": "atharvnaphade/carbonpanel:latest",
+                              "ghcr": "ghcr.io/athndev/carbonpanel:latest"},
+                    "promotion": {"state": "published", "promoted": True},
+                },
+                "nightly": {
+                    "display": "Nightly", "route": "/docs/nightly/",
+                    "commit": "c" * 40,
+                    "image": {"digest": digest,
+                              "docker_hub": "atharvnaphade/carbonpanel:nightly",
+                              "ghcr": "ghcr.io/athndev/carbonpanel:nightly"},
+                    "promotion": {"state": "final", "promoted": True},
+                },
+            },
+            "promotion": {"state": "baseline", "promoted": False},
+            "versions": [],
+        }
+
+    def run_check(self, mutate):
+        with tempfile.TemporaryDirectory() as root:
+            site = Path(root)
+            index = self.sample_index()
+            (site / "version-index.json").write_text(json.dumps(index), encoding="utf-8")
+            (site / "channel-marker.json").write_text(
+                json.dumps(vc.channel_marker(index)), encoding="utf-8")
+
+            def collector(origin, paths):
+                snapshot = {}
+                for path in paths:
+                    for width in bvc.BROWSER_WIDTHS:
+                        snapshot[f"{path}|{width}"] = {
+                            "html": "<html><body>packaged site</body></html>",
+                            "status": 200, "url": origin + path,
+                        }
+                outcome = mutate(snapshot)
+                return snapshot if outcome is None else outcome
+
+            with patch.object(bvc, "collect_dom", side_effect=collector), \
+                    patch("sys.argv", ["browser_version_check.py", str(site)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(ValueError) as caught:
+                    bvc.main()
+            return str(caught.exception)
+
+    def test_explicit_browser_error_is_not_a_missing_marker(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|375": {"error": "TimeoutError: page.goto timed out"}}))
+        self.assertIn("browser qualification aborted", message)
+        self.assertIn("TimeoutError: page.goto timed out", message)
+        self.assertNotIn("missing", message)
+
+    def test_empty_missing_and_wrong_origin_abort(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|375": {"html": "", "status": 200,
+                                   "url": "http://127.0.0.1:1/docs/nightly/"}}))
+        self.assertIn("browser returned empty DOM", message)
+
+        def omit_one(snapshot):
+            # pop() returns the removed value; do NOT return it from the
+            # mutator or the collector would receive only that single entry
+            # instead of the complete snapshot with one key missing.
+            snapshot.pop("/docs/nightly/|375", None)
+            return None
+
+        message = self.run_check(omit_one)
+        self.assertIn("no browser result collected", message)
+        self.assertEqual(message.count("browser qualification aborted"), 1)
+        self.assertEqual(message.count("no browser result collected"), 1)
+        self.assertNotIn("browser error:", message)
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|1440": {"html": "<html>ok</html>", "status": 200,
+                                    "url": "https://elsewhere.invalid/"}}))
+        self.assertIn("outside origin", message)
+
+    def test_local_server_closed_when_collection_raises(self):
+        with tempfile.TemporaryDirectory() as root:
+            site = Path(root)
+            index = self.sample_index()
+            (site / "version-index.json").write_text(json.dumps(index), encoding="utf-8")
+            (site / "channel-marker.json").write_text(
+                json.dumps(vc.channel_marker(index)), encoding="utf-8")
+            server = MagicMock()
+            with patch.object(bvc, "ThreadingHTTPServer", return_value=server), \
+                    patch.object(bvc, "collect_dom", side_effect=RuntimeError("browser boom")), \
+                    patch("sys.argv", ["browser_version_check.py", str(site)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, "browser boom"):
+                    bvc.main()
+            server.shutdown.assert_called_once()
+            server.server_close.assert_called_once()
+
+    def test_non_200_status_aborts(self):
+        message = self.run_check(lambda snap: snap.update({
+            "/docs/nightly/|1440": {"html": "<html>ok</html>", "status": 404,
+                                    "url": "http://127.0.0.1:1/docs/nightly/"}}))
+        self.assertIn("HTTP status 404", message)
 
 
 if __name__ == "__main__":

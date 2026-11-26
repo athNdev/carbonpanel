@@ -14,12 +14,13 @@ one at https://mozilla.org/MPL/2.0/.
 	import { goto } from '$app/navigation';
 	import { asset, resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
-	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
+	import { theme } from '$lib/display-preferences.svelte';
 	import { authStore } from '$lib/stores/auth';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { silentCallOptions } from '$lib/api/rpc-client';
 	import { ValidateInviteRequestSchema } from '$lib/proto/carbonpanel/v1/auth_pb';
 	import { CarbonButton, CarbonTextInput, CarbonTabs } from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, AlertCircle, TicketCheck, KeyRound, Shield } from '@lucide/svelte';
 
@@ -73,9 +74,6 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	async function initializeSignIn() {
-		// The login route renders outside CarbonShell, so hydrate the shared
-		// preference owner here before choosing a theme-aware brand mark.
-		displayPreferences.hydrate();
 		const urlParams = new URLSearchParams(window.location.search);
 
 		// Canonical OIDC error states from the callback. Never render raw IdP text.
@@ -391,6 +389,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			{#if showAuthTabs}
 				<CarbonTabs idPrefix="auth" tabs={authTabs} bind:selectedTab={mode} class="mb-6" />
+				<CarbonInactiveTabPanels tabs={authTabs} selectedTab={mode} idPrefix="auth" />
 			{/if}
 
 			{#if mode === 'login'}
@@ -398,7 +397,8 @@ one at https://mozilla.org/MPL/2.0/.
 					role={showAuthTabs ? 'tabpanel' : undefined}
 					id="auth-panel-login"
 					aria-labelledby={showAuthTabs ? 'auth-tab-login' : undefined}
-					class="motion-fade-in space-y-4"
+					class="focus-ring motion-fade-in space-y-4"
+					tabindex={showAuthTabs ? 0 : undefined}
 				>
 					{#if localAuthEnabled}
 						<form onsubmit={handleSubmit} class="space-y-4">
@@ -461,6 +461,8 @@ one at https://mozilla.org/MPL/2.0/.
 					role={showAuthTabs ? 'tabpanel' : undefined}
 					id="auth-panel-register"
 					aria-labelledby={showAuthTabs ? 'auth-tab-register' : undefined}
+					class="focus-ring"
+					tabindex={showAuthTabs ? 0 : undefined}
 				>
 					<form onsubmit={handleSubmit} class="motion-fade-in space-y-4">
 						{#if inviteValid && inviteDescription}

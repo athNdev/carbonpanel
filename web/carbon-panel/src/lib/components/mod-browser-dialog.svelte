@@ -38,6 +38,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { formatBytes } from '$lib/utils';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { createRequestSequence } from '$lib/utils/request-sequence';
+	import { resolveWizardMods, type QueuedServerMod } from '$lib/features/servers/create-content';
 	import type {
 		BrowseModResult as RpcBrowseMod,
 		ModVersion as RpcModVersion,
@@ -46,8 +47,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	interface Props {
 		open: boolean;
-		server: Server;
+		server: Pick<Server, 'id' | 'mcVersion' | 'modLoader' | 'modpackLoader'>;
 		onInstalled?: () => void;
+		onQueue?: (mods: QueuedServerMod[]) => void;
+		queuedMods?: QueuedServerMod[];
 	}
 
 	interface SearchMod {
@@ -130,7 +133,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	}
 
-	let { open = $bindable(false), server, onInstalled }: Props = $props();
+	let { open = $bindable(false), server, onInstalled, onQueue, queuedMods = [] }: Props = $props();
 
 	let searchQuery = $state('');
 	let platform = $state<'modrinth' | 'curseforge'>('modrinth');
@@ -142,6 +145,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let selectedMod = $state<SearchMod | null>(null);
 	let loadingVersions = $state(false);
 	let versions = $state<ModVersion[]>([]);
+	let versionRecords = $state<RpcModVersion[]>([]);
 	let selectedVersion = $state<ModVersion | null>(null);
 	let selectedDependencies = $state<Record<string, boolean>>({});
 	let installing = $state(false);
@@ -153,7 +157,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let gameLoader = $derived(effectiveLoader(server.modLoader, server.modpackLoader));
 
 	let installLabel = $derived(
-		selectedDepIds.length > 0 ? 'Install with all dependencies' : 'Install'
+		onQueue
+			? 'Add to server setup'
+			: selectedDepIds.length > 0
+				? 'Install with all dependencies'
+				: 'Install'
 	);
 
 	let filterByVersion = $state(true);
@@ -223,6 +231,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	// Filtered mods list - omits client-only mods by default in server context
 	let displayMods = $derived.by(() => {
+		if (onQueue) return mods.filter((mod) => mod.server_side !== 'unsupported');
 		const sideFilter = activeFilters.find((f) => f.key === 'side')?.value;
 		if (sideFilter === 'server') {
 			return mods.filter((m) => m.server_side !== 'unsupported');
@@ -237,18 +246,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	const searchSequence = createRequestSequence();
 	const versionsSequence = createRequestSequence();
 
+	function browseTarget() {
+		return {
+			loader: onQueue
+				? loaderSearchName(gameLoader)
+				: activeFilters.find((filter) => filter.key === 'loader')?.value ||
+					loaderSearchName(gameLoader),
+			mcVersion: onQueue
+				? server.mcVersion
+				: activeFilters.find((filter) => filter.key === 'version')?.value ||
+					(filterByVersion ? server.mcVersion || '' : ''),
+			side: onQueue ? 'server' : activeFilters.find((filter) => filter.key === 'side')?.value || ''
+		};
+	}
+
 	async function searchMods() {
 		searching = true;
 		const seq = searchSequence.next();
 		searchError = '';
 		mods = [];
 		try {
-			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
-			const versionVal =
-				activeFilters.find((f) => f.key === 'version')?.value ||
-				(filterByVersion ? server.mcVersion || '' : '');
-			const sideVal = activeFilters.find((f) => f.key === 'side')?.value || '';
 			// The legacy route ignored a `category` query param; the generated
 			// contract exposes only the filters the shared operation applies.
 
@@ -257,15 +274,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					serverId: server.id,
 					query: searchQuery.trim(),
 					platform,
-					loader: loaderVal,
-					mcVersion: versionVal,
-					side: sideVal
+					...browseTarget()
 				},
 				silentCallOptions
 			);
 			if (!searchSequence.isCurrent(seq)) return;
 			mods = response.results.map(toSearchMod);
 		} catch (err) {
+			if (!searchSequence.isCurrent(seq)) return;
 			console.error('Failed to search mods:', err);
 			searchError = `Failed to search mods: ${(err instanceof Error ? err.message : undefined) || 'Please verify server connection.'}`;
 		} finally {
@@ -278,27 +294,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		loadingVersions = true;
 		const seq = versionsSequence.next();
 		versions = [];
+		versionRecords = [];
 		selectedVersion = null;
 		selectedDependencies = {};
 
 		try {
-			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
-			const versionVal =
-				activeFilters.find((f) => f.key === 'version')?.value ||
-				(filterByVersion ? server.mcVersion || '' : '');
+			const { loader, mcVersion } = browseTarget();
 			const modTarget = mod.platform === 'curseforge' && mod.id ? mod.id : mod.slug || mod.id;
 			const response = await rpcClient.modBrowse.getModVersions(
 				{
 					serverId: server.id,
 					project: modTarget,
 					platform: mod.platform,
-					loader: loaderVal,
-					mcVersion: versionVal
+					loader,
+					mcVersion
 				},
 				silentCallOptions
 			);
 			if (!versionsSequence.isCurrent(seq)) return;
+			versionRecords = response.versions;
 			versions = response.versions.map(toModVersion);
 			if (versions.length > 0) {
 				selectVersion(versions[0]);
@@ -400,6 +414,29 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		installing = true;
 		try {
+			if (onQueue) {
+				const project = selectedMod;
+				const version = versionRecords.find((entry) => entry.id === selectedVersion?.id);
+				if (!version) return;
+				const { loader, mcVersion } = browseTarget();
+				const key = `${project.platform}:${project.id}`;
+				const selections = queuedMods
+					.filter((mod) => mod.project !== key)
+					.map((mod) => mod.selection);
+				const plan = await resolveWizardMods(
+					{ loader, mcVersion },
+					[
+						...selections,
+						{ id: project.id, name: project.title, platform: project.platform, version }
+					],
+					async (target) =>
+						(await rpcClient.modBrowse.getModVersions(target, silentCallOptions)).versions
+				);
+				if (!open || selectedMod !== project || selectedVersion?.id !== version.id) return;
+				onQueue(plan);
+				selectedMod = null;
+				return;
+			}
 			const loaderVal =
 				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
 			const versionVal =
@@ -505,7 +542,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<div>
 						<DialogTitle class="flex items-center gap-2 text-xl font-bold">
 							<Boxes class="h-5 w-5 text-primary" />
-							{selectedMod ? selectedMod.title : 'Browse & Install Online Mods'}
+							{selectedMod
+								? selectedMod.title
+								: onQueue
+									? 'Browse compatible mods'
+									: 'Browse & Install Online Mods'}
 						</DialogTitle>
 						<DialogDescription>
 							Loader: <span class="font-semibold text-foreground"
@@ -525,7 +566,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<Badge variant="outline" class="font-mono text-xs uppercase">
 						{loaderSearchName(gameLoader)}
 					</Badge>
-					{#if server.mcVersion}
+					{#if server.mcVersion && !onQueue}
 						<button
 							type="button"
 							onclick={() => {
@@ -595,75 +636,77 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</CarbonButton>
 				</div>
 
-				<!-- Interactive Filter Bar -->
-				<div class="flex flex-wrap items-center gap-2 border-t border-border/40 pt-1">
-					<div class="mr-1 flex items-center text-xs font-semibold text-muted-foreground">
-						<Filter class="mr-1 h-3.5 w-3.5 text-primary" />
-						Filters:
-					</div>
-
-					{#each activeFilters as f (f.key)}
-						<span
-							class="inline-flex items-center gap-1 rounded-md border border-border/50 bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
-						>
-							<span class="font-mono text-xs text-muted-foreground">{f.key}:</span>
-							<span class="font-semibold">{f.value}</span>
-							{#if f.removable}
-								<button
-									type="button"
-									onclick={() => removeFilter(f.key)}
-									class="ml-0.5 cursor-pointer transition-colors hover:text-destructive"
-									title={`Remove ${f.key} filter`}
-								>
-									<X class="h-3 w-3" />
-								</button>
-							{/if}
-						</span>
-					{/each}
-
-					<!-- Filter input with auto-suggestions -->
-					<div class="relative inline-block">
-						<div class="flex items-center">
-							<input
-								type="text"
-								placeholder="+ Add filter (e.g. side:server, category:optimization)..."
-								bind:value={filterInput}
-								onfocus={() => (filterInputFocused = true)}
-								onblur={() => setTimeout(() => (filterInputFocused = false), 200)}
-								onkeydown={(e) => {
-									if (e.key === 'Enter' && filterInput.trim()) {
-										addFilter(filterInput.trim());
-									} else if (e.key === 'Escape') {
-										filterInputFocused = false;
-									}
-								}}
-								class="h-7 w-72 rounded-md border border-dashed border-border bg-muted/50 px-2 text-xs placeholder:text-muted-foreground/70 focus:border-primary focus:bg-background focus:outline-none"
-							/>
+				{#if !onQueue}
+					<!-- Interactive Filter Bar -->
+					<div class="flex flex-wrap items-center gap-2 border-t border-border/40 pt-1">
+						<div class="mr-1 flex items-center text-xs font-semibold text-muted-foreground">
+							<Filter class="mr-1 h-3.5 w-3.5 text-primary" />
+							Filters:
 						</div>
 
-						{#if filterInputFocused && suggestions.length > 0}
-							<div
-								class="absolute top-full left-0 z-50 mt-1 w-80 overflow-hidden rounded-lg border bg-popover py-1 text-popover-foreground shadow-lg"
+						{#each activeFilters as f (f.key)}
+							<span
+								class="inline-flex items-center gap-1 rounded-md border border-border/50 bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
 							>
-								<div
-									class="mb-1 border-b px-2 py-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-								>
-									Filter Suggestions (type key:value)
-								</div>
-								{#each suggestions as s (s.label)}
+								<span class="font-mono text-xs text-muted-foreground">{f.key}:</span>
+								<span class="font-semibold">{f.value}</span>
+								{#if f.removable}
 									<button
 										type="button"
-										onmousedown={() => addFilter(s.label)}
-										class="flex w-full cursor-pointer flex-col px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+										onclick={() => removeFilter(f.key)}
+										class="ml-0.5 cursor-pointer transition-colors hover:text-destructive"
+										title={`Remove ${f.key} filter`}
 									>
-										<span class="font-mono font-medium text-primary">{s.label}</span>
-										<span class="text-xs text-muted-foreground">{s.desc}</span>
+										<X class="h-3 w-3" />
 									</button>
-								{/each}
+								{/if}
+							</span>
+						{/each}
+
+						<!-- Filter input with auto-suggestions -->
+						<div class="relative inline-block">
+							<div class="flex items-center">
+								<input
+									type="text"
+									placeholder="+ Add filter (e.g. side:server, category:optimization)..."
+									bind:value={filterInput}
+									onfocus={() => (filterInputFocused = true)}
+									onblur={() => setTimeout(() => (filterInputFocused = false), 200)}
+									onkeydown={(e) => {
+										if (e.key === 'Enter' && filterInput.trim()) {
+											addFilter(filterInput.trim());
+										} else if (e.key === 'Escape') {
+											filterInputFocused = false;
+										}
+									}}
+									class="h-7 w-72 rounded-md border border-dashed border-border bg-muted/50 px-2 text-xs placeholder:text-muted-foreground/70 focus:border-primary focus:bg-background focus:outline-none"
+								/>
 							</div>
-						{/if}
+
+							{#if filterInputFocused && suggestions.length > 0}
+								<div
+									class="absolute top-full left-0 z-50 mt-1 w-80 overflow-hidden rounded-lg border bg-popover py-1 text-popover-foreground shadow-lg"
+								>
+									<div
+										class="mb-1 border-b px-2 py-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+									>
+										Filter Suggestions (type key:value)
+									</div>
+									{#each suggestions as s (s.label)}
+										<button
+											type="button"
+											onmousedown={() => addFilter(s.label)}
+											class="flex w-full cursor-pointer flex-col px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+										>
+											<span class="font-mono font-medium text-primary">{s.label}</span>
+											<span class="text-xs text-muted-foreground">{s.desc}</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					</div>
-				</div>
+				{/if}
 			</div>
 
 			<!-- Search Results / Mod List -->
@@ -686,7 +729,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<Package class="h-10 w-10 stroke-[1.5]" />
 						<p class="mt-3 text-base font-medium">No matching mods found</p>
 						<p class="text-xs text-muted-foreground">
-							Try a different query or remove some active filters.
+							{onQueue
+								? 'Try another search for this Minecraft version and loader.'
+								: 'Try a different query or remove some active filters.'}
 						</p>
 					</div>
 				{:else}
@@ -718,12 +763,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 													<span class="truncate text-xs text-muted-foreground">by {mod.author}</span
 													>
 												{/if}
-												{#if mod.installed}
+												{#if mod.installed || queuedMods.some((entry) => entry.project === `${mod.platform}:${mod.id}`)}
 													<Badge
 														variant="default"
 														class="h-4 bg-emerald-600 px-1.5 py-0 text-xs text-white"
 													>
-														Installed
+														{mod.installed ? 'Installed' : 'Selected'}
 													</Badge>
 												{/if}
 											</div>
@@ -840,16 +885,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								Dependencies
 							</div>
 							<p class="text-xs text-muted-foreground">
-								Select dependencies to install together with this mod. Required dependencies are
-								pre-selected.
+								{onQueue
+									? 'Required dependencies are included and checked before the mod is added.'
+									: 'Select dependencies to install together with this mod. Required dependencies are pre-selected.'}
 							</p>
 							<div class="space-y-1.5 pt-1">
 								{#each selectedVersion.dependencies as dep (dep.project_id ?? dep.title)}
-									{#if dep.project_id}
+									{#if dep.project_id && dep.dependency_type.toLowerCase() !== 'incompatible'}
 										<label class="flex cursor-pointer items-center gap-2 text-xs">
 											<input
 												type="checkbox"
 												checked={!!selectedDependencies[dep.project_id]}
+												disabled={Boolean(onQueue)}
 												onchange={(e) => {
 													selectedDependencies[dep.project_id] = (
 														e.target as HTMLInputElement
@@ -867,7 +914,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											<Badge variant="outline" class="font-mono text-xs">
 												{dep.dependency_type}
 											</Badge>
-											<span>{dep.title || 'Unresolvable dependency (no project id)'}</span>
+											<span
+												>{dep.title ||
+													dep.project_id ||
+													dep.version_id ||
+													'Dependency identity unavailable'}</span
+											>
 										</div>
 									{/if}
 								{/each}
@@ -880,7 +932,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CarbonButton onclick={installMod} disabled={installing || !selectedVersion}>
 							{#if installing}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Installing to /mods...
+								{onQueue ? 'Checking dependencies…' : 'Installing to /mods…'}
 							{:else}
 								<Download class="mr-2 h-4 w-4" />
 								{installLabel}

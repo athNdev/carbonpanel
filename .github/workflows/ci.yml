@@ -28,7 +28,7 @@ jobs:
       - run: python3 -m unittest scripts.test_release scripts.test_docs_publication_gate scripts.test_go_mod_download scripts.test_runtime_artifacts
       - run: python3 -m unittest scripts.test_validate_mcp_server_json
       # Offline only: this PR test never authenticates or writes Docker Hub.
-      - run: python3 -m unittest scripts.test_dockerhub_description
+      - run: python3 -m unittest scripts.test_dockerhub_description scripts.test_version_bump_channels
 
   proxmox-installer:
     name: Proxmox installer fixtures
@@ -372,6 +372,14 @@ jobs:
       - name: Exercise component and packaged-route accessibility in Chromium
         working-directory: scripts/manual-review/e2e
         run: node a11y-check.mjs
+
+      - name: Native terrain viewport and packaged World View (Chromium)
+        working-directory: scripts/manual-review/e2e
+        run: node native-map-viewport-check.mjs
+
+      - name: World View scope and session recovery (Chromium)
+        working-directory: scripts/manual-review/e2e
+        run: node worldview-scoped-denial-check.mjs
 
       - name: Local administrator OIDC linking (Chromium)
         working-directory: web/carbon-panel

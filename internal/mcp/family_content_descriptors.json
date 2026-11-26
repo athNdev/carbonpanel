@@ -285,7 +285,7 @@
     "transport": "rpc",
     "registered_by": "content",
     "bounded_args": "single id; game_version/mod_loader \u003c= 32 chars",
-    "description": "List available versions for one modpack. Read-only."
+    "description": "List available releases for one modpack, including Minecraft versions reported for each release. Read-only."
   },
   {
     "tool": "toggle_favorite",

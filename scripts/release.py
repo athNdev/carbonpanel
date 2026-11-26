@@ -1827,6 +1827,125 @@ def verify_publication_ref(args):
     return allowed
 
 
+PHASE_RESULTS = ("success", "failure", "cancelled", "skipped", "")
+KNOWN_CHANNELS = ("stable", "prerelease")
+POSITIVE_TRANSACTION_ACTIONS = ("publish", "noop")
+
+
+def publication_phases_decision(state):
+    """Decide whether every side-effect phase of a Release run really ran.
+
+    GitHub job ``if`` expressions can silently skip a phase when an ancestor was
+    deliberately skipped (for example the staged publish path skips the whole
+    build DAG). A green run with every write phase skipped is NOT a publication.
+
+    Operator intent and the Python plan decision are deliberately separate:
+    ``event``/``request_publish`` come from the trusted dispatch, while
+    ``publish``/``channel`` are the plan's computed outputs. A false or missing
+    plan output can never turn an explicit publish request into a green
+    rehearsal. Unknown job results fail closed. No credential is read here.
+    """
+    event = str(state.get("event", ""))
+    requested = (event == "workflow_dispatch"
+                 and str(state.get("request_publish", "")).lower() == "true")
+    decision = str(state.get("publish", "")).lower() == "true"
+    channel = str(state.get("channel", ""))
+    results = {k[len("result_"):]: str(v)
+               for k, v in state.items() if k.startswith("result_")}
+    outputs = {k[len("out_"):]: str(v)
+               for k, v in state.items() if k.startswith("out_")}
+
+    # Unknown results are never silently treated as rehearsal or success.
+    for job, result in results.items():
+        if result not in PHASE_RESULTS:
+            return False, "unknown result for " + job + ": " + result
+    plan_result = results.get("plan", "")
+    if requested:
+        if plan_result != "success":
+            return False, "explicit publish requires plan result success, got " + (plan_result or "missing")
+        if not decision:
+            return False, "explicit publish requires an affirmative plan decision"
+        if channel not in KNOWN_CHANNELS:
+            return False, "unrecognized publication channel: " + (channel or "missing")
+    else:
+        # Automatic events and dry dispatches can only stage. A plan that says
+        # publish=true without a trusted dispatch request is a contradiction.
+        if decision:
+            return False, "plan decided publish without a trusted explicit request"
+        if plan_result not in ("success", "skipped", ""):
+            return False, "plan result not usable: " + plan_result
+
+    staged = requested and channel == "stable"
+    side_effect = ("publish-immutable", "prepare-draft", "promote-aliases",
+                   "publish")
+    required = list(side_effect)
+    if staged:
+        required += ["stable-channel-transaction", "publish-minor"]
+    else:
+        # Ordinary (non-Stable) publication must really build and verify the
+        # image in this run; only Stable may consume a pinned staged run.
+        required.append("image")
+
+    if not requested:
+        for job in side_effect + ("stable-channel-transaction", "publish-minor"):
+            if results.get(job, "skipped") not in ("skipped", ""):
+                return False, "rehearsal ran side-effect phase " + job
+        return True, "rehearsal: no side-effect phase ran"
+
+    for job in required:
+        result = results.get(job, "")
+        if result in ("cancelled",):
+            return False, "publication cancelled at " + job
+        if result != "success":
+            return False, "required phase " + job + " result=" + (result or "missing")
+
+    if outputs.get("publish-immutable_verified") != "true":
+        return False, "immutable verification output missing"
+    if not outputs.get("publish-immutable_digest"):
+        return False, "immutable digest output missing"
+    if not outputs.get("prepare-draft_release_id"):
+        return False, "private draft release id missing"
+    if staged:
+        action = outputs.get("stable-channel-transaction_action", "")
+        if action not in POSITIVE_TRANSACTION_ACTIONS:
+            return False, "stable transaction action not allowlisted: " + (action or "missing")
+        if outputs.get("promote-aliases_aliases_verified") != "true":
+            return False, "alias verification output missing"
+    return True, "all required publication phases ran and verified"
+
+
+def verify_publication_phases_cli(args):
+    """Terminal workflow gate for one explicit Release run."""
+    state = {
+        "event": args.event,
+        "request_publish": args.request_publish,
+        "publish": args.publish,
+        "channel": args.channel,
+        "result_plan": args.result_plan,
+        "result_image": args.result_image,
+        "result_publish-immutable": args.result_immutable,
+        "result_prepare-draft": args.result_draft,
+        "result_stable-channel-transaction": args.result_transaction,
+        "result_promote-aliases": args.result_aliases,
+        "result_publish": args.result_publish,
+        "result_publish-minor": args.result_minor,
+        "out_publish-immutable_verified": args.verified,
+        "out_publish-immutable_digest": args.digest,
+        "out_prepare-draft_release_id": args.release_id,
+        "out_stable-channel-transaction_action": args.transaction_action,
+        "out_promote-aliases_aliases_verified": args.aliases_verified,
+    }
+    ok, reason = publication_phases_decision(state)
+    values = {"allow": str(ok).lower(), "reason": reason,
+              "event": args.event, "request_publish": args.request_publish,
+              "publish": args.publish, "channel": args.channel}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Publication phase verification failed: " + reason)
+    return ok
+
+
 def verify_release_history_cli(args):
     """Validate the checked-in 84-tag retrospective catalog."""
     ok, problems = verify_release_history(None)
@@ -2187,8 +2306,8 @@ def publish(args):
     channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
         "This is a prerelease build.\n\n" if "-" in tag else "")
     upgrade = (migration_guide_notes(repository, git_tag)
-               if product and not product["prerelease"]
-               and int(product["semver"].split(".")[0]) >= 2 else "")
+               if previous_tag == "v1.0.40" and product and not product["prerelease"]
+               and int(product["semver"].split(".")[0]) == 2 else "")
     body = (f"{channel}{upgrade}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
             f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"
@@ -2343,6 +2462,26 @@ def validate_channel_contract(document, stable_commit=None, stable_digest=None):
     return (not problems), problems
 
 
+def normalise_platform_evidence(raw):
+    """Validate observed platform pairs from any registry-observation source.
+
+    Both in-process observations (sets of tuples) and CLI JSON (lists of lists)
+    must pass the SAME shape check. Returns (frozenset, '') or (None, reason);
+    malformed entries are refused deterministically, never coerced from
+    arbitrary iterables or mapping keys.
+    """
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return None, "platform evidence has an invalid shape"
+    result = set()
+    for platform in raw:
+        if (not isinstance(platform, (list, tuple))
+                or len(platform) != 2
+                or not all(isinstance(part, str) for part in platform)):
+            return None, "platform evidence has a malformed entry"
+        result.add((platform[0], platform[1]))
+    return frozenset(result), ""
+
+
 def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRIES):
     """Both maintained registries must serve the SAME verified multiarch digest
     and OCI revision. A missing, unknown, single-arch or mismatched registry
@@ -2359,7 +2498,11 @@ def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRI
             return False, f"{registry} immutable image is absent"
         if info.get("digest") != digest:
             return False, f"{registry} digest differs from the verified digest"
-        if not REQUIRED_PLATFORMS <= set(info.get("platforms", ())):
+        observed_platforms, error = normalise_platform_evidence(
+            info.get("platforms", ()))
+        if error:
+            return False, f"{registry} {error}"
+        if not REQUIRED_PLATFORMS <= observed_platforms:
             return False, f"{registry} lacks both required Linux architectures"
         if info.get("revision") != commit:
             return False, f"{registry} OCI revision does not match the pinned commit"
@@ -2597,7 +2740,7 @@ def channel_receipt(channel, commit, digest, docs_hash, docs_commit, docs_digest
 
 def channel_transaction_decision(candidate, previous=None, live=None,
                                  event="workflow_run", ancestry=None,
-                                 phase=TX_COMMIT):
+                                 phase=TX_COMMIT, nightly_opt_in=False):
     """Decide one qualified channel transaction.
 
     `phase=stage` applies every gate EXCEPT the public-candidate-marker
@@ -2605,8 +2748,10 @@ def channel_transaction_decision(candidate, previous=None, live=None,
     deploy, no receipt. `phase=commit` requires the confirmed public marker and
     may return publish/noop/reconcile/rollback. Returns (action, reason,
     receipt, steps). `previous` is the preserved verified receipt; `live` is the
-    observed registry-alias and docs-marker state. A manual dispatch can only
-    re-publish an ALREADY-ACTIVE exact source from the receipt.
+    observed registry-alias and docs-marker state. A generic manual/site-only
+    dispatch can only re-publish an ALREADY-ACTIVE exact source from the receipt;
+    an explicit trusted Nightly workflow opt-in may advance Nightly through the
+    same qualified transaction.
     """
     channel = candidate.get("channel")
     if channel not in ("nightly", "stable"):
@@ -2667,8 +2812,13 @@ def channel_transaction_decision(candidate, previous=None, live=None,
                 return ("refuse", "candidate revision is not a descendant of the active receipt",
                         previous, [])
 
+    explicit_nightly = (event == "workflow_dispatch"
+                        and channel == "nightly"
+                        and str(nightly_opt_in).strip().lower() == "true")
     # Manual/site-only deploy may publish only an already-active exact source.
-    if event == "workflow_dispatch" and not (
+    # An explicit trusted Nightly workflow opt-in uses the same qualified
+    # transaction but is not limited to the already-active receipt.
+    if event == "workflow_dispatch" and not explicit_nightly and not (
             previous.get("verified")
             and previous.get("revision") == commit
             and previous.get("digest") == digest):
@@ -3167,6 +3317,147 @@ def verify_gate_script(path):
     return (not missing), missing
 
 
+NIGHTLY_MANUAL_OPT_IN_EVENT = "workflow_dispatch"
+
+
+def nightly_ghcr_mirror_authorized(event_name, nightly_opt_in=False, ref="",
+                                   ci_verified=False, recovery=False,
+                                   pin_stable=False, schedule_opt_in=False):
+    """Authorization for writing the immutable Nightly sha image to GHCR.
+
+    Authorized Nightly writes are: an explicit trusted manual nightly opt-in on
+    refs/heads/main with exact main CI and no recovery, a trusted opt-in schedule
+    on refs/heads/main with exact main CI and a stable main pin, or the trusted
+    automatic main workflow_run advance with exact main CI. Every other path is
+    verification-only and must write nothing.
+    """
+    if str(recovery).strip().lower() == "true":
+        return False, "recovery runs never mirror Nightly sha images to GHCR"
+    if ref != TRUSTED_DEVELOPER_REF:
+        return False, "GHCR mirror requires the trusted refs/heads/main ref"
+    if str(ci_verified).strip().lower() != "true":
+        return False, "GHCR mirror requires exact main CI verification"
+    if event_name == NIGHTLY_MANUAL_OPT_IN_EVENT:
+        if str(nightly_opt_in).strip().lower() != "true":
+            return False, "manual dispatch without nightly opt-in must not write GHCR"
+        return True, "authorized explicit trusted Nightly manual dispatch"
+    if event_name == "schedule":
+        if str(schedule_opt_in).strip().lower() != "true":
+            return False, "scheduled Nightly is verify-only until the operator setting is enabled"
+        if str(pin_stable).strip().lower() != "true":
+            return False, "scheduled GHCR mirror requires a stable main pin"
+        return True, "authorized trusted opt-in Nightly schedule"
+    if event_name == "workflow_run":
+        return True, "authorized trusted main workflow_run advance"
+    return False, f"{event_name} is not authorized to mirror Nightly sha images to GHCR"
+
+
+def ghcr_sha_mirror_decision(commit, hub_observation, ghcr_observation, authorized=False):
+    """Decide whether the Hub sha image may be mirrored to GHCR.
+
+    Before any copy, the Hub index must be proven from its own digest-addressed
+    manifest/config: exact digest, both Linux platforms, and both config revisions
+    matching the pinned commit. A conflicting or unknown GHCR state refuses.
+    An identical verified GHCR sha is an idempotent reuse. Unauthorized runs
+    never write; they may only report an existing verified match.
+    """
+    if not valid_commit(commit):
+        return "refuse", "", "the pinned commit must be a full 40-hex SHA"
+    hub_state, hub_info = hub_observation
+    if hub_state == "unknown":
+        return "refuse", "", "Docker Hub sha observation is unknown; refusing before any GHCR write"
+    if hub_state != "present":
+        return "refuse", "", "Docker Hub sha image is absent; nothing to mirror to GHCR"
+    hub_digest = (hub_info or {}).get("digest", "")
+    if not valid_digest(hub_digest):
+        return "refuse", "", "Docker Hub sha digest is missing or invalid"
+    hub_anchor = hub_info["digest"]
+    hub_index, hub_revisions = platform_manifest_revisions(
+        f"{DOCKER_HUB_IMAGE}:sha-{commit}", anchor_digest=hub_anchor)
+    ok, reason = verify_sha_identity(commit, hub_digest, hub_observation, hub_revisions,
+                                     hub_index)
+    if not ok:
+        return "refuse", "", "Docker Hub sha identity is not verified: " + reason
+
+    ghcr_state, ghcr_info = ghcr_observation
+    if ghcr_state == "unknown":
+        return "refuse", "", "GHCR sha observation is unknown; refusing before any GHCR write"
+    if ghcr_state == "present":
+        ghcr_digest = (ghcr_info or {}).get("digest", "")
+        if not valid_digest(ghcr_digest):
+            return "refuse", "", "GHCR sha digest is missing or invalid"
+        if ghcr_digest != hub_digest:
+            return "refuse", "", "GHCR sha digest conflicts with the verified Docker Hub digest"
+        ghcr_index, ghcr_revisions = platform_manifest_revisions(
+            f"ghcr.io/{ghcr_repository()}:sha-{commit}", anchor_digest=ghcr_digest)
+        ok, reason = verify_sha_identity(commit, ghcr_digest, ghcr_observation,
+                                         ghcr_revisions, ghcr_index)
+        if not ok:
+            return "refuse", "", "GHCR sha identity is not verified: " + reason
+        return "reuse", hub_digest, "GHCR sha already matches the verified Docker Hub index and revision"
+
+    if not authorized:
+        return "blocked", hub_digest, "GHCR sha is absent and this run is not authorized to mirror it"
+    return "copy", hub_digest, "verified Docker Hub sha may be copied to GHCR"
+
+
+def ensure_ghcr_sha_mirror(commit, authorized=False, apply=False, emit=True,
+                           authorization=""):
+    """Observe, optionally copy, and verify the GHCR sha counterpart.
+
+    The copy is digest-preserving: it tags the GHCR sha reference to the exact
+    Docker Hub index digest, including all platforms and attestations carried by
+    that index. After any copy, the remote GHCR index and full revision are
+    observed again and must match exactly.
+    """
+    hub_ref = f"{DOCKER_HUB_IMAGE}:sha-{commit}"
+    ghcr_ref = f"ghcr.io/{ghcr_repository()}:sha-{commit}"
+    hub_obs = observe_reference(hub_ref, strict=True)
+    ghcr_obs = observe_reference(ghcr_ref, strict=True)
+    action, digest, reason = ghcr_sha_mirror_decision(commit, hub_obs, ghcr_obs, authorized)
+    values = {"action": action, "digest": digest, "reason": reason,
+              "commit": commit, "hub_reference": hub_ref, "ghcr_reference": ghcr_ref,
+              "authorized": str(bool(authorized)).lower(), "authorization": authorization}
+    if action == "copy":
+        if not apply:
+            values["action"] = "planned"
+            if emit:
+                print(json.dumps(values, indent=2))
+                write_output(values)
+            return values
+        subprocess.run([
+            "docker", "buildx", "imagetools", "create",
+            "--tag", ghcr_ref, f"{DOCKER_HUB_IMAGE}@{digest}",
+        ], check=True, cwd=ROOT)
+        ghcr_obs = observe_reference(ghcr_ref, strict=True)
+        post_action, post_digest, post_reason = ghcr_sha_mirror_decision(
+            commit, hub_obs, ghcr_obs, authorized=True)
+        if post_action != "reuse" or post_digest != digest:
+            values.update({"action": "refuse",
+                           "reason": "post-copy GHCR verification failed: " + post_reason,
+                           "digest": post_digest})
+            if emit:
+                print(json.dumps(values, indent=2))
+                write_output(values)
+            raise ValueError("GHCR sha mirror verification failed: " + post_reason)
+        values["reason"] = "GHCR sha copied and verified against the Docker Hub index"
+    if emit:
+        print(json.dumps(values, indent=2))
+        write_output(values)
+    if values["action"] == "refuse":
+        raise ValueError("GHCR sha mirror refused: " + values["reason"])
+    return values
+
+
+def mirror_ghcr_sha_cli(args):
+    authorized, auth_reason = nightly_ghcr_mirror_authorized(
+        args.event, nightly_opt_in=args.nightly_opt_in, ref=args.ref,
+        ci_verified=args.ci_verified, recovery=args.recovery,
+        pin_stable=args.pin_stable, schedule_opt_in=args.schedule_opt_in)
+    return ensure_ghcr_sha_mirror(args.commit, authorized=authorized, apply=args.apply,
+                                  authorization=auth_reason)
+
+
 def nightly_activation_decision(sha_observations):
     """Classify first Nightly activation from ACTUAL immutable observations.
 
@@ -3388,7 +3679,7 @@ def channel_resume_plan(receipt, candidate_digest=""):
 
 def channel_transaction_run(candidate, previous, writer=None, docs_publisher=None,
                             final_probe=None, live=None, event="workflow_run",
-                            ancestry=None):
+                            ancestry=None, nightly_opt_in=False):
     """Execute the qualified transaction with injectable failures (offline).
 
     `writer(registry, digest) -> (ok, error)`, `docs_publisher(commit, digest) -> bool`
@@ -3403,7 +3694,8 @@ def channel_transaction_run(candidate, previous, writer=None, docs_publisher=Non
     final_probe = final_probe or (lambda commit, digest: True)
     commit, digest = candidate.get("commit"), candidate.get("digest")
     action, reason, receipt, steps = channel_transaction_decision(
-        candidate, previous, live or {}, event, ancestry=ancestry)
+        candidate, previous, live or {}, event, ancestry=ancestry,
+        nightly_opt_in=nightly_opt_in)
     if action in ("refuse", "rollback"):
         return {"outcome": "refused", "reason": reason, "moved": [], "restored": False,
                 "receipt": previous or {}, "steps": list(steps)}
@@ -3512,7 +3804,8 @@ def channel_transaction_cli(args):
     previous = json_argument(args.previous, default={}) or {}
     live = json_argument(args.live, default={}) or {}
     action, reason, receipt, steps = channel_transaction_decision(
-        candidate, previous, live, args.event, phase=args.phase)
+        candidate, previous, live, args.event, phase=args.phase,
+        nightly_opt_in=getattr(args, "nightly_opt_in", ""))
     values = {"action": action, "reason": reason,
               "receipt": json.dumps(receipt, sort_keys=True),
               "steps": json.dumps(list(steps))}
@@ -3595,7 +3888,11 @@ def _coerce_observation_map(document):
         state, info = value
         if state == "present" and info:
             info = dict(info)
-            info["platforms"] = {tuple(item) for item in info.get("platforms", ())}
+            platforms, error = normalise_platform_evidence(
+                info.get("platforms", ()))
+            if error:
+                raise ValueError(f"{registry} {error}")
+            info["platforms"] = platforms
         result[registry] = (state, info)
     return result
 
@@ -3764,6 +4061,16 @@ def build_parser():
     sha_gate_cmd.add_argument("--expected-digest", default="")
     sha_gate_cmd.add_argument("--ci-verified", default="")
     sha_gate_cmd.add_argument("--pinned-evidence", default="")
+    mirror_sha = commands.add_parser("mirror-ghcr-sha")
+    mirror_sha.add_argument("--commit", required=True)
+    mirror_sha.add_argument("--event", required=True)
+    mirror_sha.add_argument("--ref", default="")
+    mirror_sha.add_argument("--ci-verified", default="")
+    mirror_sha.add_argument("--nightly-opt-in", default="")
+    mirror_sha.add_argument("--recovery", default="false")
+    mirror_sha.add_argument("--pin-stable", default="")
+    mirror_sha.add_argument("--schedule-opt-in", default="")
+    mirror_sha.add_argument("--apply", action="store_true")
     promote_cmds = {}
     for command_name in ("nightly-promote", "edge-promote"):
         promote_cmd = commands.add_parser(command_name)
@@ -3795,6 +4102,15 @@ def build_parser():
     ref_checker.add_argument("--commit", required=True)
     ref_checker.add_argument("--ref", required=True)
     ref_checker.add_argument("--event", default="workflow_dispatch")
+    phase_checker = commands.add_parser("verify-publication-phases")
+    phase_checker.add_argument("--event", default="")
+    phase_checker.add_argument("--request-publish", default="")
+    for name in ("publish", "channel", "result-plan", "result-image",
+                 "result-immutable", "result-draft", "result-transaction",
+                 "result-aliases", "result-publish", "result-minor",
+                 "verified", "digest", "release-id", "transaction-action",
+                 "aliases-verified"):
+        phase_checker.add_argument("--" + name, default="")
     commands.add_parser("verify-release-history")
     indexable = commands.add_parser("indexable-urls")
     indexable.add_argument("--event", required=True)
@@ -3857,6 +4173,7 @@ def build_parser():
     for name in ("candidate", "previous", "live"):
         transaction.add_argument("--" + name, default="{}")
     transaction.add_argument("--event", default="workflow_run")
+    transaction.add_argument("--nightly-opt-in", default="")
     transaction.add_argument("--phase", default=TX_COMMIT,
                              choices=(TX_STAGE, TX_COMMIT))
     order = commands.add_parser("verify-stable-order")
@@ -3946,6 +4263,7 @@ def main():
                 "product-version": product_version_info,
                 "verify-release-history": verify_release_history_cli,
                 "verify-publication-ref": verify_publication_ref,
+                "verify-publication-phases": verify_publication_phases_cli,
                 "indexable-urls": indexable_urls_cli,
                 "validate-channel-contract": validate_channel_contract_cli,
                 "channel-source-gate": channel_source_gate_cli,
@@ -3969,7 +4287,8 @@ def main():
                 "verify-stable-order": verify_stable_order,
                 "verify-public-downloads": verify_public_downloads,
                 "verify-stable-release-site": verify_stable_release_site_cli,
-                "nightly-activation-decision": nightly_activation_decision_cli}
+                "nightly-activation-decision": nightly_activation_decision_cli,
+                "mirror-ghcr-sha": mirror_ghcr_sha_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

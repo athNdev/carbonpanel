@@ -14,14 +14,13 @@ SPDX-License-Identifier: MPL-2.0
 		Lock,
 		Map as MapIcon,
 		RefreshCw,
-		ShieldCheck,
-		Unlink2
+		ShieldCheck
 	} from '@lucide/svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { ConfigCategory } from '$lib/proto/carbonpanel/v1/config_pb';
 	import type { CompatibilityReport, WorldRevision } from '$lib/proto/carbonpanel/v1/world_pb';
 	import {
-		ListWorldViewTargetsRequestSchema,
+		GetWorldViewStatusRequestSchema,
 		WorldRefSchema,
 		WorldRef_Kind,
 		type WorldViewTarget
@@ -51,6 +50,7 @@ SPDX-License-Identifier: MPL-2.0
 	} from '$lib/features/world-library/presentation';
 	import {
 		describeServerWorld,
+		relevantWorldConfig,
 		sameCompatibilityTuple,
 		shouldAcceptCompatibility,
 		type CompatibilityTuple
@@ -71,9 +71,10 @@ SPDX-License-Identifier: MPL-2.0
 	interface Props {
 		server: Server;
 		active?: boolean;
+		onopenmap: (worldKey?: string) => void;
 	}
 
-	let { server, active = false }: Props = $props();
+	let { server, active = false, onopenmap }: Props = $props();
 
 	let loading = $state(true);
 	let error = $state<unknown>(null);
@@ -132,17 +133,9 @@ SPDX-License-Identifier: MPL-2.0
 		})
 	);
 	const configRows = $derived(
-		configCategories.flatMap((category) =>
-			(category.properties ?? [])
-				.filter((property) =>
-					['level', 'levelType', 'seed', 'gamemode', 'difficulty'].includes(property.key)
-				)
-				.map((property) => ({
-					key: property.key,
-					label: property.label || property.key,
-					value: property.value
-				}))
-		)
+		relevantWorldConfig(configCategories)
+			.filter((row) => row.key !== 'level' || row.value !== description.levelName)
+			.map((row) => (row.key === 'level' ? { ...row, label: 'Configured level' } : row))
 	);
 	const selectedEntry = $derived(entries.find((entry) => entry.id === selectedEntryId));
 	const selectedRevision = $derived(
@@ -269,11 +262,12 @@ SPDX-License-Identifier: MPL-2.0
 
 	async function loadTargets(): Promise<WorldViewTarget[]> {
 		if (!canView) return [];
-		const response = await rpcClient.worldView.listWorldViewTargets(
-			create(ListWorldViewTargetsRequestSchema),
+		const serverId = server.id;
+		const { target } = await rpcClient.worldView.getWorldViewStatus(
+			create(GetWorldViewStatusRequestSchema, { serverId }),
 			silentCallOptions
 		);
-		return response.targets.filter((target) => target.serverId === server.id);
+		return target?.serverId === serverId ? [target] : [];
 	}
 
 	async function loadConfig(): Promise<ConfigCategory[]> {
@@ -507,8 +501,8 @@ SPDX-License-Identifier: MPL-2.0
 		}
 	}
 
-	function worldViewHref(): string | null {
-		if (!canView || !description.levelName) return null;
+	let activeMapKey = $derived.by(() => {
+		if (!description.levelName) return undefined;
 		const ref = description.binding
 			? create(WorldRefSchema, {
 					kind: WorldRef_Kind.LIBRARY_BINDING,
@@ -521,8 +515,8 @@ SPDX-License-Identifier: MPL-2.0
 					serverId: server.id,
 					levelName: description.levelName
 				});
-		return resolve('/worlds/[server]/[world]', { server: server.id, world: encodeWorldKey(ref) });
-	}
+		return encodeWorldKey(ref);
+	});
 
 	function libraryHref(): string {
 		const revisionId = description.binding?.revisionId;
@@ -537,30 +531,27 @@ SPDX-License-Identifier: MPL-2.0
 	}
 </script>
 
-<ServerTabPanel
-	title="World"
-	description="The active level, its library binding and read-only compatibility checks. World bytes are never edited here."
-	mode="form"
->
+<ServerTabPanel title="World" mode="form" fill={false}>
 	{#snippet chip()}
 		<CarbonTag type={description.presentation.tone} size="sm">
 			{description.presentation.label}
 		</CarbonTag>
 	{/snippet}
 	{#snippet actions()}
-		<CarbonButton
-			kind="secondary"
-			size="sm"
-			onclick={() => void load()}
-			disabled={!canReadWorlds || loading}
-			class="justify-center gap-2"
-		>
-			<RefreshCw class="h-3.5 w-3.5" />
-			Refresh
-		</CarbonButton>
-		{#if canSwapWorlds && canReadWorlds}
+		{#if canView}
 			<CarbonButton
 				kind="primary"
+				size="sm"
+				onclick={() => onopenmap(activeMapKey)}
+				class="justify-center gap-2"
+			>
+				<MapIcon class="h-3.5 w-3.5" aria-hidden="true" />
+				Open map
+			</CarbonButton>
+		{/if}
+		{#if canSwapWorlds && canReadWorlds}
+			<CarbonButton
+				kind={canView ? 'secondary' : 'primary'}
 				size="sm"
 				onclick={() => void openPicker()}
 				class="justify-center gap-2"
@@ -569,9 +560,26 @@ SPDX-License-Identifier: MPL-2.0
 				{description.binding ? 'Swap library world' : 'Pick library world'}
 			</CarbonButton>
 		{/if}
+		{#if canReadWorlds}
+			<CarbonButton
+				kind="tertiary"
+				size="sm"
+				onclick={() => void load()}
+				disabled={loading}
+				class="justify-center gap-2"
+			>
+				<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
+				Refresh
+			</CarbonButton>
+		{/if}
 	{/snippet}
 
 	<div class="flex flex-col gap-4">
+		{#if !canView}
+			<p class="text-xs text-muted-foreground">
+				Opening a map requires World View read access on this server.
+			</p>
+		{/if}
 		{#if pendingOperation}
 			{@const pendingPresentation = operationOutcomePresentation(pendingOperation.outcome)}
 			{@const pendingDisposition = bindingOutcomeDisposition(pendingOperation.outcome)}
@@ -684,48 +692,36 @@ SPDX-License-Identifier: MPL-2.0
 				</div>
 			</div>
 		{:else}
-			<!--
-				The state label is shown once in the tab header. Keep the full
-				hint here, inset like the other world cards, so it reads as
-				guidance instead of an edge-aligned orphan line.
-			-->
-			<div class="border border-border bg-card p-3 sm:p-4">
-				<p class="mono-label">World state</p>
-				<p class="mt-1 text-xs text-muted-foreground">{description.presentation.hint}</p>
-			</div>
-
-			<!-- Active world / level -->
-			<div class="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
-				<div class="border border-border bg-card p-4">
-					<p class="mono-label">Active world / level</p>
-					<p class="mt-1 text-sm font-semibold break-all text-foreground">
-						{description.levelName || 'NOT REPORTED'}
-					</p>
-					<p class="mt-1 text-xs text-muted-foreground">
-						{#if description.binding}
-							Tracked by a World Library binding on this level.
-						{:else if description.management === 'unmanaged'}
-							Observed on disk; not managed by the World Library.
-						{:else if description.management === 'unbound'}
-							Configured level; no active world was observed.
-						{:else}
-							No world was reported by the available observations.
-						{/if}
-					</p>
-				</div>
-				<div class="border border-border bg-card p-4">
-					<p class="mono-label">Server environment</p>
-					<div class="mt-2 flex flex-wrap items-center gap-2">
-						{#if description.target}
-							<CarbonTag type="blue" size="sm">WORLD VIEW OBSERVED</CarbonTag>
-						{/if}
+			<div class="border border-border bg-card p-4">
+				<dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-4 [&>*]:min-w-0">
+					<div>
+						<dt class="mono-label">
+							{description.management === 'unbound' ? 'Configured level' : 'Active level'}
+						</dt>
+						<dd class="mt-1 text-sm font-semibold wrap-anywhere text-foreground">
+							{description.levelName || 'Unreported'}
+						</dd>
 					</div>
-					<p class="mt-2 text-xs text-muted-foreground">
-						Game version {server.mcVersion || '—'} · {modLoaderLabel(
-							effectiveLoader(server.modLoader, server.modpackLoader)
-						)}
+					<div>
+						<dt class="mono-label">Server environment</dt>
+						<dd class="mt-1 text-sm text-foreground">
+							{server.mcVersion || 'Unknown version'} · {modLoaderLabel(
+								effectiveLoader(server.modLoader, server.modpackLoader)
+							)}
+						</dd>
+					</div>
+					{#each configRows as row (row.key)}
+						<div>
+							<dt class="mono-label">{row.label}</dt>
+							<dd class="mt-1 font-mono text-sm wrap-anywhere text-foreground">{row.value}</dd>
+						</div>
+					{/each}
+				</dl>
+				{#if description.management === 'unbound'}
+					<p class="mt-3 text-xs text-muted-foreground">
+						World View has no observation for this level.
 					</p>
-				</div>
+				{/if}
 			</div>
 
 			<!-- Binding + revision -->
@@ -782,56 +778,10 @@ SPDX-License-Identifier: MPL-2.0
 						</div>
 					{/if}
 				</div>
-			{:else}
-				<div class="border border-border bg-card p-4">
-					<div class="flex flex-wrap items-center gap-2">
-						<Unlink2 class="h-4 w-4 text-foreground" />
-						<h3 class="mono-label-strong">No active binding</h3>
-					</div>
-					<p class="mt-2 text-xs text-muted-foreground">
-						Picking a compatible library world journals a stop-based swap; existing level bytes are
-						preserved and never overwritten.
-					</p>
-				</div>
-			{/if}
-
-			<!-- Relevant configuration -->
-			{#if configRows.length > 0}
-				<div class="border border-border bg-card p-4">
-					<h3 class="mono-label-strong">Relevant configuration</h3>
-					<dl class="mt-3 grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
-						{#each configRows as row (row.key)}
-							<div class="min-w-0">
-								<dt class="mono-label">{row.label}</dt>
-								<dd class="mt-1 font-mono text-xs break-all text-foreground">{row.value}</dd>
-							</div>
-						{/each}
-					</dl>
-				</div>
 			{/if}
 
 			<!-- Deep links -->
 			<div class="flex flex-wrap gap-2">
-				{#if worldViewHref()}
-					<CarbonButton
-						kind="tertiary"
-						size="sm"
-						href={worldViewHref()!}
-						class="justify-center gap-2"
-					>
-						<MapIcon class="h-3.5 w-3.5" />
-						Open World View
-						<ExternalLink class="h-3 w-3" />
-					</CarbonButton>
-				{:else}
-					<span class="text-xs text-muted-foreground">
-						{#if !canView}
-							World View needs world_view/read on this server.
-						{:else}
-							World View is unavailable until a level is known.
-						{/if}
-					</span>
-				{/if}
 				<CarbonButton kind="tertiary" size="sm" href={libraryHref()} class="justify-center gap-2">
 					<BookOpen class="h-3.5 w-3.5" />
 					Open World Library

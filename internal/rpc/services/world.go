@@ -169,6 +169,13 @@ func (s *WorldService) ListBindings(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list bindings"))
 	}
 	out := &v1.ListBindingsResponse{}
+	if id := req.Msg.GetServerId(); id != "" {
+		// Level identity is supplemental. Older callers still receive their
+		// bindings if this separate configuration observation is unavailable.
+		if cfg, err := s.store.GetServerConfig(ctx, id); err == nil {
+			out.ConfiguredLevelName = worldview.ActualLevelName(cfg)
+		}
+	}
 	for _, b := range bindings {
 		out.Bindings = append(out.Bindings, bindingProto(b))
 	}
@@ -254,7 +261,11 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, notFoundOrInternal(err, "revision not found")
 	}
-	targetMC := msg.GetTargetMcVersion()
+	// Keep the caller's explicit target separate from the fallbacks below:
+	// a version-only preview must name its target, and the revision's own
+	// version must not silently satisfy that requirement.
+	requestedMC := strings.TrimSpace(msg.GetTargetMcVersion())
+	targetMC := requestedMC
 	edition := "java"
 	loader := ""
 	if msg.GetServerId() != "" {
@@ -284,7 +295,7 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 		if err != nil {
 			return nil, err
 		}
-	} else if strings.TrimSpace(targetMC) == "" {
+	} else if requestedMC == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			errors.New("target_mc_version is required when server_id is omitted"))
 	}

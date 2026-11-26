@@ -49,6 +49,16 @@ one at https://mozilla.org/MPL/2.0/.
 	let dockerComposeOpen = $state(false);
 	let envVarsOpen = $state(false);
 
+	const oidcEnvironmentVariables = [
+		'CARBONPANEL_AUTH_OIDC_ENABLED',
+		'CARBONPANEL_AUTH_OIDC_ISSUER_URI',
+		'CARBONPANEL_AUTH_OIDC_CLIENT_ID',
+		'CARBONPANEL_AUTH_OIDC_CLIENT_SECRET',
+		'CARBONPANEL_AUTH_OIDC_REDIRECT_URL',
+		'CARBONPANEL_AUTH_OIDC_SCOPES',
+		'CARBONPANEL_AUTH_OIDC_ROLE_CLAIM'
+	];
+
 	$effect(() => {
 		if (configYamlOpen) {
 			dockerComposeOpen = false;
@@ -515,32 +525,17 @@ one at https://mozilla.org/MPL/2.0/.
 						</CarbonAccordionItem>
 
 						<CarbonAccordionItem title="Environment Variables" bind:open={envVarsOpen}>
-							<div
-								class="space-y-1.5 font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground"
-							>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ISSUER_URI</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_ID</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5"
-										>CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
-									>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code
-									>
-								</p>
-								<p><code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code></p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code>
-								</p>
-							</div>
+							<ul class="min-w-0 space-y-1.5 font-mono text-xs text-muted-foreground">
+								{#each oidcEnvironmentVariables as variable (variable)}
+									<li class="min-w-0">
+										<code
+											class="block w-fit max-w-full bg-background px-1.5 py-0.5 [overflow-wrap:anywhere]"
+										>
+											{variable}
+										</code>
+									</li>
+								{/each}
+							</ul>
 						</CarbonAccordionItem>
 					</CarbonAccordion>
 

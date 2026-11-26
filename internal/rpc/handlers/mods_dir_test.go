@@ -113,6 +113,37 @@ func TestInstallModWritesTheMappedRoot(t *testing.T) {
 	}
 }
 
+func TestInstallModInterruptedRetryPreservesExistingJAR(t *testing.T) {
+	root := t.TempDir()
+	modsDir := filepath.Join(root, "mods")
+	if err := os.MkdirAll(modsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jarPath := filepath.Join(modsDir, "example.jar")
+	if err := os.WriteFile(jarPath, []byte("complete-jar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	brokenDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "32")
+		_, _ = w.Write([]byte("partial"))
+	}))
+	t.Cleanup(brokenDownload.Close)
+	store := setupTestStore(t)
+	server := &storage.Server{ID: "retry", Name: "retry", DataPath: root, ModLoader: storage.ModLoaderFabric}
+	resp, err := NewModOnlineManager(store, logger.New(), nil, nil).Install(t.Context(), server, []InstallModItem{
+		{Name: "Example", FileName: "example.jar", DownloadURL: brokenDownload.URL},
+	}, ModInstallActor{})
+	if err != nil || resp.Success || len(resp.Errors) != 1 || len(resp.Installed) != 0 {
+		t.Fatalf("bad retry was not reported: %+v, %v", resp, err)
+	}
+	if got, err := os.ReadFile(jarPath); err != nil || string(got) != "complete-jar" {
+		t.Fatalf("retry changed the already-installed jar: %q, %v", got, err)
+	}
+	if entries, err := os.ReadDir(modsDir); err != nil || len(entries) != 1 {
+		t.Fatalf("interrupted retry left staged data: %v, %v", entries, err)
+	}
+}
+
 func TestInstallModLegacyFilenameKeyRoundTrip(t *testing.T) {
 	store := setupTestStore(t)
 	dir := t.TempDir()

@@ -46,8 +46,8 @@ live only on owning node storage.
   [Library adoption fencing](../decisions/library-adoption-fencing.md).
 - Imports verify whole-archive SHA-256; ZIP CRC is the only per-file check.
   Cancellable inspection and compatibility use extraction-normalized paths.
-  Import, preview and bind refuse unusable layouts.
-  See [Import layout](../../docs/world-library-import-layout.md).
+  Import, preview and bind refuse unusable layouts; a version-only preview must
+  name its target version. See [Import layout](../../docs/world-library-import-layout.md).
 - A world-bind journal protects the configured level and custom-property
   override from staged configuration and global sync.
 - Platform support has two axes: API-backed artifact support (Modrinth,

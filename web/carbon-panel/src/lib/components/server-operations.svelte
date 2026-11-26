@@ -7,8 +7,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { create } from '@bufbuild/protobuf';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
+	import { Code, ConnectError } from '@connectrpc/connect';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import {
 		ListOperationsRequestSchema,
 		ResolveOperationRequestSchema,
@@ -24,7 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
 
-	let { server, active = false }: { server: Server; active?: boolean } = $props();
+	let { serverId, active = false }: { serverId: string; active?: boolean } = $props();
 
 	let operations = $state<LifecycleOperation[]>([]);
 	let loading = $state(false);
@@ -33,31 +33,46 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let confirmOpen = $state(false);
 	let resolveNote = $state('');
 	let resolving = $state(false);
+	let request: AbortController | undefined;
 
 	// A running operation can finish on its own, so poll only while one exists.
 	// Polling a settled journal would be pure noise.
 	const hasRunning = $derived(operations.some((op) => op.outcome === 'running'));
 
 	async function load() {
+		request?.abort();
+		const controller = new AbortController();
+		request = controller;
 		loading = true;
 		loadError = null;
 		try {
 			const response = await rpcClient.operation.listOperations(
-				create(ListOperationsRequestSchema, { serverId: server.id, limit: 50 })
+				create(ListOperationsRequestSchema, { serverId, limit: 50 }),
+				{ ...silentCallOptions, signal: controller.signal }
 			);
-			operations = response.operations;
+			if (!controller.signal.aborted) operations = response.operations;
 		} catch (error) {
-			// Keep whatever is already on screen: a dropped connection must not
-			// erase the evidence an operator was reading.
+			if (controller.signal.aborted) return;
+			const code = ConnectError.from(error).code;
+			if (
+				code === Code.PermissionDenied ||
+				code === Code.Unauthenticated ||
+				code === Code.NotFound
+			) {
+				operations = [];
+				confirmOpen = false;
+				confirmTarget = null;
+			}
 			loadError = error instanceof Error ? error.message : 'Unknown error';
 		} finally {
-			loading = false;
+			if (!controller.signal.aborted) loading = false;
 		}
 	}
 
 	$effect(() => {
 		if (active) {
 			void load();
+			return () => request?.abort();
 		}
 	});
 
@@ -65,7 +80,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!active || !hasRunning) {
 			return;
 		}
-		const timer = setInterval(() => void load(), 5000);
+		const timer = setInterval(() => {
+			if (!loading) void load();
+		}, 5000);
 		return () => clearInterval(timer);
 	});
 
@@ -84,7 +101,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		try {
 			const response = await rpcClient.operation.resolveOperation(
 				create(ResolveOperationRequestSchema, {
-					serverId: server.id,
+					serverId,
 					operationId: target.id,
 					note: resolveNote.trim()
 				})
@@ -137,7 +154,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			class="mb-4 flex flex-wrap items-center justify-between gap-2 border border-destructive bg-background p-3"
 			role="alert"
 		>
-			<p class="font-mono text-xs text-destructive-text">Could not load operations: {loadError}</p>
+			<p class="text-sm text-destructive-text">
+				Could not load operations. {loadError}
+				{operations.length > 0 ? 'Showing the last loaded operations.' : ''}
+			</p>
 			<button
 				type="button"
 				class="inline-flex h-7 items-center rounded-none bg-secondary px-3 text-xs text-foreground hover:bg-[var(--button-secondary-hover)]"
@@ -146,13 +166,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 	{/if}
 
-	{#if operations.length === 0}
-		<p class="py-6 text-center font-mono text-xs text-muted-foreground">
-			{loading
-				? 'Loading operations…'
-				: 'No operations yet. Start, stop or restart to populate this journal.'}
-		</p>
-	{:else}
+	{#if operations.length > 0}
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[720px] text-xs" aria-label="Lifecycle operation journal">
 				<thead>
@@ -205,6 +219,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</tbody>
 			</table>
 		</div>
+	{:else if loading || !loadError}
+		<p role="status" class="py-6 text-sm text-muted-foreground">
+			{loading
+				? 'Loading operations…'
+				: 'No operations yet. Start, stop or restart to populate this journal.'}
+		</p>
 	{/if}
 </div>
 

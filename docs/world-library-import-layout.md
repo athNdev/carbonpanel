@@ -29,7 +29,9 @@ layouts before any live-world change.
   the server's configured level (with a differing bind request refused). Binder
   re-reads that level under admission before journaling or moving data, and
   passes the canonical value to storage and the audit event. Version-only
-  previews (no server) still apply the layout policy without a configured level.
+  previews (no server) apply the layout policy without a configured level but
+  must name `target_mc_version`; the revision's stored version is not a
+  substitute for the request field.
 - While a world bind owns the server's operation journal, global settings sync
   preserves the configured level and the custom properties that can override
   it. Other global settings can still be synchronized. The sync total counts
