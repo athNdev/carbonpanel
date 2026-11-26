@@ -201,6 +201,49 @@ class CommandTests(unittest.TestCase):
         finally:
             boot_qual.which_any = orig
 
+    def test_aarch64_virt_uefi_selects_64bit_tcg_cpu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = Path(directory) / "AAVMF_CODE.fd"
+            variables = Path(directory) / "AAVMF_VARS.fd"
+            code.write_bytes(b"code")
+            variables.write_bytes(b"vars")
+            orig = boot_qual.which_any
+            try:
+                boot_qual.which_any = lambda *names: "/usr/bin/qemu-system-aarch64" if "qemu-system-aarch64" in names else None
+                cmd = boot_qual.qemu_command(
+                    "/tmp/disk.qcow2", "/tmp/seed.iso", "/tmp/serial.log",
+                    arch="aarch64", accel="tcg", firmware="uefi",
+                    uefi_code=str(code), uefi_vars=str(variables),
+                    machine="virt")
+            finally:
+                boot_qual.which_any = orig
+        self.assertIn("-cpu", cmd)
+        self.assertEqual(cmd[cmd.index("-cpu") + 1], "max")
+        self.assertIn("virt", cmd)
+
+    def test_aarch64_kvm_cpu_defaults_to_host(self):
+        self.assertEqual(boot_qual.default_cpu("aarch64", "kvm"), "host")
+        self.assertEqual(boot_qual.default_cpu("aarch64", "tcg"), "max")
+        self.assertIsNone(boot_qual.default_cpu("x86_64", "tcg"))
+
+    def test_explicit_cpu_overrides_aarch64_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = Path(directory) / "AAVMF_CODE.fd"
+            variables = Path(directory) / "AAVMF_VARS.fd"
+            code.write_bytes(b"code")
+            variables.write_bytes(b"vars")
+            orig = boot_qual.which_any
+            try:
+                boot_qual.which_any = lambda *names: "/usr/bin/qemu-system-aarch64" if "qemu-system-aarch64" in names else None
+                cmd = boot_qual.qemu_command(
+                    "/tmp/disk.qcow2", "/tmp/seed.iso", "/tmp/serial.log",
+                    arch="aarch64", accel="tcg", firmware="uefi",
+                    uefi_code=str(code), uefi_vars=str(variables),
+                    machine="virt", cpu="cortex-a72")
+            finally:
+                boot_qual.which_any = orig
+        self.assertEqual(cmd[cmd.index("-cpu") + 1], "cortex-a72")
+
     def test_overlay_preserves_existing_run_disk(self):
         with tempfile.TemporaryDirectory() as directory:
             work_dir = Path(directory)

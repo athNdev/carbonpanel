@@ -344,9 +344,22 @@ def prepare_overlay(image_path, work_dir, size=None):
         raise
 
 
+def default_cpu(arch, accel=None):
+    """Return the CPU model required by the declared target.
+
+    QEMU's ``virt`` machine defaults to a 32-bit ARM CPU, so an aarch64 guest
+    only boots when a 64-bit model is selected explicitly. ``max`` is the
+    portable TCG choice; KVM requires ``host``.
+    """
+    if arch != "aarch64":
+        return None
+    use_kvm = accel == "kvm" or (accel is None and os.path.exists("/dev/kvm"))
+    return "host" if use_kvm else "max"
+
+
 def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048,
                  cpus=2, accel=None, firmware="bios", uefi_code=None,
-                 uefi_vars=None, machine=None):
+                 uefi_vars=None, machine=None, cpu=None):
     validate_target(arch, firmware, machine)
     bin_name = "qemu-system-%s" % arch
     qemu = which_any(bin_name)
@@ -358,6 +371,10 @@ def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048
         "-m", str(memory_mib),
         "-smp", str(cpus),
     ]
+    if cpu is None:
+        cpu = default_cpu(arch, accel)
+    if cpu:
+        cmd.extend(["-cpu", cpu])
     if machine:
         cmd.extend(["-machine", machine])
     cmd.extend([
@@ -532,7 +549,8 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
                      memory_mib=2048, cpus=2, arch="x86_64", accel=None,
                      do_offline_inspect=True, verify_ref=None, profile="artifact",
                      sha256sums_text=None, seed_iso_path=None, firmware="uefi",
-                     disk_size=None, machine=None, output_reservation=None):
+                     disk_size=None, machine=None, cpu=None,
+                     output_reservation=None):
     work_dir = Path(work_dir)
     validate_target(arch, firmware, machine)
 
@@ -651,7 +669,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         cmd = qemu_command(disk_info["path"], iso_info["path"], str(serial_log),
                            arch=arch, memory_mib=memory_mib, cpus=cpus, accel=accel,
                            firmware=firmware, uefi_code=uefi_code,
-                           uefi_vars=uefi_vars, machine=machine)
+                           uefi_vars=uefi_vars, machine=machine, cpu=cpu)
     except Exception as e:
         report["gates"]["boot_attempt"] = {"status": "FAIL", "error": str(e)}
         return _finish()
@@ -661,6 +679,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         "command": cmd,
         "timeout_seconds": timeout_seconds,
         "accel": "kvm" if os.path.exists("/dev/kvm") and not accel else (accel or "tcg"),
+        "cpu": cpu or default_cpu(arch, accel),
         "firmware": firmware,
         "disk_size": disk_size,
         "serial_log": str(serial_log),
@@ -801,6 +820,7 @@ def main(argv=None):
     parser.add_argument("--memory-mib", type=int, default=2048)
     parser.add_argument("--cpus", type=int, default=2)
     parser.add_argument("--arch", default="x86_64")
+    parser.add_argument("--cpu", help="qemu CPU model (aarch64 defaults to max, or host with KVM)")
     parser.add_argument("--accel", help="qemu accel (tcg or kvm); default: kvm if /dev/kvm else tcg")
     parser.add_argument("--firmware", choices=("uefi", "bios"), default="uefi",
                         help="guest firmware; default uefi matches the declared artifact target")
@@ -902,7 +922,7 @@ def main(argv=None):
         accel=args.accel, do_offline_inspect=not args.no_offline_inspect,
         verify_ref=args.verify_ref, profile=args.profile, sha256sums_text=sums,
         seed_iso_path=args.seed_iso, firmware=args.firmware,
-        disk_size=args.disk_size, machine=args.machine,
+        disk_size=args.disk_size, machine=args.machine, cpu=args.cpu,
         output_reservation=output_reservation,
     )
     print(json.dumps(report, sort_keys=True))
