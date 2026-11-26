@@ -278,6 +278,117 @@ func TestPrepareDeepSleepWakeRecreatesWithoutStartingOrAdvancingLastStarted(t *t
 	assert.Nil(t, server.LastStarted, "wake preparation must not mark a start before Docker is ready")
 }
 
+func TestFreshWakePreflightCompensatesWithoutPriorEvidence(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "wake-fresh", Name: "wake-fresh", DataPath: t.TempDir(),
+		Status: storage.StatusDeepSleep, ContainerID: "old",
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "fresh"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+
+	client := &fakeLifecycleDocker{
+		result: &docker.RecreateContainerResult{NewContainerID: "old"},
+		err:    fmt.Errorf("%w: image pull unavailable", docker.ErrRecreatePreflight),
+	}
+	handled, err := prepareStagedLifecycle(ctx, store, client, nil, server, false, false, nil, nil)
+	require.True(t, handled)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "retained")
+
+	reverted, err := store.GetStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, reverted.Status,
+		"a typed preflight with no prior applied evidence proves compensation is safe")
+	live, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, live.MOTD)
+}
+
+func TestConsecutiveWakePreparationRetainsAppliedSnapshotWithoutStatus(t *testing.T) {
+	for _, status := range []storage.ServerStatus{storage.StatusDeepSleep, storage.StatusStopped} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			store := setupTestStore(t)
+			t.Cleanup(func() { _ = store.Close() })
+			server := &storage.Server{
+				ID: "wake-prior", Name: "wake-prior", DataPath: t.TempDir(),
+				Status: storage.StatusDeepSleep, ContainerID: "old",
+			}
+			require.NoError(t, store.CreateServer(ctx, server))
+			require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+			cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "applied"},
+				storage.UpdateWindowNextRestart, nil, 0)
+			require.NoError(t, err)
+
+			// First wake: prepare applies the snapshot and recreates the stopped
+			// container, then the real WakeCompletion reports that Docker started
+			// but the RUNNING persistence failed and a verified stop restored
+			// DEEPSLEEP.
+			var first *staging.RestartPublication
+			client := &fakeLifecycleDocker{result: &docker.RecreateContainerResult{NewContainerID: "replacement"}}
+			handled, err := prepareStagedLifecycle(ctx, store, client, nil, server, false, false, nil,
+				func(p *staging.RestartPublication) { first = p })
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.NotNil(t, first)
+			require.Equal(t, "replacement", server.ContainerID)
+			require.NoError(t, store.UpdateServerStatus(ctx, server.ID, storage.StatusDeepSleep))
+			server.Status = storage.StatusDeepSleep
+			completion := func(startAttempted bool, wakeErr error) error {
+				if startAttempted {
+					first.RuntimeAttempted = true
+				}
+				return first.Resolve(ctx, store, wakeErr)
+			}
+			require.ErrorContains(t, completion(true, errors.New("failed to update server status to running")), "retained")
+
+			applied, err := store.GetStagedConfigChange(ctx, cfg.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.StagedStatusApplied, applied.Status)
+			live, err := store.GetServerConfig(ctx, server.ID)
+			require.NoError(t, err)
+			require.NotNil(t, live.MOTD)
+			require.Equal(t, "applied", *live.MOTD)
+
+			// The reconciler can move a retained ERROR to STOPPED; the next wake
+			// must not read that mutable status as proof that the prior replacement
+			// never embedded the snapshot.
+			require.NoError(t, store.UpdateServerStatus(ctx, server.ID, status))
+			stored, err := store.GetServer(ctx, server.ID)
+			require.NoError(t, err)
+			stored.LastStarted = nil
+			require.Nil(t, stored.LastStarted)
+
+			preflight := &fakeLifecycleDocker{
+				result: &docker.RecreateContainerResult{NewContainerID: "replacement"},
+				err:    fmt.Errorf("%w: image pull unavailable", docker.ErrRecreatePreflight),
+			}
+			handled, err = prepareStagedLifecycle(ctx, store, preflight, nil, stored, false, false, nil, nil)
+			require.True(t, handled)
+			require.ErrorContains(t, err, "retained")
+			require.Empty(t, preflight.starts)
+
+			retained, err := store.GetStagedConfigChange(ctx, cfg.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.StagedStatusApplied, retained.Status,
+				"a new preflight cannot roll back an applied snapshot while status is %s", status)
+			live, err = store.GetServerConfig(ctx, server.ID)
+			require.NoError(t, err)
+			require.NotNil(t, live.MOTD)
+			require.Equal(t, "applied", *live.MOTD)
+			lease, err := datawrite.TryShared(server.ID)
+			require.NoError(t, err)
+			lease.Release()
+		})
+	}
+}
+
 func TestSchedulerWakePathsRejectOvercommittedNode(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)

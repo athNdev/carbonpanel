@@ -44,13 +44,17 @@ included; an at-time or idle batch is never published by an incidental restart.
 Rows already applied after the last start are included so a safe failure can
 return them to staged without applying them twice. A typed Docker preflight
 failure before any container mutation compensates the snapshot even if the old
-container is still running. Any other attempted runtime outcome, including a
-transport timeout or an accepted replacement, is retained: a stopped container
-is not proof that it is the old, unstaged one. Config-only finalize never opens
-file recovery storage. Applied content rows are durable cleanup evidence: a
-retry finishes that idempotent cleanup instead of republishing, and cleanup
-runs before a cron-coexistence batch is parked so the elapsed timed window can
-retry.
+container is still running, but only when no durable applied evidence from an
+earlier attempt exists. Applied content or config rows report that a replacement
+may already embed the snapshot; that decision does not read the mutable server
+status, because a wake can leave DEEPSLEEP after a verified compensating stop
+and the reconciler can move a retained ERROR to STOPPED. Any other attempted
+runtime outcome, including a transport timeout or an accepted replacement, is
+retained: a stopped container is not proof that it is the old, unstaged one.
+Config-only finalize never opens file recovery storage. Applied content rows are
+durable cleanup evidence: a retry finishes that idempotent cleanup instead of
+republishing, and cleanup runs before a cron-coexistence batch is parked so the
+elapsed timed window can retry.
 
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same

@@ -406,6 +406,16 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 			defer cancel()
 			return finishNextRestartBatch(finishCtx, store, server, batchForFinish, resolver, commit.HasContent())
 		}
+		// An earlier attempt may already have published some content rows. The
+		// count is durable evidence independent of staged rows still waiting, of
+		// server status, and of whether the attempt's start outcome was observed.
+		var count int64
+		err := store.DB().WithContext(ctx).Model(&storage.StagedContentChange{}).
+			Where("batch_id = ? AND status = ?", batchID, storage.StagedStatusApplied).Count(&count).Error
+		if err != nil {
+			return nil, err
+		}
+		commit.pendingContent = count > 0
 	}
 	if len(content) > 0 {
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
@@ -418,17 +428,6 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		if err != nil {
 			return nil, err
 		}
-	} else if batchID != "" {
-		// An earlier attempt may have published files before its start outcome
-		// became uncertain. A new, successful lifecycle operation can complete
-		// that batch, but must not close it during a no-work preflight.
-		var count int64
-		err := store.DB().WithContext(ctx).Model(&storage.StagedContentChange{}).
-			Where("batch_id = ? AND status = ?", batchID, storage.StagedStatusApplied).Count(&count).Error
-		if err != nil {
-			return nil, err
-		}
-		commit.pendingContent = count > 0
 	}
 	owned = true
 	return commit, nil
@@ -437,10 +436,12 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 // HasContent reports whether this batch has published content awaiting a start.
 func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != nil || c.pendingContent) }
 
-// HasPriorRuntimeState reports that an earlier attempt already applied content
-// or config for this snapshot. Such an attempt may have left a replacement
-// container, so a new preflight failure cannot prove the current container is
-// the old, unstaged one.
+// HasPriorRuntimeState reports that an earlier attempt already applied this
+// snapshot's content or config. The evidence is durable persisted rows, not the
+// mutable server status: a verified compensating stop can leave DEEPSLEEP, and
+// the reconciler can move a retained ERROR to STOPPED. Such an attempt may have
+// left a replacement container embedding the applied snapshot, so a new
+// preflight cannot prove the current container is the old, unstaged one.
 func (c *NextRestartCommit) HasPriorRuntimeState() bool {
 	if c == nil {
 		return false

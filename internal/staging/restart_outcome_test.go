@@ -254,6 +254,40 @@ func TestNextRestartCleanupRetryAfterAppliedRowsClosesWithoutRepublish(t *testin
 	require.Equal(t, "new", string(body))
 }
 
+func TestNextRestartPriorStateIncludesAppliedEvidenceBesideStagedRows(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "mixed-prior", Name: "mixed-prior", DataPath: data, Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+
+	// A prior attempt applied one content row and one config row, then failed
+	// before the batch could close. A new row joins the still-open batch.
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "prior"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "already.txt", "already")
+	rows, err := store.ListBatchContent(ctx, cfg.BatchID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NoError(t, store.MarkStagedContentApplied(ctx, rows[0].ID))
+	_, err = store.ApplyStagedConfigChange(ctx, cfg.ID)
+	require.NoError(t, err)
+	stageFile(t, store, data, cfg.BatchID, server.ID, "next.txt", "next")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(commit.Finish)
+	require.True(t, commit.HasContent())
+	require.True(t, commit.HasPriorRuntimeState(),
+		"applied evidence must survive when staged rows also participate")
+	require.Equal(t, 1, commit.ConfigSnapshot())
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	require.Len(t, applied, 1)
+	require.Equal(t, storage.StagedStatusApplied, applied[0].Status)
+}
+
 func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
