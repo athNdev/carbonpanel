@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -466,6 +468,104 @@ func TestIdleClockSurvivesAndDoesNotFireEarly(t *testing.T) {
 	require.Equal(t, "later", string(body))
 }
 
+func TestApplyBatchHoldsExclusiveDataWriteThroughPublication(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "publish-gate", Name: "publish-gate", DataPath: data, Status: storage.StatusRunning, ContainerID: "c1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, os.WriteFile(filepath.Join(data, "mod.jar"), []byte("installed"), 0o644))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageFile(t, store, data, batchID, server.ID, "mod.jar", "candidate")
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	var observed error
+	published := false
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, func(context.Context, *storage.Server, Plan) error {
+		published = true
+		_, observed = datawrite.TryShared(server.ID)
+		return nil
+	}))
+	require.True(t, published)
+	require.ErrorIs(t, observed, datawrite.ErrExclusiveHeld,
+		"a direct write must be refused while the publisher owns the snapshot-to-commit window")
+
+	after, err := datawrite.TryShared(server.ID)
+	require.NoError(t, err, "the publication must release the data path on success")
+	after.Release()
+}
+
+func TestNextRestartCommitOwnsDataWriteThroughUndoOrFinish(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		finish bool
+	}{
+		{name: "undo", finish: false},
+		{name: "finish", finish: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, data := newStageStore(t)
+			server := &storage.Server{ID: "next-gate-" + tc.name, Name: "next-gate", DataPath: data, Status: storage.StatusRunning, ContainerID: "c1"}
+			require.NoError(t, store.CreateServer(ctx, server))
+			batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+			stageFile(t, store, data, batch, server.ID, "mod.jar", "candidate")
+
+			commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+			require.NoError(t, err)
+			require.NotNil(t, commit)
+			body, readErr := os.ReadFile(filepath.Join(data, "mod.jar"))
+			require.NoError(t, readErr)
+			require.Equal(t, "candidate", string(body))
+
+			if _, err := datawrite.TryShared(server.ID); !errors.Is(err, datawrite.ErrExclusiveHeld) {
+				t.Fatalf("direct write while start/restart owns publication = %v, want ErrExclusiveHeld", err)
+			}
+
+			if tc.finish {
+				commit.Finish()
+				require.FileExists(t, filepath.Join(data, "mod.jar"))
+			} else {
+				commit.Undo()
+				require.NoFileExists(t, filepath.Join(data, "mod.jar"))
+			}
+			// Undo after Finish is a no-op, and double release stays safe.
+			commit.Undo()
+			commit.Finish()
+
+			after, err := datawrite.TryShared(server.ID)
+			require.NoError(t, err, "the start/restart commit must release the data path")
+			after.Release()
+		})
+	}
+}
+
+func TestLiveDriftGuardNamesTheChangedTarget(t *testing.T) {
+	data := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(data, "mods"), 0o755))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+	acc, err := nodestorage.NewLocal(data)
+	require.NoError(t, err)
+	defer func() { _ = acc.Close() }()
+
+	guard := liveDriftGuard{target: "mods/mod.jar", sha512: fmt.Sprintf("%x", sha512.Sum512([]byte("installed")))}
+	require.NoError(t, guard.verifyLive(context.Background(), acc))
+
+	require.NoError(t, os.WriteFile(live, []byte("edited-after-review"), 0o644))
+	err = guard.verifyLive(context.Background(), acc)
+	require.ErrorIs(t, err, errStagedLiveDrift)
+	require.Contains(t, err.Error(), "mods/mod.jar", "the typed guard must name the row it verified")
+
+	require.NoError(t, os.Remove(live))
+	err = guard.verifyLive(context.Background(), acc)
+	require.ErrorIs(t, err, errStagedLiveDrift)
+	require.Contains(t, err.Error(), "missing")
+}
+
 func TestNextRestartContentIsNotAppliedByTheSweep(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
@@ -480,13 +580,13 @@ func TestNextRestartContentIsNotAppliedByTheSweep(t *testing.T) {
 	}))
 	require.NoFileExists(t, filepath.Join(data, "mod.jar"))
 
-	undo, err := CommitNextRestartFiles(ctx, store, server, nil)
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
-	require.NotNil(t, undo)
+	require.NotNil(t, commit)
 	body, err := os.ReadFile(filepath.Join(data, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "bytes", string(body))
-	undo()
+	commit.Undo()
 	require.NoFileExists(t, filepath.Join(data, "mod.jar"))
 	rows, err := store.ListStagedContent(ctx, server.ID)
 	require.NoError(t, err)

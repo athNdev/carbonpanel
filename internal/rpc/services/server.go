@@ -2483,14 +2483,19 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 	// Apply staged configs on restart/start (STAGED-CONFIG). Content waiting
 	// for a clock time or an idle window stays staged.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
+	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on start for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
 	}
-	contentReady := undoFiles != nil
-	if undoFiles == nil {
-		undoFiles = func() {}
+	contentReady := commit != nil
+	undoFiles := func() {}
+	if commit != nil {
+		// This start path is not journaled. Hold the data-write gate from the
+		// publication decision through the container start, and release it on
+		// every return; Undo also releases it after restoring live files.
+		defer commit.Finish()
+		undoFiles = commit.Undo
 	}
 	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
 	if err != nil {
@@ -2920,13 +2925,18 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 
 	// Apply any staged config changes marked for restart. A future time or idle
 	// window is not published by this restart.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
+	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on restart for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
 	}
-	if undoFiles == nil {
-		undoFiles = func() {}
+	undoFiles := func() {}
+	if commit != nil {
+		// This restart path is not journaled. Hold the data-write gate from the
+		// publication decision through the container restart, and release it on
+		// every return; Undo also releases it after restoring live files.
+		defer commit.Finish()
+		undoFiles = commit.Undo
 	}
 	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
 	if err != nil {

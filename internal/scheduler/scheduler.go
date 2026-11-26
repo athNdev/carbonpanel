@@ -1255,12 +1255,15 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	undoFiles := func() {}
 	contentReady := false
 	if concrete, ok := store.(*storage.Store); ok {
-		undo, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
+		commit, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
 		if fileErr != nil {
 			return true, fmt.Errorf("failed to apply staged content: %w", fileErr)
 		}
-		if undo != nil {
-			undoFiles = undo
+		if commit != nil {
+			// The caller is not journaled. Keep the data-write gate until the
+			// container operation succeeds (Finish) or the returned undo runs.
+			defer commit.Finish()
+			undoFiles = commit.Undo
 			contentReady = true
 		}
 	}

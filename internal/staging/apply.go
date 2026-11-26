@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
@@ -106,6 +108,14 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if current == nil || current.ID != batch.ID || current.Window != batch.Window || !current.UpdatedAt.Equal(batch.UpdatedAt) {
 			return nil
 		}
+		// Hold the data path from before the undo snapshot through publication
+		// and any rollback. Ordinary panel file mutations take the shared side
+		// of this gate, so they cannot straddle snapshot and commit.
+		write, err := datawrite.AcquireExclusive(ctx, server.ID)
+		if err != nil {
+			return err
+		}
+		defer write.Release()
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
 			return err
 		}
@@ -223,12 +233,66 @@ func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID 
 	return store.RestageOpenBatchRolledBackConfigs(ctx, batchID)
 }
 
+// NextRestartCommit owns the server data path after files for a next-restart
+// batch have been published. The start/restart call site is not itself
+// journaled, so the caller must keep this handle until the container operation
+// resolves: Undo restores the files and releases the gate, Finish keeps the
+// published bytes and releases it. Both methods are idempotent.
+type NextRestartCommit struct {
+	mu       sync.Mutex
+	undo     func()
+	release  func()
+	undone   bool
+	released bool
+}
+
+// Undo restores published files, module fields and staged rows, then releases
+// the data-write gate. It is a no-op after Finish.
+func (c *NextRestartCommit) Undo() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.undone || c.released {
+		return
+	}
+	c.undone = true
+	if c.undo != nil {
+		c.undo()
+	}
+	c.released = true
+	if c.release != nil {
+		c.release()
+	}
+}
+
+// Finish keeps the published files and releases the data-write gate. It does
+// not undo; a caller that needs rollback must call Undo before Finish. Calling
+// Undo after Finish is deliberately a no-op so success cannot be reversed
+// without fresh ownership.
+func (c *NextRestartCommit) Finish() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.released {
+		return
+	}
+	c.released = true
+	if c.release != nil {
+		c.release()
+	}
+}
+
 // CommitNextRestartFiles copies content for a next-restart batch onto the live
 // tree. A batch waiting for a time or an idle window is left untouched, so an
 // incidental restart does not publish it. recreateModule runs for a staged
-// module whose container spec changed. The returned function puts the files
-// and module fields back and returns the rows to staged.
-func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (func(), error) {
+// module whose container spec changed. The returned handle puts the files and
+// module fields back and returns the rows to staged, and owns the exclusive
+// data-write gate until the caller calls Undo or Finish.
+func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (*NextRestartCommit, error) {
 	resolver := firstResolver(resolvers)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
@@ -241,6 +305,21 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 		return nil, err
 	}
+	write, err := datawrite.AcquireExclusive(ctx, server.ID)
+	if err != nil {
+		return nil, err
+	}
+	undo, err := commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, resolver)
+	if err != nil {
+		write.Release()
+		return nil, err
+	}
+	return &NextRestartCommit{undo: undo, release: write.Release}, nil
+}
+
+// commitNextRestartFilesHeld publishes the already-selected next-restart rows.
+// The caller owns the exclusive data-write gate through the returned undo.
+func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, resolver *nodestorage.Resolver) (func(), error) {
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err

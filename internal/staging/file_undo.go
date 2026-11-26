@@ -77,10 +77,86 @@ func validSHA512Hex(value string) bool {
 	return err == nil && len(raw) == sha512.Size
 }
 
+// fileSHA512 reads one file without loading it into memory and verifies that
+// it did not change while the digest was being calculated.
+func fileSHA512(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	before, err := acc.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if !before.Mode().IsRegular() {
+		return "", fmt.Errorf("file %s is not a regular file", target)
+	}
+	r, err := acc.OpenRead(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	h := sha512.New()
+	n, copyErr := io.CopyBuffer(h, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	closeErr := r.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return "", err
+	}
+	if n > limit {
+		return "", fmt.Errorf("file %s exceeds the %d-byte digest limit", target, limit)
+	}
+	after, err := acc.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return "", fmt.Errorf("file %s changed while its digest was checked", target)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// errStagedLiveDrift marks a reviewed target whose live bytes no longer match
+// the digest observed when the batch was reviewed. The guard is checked again
+// next to the live writer commit, not only while taking the undo snapshot.
+var errStagedLiveDrift = errors.New("reviewed live digest changed after staging")
+
+// liveDriftGuard binds a staged target to the reviewed live digest so the
+// target and its precondition cannot be compared against the wrong row. The
+// zero value means the row has no reviewed precondition (an ordinary upload).
+type liveDriftGuard struct {
+	target string
+	sha512 string
+}
+
+func (g liveDriftGuard) empty() bool {
+	return g.sha512 == ""
+}
+
+// verifyLive re-reads the live target immediately before its writer commits.
+// The staged publisher holds the exclusive data-write gate, and ordinary panel
+// writes take the shared side, so a panel write cannot change the target in
+// this window. A process outside the panel is still not an atomic
+// compare-and-swap and can race the final writer.
+func (g liveDriftGuard) verifyLive(ctx context.Context, acc nodestorage.Accessor) error {
+	if g.empty() {
+		return nil
+	}
+	got, err := fileSHA512(ctx, acc, g.target, storageworker.MaxStreamBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: staged target %s changed after staging: expected SHA-512 %s but the live file is missing", errStagedLiveDrift, g.target, g.sha512)
+		}
+		return fmt.Errorf("recheck staged target %s before commit: %w", g.target, err)
+	}
+	if !strings.EqualFold(got, g.sha512) {
+		return fmt.Errorf("%w: staged target %s changed after staging: expected SHA-512 %s but found %s", errStagedLiveDrift, g.target, g.sha512, got)
+	}
+	return nil
+}
+
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
 	type pending struct {
 		source, target, action string
 		expectedSHA512         string
+		guard                  liveDriftGuard
 		expectedStageSha512    string
 	}
 	var files []pending
@@ -102,8 +178,9 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			}
 		} else {
 			item := pending{
-				source: row.StagePath, target: row.TargetPath,
-				action: row.Action, expectedSHA512: row.ExpectedLiveSha512,
+				source: row.StagePath, target: row.TargetPath, action: row.Action,
+				expectedSHA512: row.ExpectedLiveSha512,
+				guard:          liveDriftGuard{target: row.TargetPath, sha512: row.ExpectedLiveSha512},
 			}
 			// A provider-reviewed mod publication precondition was verified
 			// against the provider release and the staged bytes at admission.
@@ -199,6 +276,12 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	var published int64
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
+			return snaps, err
+		}
+		// Recheck at the mutation point, not only while taking the snapshot.
+		// The exclusive data-write gate covers normal panel writes; see
+		// liveDriftGuard.verifyLive for the remaining out-of-band boundary.
+		if err := file.guard.verifyLive(ctx, acc); err != nil {
 			return snaps, err
 		}
 		if file.action == storage.StagedActionDelete {
