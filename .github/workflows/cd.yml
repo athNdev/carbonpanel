@@ -523,7 +523,7 @@ jobs:
 
       - name: Set up Node
         if: steps.pinned.outputs.stable == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
       - name: Set up Bun
@@ -551,7 +551,7 @@ jobs:
         run: |
           OBS=$(python3 scripts/release.py channel-observe --reference "$REF" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.pinned.outputs.stable == 'true'
       - name: Sign in to the linked GitHub container registry
         if: steps.pinned.outputs.stable == 'true'
@@ -790,7 +790,7 @@ jobs:
       - name: Deploy the off-path Nightly candidate probe
         id: deploy
         if: steps.markers.outcome == 'success'
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-nightly-probe
 
@@ -935,7 +935,7 @@ jobs:
       - name: Deploy the final canonical artifact
         id: final_deploy
         if: steps.final_upload.outcome == 'success'
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
       - name: Live browser QA on deployed HTTPS (switcher, pins, both channels)
         id: live_browser
@@ -997,7 +997,7 @@ jobs:
       - name: Deploy the exact prior docs bytes
         id: rollback_deploy
         if: always() && steps.rollback_docs.outcome == 'success'
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-prior
       - name: Verify restored aliases and public docs bytes/marker
@@ -1029,7 +1029,7 @@ jobs:
           python3 -c "import json; r=json.load(open('channel-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
       - name: Upload the channel receipt artifact
         if: steps.final_verify.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: channel-receipt-${{ steps.pinned.outputs.sha }}
           path: channel-receipt.json
@@ -1055,7 +1055,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: python3 -m unittest scripts.test_nightly_recovery -v
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -1095,7 +1095,7 @@ jobs:
           persist-credentials: false
       - name: Set up Node for the Pages plan
         if: inputs.recovery == 'prepare'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
       - name: Set up Bun for the Pages plan
@@ -1116,7 +1116,7 @@ jobs:
         run: python3 -m scripts.nightly_recovery prepare --config "$RECOVERY_EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Retain the exact prior, staged and final site trees before any public write
         if: inputs.recovery == 'prepare'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-recovery-plan
           path: .nightly-recovery/
@@ -1145,7 +1145,7 @@ jobs:
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Retain the inspection receipt
         if: inputs.recovery == 'inspect'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-recovery-receipt
           path: nightly-recovery-receipt.json
@@ -1221,7 +1221,7 @@ jobs:
             --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST"
       - name: Deploy the selected Pages artifact
         if: steps.pages_recheck.outputs.action != '' && steps.pages_recheck.outputs.action == steps.decision.outputs.action
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         if: steps.decision.outputs.action == 'hub' || steps.decision.outputs.action == 'hub-prior'
@@ -1248,7 +1248,7 @@ jobs:
             --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST" --expected "$EXPECTED_STATE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Retain the recovery receipt
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-recovery-receipt
           path: nightly-recovery-receipt.json
