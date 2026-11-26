@@ -637,8 +637,15 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Carbon Tabs for Sub-Views with bottom blue line indicator (Requirement 4) -->
-		<!-- Keep a usable tab viewport when stacked runtime cards fill the screen. -->
-		<div class="flex min-h-[28rem] flex-1 flex-col gap-4">
+		<!-- Keep a usable tab viewport when stacked runtime cards fill the screen.
+		     The mods tab carries a status line and a wrapped action row; on a
+		     phone that leaves the installed-mod list too short, so its floor is
+		     raised and the page scrolls instead of squeezing the list. -->
+		<div
+			class="flex min-h-[28rem] flex-1 flex-col gap-4 {activeTab === 'mods'
+				? 'max-sm:min-h-[35rem]'
+				: ''}"
+		>
 			<!-- Tab Bar -->
 			<CarbonTabs
 				tabs={subViewTabs}

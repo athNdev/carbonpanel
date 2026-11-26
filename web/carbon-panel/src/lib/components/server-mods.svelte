@@ -20,13 +20,15 @@ one at https://mozilla.org/MPL/2.0/.
 		Boxes,
 		Search,
 		Check,
-		Ban
+		Ban,
+		RefreshCw
 	} from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { Mod } from '$lib/proto/carbonpanel/v1/mod_pb';
 	import { formatBytes } from '$lib/utils';
+	import { summarizeModUpdateCheck } from '$lib/utils/mod-update-summary';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import ModBrowserDialog from '$lib/components/mod-browser-dialog.svelte';
 	import {
@@ -59,12 +61,16 @@ one at https://mozilla.org/MPL/2.0/.
 	let hasLoaded = false;
 	let requestNumber = 0;
 	let updateStatus = $state('');
+	// A check runs against an already-listed set. Keeping it separate from
+	// `loading` leaves the rows on screen while the provider is queried.
+	let checking = $state(false);
 	let previousServerId = '';
 
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			updateStatus = '';
+			checking = false;
 			mods = [];
 			loading = true;
 			uploading = false;
@@ -96,10 +102,21 @@ one at https://mozilla.org/MPL/2.0/.
 		return result;
 	});
 
+	function startUpdateCheck() {
+		if (checking || loading || uploading || !mods.length) return;
+		void loadMods(true);
+	}
+
 	async function loadMods(checkUpdates = false) {
 		const serverId = server.id;
 		const request = ++requestNumber;
 		const isCurrent = () => request === requestNumber && server.id === serverId;
+		// The check trigger keeps focus while a check runs: it is only
+		// aria-disabled, never natively disabled, so Enter/Space do not send a
+		// keyboard user back to the top of the page. Restore focus defensively
+		// if an unrelated path did drop it to the document.
+		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		checking = checkUpdates;
 		updateStatus = checkUpdates ? 'Checking installed files for compatible releases…' : '';
 		// A vanilla server has no mods directory, and asking for one returns an
 		// error the RPC interceptor turns into a toast - on a tab that already
@@ -107,16 +124,18 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!canHaveMods()) {
 			mods = [];
 			loading = false;
+			checking = false;
 			return;
 		}
 		try {
-			loading = true;
+			// A check keeps the current rows visible; only the first load (or a
+			// mutation-triggered refresh) replaces them with the loading state.
+			if (!checkUpdates) loading = true;
 			const response = await rpcClient.mod.listMods({ serverId, checkUpdates });
 			if (!isCurrent()) return;
 			mods = response.mods;
 			if (checkUpdates) {
-				const available = mods.filter((mod) => mod.updatePreview?.state === 'available').length;
-				updateStatus = `Checked ${mods.length} installed files. Compatible updates available for ${available}.`;
+				updateStatus = summarizeModUpdateCheck(mods.map((mod) => mod.updatePreview?.state));
 			}
 		} catch (_e) {
 			if (isCurrent()) {
@@ -124,7 +143,12 @@ one at https://mozilla.org/MPL/2.0/.
 				toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
 			}
 		} finally {
-			if (isCurrent()) loading = false;
+			if (isCurrent()) {
+				loading = false;
+				checking = false;
+				if (focused && !document.activeElement?.isConnected) focused.focus();
+				else if (focused && document.activeElement === document.body) focused.focus();
+			}
 		}
 	}
 
@@ -282,13 +306,23 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#snippet actions()}
 		{#if canHaveMods()}
+			<!--
+				Icon-only below sm. The full label otherwise wraps onto a third
+				action row at 390 px and takes the height the mod list needs. One
+				element only, so the tab order and accessible name stay stable.
+			-->
 			<CarbonButton
 				kind="secondary"
 				size="sm"
+				class="max-sm:px-2! {checking ? 'opacity-50' : ''}"
 				disabled={loading || uploading || !mods.length}
-				onclick={() => loadMods(true)}
+				aria-disabled={checking ? 'true' : undefined}
+				aria-label="Check for updates"
+				title="Check for updates"
+				onclick={startUpdateCheck}
 			>
-				Check for updates
+				<RefreshCw class="h-4 w-4 sm:hidden {checking ? 'animate-spin' : ''}" />
+				<span class="hidden sm:inline">Check for updates</span>
 			</CarbonButton>
 			<CarbonButton kind="primary" size="sm" onclick={() => (browserDialogOpen = true)}>
 				<Boxes class="h-4 w-4" />
@@ -317,7 +351,7 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 		{/if}
 	{/snippet}
-	<p role="status" class="text-sm text-muted-foreground">{updateStatus}</p>
+	<p role="status" class="px-3 text-sm text-muted-foreground">{updateStatus}</p>
 	{#snippet toolbar()}
 		{#if canHaveMods()}
 			<div
@@ -403,7 +437,7 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 	{/snippet}
-	<div class="min-h-0 flex-1 overflow-auto bg-background">
+	<div class="min-h-0 flex-1 overflow-auto bg-background" aria-busy={checking ? 'true' : undefined}>
 		{#if !canHaveMods()}
 			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
 				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
