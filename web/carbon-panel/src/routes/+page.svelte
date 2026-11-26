@@ -45,6 +45,9 @@ one at https://mozilla.org/MPL/2.0/.
 		serverActions,
 		sortServersByActivity
 	} from '$lib/stores/servers';
+	import { summarizeNodes } from '$lib/utils/node-status';
+	import { formatTimestamp } from '$lib/utils/format-time';
+	import { summarizeDashboardTelemetry } from '$lib/features/servers/dashboard-telemetry';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
 		CarbonButton,
@@ -52,7 +55,6 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonErrorState,
 		CarbonPageHeader
 	} from '$lib/components/carbon';
-	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
 	// Dashboard data
 	let dashboardServers = $derived($serversStore);
@@ -62,7 +64,6 @@ one at https://mozilla.org/MPL/2.0/.
 	let isLoading = $state(true);
 	let loadError = $state<string | null>(null);
 	let isRefreshing = $state(false);
-	let currentTime = $state(new Date());
 
 	// Load dashboard data with full stats, plus node inventory fail-open.
 	// NodeService.listNodes runs in parallel with listServers so a node
@@ -108,20 +109,14 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	let telemetry = $derived(summarizeDashboardTelemetry(dashboardServers));
+	let memoryUsageMiB = $derived(telemetry.memory.usageMiB);
 	let stats = $derived({
 		total: dashboardServers.length,
-		running: dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length,
+		running: telemetry.running,
 		stopped: dashboardServers.filter((s) => s.status === ServerStatus.STOPPED).length,
 		error: dashboardServers.filter((s) => s.status === ServerStatus.ERROR).length,
 		warning: dashboardServers.filter((s) => s.status === ServerStatus.UNHEALTHY).length,
-		totalMemory: dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0),
-		usedMemory: dashboardServers
-			.filter((s) => s.status === ServerStatus.RUNNING)
-			.reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0),
-		totalPlayers: dashboardServers
-			.filter((s) => joinIsPlayable(s))
-			.reduce((acc, s) => acc + (s.playersOnline || 0), 0),
-		totalMaxPlayers: dashboardServers.reduce((acc, s) => acc + (s.maxPlayers || 0), 0),
 		avgTps: dashboardServers
 			.filter((s) => s.tps && s.tps > 0)
 			.reduce((acc, s, _, arr) => acc + (s.tps || 0) / arr.length, 0),
@@ -133,44 +128,20 @@ one at https://mozilla.org/MPL/2.0/.
 		avgCpu: dashboardServers
 			.filter((s) => s.cpuPercent && s.cpuPercent > 0)
 			.reduce((acc, s, _, arr) => acc + (s.cpuPercent || 0) / arr.length, 0),
-		activeRatio:
-			dashboardServers.length > 0
-				? Math.round(
-						(dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length /
-							dashboardServers.length) *
-							100
-					)
-				: 0,
-		memUsagePercent:
-			dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0) > 0
-				? Math.min(
-						100,
-						Math.round(
-							(dashboardServers
-								.filter((s) => s.status === ServerStatus.RUNNING)
-								.reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0) /
-								dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0)) *
-								100
-						)
-					)
-				: 0
+		activeRatio: dashboardServers.length
+			? Math.round((telemetry.running / dashboardServers.length) * 100)
+			: 0
 	});
 
-	let recentActivity = $derived(
+	let recentStarts = $derived(
 		dashboardServers
-			.filter((s) => s.lastStarted)
+			.filter((server) => server.lastStarted && server.lastStarted.seconds > 0n)
 			.sort(
 				(a, b) =>
-					new Date(Number(b.lastStarted!.seconds) * 1000).getTime() -
-					new Date(Number(a.lastStarted!.seconds) * 1000).getTime()
+					Number(b.lastStarted!.seconds - a.lastStarted!.seconds) ||
+					b.lastStarted!.nanos - a.lastStarted!.nanos
 			)
 			.slice(0, 5)
-			.map((s) => ({
-				server: s.name,
-				action: s.status === ServerStatus.RUNNING ? 'Started' : 'Activity',
-				time: s.lastStarted,
-				status: s.status
-			}))
 	);
 
 	let serversByStatus = $derived({
@@ -189,13 +160,7 @@ one at https://mozilla.org/MPL/2.0/.
 		)
 	});
 
-	let nodeStats = $derived({
-		total: dashboardNodes.length,
-		online: dashboardNodes.filter((n) => n.status === NodeStatusEnum.ONLINE).length,
-		offline: dashboardNodes.filter((n) => n.status !== NodeStatusEnum.ONLINE).length,
-		totalServers: dashboardNodes.reduce((acc, n) => acc + (n.serverCount || 0), 0),
-		totalAllocatedMb: dashboardNodes.reduce((acc, n) => acc + Number(n.allocatedMemoryMb || 0n), 0)
-	});
+	let nodeStats = $derived(summarizeNodes(dashboardNodes));
 
 	function getNodeTagType(status: NodeStatusEnum): 'green' | 'red' | 'gray' {
 		switch (status) {
@@ -235,13 +200,9 @@ one at https://mozilla.org/MPL/2.0/.
 			isLoading = false;
 		});
 
-		const interval = setInterval(() => {
-			currentTime = new Date();
-		}, 1000);
 		return () => {
 			mounted = false;
 			++dashboardLoadGeneration;
-			clearInterval(interval);
 		};
 	});
 
@@ -257,19 +218,6 @@ one at https://mozilla.org/MPL/2.0/.
 		blue: 'bg-primary',
 		gray: 'bg-muted-foreground',
 		'warm-gray': 'bg-muted-foreground'
-	};
-
-	const formatUptime = (lastStarted?: Timestamp) => {
-		if (!lastStarted) return 'Never';
-		const start = new Date(Number(lastStarted.seconds) * 1000);
-		const diff = currentTime.getTime() - start.getTime();
-		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-		if (days > 0) return `${days}d ${hours}h`;
-		if (hours > 0) return `${hours}h ${minutes}m`;
-		return `${minutes}m`;
 	};
 
 	const getTpsColor = (tps: number | undefined) => {
@@ -319,20 +267,20 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#if isLoading}
-	<div class="space-y-6 bg-background text-foreground">
+	<div class="space-y-6 bg-background text-foreground" role="status" aria-label="Loading dashboard">
 		<div
 			class="flex flex-col justify-between gap-4 border-b border-border pb-4 sm:flex-row sm:items-center"
 		>
 			<div class="w-full">
 				<div class="motion-skeleton h-8 w-56 bg-card"></div>
-				<div class="motion-skeleton mt-2 h-3 w-80 bg-card"></div>
+				<div class="motion-skeleton mt-2 h-3 w-80 max-w-full bg-card"></div>
 			</div>
 			<div class="flex items-center gap-2">
 				<div class="motion-skeleton h-8 w-28 bg-card"></div>
 				<div class="motion-skeleton h-8 w-32 bg-card"></div>
 			</div>
 		</div>
-		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 			{#each [0, 1, 2, 3] as _ (_)}
 				<div
 					class="flex h-[140px] flex-col justify-between rounded-none border border-border bg-card p-6 select-none"
@@ -394,7 +342,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon KPI Tiles -->
 		<div
-			class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0"
+			class="motion-stagger grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-kpi-tiles"
 		>
 			<!-- Tile 1: Total Servers -->
@@ -415,9 +363,9 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					<div class="flex items-center gap-3">
+					<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
 						<div class="flex items-center gap-1.5 text-success-text">
 							<span class="h-1.5 w-1.5 bg-success"></span>
 							<span>{stats.running} ACTIVE</span>
@@ -454,24 +402,27 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
 					>
-						<span use:countUp={{ value: stats.totalPlayers, decimals: 0 }}></span>
+						{#if telemetry.players.online === null}
+							<span class="text-muted-foreground">—</span>
+						{:else}
+							<span use:countUp={{ value: telemetry.players.online, decimals: 0 }}></span>
+						{/if}
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					{#if stats.totalPlayers > 0}
-						<div class="flex items-center gap-1.5 text-success-text">
-							<span class="h-1.5 w-1.5 bg-success"></span>
-							<span
-								>{stats.totalPlayers === 1 ? '1 PLAYER' : `${stats.totalPlayers} PLAYERS`} ONLINE</span
-							>
-						</div>
+					{#if telemetry.running === 0}
+						<span>No running servers</span>
+					{:else if telemetry.players.online === null}
+						<span>Player count unavailable</span>
+					{:else if telemetry.players.reporting < telemetry.running}
+						<span>{telemetry.players.reporting} of {telemetry.running} servers reporting</span>
 					{:else}
-						<span class="text-muted-foreground">0 PLAYERS ONLINE</span>
+						<span>All running servers reporting</span>
 					{/if}
-					{#if stats.totalMaxPlayers > 0}
-						<span class="text-muted-foreground">MAX: {stats.totalMaxPlayers}</span>
+					{#if telemetry.players.capacity > 0}
+						<span>{telemetry.players.capacity} slots configured</span>
 					{/if}
 				</div>
 			</div>
@@ -484,49 +435,65 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
-						<span>Memory Allocation</span>
+						<span>Memory Usage</span>
 						<MemoryStick class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div class="mt-3 flex items-baseline gap-1.5">
-						<span
-							class="font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
-							use:countUp={{
-								value: stats.totalMemory > 0 ? stats.usedMemory / 1024 : 0,
-								decimals: 1
-							}}
-						></span>
-						<span class="font-sans text-sm text-muted-foreground">
-							/ {stats.totalMemory > 0 ? (stats.totalMemory / 1024).toFixed(1) : '0.0'} GB
-						</span>
+						{#if memoryUsageMiB === null}
+							<span class="font-sans text-[32px] leading-none font-semibold text-muted-foreground"
+								>—</span
+							>
+						{:else}
+							{#key memoryUsageMiB >= 1024}
+								<span
+									class="font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
+									use:countUp={{
+										value: memoryUsageMiB >= 1024 ? memoryUsageMiB / 1024 : memoryUsageMiB,
+										decimals: memoryUsageMiB >= 1024 ? 1 : 0
+									}}
+								></span>
+								<span class="font-sans text-sm text-muted-foreground"
+									>{memoryUsageMiB >= 1024 ? 'GiB' : 'MiB'}</span
+								>
+							{/key}
+						{/if}
 					</div>
-					<!-- Sharp Carbon Progress Bar -->
-					<div class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-secondary">
-						<div
-							class="h-full bg-primary transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
-							style="width: {stats.memUsagePercent}%"
-						></div>
-					</div>
+					{#if telemetry.memory.reportedUtilization !== null}
+						<div class="telemetry-track mt-3" aria-hidden="true">
+							<div
+								class="h-full bg-accent-text transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+								style="width: {Math.min(telemetry.memory.reportedUtilization, 100)}%"
+							></div>
+						</div>
+					{/if}
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					<div
-						class="flex items-center gap-1.5 {stats.memUsagePercent > 85
-							? 'text-destructive-text'
-							: stats.memUsagePercent > 70
-								? 'text-warning-text'
-								: 'text-success-text'}"
-					>
+					{#if telemetry.memory.reportedUtilization !== null}
 						<span
-							class="h-1.5 w-1.5 {stats.memUsagePercent > 85
-								? 'bg-destructive'
-								: stats.memUsagePercent > 70
-									? 'bg-warning'
-									: 'bg-success'}"
-						></span>
-						<span>{stats.memUsagePercent}% UTILIZED</span>
-					</div>
-					<span class="text-muted-foreground">RAM POOL</span>
+							class={telemetry.memory.reportedUtilization > 85
+								? 'text-destructive-text'
+								: telemetry.memory.reportedUtilization > 70
+									? 'text-warning-text'
+									: 'text-success-text'}
+							>{telemetry.memory.reportedUtilization}% of reporting limits</span
+						>
+					{:else if telemetry.memory.usageMiB === null}
+						<span>{telemetry.running ? 'Usage unavailable' : 'No running servers'}</span>
+					{:else}
+						<span>Reporting limits unavailable</span>
+					{/if}
+					{#if telemetry.memory.reporting > 0 && telemetry.memory.reporting < telemetry.running}
+						<span>{telemetry.memory.reporting} of {telemetry.running} servers reporting</span>
+					{/if}
+					{#if telemetry.memory.allocatedMiB > 0}
+						<span>
+							{telemetry.memory.allocatedMiB >= 1024
+								? `${(telemetry.memory.allocatedMiB / 1024).toFixed(1)} GiB`
+								: `${telemetry.memory.allocatedMiB} MiB`} allocated
+						</span>
+					{/if}
 				</div>
 			</div>
 
@@ -560,7 +527,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					{#if stats.running === 0}
 						<div class="flex items-center gap-1.5 text-muted-foreground">
@@ -574,7 +541,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					{:else}
 						<div
-							class="flex items-center gap-1.5 {stats.avgTps >= 18
+							class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 {stats.avgTps >= 18
 								? 'text-success-text'
 								: 'text-destructive-text'}"
 						>
@@ -603,29 +570,26 @@ one at https://mozilla.org/MPL/2.0/.
 							? 'text-destructive-text'
 							: 'text-warning-text'} shrink-0"
 					/>
-					<div class="font-sans text-xs text-foreground">
+					<div class="space-y-1 text-sm leading-snug">
 						{#if serversByStatus.critical.length > 0}
-							<span class="font-mono font-bold text-destructive-text"
-								>{serversByStatus.critical.length} SERVER{serversByStatus.critical.length > 1
-									? 'S'
-									: ''} CRITICAL</span
-							>: require operator intervention.
+							<p class="font-semibold text-destructive-text">
+								{serversByStatus.critical.length}
+								{serversByStatus.critical.length === 1 ? 'server needs' : 'servers need'} attention
+							</p>
+							<p class="text-muted-foreground">Check the affected servers for errors or low TPS.</p>
 						{/if}
 						{#if serversByStatus.warning.length > 0}
-							<span
-								class="font-mono font-bold text-warning-text {serversByStatus.critical.length > 0
-									? 'ml-2'
-									: ''}"
-								>{serversByStatus.warning.length} SERVER{serversByStatus.warning.length > 1
-									? 'S'
-									: ''} RUNNING SLOW</span
-							>: sub-optimal TPS detected.
+							<p class="font-medium text-warning-text">
+								{serversByStatus.warning.length}
+								{serversByStatus.warning.length === 1 ? 'server is' : 'servers are'} reporting degraded
+								performance
+							</p>
 						{/if}
 					</div>
 				</div>
 				<a
 					href={resolve('/servers')}
-					class="mono-label-accent flex shrink-0 items-center gap-1 hover:text-foreground"
+					class="focus-ring flex shrink-0 items-center gap-1 text-sm font-medium text-accent-text hover:underline"
 				>
 					<span>Inspect Servers</span>
 					<ChevronRight class="h-3.5 w-3.5" />
@@ -634,18 +598,16 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Server list & Recent activity Grid -->
-		<div class="grid gap-6 lg:grid-cols-7 [&>*]:min-w-0">
+		<div class="grid gap-6 2xl:grid-cols-7 [&>*]:min-w-0">
 			<!-- Carbon DataTable: Server Overview (4 cols on lg) -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-border bg-card lg:col-span-4"
+				class="flex flex-col justify-between rounded-none border border-border bg-card 2xl:col-span-4"
 			>
 				<div>
 					<!-- Table Toolbar / Header -->
 					<div class="flex items-center justify-between border-b border-border bg-card p-4">
 						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-								Server Overview
-							</h2>
+							<h2 class="font-sans text-base font-semibold text-foreground">Server Overview</h2>
 							<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 								Instance telemetry & state across cluster
 							</p>
@@ -682,7 +644,12 @@ one at https://mozilla.org/MPL/2.0/.
 							</CarbonButton>
 						</div>
 					{:else}
-						<div class="overflow-x-auto">
+						<div
+							class="fleet-table-scroll focus-ring"
+							role="region"
+							aria-label="Server overview table"
+							tabindex="0"
+						>
 							<table class="w-full border-collapse text-left font-sans text-sm">
 								<thead class="border-b border-border bg-secondary text-foreground">
 									<tr>
@@ -780,9 +747,9 @@ one at https://mozilla.org/MPL/2.0/.
 															title={server.status === ServerStatus.DEEPSLEEP
 																? 'Wake Server'
 																: 'Start Server'}
-															aria-label={server.status === ServerStatus.DEEPSLEEP
-																? 'Wake Server'
-																: 'Start Server'}
+															aria-label={(server.status === ServerStatus.DEEPSLEEP
+																? 'Wake '
+																: 'Start ') + server.name}
 														>
 															<PlayCircle class="h-4 w-4" />
 														</button>
@@ -792,7 +759,7 @@ one at https://mozilla.org/MPL/2.0/.
 																onclick={() => handleServerAction('stop', server)}
 																class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 																title="Stop Server"
-																aria-label="Stop Server"
+																aria-label={'Stop ' + server.name}
 															>
 																<StopCircle class="h-4 w-4" />
 															</button>
@@ -803,7 +770,7 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('start', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-accent-text transition-colors hover:bg-secondary hover:text-accent-text"
 															title="Resume Server"
-															aria-label="Resume Server"
+															aria-label={'Resume ' + server.name}
 														>
 															<PlayCircle class="h-4 w-4" />
 														</button>
@@ -812,7 +779,7 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
-															aria-label="Stop Server"
+															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />
 														</button>
@@ -822,13 +789,14 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
-															aria-label="Stop Server"
+															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />
 														</button>
 													{/if}
 													<a
 														href={resolve('/servers/[id]', { id: server.id })}
+														aria-label={'Manage ' + server.name}
 														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-secondary hover:text-foreground"
 													>
 														Manage
@@ -844,40 +812,35 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 
-			<!-- Carbon Structured List: Recent Activity (3 cols on lg) -->
-			<div class="flex flex-col rounded-none border border-border bg-card lg:col-span-3">
+			<!-- Recent server starts -->
+			<div class="flex flex-col rounded-none border border-border bg-card 2xl:col-span-3">
 				<!-- Header -->
 				<div class="flex items-center justify-between border-b border-border bg-card p-4">
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-							Recent Activity
-						</h2>
-						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
-							Latest lifecycle and cluster events
-						</p>
+						<h2 class="font-sans text-base font-semibold text-foreground">Recent server starts</h2>
 					</div>
 					<Clock class="h-4 w-4 text-muted-foreground" />
 				</div>
 
 				<!-- Content -->
-				{#if recentActivity.length === 0}
+				{#if recentStarts.length === 0}
 					<div
 						class="flex flex-1 flex-col items-center justify-center p-8 text-center text-muted-foreground"
 					>
 						<Clock class="mb-2 h-8 w-8 text-muted-foreground" />
-						<p class="mono-label">No recent events recorded</p>
+						<p class="text-sm">No server starts recorded</p>
 					</div>
 				{:else}
 					<!-- Structured List Header -->
 					<div
 						class="flex items-center justify-between border-b border-border bg-secondary px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 					>
-						<span>Event / Instance</span>
-						<span>Timestamp</span>
+						<span>Server</span>
+						<span>Last started</span>
 					</div>
 					<!-- Structured List Rows -->
 					<div class="motion-stagger flex-1 divide-y divide-border bg-card">
-						{#each recentActivity as activity (activity.server + (activity.time?.seconds ?? ''))}
+						{#each recentStarts as server (server.id)}
 							<div
 								class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
 							>
@@ -885,22 +848,21 @@ one at https://mozilla.org/MPL/2.0/.
 									<!-- Sharp status pip -->
 									<div
 										role="img"
-										aria-label={serverStatusLabel(activity.status)}
-										title={serverStatusLabel(activity.status)}
+										aria-label={serverStatusLabel(server.status)}
+										title={serverStatusLabel(server.status)}
 										class="h-2 w-2 shrink-0 {statusPipColor[
-											getStatusTagType(activity.status)
-										]} {activity.status === ServerStatus.ERROR ||
-										activity.status === ServerStatus.UNHEALTHY
+											getStatusTagType(server.status)
+										]} {server.status === ServerStatus.ERROR ||
+										server.status === ServerStatus.UNHEALTHY
 											? 'motion-pulse'
 											: ''}"
 									></div>
 									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-foreground">{activity.server}</p>
-										<p class="font-mono text-xs text-muted-foreground">{activity.action}</p>
+										<p class="truncate text-sm font-medium text-foreground">{server.name}</p>
 									</div>
 								</div>
 								<div class="shrink-0 pl-3 font-mono text-xs text-muted-foreground">
-									{formatUptime(activity.time)} ago
+									{formatTimestamp(server.lastStarted)}
 								</div>
 							</div>
 						{/each}
@@ -915,14 +877,16 @@ one at https://mozilla.org/MPL/2.0/.
 					class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 				>
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-							Nodes
-						</h2>
+						<h2 class="font-sans text-base font-semibold text-foreground">Nodes</h2>
 						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							Docker hosts backing this cluster
 						</p>
 					</div>
-					<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
+					<CarbonTag
+						type={nodeStats.offline > 0 ? 'yellow' : 'green'}
+						size="sm"
+						class="self-start sm:self-auto"
+					>
 						{nodeStats.online}/{nodeStats.total} ONLINE
 					</CarbonTag>
 				</div>
@@ -959,9 +923,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 			>
 				<div>
-					<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-						System Health
-					</h2>
+					<h2 class="font-sans text-base font-semibold text-foreground">System Health</h2>
 					<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 						Underlying daemon and network state
 					</p>
@@ -973,6 +935,7 @@ one at https://mozilla.org/MPL/2.0/.
 							? 'yellow'
 							: 'green'}
 					size="sm"
+					class="self-start sm:self-auto"
 				>
 					{serversByStatus.critical.length > 0
 						? 'ATTENTION REQUIRED'
@@ -981,29 +944,30 @@ one at https://mozilla.org/MPL/2.0/.
 							: 'OPERATIONAL'}
 				</CarbonTag>
 			</div>
-			<div
-				class="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
-			>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> RPC Telemetry </span>
-					<CarbonTag type="green" size="sm">OPERATIONAL</CarbonTag>
+			<div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-px bg-border">
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">RPC telemetry</span>
+					<CarbonTag type="gray" size="sm">NOT MEASURED</CarbonTag>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> Network Proxy </span>
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">Network proxy</span>
 					<CarbonTag type={stats.running > 0 ? 'green' : 'gray'} size="sm">
 						{stats.running > 0 ? 'CONNECTED' : 'IDLE'}
 					</CarbonTag>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> Storage Allocation </span>
-					<span class="font-mono text-xs text-foreground">
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">Storage allocation</span>
+					<span class="text-right text-sm font-medium text-foreground">
 						{stats.totalDiskUsage > 0
 							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
-							: 'LOCAL VOLUMES'}
+							: 'Local volumes'}
 					</span>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3" data-testid="health-nodes">
-					<span class="mono-label">Nodes</span>
+				<div
+					class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3"
+					data-testid="health-nodes"
+				>
+					<span class="text-sm text-muted-foreground">Nodes</span>
 					{#if nodeStats.total > 0}
 						<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
 							{nodeStats.online}/{nodeStats.total} ONLINE

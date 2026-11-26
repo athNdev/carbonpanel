@@ -744,7 +744,8 @@ one at https://mozilla.org/MPL/2.0/.
 	onclose={async () => {
 		// The inline pane remounts on close; return focus to its expand button.
 		await tick();
-		document.querySelector<HTMLElement>('[aria-label="Expand console"]')?.focus();
+		const button = document.querySelector('[aria-label="Expand console"]') as HTMLElement | null;
+		button?.focus();
 	}}
 >
 	{@render consolePane(true)}

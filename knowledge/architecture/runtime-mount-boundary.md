@@ -37,6 +37,10 @@ booting. When the mount table cannot be read, the deprecated
 as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is the
 source of truth.
 
+A remote module bind uses its server-relative path even when the controller
+and daemon share the same absolute storage root. Preparing a bind directory
+requires a reachable controller mount and confines creation to that server.
+
 # Work temp
 
 `/tmp` stays a 64 MiB noexec tmpfs. Modpack downloads, archive extracts, and

@@ -113,6 +113,37 @@ func TestInstallModWritesTheMappedRoot(t *testing.T) {
 	}
 }
 
+func TestInstallModInterruptedRetryPreservesExistingJAR(t *testing.T) {
+	root := t.TempDir()
+	modsDir := filepath.Join(root, "mods")
+	if err := os.MkdirAll(modsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jarPath := filepath.Join(modsDir, "example.jar")
+	if err := os.WriteFile(jarPath, []byte("complete-jar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	brokenDownload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "32")
+		_, _ = w.Write([]byte("partial"))
+	}))
+	t.Cleanup(brokenDownload.Close)
+	store := setupTestStore(t)
+	server := &storage.Server{ID: "retry", Name: "retry", DataPath: root, ModLoader: storage.ModLoaderFabric}
+	resp, err := NewModOnlineManager(store, logger.New(), nil, nil).Install(t.Context(), server, []InstallModItem{
+		{Name: "Example", FileName: "example.jar", DownloadURL: brokenDownload.URL},
+	}, ModInstallActor{})
+	if err != nil || resp.Success || len(resp.Errors) != 1 || len(resp.Installed) != 0 {
+		t.Fatalf("bad retry was not reported: %+v, %v", resp, err)
+	}
+	if got, err := os.ReadFile(jarPath); err != nil || string(got) != "complete-jar" {
+		t.Fatalf("retry changed the already-installed jar: %q, %v", got, err)
+	}
+	if entries, err := os.ReadDir(modsDir); err != nil || len(entries) != 1 {
+		t.Fatalf("interrupted retry left staged data: %v, %v", entries, err)
+	}
+}
+
 func TestInstallModLegacyFilenameKeyRoundTrip(t *testing.T) {
 	store := setupTestStore(t)
 	dir := t.TempDir()
@@ -250,6 +281,71 @@ func TestPackwizBakeWritesTheMappedRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "controller", "srv-data", "mods", "example.jar")); !os.IsNotExist(err) {
 		t.Fatalf("controller jar exists: %v", err)
+	}
+}
+
+func TestPackwizBakeRejectsUnresolvedCurseForgeManifestMods(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "mount")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := seedRemoteModServer(t, store, "srv-cf-bake", filepath.Join(dir, "controller", "srv-data"), mount)
+
+	archive := testZipBytes(t, map[string]string{"manifest.json": `{
+		"name": "CurseForge Pack",
+		"minecraft": {"version": "1.20.4", "modLoaders": [{"id": "forge-49.0.1", "primary": true}]},
+		"files": [
+			{"projectID": 100, "fileID": 101, "required": false},
+			{"projectID": 200, "fileID": 201, "required": true}
+		]
+	}`})
+	mgr := packwiz.NewManager(t.TempDir(), logger.New())
+	pack, err := mgr.ImportCurseForge(bytes.NewReader(archive), int64(len(archive)), packwiz.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("bake requested a direct download despite the unavailable required entry")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(download.Close)
+	if err := mgr.AddMod(pack.ID, packwiz.ModItem{
+		Slug: "a-available", Name: "Available", FileName: "available.jar", Side: "server", DownloadURL: download.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(DeployPackRequest{ServerID: server.ID, Mode: "bake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/deploy", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewPackwizHandler(mgr, store, nil, logger.New(), nil, nil, nil).handleDeploy(rec, req, pack.ID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bake status = %d body %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(response.Error, "no direct download URL is available for CurseForge project 200, file 201") ||
+		!strings.Contains(response.Error, "CurseForge modpack library") {
+		t.Fatalf("unexpected bake error: %q", response.Error)
+	}
+	if _, err := os.Stat(filepath.Join(mount, "srv-data")); !os.IsNotExist(err) {
+		t.Fatalf("mapped data directory changed: %v", err)
+	}
+	got, err := store.GetServer(context.Background(), server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MCVersion != server.MCVersion || got.ModLoader != server.ModLoader {
+		t.Fatalf("bake changed the server version and loader to %s / %s", got.MCVersion, got.ModLoader)
 	}
 }
 

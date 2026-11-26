@@ -10,29 +10,22 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import UpdateBatch from '$lib/components/fragments/UpdateBatch.svelte';
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+
 	import { toast } from 'svelte-sonner';
-	import {
-		Save,
-		RefreshCw,
-		Loader2,
-		Link,
-		CircleDot,
-		Circle,
-		Send,
-		KeyRound,
-		ChevronDown,
-		ChevronRight,
-		Wand2
-	} from '@lucide/svelte';
+	import { Save, RefreshCw, Loader2, Link, Send, ChevronRight, Wand2 } from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import { CarbonButton, CarbonInlineLoading } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonInlineLoading,
+		CarbonSearch,
+		CarbonSelect
+	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
@@ -40,7 +33,6 @@ one at https://mozilla.org/MPL/2.0/.
 		type ConfigCategory,
 		type ConfigProperty
 	} from '$lib/proto/carbonpanel/v1/config_pb';
-	import ScrollToTop from './scroll-to-top.svelte';
 
 	interface Props {
 		server?: Server;
@@ -50,6 +42,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	let { server, config, onSave, saving: externalSaving = false }: Props = $props();
+	const fieldControlPrefix = $props.id();
 
 	// State
 	let loading = $state(false);
@@ -61,8 +54,11 @@ one at https://mozilla.org/MPL/2.0/.
 	let batchOpen = $state(false);
 	let batchItems = $state<Array<{ id: string; kind: string; action: string; summary: string }>>([]);
 	let categories = $state<ConfigCategory[]>([]);
-	let activeCategory = $state<string>('');
+	let activeCategory = $state('all');
+	let search = $state('');
+	let changesOnly = $state(false);
 	let highlightedField = $state<string | null>(null);
+	let expanded = new SvelteSet<string>();
 
 	// Track original and current values
 	let originalValues = $state<Map<string, string | null>>(new Map());
@@ -81,36 +77,6 @@ one at https://mozilla.org/MPL/2.0/.
 				properties: !server ? cat.properties.filter((p) => !p.system) : cat.properties
 			}))
 			.filter((cat) => cat.properties.length > 0);
-	});
-
-	// Get current category's properties
-	let currentCategoryProps = $derived.by(() => {
-		const cat = filteredCategories.find((c) => getCategoryId(c.name) === activeCategory);
-		return cat?.properties ?? [];
-	});
-
-	// CurseForge primary vs advanced fields separation
-	const cfPrimaryKeys = new Set([
-		'cfPageUrl',
-		'cfSlug',
-		'cfFileId',
-		'cfForceSynchronize',
-		'cfApiKey'
-	]);
-	let showAdvancedCurseForge = $state(false);
-
-	let primaryCategoryProps = $derived.by(() => {
-		if (activeCategory === 'curseforge') {
-			return currentCategoryProps.filter((p) => cfPrimaryKeys.has(p.key));
-		}
-		return currentCategoryProps;
-	});
-
-	let advancedCategoryProps = $derived.by(() => {
-		if (activeCategory === 'curseforge') {
-			return currentCategoryProps.filter((p) => !cfPrimaryKeys.has(p.key));
-		}
-		return [];
 	});
 
 	function parseCurseForgeUrl(url: string): { slug: string; fileId: string } {
@@ -186,11 +152,6 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	let currentCategoryName = $derived.by(() => {
-		const cat = filteredCategories.find((c) => getCategoryId(c.name) === activeCategory);
-		return cat?.name ?? '';
-	});
-
 	// Calculate modified fields
 	let modifiedFields = $derived.by(() => {
 		const modified = new SvelteSet<string>();
@@ -211,18 +172,19 @@ one at https://mozilla.org/MPL/2.0/.
 		return modified;
 	});
 
-	// Count modified fields per category
-	let modifiedCountByCategory = $derived.by(() => {
-		const counts = new SvelteMap<string, number>();
-		for (const cat of filteredCategories) {
-			const catId = getCategoryId(cat.name);
-			let count = 0;
-			for (const prop of cat.properties) {
-				if (modifiedFields.has(prop.key)) count++;
-			}
-			counts.set(catId, count);
-		}
-		return counts;
+	let visibleGroups = $derived.by(() => {
+		const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		return filteredCategories
+			.filter((cat) => activeCategory === 'all' || getCategoryId(cat.name) === activeCategory)
+			.map((cat) => ({
+				name: cat.name,
+				properties: cat.properties.filter((p) => {
+					if (changesOnly && !modifiedFields.has(p.key)) return false;
+					const text = [cat.name, p.label, p.key, p.envVar, p.description].join(' ').toLowerCase();
+					return words.every((word) => text.includes(word));
+				})
+			}))
+			.filter((group) => group.properties.length);
 	});
 
 	let hasChanges = $derived(modifiedFields.size > 0);
@@ -284,17 +246,12 @@ one at https://mozilla.org/MPL/2.0/.
 		if (server && server.id !== previousServerId) {
 			untrack(() => {
 				previousServerId = server!.id;
+				expanded.clear();
+				search = '';
+				changesOnly = false;
+				activeCategory = 'all';
 				loadServerConfig();
 				void loadBatch();
-			});
-		}
-	});
-
-	// Set initial active category when categories load
-	$effect(() => {
-		if (filteredCategories.length > 0 && !activeCategory) {
-			untrack(() => {
-				activeCategory = getCategoryId(filteredCategories[0].name);
 			});
 		}
 	});
@@ -350,6 +307,7 @@ one at https://mozilla.org/MPL/2.0/.
 		currentValues = newCurrentValues;
 		originalEnabled = newOriginalEnabled;
 		currentEnabled = newCurrentEnabled;
+		void tick().then(checkUrlHash);
 	}
 
 	async function handleSave(stage = true) {
@@ -525,13 +483,19 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function selectCategory(categoryId: string) {
 		activeCategory = categoryId;
+		highlightedField = null;
 		const url = new SvelteURL(window.location.href);
-		url.hash = categoryId;
-		window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+		url.hash = categoryId === 'all' ? '' : categoryId;
+		window.history.replaceState(
+			window.history.state,
+			'',
+			`${url.pathname}${url.search}${url.hash}`
+		);
 	}
 
 	async function copyLinkToClipboard(anchor: string) {
 		const url = new SvelteURL(window.location.href);
+		url.searchParams.set('tab', server ? 'configuration' : 'server-config');
 		url.hash = anchor;
 		const success = await copyToClipboard(url.toString());
 		if (success) {
@@ -539,35 +503,22 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function checkUrlHash() {
+	async function checkUrlHash() {
 		const hash = window.location.hash.slice(1);
 		if (!hash) return;
-
-		setTimeout(() => {
-			const matchingCategory = filteredCategories.find((c) => getCategoryId(c.name) === hash);
-			if (matchingCategory) {
-				activeCategory = hash;
-				return;
-			}
-
-			for (const cat of filteredCategories) {
-				const matchingProp = cat.properties.find((p) => p.key === hash);
-				if (matchingProp) {
-					activeCategory = getCategoryId(cat.name);
-					setTimeout(() => {
-						const element = document.getElementById(hash);
-						if (element) {
-							element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							highlightedField = hash;
-							setTimeout(() => {
-								highlightedField = null;
-							}, 3000);
-						}
-					}, 100);
-					return;
-				}
-			}
-		}, 50);
+		const category =
+			filteredCategories.find((cat) => getCategoryId(cat.name) === hash) ??
+			filteredCategories.find((cat) => cat.properties.some((p) => p.key === hash));
+		if (!category) return;
+		search = '';
+		changesOnly = false;
+		activeCategory = getCategoryId(category.name);
+		highlightedField = hash === activeCategory ? null : hash;
+		if (highlightedField) {
+			await tick();
+			if (window.location.hash.slice(1) === hash)
+				document.getElementById(hash)?.scrollIntoView({ block: 'center' });
+		}
 	}
 
 	function canToggleField(prop: ConfigProperty): boolean {
@@ -578,6 +529,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <ServerTabPanel
+	mode="form"
 	title={!server ? 'Default Server Configuration' : 'Server Configuration'}
 	description={!server
 		? 'Configure default values for new servers'
@@ -595,6 +547,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="secondary"
 				size="sm"
+				class="gap-1.5"
 				onclick={() => handleSyncToAllServers(true)}
 				disabled={loading || syncing || hasChanges}
 				title="Propagate configured default Ops and Whitelist to all existing servers"
@@ -610,6 +563,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<CarbonButton
 			kind="secondary"
 			size="sm"
+			class="gap-1.5"
 			onclick={handleReset}
 			disabled={loading || !hasChanges}
 		>
@@ -630,6 +584,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<CarbonButton
 			kind="primary"
 			size="sm"
+			class="gap-1.5"
 			onclick={() => handleSave(true)}
 			disabled={loading || isSaving || !hasChanges}
 		>
@@ -641,317 +596,192 @@ one at https://mozilla.org/MPL/2.0/.
 			<span>{server ? 'Stage' : 'Save'}</span>
 		</CarbonButton>
 	{/snippet}
-	<div class="my-0 flex-1 overflow-hidden p-0">
-		{#if loading}
-			<div class="flex items-center justify-center py-16">
-				<CarbonInlineLoading description="Loading server configuration..." />
-			</div>
-		{:else if filteredCategories.length === 0}
-			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-				<p class="mb-2 text-sm">No configuration found</p>
-				<p class="text-xs text-muted-foreground">Unable to load server configuration</p>
-			</div>
-		{:else}
-			<div class="flex h-full">
-				<!-- Category Sidebar -->
-				<div class="w-48 shrink-0 overflow-y-auto border-r border-border bg-background">
-					<nav class="space-y-0 p-0">
-						{#each filteredCategories as category (category.name)}
-							{@const categoryId = getCategoryId(category.name)}
-							{@const isActive = activeCategory === categoryId}
-							{@const modCount = modifiedCountByCategory.get(categoryId) ?? 0}
-							<button
-								class="flex w-full cursor-pointer items-center justify-between rounded-none border-b border-border px-3 py-2.5 text-left text-xs transition-colors
-									{isActive
-									? 'border-l-4 border-l-primary bg-accent pl-2.5 font-medium text-foreground'
-									: 'border-l-4 border-l-transparent text-muted-foreground hover:bg-card hover:text-foreground'}"
-								onclick={() => selectCategory(categoryId)}
-							>
-								<span class="truncate">{category.name}</span>
-								{#if modCount > 0}
-									<span
-										class="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-none px-1 font-mono text-xs font-medium
-										{isActive ? 'bg-warning font-semibold text-black' : 'bg-warning text-black'}"
-									>
-										{modCount}
-									</span>
-								{/if}
-							</button>
-						{/each}
-					</nav>
+	{#snippet toolbar()}
+		{#if filteredCategories.length}
+			<div class="config-toolbar">
+				<div class="config-search">
+					<label for={`${fieldControlPrefix}-search`}>Search settings</label>
+					<CarbonSearch
+						id={`${fieldControlPrefix}-search`}
+						type="search"
+						aria-label="Search settings"
+						placeholder="Name, environment variable or description"
+						bind:value={search}
+					/>
 				</div>
-
-				<!-- Fields Panel -->
-				<div class="flex min-w-0 flex-1 flex-col bg-background">
-					<!-- Category Header -->
-					<div class="shrink-0 border-b border-border bg-card px-4 py-3">
-						<h3 class="font-sans text-sm font-normal text-foreground">{currentCategoryName}</h3>
-						<p class="mt-0.5 text-xs text-muted-foreground">{currentCategoryProps.length} fields</p>
-					</div>
-
-					{#snippet fieldCard(prop: ConfigProperty)}
+				<div class="config-filters">
+					<CarbonSelect
+						class="min-w-0"
+						label="Configuration category"
+						value={activeCategory}
+						onchange={(event) => selectCategory(event.currentTarget.value)}
+					>
+						<option value="all">All categories</option>
+						{#each filteredCategories as category (category.name)}
+							<option value={getCategoryId(category.name)}>{category.name}</option>
+						{/each}
+					</CarbonSelect>
+					<button
+						type="button"
+						class="change-filter focus-ring"
+						aria-pressed={changesOnly}
+						onclick={() => (changesOnly = !changesOnly)}
+					>
+						Unsaved ({modifiedFields.size})
+					</button>
+				</div>
+			</div>
+		{/if}
+	{/snippet}
+	<div class="config-list">
+		{#if loading}
+			<div class="p-4"><CarbonInlineLoading description="Loading server configuration…" /></div>
+		{:else if !filteredCategories.length}
+			<p class="p-4 text-sm text-muted-foreground">No configuration is available.</p>
+		{:else}
+			{#if !visibleGroups.length}
+				<div class="flex flex-wrap items-center gap-3 p-4" role="status">
+					<p>No matching settings</p>
+					<CarbonButton
+						kind="tertiary"
+						size="sm"
+						onclick={() => {
+							search = '';
+							changesOnly = false;
+							selectCategory('all');
+						}}>Clear filters</CarbonButton
+					>
+				</div>
+			{/if}
+			{#each visibleGroups as group (group.name)}
+				<section aria-label={group.name} class="config-group">
+					<h3>{group.name} <span>{group.properties.length}</span></h3>
+					{#each group.properties as prop (prop.key)}
 						{@const isEnabled = currentEnabled.has(prop.key)}
-						{@const isModified = modifiedFields.has(prop.key)}
-						{@const isHighlighted = highlightedField === prop.key}
 						{@const canToggle = canToggleField(prop)}
-
+						{@const isModified = modifiedFields.has(prop.key)}
+						{@const controlId = `${fieldControlPrefix}-${prop.key}`}
 						<div
 							id={prop.key}
 							data-field="true"
-							class="group rounded-none border border-border p-4 transition-all duration-150
-								{isHighlighted ? 'outline-2 outline-primary' : ''}
-								{isModified
-								? 'border-l-4 border-l-warning bg-muted'
-								: !isEnabled
-									? 'bg-muted opacity-80'
-									: 'bg-card'}"
+							class="config-row"
+							class:modified={isModified}
+							class:highlighted={highlightedField === prop.key}
 						>
-							<!-- Field Header -->
-							<div class="mb-3 flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1">
-									<div class="mb-1 flex flex-wrap items-center gap-2">
-										<Label
-											for={prop.key}
-											class="text-xs font-medium text-foreground {!isEnabled
-												? 'text-muted-foreground'
-												: ''}"
-										>
-											{prop.label}
-										</Label>
-										{#if prop.required}
-											<span
-												class="rounded-none border border-destructive/40 bg-destructive/20 px-1 py-0.5 font-mono text-xs font-medium text-destructive-text"
-												>required</span
-											>
-										{/if}
-										{#if prop.system}
-											<span
-												class="rounded-none border border-primary/40 bg-primary/20 px-1 py-0.5 font-mono text-xs font-medium text-accent-text"
-												>system</span
-											>
-										{/if}
-										{#if isModified}
-											<span
-												class="rounded-none border border-warning/40 bg-warning/20 px-1 py-0.5 font-mono text-xs font-medium text-warning-text"
-												>modified</span
-											>
-										{/if}
-										{#if !isEnabled}
-											<span
-												class="rounded-none border border-border bg-accent px-1 py-0.5 font-mono text-xs text-muted-foreground"
-												>(unset)</span
-											>
-										{/if}
-										{#if prop.key === 'cfApiKey'}
-											<span
-												class="rounded-none border border-primary/40 bg-primary/20 px-1.5 py-0.5 font-mono text-xs font-medium text-accent-text"
-											>
-												Optional (Keyless Fallback)
-											</span>
-										{/if}
-									</div>
-									{#if prop.envVar}
-										<code class="font-mono text-xs break-all text-muted-foreground"
-											>{prop.envVar}</code
-										>
-									{/if}
-									{#if prop.description}
-										<p class="mt-1 text-xs text-muted-foreground">{prop.description}</p>
-									{/if}
-
-									<!-- Quick Actions for CurseForge Fields -->
-									{#if prop.key === 'cfSlug' && server?.name}
-										<div class="mt-2">
-											<button
-												type="button"
-												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-border bg-accent px-2 font-sans text-xs text-accent-text hover:bg-secondary hover:text-foreground"
-												onclick={assumeCfSlugFromServerName}
-											>
-												<Wand2 class="mr-1 h-3 w-3" />
-												Assume from Server Name ("{server.name}")
-											</button>
-										</div>
-									{/if}
-									{#if prop.key === 'cfPageUrl' && getDisplayValue(prop)}
-										<div class="mt-2">
-											<button
-												type="button"
-												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-border bg-accent px-2 font-sans text-xs text-accent-text hover:bg-secondary hover:text-foreground"
-												onclick={() => handleExtractFromPageUrl(getDisplayValue(prop))}
-											>
-												<Wand2 class="mr-1 h-3 w-3" />
-												Extract Slug & File ID
-											</button>
-										</div>
-									{/if}
-								</div>
-								<div class="flex items-center gap-1">
-									<!-- Set/Unset Toggle -->
-									<button
-										class="rounded-none p-1 transition-colors
-											{canToggle ? 'cursor-pointer hover:bg-accent' : 'cursor-not-allowed opacity-50'}"
-										onclick={() => canToggle && toggleFieldEnabled(prop.key, !isEnabled, prop)}
-										disabled={!canToggle}
-										title={isEnabled
-											? 'Click to unset (use default)'
-											: 'Click to set a custom value'}
-									>
-										{#if isEnabled}
-											<CircleDot class="h-4 w-4 text-success-text" />
-										{:else}
-											<Circle class="h-4 w-4 text-muted-foreground" />
-										{/if}
-									</button>
-									<button
-										type="button"
-										class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-										onclick={() => copyLinkToClipboard(prop.key)}
-										title="Copy link to field"
-									>
-										<Link class="h-3 w-3" />
-									</button>
-								</div>
+							<div class="setting-name">
+								<Label id={`${controlId}-label`} for={controlId}>{prop.label || prop.key}</Label>
+								{#if prop.envVar}<code>{prop.envVar}</code>{/if}
 							</div>
-
-							<!-- Field Input -->
-							{#if prop.type === 'checkbox'}
-								<div class="flex items-center gap-3 py-1">
-									<Switch
-										id={prop.key}
-										checked={getBooleanValue(prop)}
-										onCheckedChange={(checked) => updateValue(prop.key, checked)}
+							<div class="min-w-0">
+								{#if prop.type === 'checkbox'}
+									<div class="flex items-center gap-2">
+										<Switch
+											id={controlId}
+											aria-labelledby={`${controlId}-label`}
+											checked={getBooleanValue(prop)}
+											onCheckedChange={(checked) => updateValue(prop.key, checked)}
+											disabled={prop.system || !isEnabled}
+										/>
+										<span class="text-xs">{getBooleanValue(prop) ? 'On' : 'Off'}</span>
+									</div>
+								{:else if prop.type === 'select' && prop.options?.length}
+									<select
+										id={controlId}
+										class="h-9 w-full px-3 text-sm"
+										value={getDisplayValue(prop)}
 										disabled={prop.system || !isEnabled}
-									/>
-									<span class="text-xs text-foreground {!isEnabled ? 'text-muted-foreground' : ''}">
-										{getBooleanValue(prop) ? 'Enabled' : 'Disabled'}
-									</span>
-								</div>
-							{:else if prop.type === 'select' && prop.options?.length}
-								<Select
-									type="single"
-									value={getDisplayValue(prop)}
-									onValueChange={(value) => updateValue(prop.key, value ?? '')}
-									disabled={prop.system || !isEnabled}
-								>
-									<SelectTrigger
-										class="h-9 rounded-none border border-border bg-background text-foreground {!isEnabled
-											? 'opacity-60'
-											: ''}"
+										onchange={(event) => updateValue(prop.key, event.currentTarget.value)}
 									>
-										<span class="truncate">
-											{getDisplayValue(prop) || 'Select...'}
-										</span>
-									</SelectTrigger>
-									<SelectContent class="rounded-none border border-border bg-card">
-										{#each prop.options as option (option)}
-											<SelectItem value={option} class="rounded-none"
-												>{option || '(empty)'}</SelectItem
+										{#if !prop.options.includes(getDisplayValue(prop))}
+											<option value={getDisplayValue(prop)}
+												>{getDisplayValue(prop) || 'Select…'}</option
 											>
-										{/each}
-									</SelectContent>
-								</Select>
-							{:else if prop.type === 'number'}
-								<Input
-									id={prop.key}
-									type="number"
-									value={getDisplayValue(prop)}
-									placeholder={prop.defaultValue ?? ''}
-									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
-									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
-										? 'opacity-60'
-										: ''}"
-								/>
-							{:else if prop.type === 'password'}
-								<Input
-									id={prop.key}
-									type="password"
-									value={getDisplayValue(prop)}
-									placeholder={prop.defaultValue ?? ''}
-									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
-									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
-										? 'opacity-60'
-										: ''}"
-								/>
-							{:else}
-								<Input
-									id={prop.key}
-									type="text"
-									value={getDisplayValue(prop)}
-									placeholder={prop.defaultValue ?? ''}
-									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
-									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
-										? 'opacity-60'
-										: ''}"
-								/>
-							{/if}
-
-							{#if prop.defaultValue !== undefined && prop.defaultValue !== ''}
-								<p class="mt-2 text-xs text-muted-foreground">
-									Default: <code
-										class="rounded-none bg-accent px-1 py-0.5 font-mono text-xs text-muted-foreground"
-										>{prop.defaultValue}</code
-									>
-								</p>
-							{/if}
-						</div>
-					{/snippet}
-
-					<!-- Fields Grid -->
-					<div class="flex-1 overflow-y-auto p-4">
-						{#if activeCategory === 'curseforge'}
-							<div class="mb-4 rounded-none border border-primary/40 bg-primary/10 p-3 text-sm">
-								<div class="flex items-center gap-2 font-medium text-accent-text">
-									<KeyRound class="h-4 w-4" />
-									CurseForge Keyless Mode & Defaults Active
-								</div>
-								<p class="mt-1 text-xs text-muted-foreground">
-									CurseForge modpacks and mods can be downloaded and searched without an API key via
-									community proxies. If provided, slugs and file IDs can be auto-extracted directly
-									from modpack URLs or assumed from the server name.
-								</p>
-							</div>
-						{/if}
-
-						<div class="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-							{#each primaryCategoryProps as prop (prop.key)}
-								{@render fieldCard(prop)}
-							{/each}
-						</div>
-
-						{#if activeCategory === 'curseforge' && advancedCategoryProps.length > 0}
-							<div class="mt-6 rounded-none border border-border bg-muted p-4">
-								<button
-									type="button"
-									onclick={() => (showAdvancedCurseForge = !showAdvancedCurseForge)}
-									class="flex w-full cursor-pointer items-center justify-between rounded-none text-left text-sm font-medium text-foreground transition-colors hover:text-accent-text"
-								>
-									<span class="flex items-center gap-2">
-										{#if showAdvancedCurseForge}
-											<ChevronDown class="h-4 w-4 text-muted-foreground" />
-										{:else}
-											<ChevronRight class="h-4 w-4 text-muted-foreground" />
 										{/if}
-										Advanced CurseForge Options
-									</span>
-									<span class="text-xs text-muted-foreground">
-										{advancedCategoryProps.length} additional options
-									</span>
-								</button>
-								{#if showAdvancedCurseForge}
-									<div class="mt-4 grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-										{#each advancedCategoryProps as prop (prop.key)}
-											{@render fieldCard(prop)}
-										{/each}
-									</div>
+										{#each prop.options as option (option)}<option value={option}
+												>{option || '(empty)'}</option
+											>{/each}
+									</select>
+								{:else}
+									<Input
+										id={controlId}
+										type={prop.type === 'number' || prop.type === 'password' ? prop.type : 'text'}
+										value={getDisplayValue(prop)}
+										placeholder={prop.type === 'password' ? '' : (prop.defaultValue ?? '')}
+										oninput={(event) => updateValue(prop.key, event.currentTarget.value)}
+										disabled={prop.system || !isEnabled}
+										class="h-9"
+									/>
 								{/if}
 							</div>
-						{/if}
-					</div>
-				</div>
-			</div>
+							<div class="field-actions">
+								{#if canToggle}
+									<button
+										type="button"
+										class="source-button focus-ring"
+										aria-pressed={isEnabled}
+										aria-label={`Override ${prop.label || prop.key}`}
+										title={isEnabled ? 'Use the default value' : 'Set a custom value'}
+										onclick={() => toggleFieldEnabled(prop.key, !isEnabled, prop)}
+									>
+										{isEnabled ? 'Override' : 'Default'}
+									</button>
+								{:else}
+									<span class="text-xs text-muted-foreground"
+										>{prop.system ? 'Managed' : 'Required'}</span
+									>
+								{/if}
+							</div>
+							<button
+								type="button"
+								class="setting-help focus-ring"
+								aria-label={`Details for ${prop.label || prop.key}`}
+								aria-expanded={expanded.has(prop.key)}
+								aria-controls={`${controlId}-help`}
+								onclick={() =>
+									expanded.has(prop.key) ? expanded.delete(prop.key) : expanded.add(prop.key)}
+							>
+								<ChevronRight size={14} aria-hidden="true" /><span>Details</span>
+							</button>
+							<div
+								id={`${controlId}-help`}
+								hidden={!expanded.has(prop.key)}
+								class="setting-description"
+							>
+								{#if prop.description}<p>{prop.description}</p>{/if}
+								{#if prop.defaultValue && prop.type !== 'password'}<p>
+										Default: <code>{prop.defaultValue}</code>
+									</p>{/if}
+								{#if prop.key === 'cfApiKey'}<p>
+										Optional. Keyless downloads are available through community proxies.
+									</p>{/if}
+								<div class="flex flex-wrap gap-2">
+									<CarbonButton
+										kind="tertiary"
+										size="sm"
+										class="gap-1.5"
+										onclick={() => copyLinkToClipboard(prop.key)}
+									>
+										<Link size={14} /> Copy link
+									</CarbonButton>
+									{#if prop.key === 'cfSlug' && server?.name}
+										<CarbonButton kind="tertiary" size="sm" onclick={assumeCfSlugFromServerName}>
+											<Wand2 size={14} /> Use server name
+										</CarbonButton>
+									{:else if prop.key === 'cfPageUrl' && getDisplayValue(prop)}
+										<CarbonButton
+											kind="tertiary"
+											size="sm"
+											onclick={() => handleExtractFromPageUrl(getDisplayValue(prop))}
+										>
+											<Wand2 size={14} /> Extract slug and file ID
+										</CarbonButton>
+									{/if}
+								</div>
+							</div>
+						</div>
+					{/each}
+				</section>
+			{/each}
 
 			{#if server}
 				<UpdateBatch
@@ -967,4 +797,140 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 </ServerTabPanel>
 
-<ScrollToTop />
+<style>
+	.config-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--carbon-space-3);
+		padding: var(--carbon-space-4);
+		background: var(--card);
+	}
+	.config-search {
+		flex: 2 1 17rem;
+		min-width: 0;
+		align-self: end;
+		display: grid;
+		gap: var(--carbon-space-1);
+		font-size: 0.8125rem;
+	}
+	.config-search :global(input::-webkit-search-cancel-button) {
+		appearance: none;
+	}
+	.config-filters {
+		flex: 1 1 16rem;
+		min-width: 0;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: var(--carbon-space-3);
+	}
+	.change-filter,
+	.source-button {
+		padding: 0.3rem 0.6rem;
+		font-size: 0.8125rem;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		cursor: pointer;
+	}
+	.change-filter {
+		min-height: var(--carbon-control-md);
+		padding-inline: var(--carbon-space-3);
+		white-space: nowrap;
+		background: var(--field-surface);
+	}
+	.change-filter:hover,
+	.source-button:hover {
+		color: var(--foreground);
+		border-color: var(--field-hover-edge);
+	}
+	.change-filter[aria-pressed='true'],
+	.source-button[aria-pressed='true'] {
+		color: var(--accent-text);
+		background: var(--accent);
+	}
+	.config-list {
+		container-type: inline-size;
+	}
+	.config-group > h3 {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		background: var(--card);
+		border-block-end: 1px solid var(--border);
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+	.config-group > h3 span,
+	.setting-name code {
+		color: var(--muted-foreground);
+		font-size: 0.75rem;
+		font-weight: 400;
+	}
+	.config-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 5rem 4.5rem;
+		gap: 0.4rem 0.85rem;
+		align-items: center;
+		padding: 0.5rem 1rem;
+		border-block-end: 1px solid var(--border);
+	}
+	.setting-name {
+		display: grid;
+		gap: 0.15rem;
+		overflow-wrap: anywhere;
+	}
+	.field-actions {
+		justify-self: end;
+	}
+	.config-row.modified {
+		box-shadow: inset 3px 0 var(--warning);
+	}
+	.config-row.highlighted {
+		outline: 2px solid var(--ring);
+		outline-offset: -2px;
+	}
+	.setting-help {
+		justify-self: end;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		cursor: pointer;
+		color: var(--muted-foreground);
+		min-height: 2rem;
+		font-size: 0.8125rem;
+	}
+	.setting-help[aria-expanded='true'] :global(svg) {
+		transform: rotate(90deg);
+	}
+	.setting-description {
+		grid-column: 1 / -1;
+		padding: 0.5rem 0;
+		color: var(--muted-foreground);
+		font-size: 0.875rem;
+		overflow-wrap: anywhere;
+	}
+	.setting-description > * + * {
+		margin-block-start: 0.4rem;
+	}
+	@container (max-width: 42rem) {
+		.config-row {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+		.setting-name {
+			grid-column: 1;
+		}
+		.config-row > :nth-child(2) {
+			grid-column: 1;
+			grid-row: 2;
+		}
+		.field-actions {
+			grid-row: 2;
+			grid-column: 2;
+		}
+		.setting-help {
+			grid-row: 1;
+			grid-column: 2;
+		}
+	}
+</style>

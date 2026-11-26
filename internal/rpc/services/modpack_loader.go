@@ -9,8 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 )
 
@@ -37,26 +39,86 @@ func resolveModpackGameLoader(modpack *storage.IndexedModpack, files []*storage.
 	if modpack == nil {
 		return ""
 	}
-	if versionID != "" {
-		for _, f := range files {
-			if f == nil || f.ID != versionID {
-				continue
-			}
-			if l, ok := minecraft.MatchModLoader(f.ModLoader); ok && !isModpackPlatformLoader(l) {
-				return l
-			}
-			break
-		}
+	if loader := indexedModpackGameLoader(files, versionID); loader != "" {
+		return loader
 	}
 	var loaders []string
 	if err := json.Unmarshal([]byte(modpack.ModLoaders), &loaders); err == nil {
 		for _, raw := range loaders {
-			if l, ok := minecraft.MatchModLoader(raw); ok && !isModpackPlatformLoader(l) {
-				return l
+			if loader := modpackGameLoader(raw); loader != "" {
+				return loader
 			}
 		}
 	}
 	return ""
+}
+
+func indexedModpackGameLoader(files []*storage.IndexedModpackFile, versionID string) storage.ModLoader {
+	if versionID != "" {
+		for _, f := range files {
+			if f != nil && f.ID == versionID {
+				return modpackGameLoader(f.ModLoader)
+			}
+		}
+	}
+	return ""
+}
+
+func modpackGameLoader(raw string) storage.ModLoader {
+	if loader, ok := minecraft.MatchModLoader(raw); ok && !isModpackPlatformLoader(loader) {
+		return loader
+	}
+	return ""
+}
+
+// resolveAttachedModpack consults the provider for pinned Modrinth releases
+// absent from the local file index. The wizard lists provider versions even
+// before any file sync. Metadata lookup is optional for offline deploys.
+func (s *ServerService) resolveAttachedModpack(ctx context.Context, pack *storage.IndexedModpack, selector string) (storage.ModLoader, string) {
+	files, _ := s.store.GetIndexedModpackFiles(ctx, pack.ID)
+	if loader := indexedModpackGameLoader(files, selector); loader != "" {
+		return loader, selector
+	}
+	if pack.Indexer == "modrinth" && selector != "" && selector != "latest" {
+		if file := s.findModrinthVersion(ctx, pack.IndexerID, selector); file != nil {
+			selector = file.ID
+			if loader := modpackGameLoader(file.ModLoader); loader != "" {
+				return loader, selector
+			}
+		}
+	}
+	return resolveModpackGameLoader(pack, nil, ""), selector
+}
+
+func (s *ServerService) findModrinthVersion(ctx context.Context, projectID, selector string) *indexers.ModpackFile {
+	indexer, err := indexers.NewIndexer("modrinth", "", s.config)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	files, err := indexer.GetModpackFiles(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	for i := range files {
+		if files[i].ID == selector {
+			return &files[i]
+		}
+	}
+	// Version numbers were sent by older wizards and can be reused across
+	// releases. Leave an ambiguous number for the runtime to interpret.
+	var match *indexers.ModpackFile
+	for i := range files {
+		if files[i].ID == "" || files[i].VersionNumber != selector {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		match = &files[i]
+	}
+	return match
 }
 
 // backfillModpackLoader resolves and persists the display loader for a

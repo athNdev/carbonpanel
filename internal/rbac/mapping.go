@@ -76,10 +76,10 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.AuthService/DeleteInvite":       {Resource: ResourceUsers, Action: ActionDelete},
 
 	// â”€â”€ ConfigService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-	"/carbonpanel.v1.ConfigService/GetServerConfig":             {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.ConfigService/UpdateServerConfig":          {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.ConfigService/GetUpdateBatch":              {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.ConfigService/DiscardUpdateBatch":          {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.ConfigService/GetServerConfig":    {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.ConfigService/UpdateServerConfig": {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.ConfigService/GetUpdateBatch":     {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.ConfigService/DiscardUpdateBatch": {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
 
 	// StagedConfigService mirrors the legacy /api/v1/staged-config adapter:
 	// reads need server config read on the request's server, mutations need
@@ -95,17 +95,17 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// need modpacks/read, clone/refresh/delete and every mod mutation need
 	// modpacks/create. The legacy handler checked the global "*" object for all
 	// of these routes; no ObjectIDField keeps that exact scope.
-	"/carbonpanel.v1.PackwizService/ListPacks":     {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/GetPack":       {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/ClonePack":     {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/RefreshPack":   {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/CheckUpdates":  {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/DeletePack":    {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/AddPackMod":    {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/AddUrlMod":     {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/UpdatePackMod": {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/DeletePackMod": {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/BatchPackMods": {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/ListPacks":                  {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/GetPack":                    {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/ClonePack":                  {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/RefreshPack":                {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/CheckUpdates":               {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/DeletePack":                 {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/AddPackMod":                 {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/AddUrlMod":                  {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/UpdatePackMod":              {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/DeletePackMod":              {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/BatchPackMods":              {Resource: ResourceModpacks, Action: ActionCreate},
 	"/carbonpanel.v1.ConfigService/GetGlobalSettings":           {Resource: ResourceSettings, Action: ActionRead},
 	"/carbonpanel.v1.ConfigService/UpdateGlobalSettings":        {Resource: ResourceSettings, Action: ActionUpdate},
 	"/carbonpanel.v1.ConfigService/SyncGlobalSettingsToServers": {Resource: ResourceSettings, Action: ActionUpdate},
@@ -130,7 +130,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.FileService/DownloadRemoteArchive":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.FileService/GetRemoteArchiveProgress": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 	// OSS-387 controller-owned bounded stream transport.
-	"/carbonpanel.v1.FileService/OpenStream":       {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.FileService/OpenStream": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 	// Every frame and release carries server_id so the interceptor enforces the
 	// same per-server grant as open, and the service binds the handle to that
 	// exact server. A token scoped to server A cannot read/close server B.
@@ -275,11 +275,12 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.BackupService/CreateBackup":    {Resource: ResourceBackups, Action: ActionCreate, ObjectIDField: "server_id"},
 
 	// â”€â”€ UserService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-	"/carbonpanel.v1.UserService/ListUsers":  {Resource: ResourceUsers, Action: ActionRead},
-	"/carbonpanel.v1.UserService/GetUser":    {Resource: ResourceUsers, Action: ActionRead},
-	"/carbonpanel.v1.UserService/CreateUser": {Resource: ResourceUsers, Action: ActionCreate},
-	"/carbonpanel.v1.UserService/UpdateUser": {Resource: ResourceUsers, Action: ActionUpdate},
-	"/carbonpanel.v1.UserService/DeleteUser": {Resource: ResourceUsers, Action: ActionDelete},
+	"/carbonpanel.v1.UserService/ListUsers":     {Resource: ResourceUsers, Action: ActionRead},
+	"/carbonpanel.v1.UserService/GetUser":       {Resource: ResourceUsers, Action: ActionRead},
+	"/carbonpanel.v1.UserService/CreateUser":    {Resource: ResourceUsers, Action: ActionCreate},
+	"/carbonpanel.v1.UserService/UpdateUser":    {Resource: ResourceUsers, Action: ActionUpdate},
+	"/carbonpanel.v1.UserService/BeginOIDCLink": {Resource: ResourceUsers, Action: ActionUpdate},
+	"/carbonpanel.v1.UserService/DeleteUser":    {Resource: ResourceUsers, Action: ActionDelete},
 
 	// â”€â”€ RoleService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	"/carbonpanel.v1.RoleService/ListRoles":           {Resource: ResourceRoles, Action: ActionRead},
@@ -312,23 +313,23 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// Exact-identity lookup has no server scope: it resolves an account the
 	// panel has not observed yet. It stays fail-closed behind players:read on
 	// the global "*" scope; no subuser per-server grant implies it.
-	"/carbonpanel.v1.PlayerService/LookupPlayer":            {Resource: ResourcePlayers, Action: ActionRead},
-	"/carbonpanel.v1.PlayerService/ListPlayers":             {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/GetPlayer":               {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/ListPlayerSessions":      {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/ListPlayerAccess":        {Resource: ResourcePlayers, Action: ActionAccessRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/ListPlayerHistory":       {Resource: ResourcePlayers, Action: ActionHistoryRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/ListPlayerCapabilities":  {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/GetPlayerSkin":           {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/RefreshPlayerSkin":       {Resource: ResourcePlayers, Action: ActionSkinRefresh, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/GetPlayerDeepData":       {Resource: ResourcePlayers, Action: ActionInventory, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/KickPlayer":              {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/BanPlayer":               {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/PardonPlayer":            {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/SetOperator":             {Resource: ResourcePlayers, Action: ActionModerateOp, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/SetWhitelistEntry":       {Resource: ResourcePlayers, Action: ActionAccessWrite, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/BulkPlayerAction":        {Resource: ResourcePlayers, Action: ActionBulk, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/UndoPlayerAction":        {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/LookupPlayer":           {Resource: ResourcePlayers, Action: ActionRead},
+	"/carbonpanel.v1.PlayerService/ListPlayers":            {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/GetPlayer":              {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/ListPlayerSessions":     {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/ListPlayerAccess":       {Resource: ResourcePlayers, Action: ActionAccessRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/ListPlayerHistory":      {Resource: ResourcePlayers, Action: ActionHistoryRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/ListPlayerCapabilities": {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/GetPlayerSkin":          {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/RefreshPlayerSkin":      {Resource: ResourcePlayers, Action: ActionSkinRefresh, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/GetPlayerDeepData":      {Resource: ResourcePlayers, Action: ActionInventory, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/KickPlayer":             {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/BanPlayer":              {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/PardonPlayer":           {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/SetOperator":            {Resource: ResourcePlayers, Action: ActionModerateOp, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/SetWhitelistEntry":      {Resource: ResourcePlayers, Action: ActionAccessWrite, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/BulkPlayerAction":       {Resource: ResourcePlayers, Action: ActionBulk, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.PlayerService/UndoPlayerAction":       {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
 
 	// ── WorldViewService (OSS-354/355/357) ──────────────────────────
 	// World viewing is observation-only. ListWorldViewTargets is global and
@@ -336,12 +337,12 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// concrete server_id. Map reads never imply player observation or overlay
 	// edits: those actions are mapped separately and are admin-only by default.
 	"/carbonpanel.v1.WorldViewService/ListWorldViewTargets": {Resource: ResourceWorldView, Action: ActionRead},
-	"/carbonpanel.v1.WorldViewService/GetWorldViewStatus":    {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.WorldViewService/GetWorldViewSession":   {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.WorldViewService/ListCapabilities":      {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.WorldViewService/ListMapOverlays":       {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.WorldViewService/SetMapOverlay":         {Resource: ResourceWorldView, Action: ActionUpdate, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.WorldViewService/SetPlayerVisibility":   {Resource: ResourceWorldView, Action: ActionObservePlayers, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewStatus":   {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewSession":  {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListCapabilities":     {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListMapOverlays":      {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetMapOverlay":        {Resource: ResourceWorldView, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetPlayerVisibility":  {Resource: ResourceWorldView, Action: ActionObservePlayers, ObjectIDField: "server_id"},
 
 	// ── WorldService ────────────────────────────────────────────────
 	// Library metadata is not server-scoped. Listing bindings and every

@@ -24,6 +24,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -880,7 +881,7 @@ func (s *Store) GetUserByOIDCSubject(ctx context.Context, subject string) (*User
 	err := s.db.WithContext(ctx).First(&user, "oidc_subject = ?", subject).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("user not found: %w", err)
 		}
 		return nil, err
 	}
@@ -898,7 +899,7 @@ func (s *Store) GetUserByOIDCIssuerAndSubject(ctx context.Context, issuer, subje
 	err := s.db.WithContext(ctx).First(&user, "oidc_issuer = ? AND oidc_subject = ?", issuer, subject).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("user not found: %w", err)
 		}
 		return nil, err
 	}
@@ -911,8 +912,31 @@ func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
 	return users, err
 }
 
-func (s *Store) UpdateUser(ctx context.Context, user *User) error {
-	return s.db.WithContext(ctx).Save(user).Error
+func (s *Store) UpdateUserProfile(ctx context.Context, user *User) error {
+	return updateUserFields(s.db.WithContext(ctx), user.ID, map[string]any{
+		"username":  user.Username,
+		"email":     user.Email,
+		"is_active": user.IsActive,
+	})
+}
+
+func (s *Store) UpdateUserLastLogin(ctx context.Context, userID string, at time.Time) error {
+	return updateUserFields(s.db.WithContext(ctx), userID, map[string]any{"last_login": at.UTC()})
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, userID, hash string) error {
+	return updateUserFields(s.db.WithContext(ctx), userID, map[string]any{"password_hash": hash})
+}
+
+func updateUserFields(tx *gorm.DB, userID string, fields map[string]any) error {
+	result := tx.Model(&User{}).Where("id = ?", userID).Updates(fields)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
@@ -1007,22 +1031,100 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 
 // UserRole operations
 func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string) error {
-	var existing UserRole
-	err := s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).First(&existing).Error
-	if err == nil {
-		return nil // Already assigned
+	if source == "" {
+		source = "local"
 	}
-	ur := &UserRole{
-		ID:       uuid.New().String(),
-		UserID:   userID,
-		RoleName: roleName,
-		Source:   source,
-	}
-	return s.db.WithContext(ctx).Create(ur).Error
+	_, err := assignUserRole(s.db.WithContext(ctx), userID, roleName, source)
+	return err
+}
+
+func assignUserRole(tx *gorm.DB, userID, roleName, source string) (bool, error) {
+	// SQLite serializes this statement with other writes. Rechecking the
+	// exact provenance in the statement also handles grants on older schemas.
+	result := tx.Exec(`
+		INSERT INTO user_roles (id, user_id, role_name, source, created_at)
+		SELECT ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_roles WHERE user_id = ? AND role_name = ? AND source = ?
+		)`, uuid.NewString(), userID, roleName, source, tx.NowFunc(), userID, roleName, source)
+	return result.RowsAffected != 0, result.Error
 }
 
 func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
-	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+	return s.db.WithContext(ctx).
+		Where("user_id = ? AND role_name = ? AND source <> ?", userID, roleName, oidcRoleSource).
+		Delete(&UserRole{}).Error
+}
+
+var ErrLocalAdminGrantForbidden = errors.New("assigning the admin role requires roles/manage_wildcard")
+
+// LocalRoleUpdate describes an explicit replacement of locally owned roles.
+// A legacy effective-role list preserves provider-only grants without adopting
+// them as new local grants.
+type LocalRoleUpdate struct {
+	Roles                []string
+	LegacyEffectiveNames bool
+	AllowAdminGrant      bool
+}
+
+func (s *Store) UpdateUserProfileAndRoles(ctx context.Context, userID string, email *string, active *bool, roles *LocalRoleUpdate) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The profile UPDATE acquires the SQLite writer lock before checking
+		// which grants exist and whether a new local admin grant is allowed.
+		fields := map[string]any{"updated_at": tx.NowFunc()}
+		if email != nil {
+			fields["email"] = *email
+		}
+		if active != nil {
+			fields["is_active"] = *active
+		}
+		if err := updateUserFields(tx, userID, fields); err != nil || roles == nil {
+			return err
+		}
+		return replaceLocalRoleGrants(tx, userID, *roles)
+	})
+}
+
+func replaceLocalRoleGrants(tx *gorm.DB, userID string, update LocalRoleUpdate) error {
+	current, err := getUserRoleNames(tx.Where("user_roles.source <> ?", oidcRoleSource), userID)
+	if err != nil {
+		return err
+	}
+	local := make(map[string]bool, len(current))
+	for _, role := range current {
+		local[role] = true
+	}
+	providerOnly := map[string]bool{}
+	if update.LegacyEffectiveNames {
+		provider, err := getUserRoleNames(tx.Where("user_roles.source = ?", oidcRoleSource), userID)
+		if err != nil {
+			return err
+		}
+		for _, role := range provider {
+			providerOnly[role] = !local[role]
+		}
+	}
+	desired := make([]string, 0, len(update.Roles))
+	for _, role := range update.Roles {
+		if role == "" || providerOnly[role] {
+			continue
+		}
+		if !local[role] {
+			if strings.EqualFold(role, "admin") && !update.AllowAdminGrant {
+				return ErrLocalAdminGrantForbidden
+			}
+			if _, err := assignUserRole(tx, userID, role, "local"); err != nil {
+				return err
+			}
+			local[role] = true
+		}
+		desired = append(desired, role)
+	}
+	stale := tx.Where("user_id = ? AND source <> ?", userID, oidcRoleSource)
+	if len(desired) > 0 {
+		stale = stale.Where("role_name NOT IN ?", desired)
+	}
+	return stale.Delete(&UserRole{}).Error
 }
 
 // SetUserRolesBySource reconciles a user's role grants for exactly one source
@@ -1030,69 +1132,81 @@ func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error
 // are never read as "current", deleted, or reattributed. It returns the
 // deterministic added/removed role names so callers can emit audit deltas.
 //
-// This is the source-aware helper required for OIDC entitlement reconciliation:
-// the older UnassignRole has no source filter and must not be used for it.
+// OIDC entitlement reconciliation uses this helper rather than the manual
+// UnassignRole operation.
 func (s *Store) SetUserRolesBySource(ctx context.Context, userID, source string, desired []string) (added, removed []string, err error) {
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing []UserRole
-		if err := tx.Where("user_id = ? AND source = ?", userID, source).Find(&existing).Error; err != nil {
-			return err
-		}
-		current := make(map[string]struct{}, len(existing))
-		for _, grant := range existing {
-			current[grant.RoleName] = struct{}{}
-		}
-		want := make(map[string]struct{}, len(desired))
-		for _, name := range desired {
-			if name != "" {
-				want[name] = struct{}{}
-			}
-		}
-		for name := range want {
-			if _, ok := current[name]; ok {
-				continue
-			}
-			grant := &UserRole{ID: uuid.New().String(), UserID: userID, RoleName: name, Source: source}
-			if err := tx.Create(grant).Error; err != nil {
-				return err
-			}
-			added = append(added, name)
-		}
-		for name := range current {
-			if _, ok := want[name]; ok {
-				continue
-			}
-			if err := tx.Where("user_id = ? AND role_name = ? AND source = ?", userID, name, source).Delete(&UserRole{}).Error; err != nil {
-				return err
-			}
-			removed = append(removed, name)
-		}
-		sort.Strings(added)
-		sort.Strings(removed)
-		return nil
+		added, removed, err = setUserRolesBySource(tx, userID, source, desired)
+		return err
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 	return added, removed, err
 }
 
-// GetUserRoleSource returns the recorded source of a user's role grant. It is
-// used to detect provenance conflicts before OIDC reconciliation so that a
-// locally or admin assigned grant is never converted into an OIDC grant.
-func (s *Store) GetUserRoleSource(ctx context.Context, userID, roleName string) (string, error) {
-	var grant UserRole
-	if err := s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).First(&grant).Error; err != nil {
-		return "", err
+func setUserRolesBySource(tx *gorm.DB, userID, source string, desired []string) (added, removed []string, err error) {
+	want := make(map[string]struct{}, len(desired))
+	var names []string
+	for _, name := range desired {
+		if _, exists := want[name]; name != "" && !exists {
+			want[name] = struct{}{}
+			names = append(names, name)
+		}
 	}
-	return grant.Source, nil
+	sort.Strings(names)
+
+	// Delete first so standalone reconciliation acquires SQLite's writer lock
+	// before reading or inserting grants. RETURNING reports the actual delta.
+	query := tx.Where("user_id = ? AND source = ?", userID, source)
+	if len(names) != 0 {
+		query = query.Where("role_name NOT IN ?", names)
+	}
+	var deleted []UserRole
+	if err := query.Clauses(clause.Returning{Columns: []clause.Column{{Name: "role_name"}}}).Delete(&deleted).Error; err != nil {
+		return nil, nil, err
+	}
+	seen := make(map[string]struct{}, len(deleted))
+	for _, grant := range deleted {
+		if _, exists := seen[grant.RoleName]; !exists {
+			removed = append(removed, grant.RoleName)
+			seen[grant.RoleName] = struct{}{}
+		}
+	}
+	sort.Strings(removed)
+
+	for _, name := range names {
+		inserted, err := assignUserRole(tx, userID, name, source)
+		if err != nil {
+			return nil, nil, err
+		}
+		if inserted {
+			added = append(added, name)
+		}
+	}
+	return added, removed, nil
 }
 
 func (s *Store) GetUserRoleNames(ctx context.Context, userID string) ([]string, error) {
+	return getUserRoleNames(s.db.WithContext(ctx), userID)
+}
+
+func (s *Store) GetUserRoleNamesBySource(ctx context.Context, userID, source string) ([]string, error) {
+	return getUserRoleNames(s.db.WithContext(ctx).Where("user_roles.source = ?", source), userID)
+}
+
+// GetUserLocalRoleNames includes grants administered outside OIDC.
+func (s *Store) GetUserLocalRoleNames(ctx context.Context, userID string) ([]string, error) {
+	return getUserRoleNames(s.db.WithContext(ctx).Where("user_roles.source <> ?", oidcRoleSource), userID)
+}
+
+func getUserRoleNames(tx *gorm.DB, userID string) ([]string, error) {
 	var names []string
-	err := s.db.WithContext(ctx).
-		Model(&UserRole{}).
-		Select("user_roles.role_name").
+	err := tx.Model(&UserRole{}).
+		Distinct("user_roles.role_name").
 		Joins("LEFT JOIN roles ON roles.name = user_roles.role_name").
 		Where("user_roles.user_id = ?", userID).
-		Order("roles.is_system DESC, roles.name ASC").
+		Order("roles.is_system DESC, roles.name ASC, user_roles.role_name ASC").
 		Pluck("user_roles.role_name", &names).Error
 	if err != nil {
 		return nil, err
@@ -1110,11 +1224,12 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 
 func (s *Store) GetSession(ctx context.Context, token string) (*Session, error) {
 	var session Session
-	err := s.db.WithContext(ctx).Preload("User").Where("token = ? AND expires_at > ?", token, time.Now()).First(&session).Error
+	err := s.db.WithContext(ctx).Preload("User").Where("token = ?", token).First(&session).Error
+	// Compare instants so sessions remain valid across controller time zones.
+	if err == gorm.ErrRecordNotFound || (err == nil && !session.ExpiresAt.After(time.Now())) {
+		return nil, fmt.Errorf("session not found or expired")
+	}
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("session not found or expired")
-		}
 		return nil, err
 	}
 	return &session, nil
@@ -1122,6 +1237,10 @@ func (s *Store) GetSession(ctx context.Context, token string) (*Session, error) 
 
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return s.db.WithContext(ctx).Where("token = ?", token).Delete(&Session{}).Error
+}
+
+func (s *Store) DeleteUserSessionsByProvider(ctx context.Context, userID, provider string) error {
+	return s.db.WithContext(ctx).Where("user_id = ? AND auth_provider = ?", userID, provider).Delete(&Session{}).Error
 }
 
 // DeleteUserSessionsExcept removes every stored session for userID, keeping the
@@ -1136,7 +1255,9 @@ func (s *Store) DeleteUserSessionsExcept(ctx context.Context, userID, exceptToke
 }
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
-	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+	return s.db.WithContext(ctx).
+		Where("julianday(expires_at) <= julianday(?)", time.Now().UTC().Format(time.RFC3339Nano)).
+		Delete(&Session{}).Error
 }
 
 // CleanAllSessions deletes all sessions (used when JWT secret changes).
@@ -1773,6 +1894,15 @@ func (s *Store) UpdateModuleStatus(ctx context.Context, id string, status Module
 
 func (s *Store) UpdateModuleContainerID(ctx context.Context, id string, containerID string) error {
 	return s.db.WithContext(ctx).Model(&Module{}).Where("id = ?", id).Update("container_id", containerID).Error
+}
+
+// RecordCreatedModuleContainer recovers the result of Docker create after a
+// canceled write. Record the ID and stopped state together, and leave a row
+// that has already moved beyond creation alone.
+func (s *Store) RecordCreatedModuleContainer(ctx context.Context, id, containerID string) error {
+	return s.db.WithContext(ctx).Model(&Module{}).
+		Where("id = ? AND status = ?", id, ModuleStatusCreating).
+		Updates(map[string]any{"container_id": containerID, "status": ModuleStatusStopped}).Error
 }
 
 // MoveServerModulesToNode retargets every module on a server after the parent

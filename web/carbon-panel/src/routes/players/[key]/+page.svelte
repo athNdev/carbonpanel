@@ -23,6 +23,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonTag,
 		CarbonTabs
 	} from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import PlayerAvatar from '$lib/components/player-avatar.svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { formatRpcError } from '$lib/api/rpc-error';
@@ -334,10 +335,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		/>
 	{:else}
 		<CarbonTabs tabs={[...TABS]} selectedTab={activeTab} idPrefix="player" onselect={setTab} />
+		<CarbonInactiveTabPanels tabs={TABS} selectedTab={activeTab} idPrefix="player" />
 
 		<div class="space-y-4">
 			{#if activeTab === 'overview'}
-				<section role="tabpanel" id="player-panel-overview" aria-labelledby="player-tab-overview">
+				<section
+					role="tabpanel"
+					id="player-panel-overview"
+					aria-labelledby="player-tab-overview"
+					class="focus-ring"
+					tabindex="0"
+				>
 					<CarbonStructuredList>
 						{#snippet header()}
 							<p class="mono-label-strong">Identity</p>
@@ -429,7 +437,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					role="tabpanel"
 					id="player-panel-{activeTab}"
 					aria-labelledby="player-tab-{activeTab}"
-					class="space-y-4"
+					class="focus-ring space-y-4"
+					tabindex="0"
 				>
 					{#if sectionLoading[activeTab] && !loadedSections[activeTab]}
 						<div class="border border-border bg-card p-6">

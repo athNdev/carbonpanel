@@ -11,14 +11,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"gorm.io/gorm"
 )
 
 // moduleDaemon is a stateful fake Engine for the drift/reconnect journey.
@@ -342,5 +345,64 @@ func TestDriftJourneyParentDeleteStopsOrphanContainerWithoutPurge(t *testing.T) 
 	}
 	if got.ContainerID != "" {
 		t.Fatalf("container id = %q, want cleared without a Docker remove", got.ContainerID)
+	}
+}
+
+func TestCreateModuleCancellationRecordsStoppedContainer(t *testing.T) {
+	daemon := newModuleDaemon()
+	api := httptest.NewServer(daemon.handler())
+	t.Cleanup(api.Close)
+	// Cancellation can discard the SQL connection, so use a disk-backed DB.
+	cfg := &config.Config{Database: config.DatabaseConfig{
+		Path: filepath.Join(t.TempDir(), "sidecar.db"), AutoMigrate: true,
+	}}
+	store, err := storage.NewSQLiteStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	log := logger.New()
+	cli, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	manager := NewManager(store, cli, nil, cfg, nil, log)
+	_, mod := seedRunningSidecar(t, store, "canceled-create", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancel at the store write, after the daemon has returned a container ID.
+	// Cancellation at the HTTP handler would race the client decoding it.
+	if err := store.DB().Callback().Update().Before("gorm:update").
+		Register("fixture:cancel_created_module", func(tx *gorm.DB) {
+			row, ok := tx.Statement.Dest.(*storage.Module)
+			if ok && row.ID == mod.ID && row.ContainerID == daemon.nextCreateID &&
+				row.Status == storage.ModuleStatusStopped {
+				cancel()
+			}
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.CreateAndStartModule(ctx, mod.ID, false); err == nil || ctx.Err() != context.Canceled {
+		t.Fatalf("post-create write did not see cancellation: %v", err)
+	}
+	row, err := store.GetModule(context.Background(), mod.ID)
+	if err != nil || row.ContainerID != daemon.nextCreateID || row.Status != storage.ModuleStatusStopped {
+		t.Fatalf("created module container and stopped state were not recovered together: %v, %v", row, err)
+	}
+	if err := manager.StartModule(context.Background(), mod.ID); err != nil {
+		t.Fatalf("retry could not reuse created container: %v", err)
+	}
+	if err := store.RecordCreatedModuleContainer(context.Background(), mod.ID, "obsolete-container"); err != nil {
+		t.Fatal(err)
+	}
+	row, err = store.GetModule(context.Background(), mod.ID)
+	if err != nil || row.ContainerID != daemon.nextCreateID || row.Status != storage.ModuleStatusRunning {
+		t.Fatalf("a recovery write overwrote a later start: %v, %v", row, err)
+	}
+	if creates, _, _ := daemon.snapshot(); creates != 1 {
+		t.Fatalf("retry created %d containers, want one", creates)
 	}
 }

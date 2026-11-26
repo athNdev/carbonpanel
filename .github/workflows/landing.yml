@@ -45,7 +45,7 @@ permissions:
 # Deployments are serialized channel-wide and never cancelled by the routine
 # per-SHA verification builds; alias/artifact writes stay coherent.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy && 'pages-deploy' || format('pages-verify-{0}', github.sha) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && vars.NIGHTLY_RECOVERY_ACTIVE != 'true' && inputs.deploy && 'pages-deploy' || format('pages-verify-{0}', github.sha) }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.deploy }}
 
 jobs:
@@ -55,6 +55,8 @@ jobs:
     # explicit dispatch opt-in; the workflow itself stays active.
     outputs:
       publish: ${{ steps.channel.outputs.publish }}
+      contract: ${{ steps.contract.outputs.verified }}
+      live_index: ${{ steps.live_state.outputs.index }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +72,7 @@ jobs:
         run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
       - name: Decide Pages publication (explicit opt-in only)
         id: channel
+        if: vars.NIGHTLY_RECOVERY_ACTIVE != 'true'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
           CHANNEL_OPT_IN: ${{ inputs.deploy }}
@@ -96,10 +99,67 @@ jobs:
           version: '1.50.0'
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and validate the combined website
+      - name: Qualify the active public docs before a site-only deployment
+        id: live_state
+        if: steps.channel.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_COMMIT: ${{ github.sha }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
         run: |
-          python3 scripts/build_website.py
-          python3 scripts/check_website.py
+          python3 scripts/release.py channel-source-gate \
+            --event "$GITHUB_EVENT_NAME" --ref "$CHANNEL_REF" --commit "$CHANNEL_COMMIT" \
+            --ci-verified "$CHANNEL_CI_VERIFIED"
+          mkdir -p .website-build
+          curl -fsSL https://carbonpanel.dev/version-index.json \
+            -o .website-build/live-version-index.json
+          curl -fsSL https://carbonpanel.dev/docs/version-index.json \
+            -o .website-build/live-docs-version-index.json
+          cmp .website-build/live-version-index.json .website-build/live-docs-version-index.json
+          printf 'index=%s\n' "$(jq -c . .website-build/live-version-index.json)" >> "$GITHUB_OUTPUT"
+          python3 scripts/docs_publication_gate.py resolve-live-docs-state \
+            --path .website-build/live-version-index.json --verify-stable --require-nightly-parity
+
+      - name: Build and validate the combined website
+        env:
+          LIVE_STATE: ${{ steps.live_state.outputs.state }}
+          LIVE_REVISION: ${{ steps.live_state.outputs.revision }}
+          LIVE_DIGEST: ${{ steps.live_state.outputs.digest }}
+          LIVE_RECEIPT: ${{ steps.live_state.outputs.receipt }}
+          CARBONPANEL_STABLE_TAG: ${{ steps.live_state.outputs.stable_tag }}
+          CARBONPANEL_STABLE_REVISION: ${{ steps.live_state.outputs.stable_revision }}
+          CARBONPANEL_STABLE_DIGEST: ${{ steps.live_state.outputs.stable_digest }}
+        run: |
+          if [ "$LIVE_STATE" = final ]; then
+            python3 scripts/build_website.py --nightly-revision "$LIVE_REVISION" \
+              --nightly-digest "$LIVE_DIGEST" --promotion-state final \
+              --promotion-receipt "$LIVE_RECEIPT"
+            python3 scripts/check_website.py --expect-nightly-revision "$LIVE_REVISION" \
+              --expect-nightly-digest "$LIVE_DIGEST" --expect-promotion-state final \
+              --expect-promotion-receipt "$LIVE_RECEIPT"
+          else
+            python3 scripts/build_website.py
+            python3 scripts/check_website.py
+          fi
+
+      - name: Verify channel and maintained guide receipts in the site-only artifact
+        id: contract
+        if: steps.channel.outputs.publish == 'true'
+        run: |
+          GATE=scripts/docs_publication_gate.py
+          LIVE=.website-build/live-version-index.json
+          SITE=.website-build/site
+          python3 "$GATE" validate-channel-contract --path "$SITE/version-index.json" --stable-source "$LIVE"
+          python3 "$GATE" verify-docs-receipt --built "$SITE/version-index.json" --live "$LIVE"
+          python3 "$GATE" guide-fingerprint --declaration docs/maintained-guides.json \
+            --revision "$GITHUB_SHA" --root "$GITHUB_WORKSPACE" > .guide-fingerprint.json
+          python3 "$GATE" verify-maintained-guides --site "$SITE" --revision "$GITHUB_SHA"
+          python3 "$GATE" stamp-publication-receipt --site "$SITE" --candidate .guide-fingerprint.json \
+            --live "$LIVE" --revision "$GITHUB_SHA"
+          python3 "$GATE" verify-publication-receipt --site "$SITE" --candidate .guide-fingerprint.json \
+            --live "$LIVE" --revision "$GITHUB_SHA"
+          python3 "$GATE" verify-rendered-guides --site "$SITE" --live "$LIVE" --root "$GITHUB_WORKSPACE"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -108,7 +168,7 @@ jobs:
 
   deploy:
     needs: build
-    if: needs.build.outputs.publish == 'true'
+    if: needs.build.outputs.publish == 'true' && needs.build.outputs.contract == 'true' && vars.NIGHTLY_RECOVERY_ACTIVE != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,6 +178,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Recheck the exact main pin and live channel receipt before the Pages write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_INDEX: ${{ needs.build.outputs.live_index }}
+        run: |
+          GATE=scripts/docs_publication_gate.py
+          python3 "$GATE" recheck-main-tip --repository "$GITHUB_REPOSITORY" --expected "$GITHUB_SHA"
+          printf '%s\n' "$LIVE_INDEX" > .predeploy-live-index.json
+          curl -fsSL https://carbonpanel.dev/version-index.json -o .public-index.json
+          python3 "$GATE" verify-docs-receipt --built .public-index.json --live .predeploy-live-index.json
+          python3 "$GATE" resolve-live-docs-state --path .public-index.json --verify-stable --require-nightly-parity
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

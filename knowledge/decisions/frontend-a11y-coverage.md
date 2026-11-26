@@ -10,7 +10,10 @@ code_refs:
   - web/carbon-panel/test/a11y-routes/serve.mjs
   - web/carbon-panel/src/lib/components/carbon/a11y-dom.test.ts
   - scripts/manual-review/e2e/a11y-check.mjs
+  - scripts/review/plan-modpacks-library.json
+  - scripts/review/plan-modpacks-studio-library.json
   - .github/workflows/ci.yml
+  - .github/workflows/modpacks-review.yml
 sources:
   - title: Review browser driver
     resource: review-browser-driver.md
@@ -34,7 +37,8 @@ world library and world view — are additionally checked in both the light and
 dark Carbon themes at each width. Theme is selected through the persisted
 `carbon-theme` preference, so the assertions observe the real
 `data-carbon-theme` attribute and painted background rather than toggling a
-class from the test.
+class from the test. The shell skip link and profile controls restore keyboard focus to the owning trigger. Dashboard and inventory fleet tables keep the horizontal scroll region on the labelled wrapper at every width. Long KPI values and status footers wrap when the expanded navigation reduces available space. Settings reflow checks measure nested control and text bounds
+with populated defaults and migration choices at both widths. The fixture holds async responses and waits for controls to enable before sending keys.
 
 # Alternatives
 
@@ -45,16 +49,12 @@ locked Playwright package and owned cache the review harness already provides.
 
 # Consequence
 
-Accessibility claims must name the engine actually exercised. The primary gate
-is Chromium only. An optional smoke mode drives the same packaged routes in
-Firefox or WebKit when CI installs those browsers into the owned cache; it is a
-smoke check, not full cross-engine coverage. Mobile-device emulation, screen
-readers and 400% zoom are not covered by this gate. The route checks exercise
-the packaged SPA with a seeded
-API boundary, not an authenticated live controller, RPC service, Docker daemon
-or Minecraft gameplay. They do not duplicate the screenshot review lane. New
-interactive components should extend the DOM tests for public-seam behavior and
-the journey for whole-page keyboard, role, state and reflow properties. It also
-drives the Modpacks library and Studio shell controls from the same seeds, with
-a refused `SearchModpacks` response and Retry reconciliation, exercising the
-named recurring review plans' selectors rather than the external mod indexer.
+Chromium is the primary gate. Firefox and WebKit run smoke checks. Seeded SPA checks cover Modpacks filters, refusal/Retry, catalogue details and focus restoration across widths in both themes.
+Player roster shortcuts yield to dialogs and native controls. An empty cross-server filter keeps the server selector and Clear filters available.
+Dialogs preserve focus already moved inside by the user. The server route journey
+exercises keyboard access to the map and Copy Address. Screen readers, 400% zoom
+and mobile-device emulation remain outside coverage.
+On relevant PRs and main changes, the Modpacks browser review runs both plans
+against an owned authenticated controller. It checks the Modrinth-backed
+catalog, unmatched search and recovery, and the Studio library entry controls.
+Product journeys and screenshot publication have separate evidence.

@@ -295,7 +295,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
+	<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 		{#if collapsible}
 			<button
 				type="button"
@@ -342,7 +342,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{#if expanded}
 		<Card class="overflow-hidden">
 			{#if jsonMode}
-				<CardContent class="pt-6">
+				<CardContent class="px-3 pt-4 sm:px-6 sm:pt-6">
 					<div class="space-y-3">
 						<Textarea
 							bind:value={jsonText}
@@ -371,7 +371,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</CardContent>
 			{:else}
-				<CardContent class="space-y-6 pt-6">
+				<CardContent class="space-y-6 px-3 pt-4 sm:px-6 sm:pt-6">
 					<!-- Environment Variables -->
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
@@ -568,6 +568,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<Label for="memory-limit" class="text-sm">Memory request (MB)</Label>
 							<Input
 								id="memory-limit"
+								aria-describedby="memory-limit-advisory"
 								type="number"
 								min="512"
 								placeholder="e.g., 8192"
@@ -582,9 +583,10 @@ one at https://mozilla.org/MPL/2.0/.
 								{disabled}
 								class="h-8 text-xs"
 							/>
-							<p class="text-xs text-muted-foreground">
-								Advisory until the engine reports the cap as enforced; ignored when
-								memory_limit_unsupported.
+							<p id="memory-limit-advisory" class="min-w-0 text-xs text-muted-foreground">
+								The requested cap is advisory until the engine confirms enforcement. The engine
+								ignores it when reporting
+								<code class="[overflow-wrap:anywhere]">memory_limit_unsupported</code>.
 							</p>
 						</div>
 					</div>

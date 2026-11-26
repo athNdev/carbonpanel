@@ -21,11 +21,12 @@ sources:
   `upgrade-rehearsal.yml` runs weekly, on path-gated PRs and on dispatch. It
   builds a candidate and runs two fail-closed cases on seeded disposable
   DB/world copies with real `carbon-panel` binaries: the explicit v1.0.40 legacy
-  baseline (35 → 44 → 35) and the current published stable derived from the
+  baseline (35 → 45 → 35) and the current published stable derived from the
   authoritative release record via the OSS-395 product version contract (no
   hardcoded stable literal; no hardcoded count for the current case). Both
   assert integrity, additive table growth, row/world preservation, forced-
-  failure refusal and app-level plus copy-back rollback. Disposable artifacts
+  failure refusal and both rollback paths. Rollback restores the exact Stable
+  table set and removes only tables observed in the candidate delta. Disposable artifacts
   stay under `$RUNNER_TEMP` (build caches excepted); a missing or mismatched
   fixture, or any failed check, fails closed with no silent skip and still
   writes a failing evidence report. It grants no write scope and never touches

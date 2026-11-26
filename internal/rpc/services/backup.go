@@ -363,6 +363,46 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 		s.restoringMu.Unlock()
 	}()
 
+	// Check bindings and perform the restore under the same per-server lock
+	// used by World Library bind and unbind.
+	var restoreResp *v1.RestoreBackupResponse
+	err = operation.RunJournaled(ctx, s.store, s.log, server, "restore", "", func() error {
+		// A backup restore replaces whole level families outside the World
+		// Library binder. WorldBinding is authoritative for which world is
+		// live (ADR 0016): restoring while a binding is active would leave a
+		// row claiming the old revision over newly written bytes. Check under
+		// the journaled lock, before the container stop or the first byte
+		// mutation, and fail closed if the binding state cannot be read.
+		bindings, bindErr := s.store.ListWorldBindings(ctx, server.ID, "")
+		if bindErr != nil {
+			return connect.NewError(connect.CodeInternal,
+				fmt.Errorf("cannot verify world bindings before restore: %w", bindErr))
+		}
+		if len(bindings) > 0 {
+			levels := make([]string, 0, len(bindings))
+			for _, binding := range bindings {
+				levels = append(levels, binding.LevelName)
+			}
+			return connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("restore refused: server %s has active World Library binding(s) for level(s) %s; open the World Library and use Unbind for each level before restoring",
+					server.ID, strings.Join(levels, ", ")))
+		}
+		var restoreErr error
+		restoreResp, restoreErr = s.restoreBackup(ctx, server, rec, worldDataPath, acc)
+		return restoreErr
+	})
+	if err != nil {
+		if errors.Is(err, storage.ErrActiveOperation) || errors.Is(err, operation.ErrInProgress) {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("restore refused while another operation owns the server: %w", err))
+		}
+		return nil, err
+	}
+	return connect.NewResponse(restoreResp), nil
+}
+
+// restoreBackup prepares and verifies the archive before changing server data.
+// The caller holds the durable per-server operation lock.
+func (s *BackupService) restoreBackup(ctx context.Context, server *storage.Server, rec *storage.BackupRecord, worldDataPath string, acc nodestorage.Accessor) (*v1.RestoreBackupResponse, error) {
 	if err := s.store.SetBackupStatus(ctx, rec.ID, "restoring"); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to mark restoring"))
 	}
@@ -453,22 +493,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeDataLoss, fmt.Errorf("backup archive corrupt or invalid: %w", err))
 	}
 
-	// The per-server operation lock serializes this restore against every
-	// other lifecycle mutation of the world (OSS-229/OSS-235).
-	var restoreResp *v1.RestoreBackupResponse
-	jerr := operation.RunJournaled(ctx, s.store, s.log, server, "restore", "", func() error {
-		var rerr error
-		restoreResp, rerr = s.restoreBackupNow(ctx, server, rec, archivePath, worldDataPath, acc, done)
-		return rerr
-	})
-	if jerr != nil {
-		done("failed")
-		if errors.Is(jerr, storage.ErrActiveOperation) || errors.Is(jerr, operation.ErrInProgress) {
-			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("restore refused while another operation owns the server: %w", jerr))
-		}
-		return nil, jerr
-	}
-	return connect.NewResponse(restoreResp), nil
+	return s.restoreBackupNow(ctx, server, rec, archivePath, worldDataPath, acc, done)
 }
 
 // restoreBackupNow runs the journaled mutation window of a restore: verify

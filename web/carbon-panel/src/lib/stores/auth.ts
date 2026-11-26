@@ -29,6 +29,7 @@ interface AuthState {
 	isLoading: boolean;
 	localAuthEnabled: boolean;
 	oidcEnabled: boolean;
+	canLinkOidc: boolean;
 	firstUserSetup: boolean;
 	allowRegistration: boolean;
 	anonymousAccessEnabled: boolean;
@@ -49,6 +50,21 @@ function checkPermission(
 	);
 }
 
+function syncSessionCookie(token: string | null) {
+	// Same-origin browser resources, including maps and WebSockets, cannot set
+	// Bearer headers. Synchronize before exposing the authenticated session.
+	const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+	const expiry = token ? '' : '; Max-Age=0';
+	document.cookie = `cp_session=${encodeURIComponent(token ?? '')}; Path=/; SameSite=Strict${secure}${expiry}`;
+}
+
+function persistBrowserSession(token: string | null) {
+	if (!browser) return;
+	if (token) localStorage.setItem('auth_token', token);
+	else localStorage.removeItem('auth_token');
+	syncSessionCookie(token);
+}
+
 function createAuthStore() {
 	let sessionRevision = 0;
 	const { subscribe, set, update } = writable<AuthState>({
@@ -59,6 +75,7 @@ function createAuthStore() {
 		isLoading: true,
 		localAuthEnabled: true,
 		oidcEnabled: false,
+		canLinkOidc: false,
 		firstUserSetup: false,
 		allowRegistration: false,
 		anonymousAccessEnabled: false
@@ -68,6 +85,7 @@ function createAuthStore() {
 	if (browser) {
 		const token = localStorage.getItem('auth_token');
 		if (token) {
+			syncSessionCookie(token);
 			update((state) => ({ ...state, token }));
 		}
 	}
@@ -131,16 +149,14 @@ function createAuthStore() {
 				const response = await rpcClient.auth.login(request);
 				if (generation !== sessionRevision) return response;
 
-				// Store token
-				if (browser && response.token) {
-					localStorage.setItem('auth_token', response.token);
-				}
+				persistBrowserSession(response.token || null);
 
 				update((state) => ({
 					...state,
 					user: response.user || null,
 					token: response.token,
 					isAuthenticated: true,
+					canLinkOidc: false,
 					isLoading: false
 				}));
 
@@ -167,10 +183,7 @@ function createAuthStore() {
 			}
 
 			if (generation !== sessionRevision) return;
-			// Clear local storage
-			if (browser) {
-				localStorage.removeItem('auth_token');
-			}
+			persistBrowserSession(null);
 
 			// Reset state
 			set({
@@ -181,6 +194,7 @@ function createAuthStore() {
 				isLoading: false,
 				localAuthEnabled: currentState.localAuthEnabled,
 				oidcEnabled: currentState.oidcEnabled,
+				canLinkOidc: false,
 				firstUserSetup: currentState.firstUserSetup,
 				allowRegistration: currentState.allowRegistration,
 				anonymousAccessEnabled: currentState.anonymousAccessEnabled
@@ -214,10 +228,8 @@ function createAuthStore() {
 
 		setToken(token: string) {
 			sessionRevision++;
-			if (browser) {
-				localStorage.setItem('auth_token', token);
-			}
-			update((state) => ({ ...state, token }));
+			persistBrowserSession(token);
+			update((state) => ({ ...state, token, canLinkOidc: false }));
 		},
 
 		async changePassword(oldPassword: string, newPassword: string) {
@@ -238,9 +250,7 @@ function createAuthStore() {
 			const request = create(UseRecoveryKeyRequestSchema, { recoveryKey: key });
 			const response = await rpcClient.auth.useRecoveryKey(request);
 			if (generation !== sessionRevision) return response;
-			if (browser) {
-				localStorage.removeItem('auth_token');
-			}
+			persistBrowserSession(null);
 			set({
 				user: null,
 				token: null,
@@ -249,6 +259,7 @@ function createAuthStore() {
 				isLoading: false,
 				localAuthEnabled: true,
 				oidcEnabled: false,
+				canLinkOidc: false,
 				firstUserSetup: true,
 				allowRegistration: false,
 				anonymousAccessEnabled: false
@@ -265,7 +276,7 @@ function createAuthStore() {
 			});
 
 			if (!currentToken) {
-				update((state) => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false, canLinkOidc: false }));
 				return false;
 			}
 
@@ -279,28 +290,28 @@ function createAuthStore() {
 						user: response.user || null,
 						permissions: response.permissions || [],
 						isAuthenticated: true,
+						canLinkOidc: response.canLinkOidc,
 						isLoading: false
 					}));
 					return true;
 				} else {
 					// Invalid token, clear it
 					sessionRevision++;
-					if (browser) {
-						localStorage.removeItem('auth_token');
-					}
+					persistBrowserSession(null);
 					update((state) => ({
 						...state,
 						user: null,
 						token: null,
 						permissions: [],
 						isAuthenticated: false,
+						canLinkOidc: false,
 						isLoading: false
 					}));
 					return false;
 				}
 			} catch {
 				if (generation !== sessionRevision) return false;
-				update((state) => ({ ...state, isLoading: false }));
+				update((state) => ({ ...state, isLoading: false, canLinkOidc: false }));
 				return false;
 			}
 		},
@@ -318,6 +329,11 @@ function createAuthStore() {
 		getToken(): string | null {
 			const state = get({ subscribe });
 			return state.token || (browser ? localStorage.getItem('auth_token') : null);
+		},
+
+		refreshBrowserSessionCookie() {
+			const token = get({ subscribe }).token;
+			if (browser && token) syncSessionCookie(token);
 		},
 
 		hasRole(role: string): boolean {

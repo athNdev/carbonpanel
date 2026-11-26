@@ -36,7 +36,6 @@ test('stale sockets and timers cannot change a replacement and tail survives rec
 		enabled: () => true,
 		url: () => 'ws://example.test/ws',
 		token: () => 'token',
-		setSessionCookie: () => {},
 		createSocket: () => {
 			const socket = new FakeSocket();
 			sockets.push(socket);
@@ -97,7 +96,6 @@ test('AUTH_FAIL is terminal: socket dropped, session cleared, no reconnect spinn
 		enabled: () => true,
 		url: () => 'ws://example.test/ws',
 		token: () => 'token',
-		setSessionCookie: () => {},
 		createSocket: () => {
 			const socket = new FakeSocket();
 			sockets.push(socket);

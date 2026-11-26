@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package db
 
 import (
@@ -132,5 +131,30 @@ func TestSearchIndexedModpacks(t *testing.T) {
 	paged, _, err := store.ListIndexedModpacks(ctx, 1, 1)
 	if err != nil || len(paged) != 1 {
 		t.Errorf("paged list = %v, %v", paged, err)
+	}
+}
+
+func TestIndexedModpackUpgradePreservesUnknownServerSupport(t *testing.T) {
+	store := newTestStore(t)
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close test store: %v", err)
+		}
+	})
+	if err := store.DB().Exec("ALTER TABLE indexed_modpacks DROP COLUMN server_side").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB().Exec("INSERT INTO indexed_modpacks(id, indexer, name) VALUES (?, ?, ?)", "modrinth-legacy", "modrinth", "Legacy pack").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := store.GetIndexedModpack(context.Background(), "modrinth-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.ServerSide != "" || pack.Name != "Legacy pack" {
+		t.Fatalf("upgraded pack = %+v", pack)
 	}
 }

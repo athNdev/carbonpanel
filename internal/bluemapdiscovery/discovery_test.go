@@ -84,6 +84,18 @@ dimension: "minecraft:overworld"
 	}
 }
 
+func TestReadStockMapConfigUsesFilenameAndOverworld(t *testing.T) {
+	dir := t.TempDir()
+	mapsDir := filepath.Join(dir, "modules", "bluemap", "config", "maps")
+	writeFixture(t, filepath.Join(mapsDir, "end.conf"), "world: \"world\"\ndimension: \"minecraft:the_end\"\n")
+	writeFixture(t, filepath.Join(mapsDir, "nether.conf"), "world: \"world\"\ndimension: \"minecraft:the_nether\"\n")
+	writeFixture(t, filepath.Join(mapsDir, "overworld.conf"), "world: \"world\"\ndimension: \"minecraft:overworld\"\n")
+	id, ok := readMapConfig(fixtureAccessor(t, dir))
+	if !ok || id != "overworld" {
+		t.Fatalf("stock standalone configs resolved to map %q, present = %v; want overworld", id, ok)
+	}
+}
+
 func TestIsAppWorldFixture(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -104,7 +116,12 @@ func TestTilesExistFixture(t *testing.T) {
 	if tilesExist(accessor, "overworld") {
 		t.Fatal("an empty map web dir must not claim rendered tiles")
 	}
-	writeFixture(t, filepath.Join(dir, "modules", "bluemap", "web", "maps", "overworld", "tiles", "0", "0", "0.png"), "not-a-real-tile")
+	tilesDir := filepath.Join(dir, "modules", "bluemap", "web", "maps", "overworld", "tiles", "3", "x0")
+	writeFixture(t, filepath.Join(tilesDir, "z0.png"), "")
+	if tilesExist(accessor, "overworld") {
+		t.Fatal("a tile directory or empty placeholder must not qualify")
+	}
+	writeFixture(t, filepath.Join(tilesDir, "z0.png"), "fixture-tile")
 	if !tilesExist(accessor, "overworld") {
 		t.Fatal("a present tile must be observed as rendered")
 	}
@@ -119,7 +136,7 @@ func TestManagedConfigNoClobberOnConcurrentTargetFixture(t *testing.T) {
 		{MapID: "actual_world", WorldPath: "/app/world", Dimension: "minecraft:overworld"},
 	}}
 	resolver := nodestorage.NewResolver(nil)
-	stager, err := StageManagedConfig(context.Background(), resolver, server, facts)
+	stager, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +286,7 @@ func TestManagedConfigStagingLifecycleFixture(t *testing.T) {
 	}}
 	resolver := nodestorage.NewResolver(nil)
 
-	stager, err := StageManagedConfig(context.Background(), resolver, server, facts)
+	stager, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +304,7 @@ func TestManagedConfigStagingLifecycleFixture(t *testing.T) {
 	_ = stager.Close()
 
 	// Identical retry is a no-op (no ErrManagedConfigExists).
-	retry, err := StageManagedConfig(context.Background(), resolver, server, facts)
+	retry, err := StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, facts)
 	if err != nil {
 		t.Fatalf("idempotent retry: %v", err)
 	}
@@ -299,7 +316,7 @@ func TestManagedConfigStagingLifecycleFixture(t *testing.T) {
 	// A non-managed pre-existing file at a target path is preserved; staging
 	// refuses to overwrite it (an unrelated extra map file is left alone).
 	writeFixture(t, filepath.Join(dataRoot, "modules", "bluemap", "config", "core.conf"), "operator: custom consent")
-	_, err = StageManagedConfig(context.Background(), resolver, server, facts)
+	_, err = StageManagedConfig(context.Background(), resolver, nodestorage.LocalNode(), server, facts)
 	if !errors.Is(err, ErrManagedConfigExists) {
 		t.Fatalf("operator config must be preserved, got %v", err)
 	}

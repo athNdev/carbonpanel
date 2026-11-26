@@ -85,6 +85,17 @@ func evaluateFullCoverage(matrix FamilyAuditMatrix, listed, reachable, verified 
 }
 
 func TestFamilyAuditFullCoverage(t *testing.T) {
+	// The composed byte paths share procedures with canonical tools. Those
+	// procedures' mock outcomes cannot establish that a byte transfer works.
+	t.Run("AuditInventory", TestFamilyAudit)
+	t.Run("ConnectMounts", TestSharedMountListMatchesServerRegistrations)
+	t.Run("DownloadBytes", TestDownloadToolsTypedMappingAndBytes)
+	t.Run("DownloadScope", TestDownloadToolsResourceScopeDenial)
+	t.Run("UploadBytes", TestUploadFamilyComposedStreamCommit)
+	t.Run("UploadScope", TestUploadFamilyFreshCreateAtCommit)
+	t.Run("ScopedReads", TestScopedReadOperationalTools)
+	t.Run("PackwizReadScope", TestPackwizReadsGlobalScope)
+
 	matrix := FamilyAudit()
 	result := evaluateFullCoverage(matrix, liveListedProcedures(), liveReachableTools(), liveFixtureProcedures(t))
 	for _, gap := range result.gaps {

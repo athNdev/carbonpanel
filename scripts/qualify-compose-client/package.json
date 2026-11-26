@@ -1,0 +1,11 @@
+{
+  "name": "carbonpanel-compose-game-qualification",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "minecraft-protocol": "1.68.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

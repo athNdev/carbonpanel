@@ -503,9 +503,11 @@ func (*GetCurrentUserRequest) Descriptor() ([]byte, []int) {
 
 // Authenticated user with permissions
 type GetCurrentUserResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	Permissions   []*Permission          `protobuf:"bytes,2,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	User        *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Permissions []*Permission          `protobuf:"bytes,2,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	// The current session can start an explicit self-service OIDC link.
+	CanLinkOidc   bool `protobuf:"varint,3,opt,name=can_link_oidc,json=canLinkOidc,proto3" json:"can_link_oidc,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -552,6 +554,13 @@ func (x *GetCurrentUserResponse) GetPermissions() []*Permission {
 		return x.Permissions
 	}
 	return nil
+}
+
+func (x *GetCurrentUserResponse) GetCanLinkOidc() bool {
+	if x != nil {
+		return x.CanLinkOidc
+	}
+	return false
 }
 
 // Password change
@@ -2082,10 +2091,11 @@ const file_carbonpanel_v1_auth_proto_rawDesc = "" +
 	"\v_invite_pin\"<\n" +
 	"\x10RegisterResponse\x12(\n" +
 	"\x04user\x18\x01 \x01(\v2\x14.carbonpanel.v1.UserR\x04user\"\x17\n" +
-	"\x15GetCurrentUserRequest\"\x80\x01\n" +
+	"\x15GetCurrentUserRequest\"\xa4\x01\n" +
 	"\x16GetCurrentUserResponse\x12(\n" +
 	"\x04user\x18\x01 \x01(\v2\x14.carbonpanel.v1.UserR\x04user\x12<\n" +
-	"\vpermissions\x18\x02 \x03(\v2\x1a.carbonpanel.v1.PermissionR\vpermissions\"]\n" +
+	"\vpermissions\x18\x02 \x03(\v2\x1a.carbonpanel.v1.PermissionR\vpermissions\x12\"\n" +
+	"\rcan_link_oidc\x18\x03 \x01(\bR\vcanLinkOidc\"]\n" +
 	"\x15ChangePasswordRequest\x12!\n" +
 	"\fold_password\x18\x01 \x01(\tR\voldPassword\x12!\n" +
 	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"2\n" +

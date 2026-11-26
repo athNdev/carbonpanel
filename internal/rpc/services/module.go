@@ -53,7 +53,9 @@ type ModuleService struct {
 	// create path per controller process. It makes retries/concurrent tabs
 	// converge on one module per server; it is explicitly NOT a cross-process
 	// atomic reservation (ADR 0011/0015).
-	blueMapInstallMu sync.Mutex
+	blueMapInstallMu      sync.Mutex
+	blueMapStarting       map[string]string // server ID to committed module ID, under blueMapInstallMu
+	blueMapStartupTimeout time.Duration     // when zero, use the managed startup default
 }
 
 // ModuleAuthorizer is the mapped RBAC seam used for managed-install create and
@@ -707,7 +709,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		HealthCheckTimeout:    int(msg.HealthCheckTimeout),
 		HealthCheckRetries:    int(msg.HealthCheckRetries),
 		EventHooks:            msg.EventHooks,
-		Metadata:              msg.Metadata,
+		Metadata:              blueMapModuleMetadata(msg.Metadata, finalizeBlueMap != nil),
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
 		UID:                   msg.Uid,
@@ -767,22 +769,22 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		if commitErr := finalizeBlueMap(true, module.ID); commitErr != nil {
 			// finalize performed staged-file cleanup AND deleted the module row
 			// while still holding the singleton lock with a bounded context.
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("managed BlueMap config was rolled back: %w", commitErr))
+			return nil, blueMapConfigPrecondition(commitErr)
 		}
+	} else {
+		go s.createModuleContainer(module.ID, msg.StartImmediately)
 	}
-
-	// Create container in background
-	go func() {
-		bgCtx := context.Background()
-		if err := s.moduleManager.CreateAndStartModule(bgCtx, module.ID, msg.StartImmediately); err != nil {
-			s.log.Error("Failed to create module container: %v", err)
-		}
-	}()
 
 	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.CreateModuleResponse{
 		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname, createdByUsername),
 	}), nil
+}
+
+func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool) {
+	if err := s.moduleManager.CreateAndStartModule(context.Background(), moduleID, startImmediately); err != nil {
+		s.log.Error("Failed to create module container: %v", err)
+	}
 }
 
 func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v1.UpdateModuleRequest]) (*connect.Response[v1.UpdateModuleResponse], error) {
@@ -795,6 +797,12 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
+
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { transition.Release() }()
 
 	needsRecreate := false
 	before := moduleScalars{
@@ -896,7 +904,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.EventHooks = msg.EventHooks
 	}
 	if len(msg.Metadata) > 0 {
-		module.Metadata = msg.Metadata
+		module.Metadata = blueMapModuleMetadata(msg.Metadata, isManagedBlueMapModule(module))
 	}
 	if msg.CmdOverride != nil {
 		if *msg.CmdOverride != module.CmdOverride {
@@ -963,12 +971,23 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 
 	// Recreate container if needed
 	if needsRecreate && module.ContainerID != "" {
-		go func() {
+		// The managed update already owns the assignment. Hand the same
+		// transition to recreation, so the async worker cannot start on a
+		// node that changed after the update's eligibility check.
+		workerTransition := transition
+		transition = nil
+		go func(moduleID string) {
+			defer workerTransition.Release()
 			bgCtx := context.Background()
-			if err := s.moduleManager.RecreateModule(bgCtx, module.ID); err != nil {
+			if workerTransition != nil {
+				var cancel context.CancelFunc
+				bgCtx, cancel = context.WithTimeout(bgCtx, s.managedBlueMapTimeout())
+				defer cancel()
+			}
+			if err := s.moduleManager.RecreateModule(bgCtx, moduleID); err != nil {
 				s.log.Error("Failed to recreate module container: %v", err)
 			}
-		}()
+		}(module.ID)
 	}
 
 	// Get enrichment data
@@ -1097,6 +1116,12 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
+
 	// If no container exists, create one first
 	if module.ContainerID == "" {
 		if err := s.moduleManager.CreateAndStartModule(ctx, msg.Id, true); err != nil {
@@ -1134,6 +1159,11 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
 	}
@@ -1149,6 +1179,11 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RecreateModule(ctx, msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate module: %w", err))
 	}

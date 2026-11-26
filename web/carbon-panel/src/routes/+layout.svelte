@@ -11,7 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import '../app.css';
 	import CarbonShell from '$lib/components/carbon/CarbonShell.svelte';
-	import { ModeWatcher } from 'mode-watcher';
+	import { displayPreferences } from '$lib/display-preferences.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve as resolvePath } from '$app/paths';
@@ -93,7 +93,10 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	onMount(() => {
+		displayPreferences.hydrate();
+		const stopWatching = displayPreferences.watchSystemTheme();
 		initialize();
+		return stopWatching;
 	});
 
 	$effect(() => {
@@ -141,8 +144,7 @@ one at https://mozilla.org/MPL/2.0/.
 	for its subtree.
 -->
 <Tooltip.Provider>
-	<ModeWatcher />
-	<Toaster position="bottom-center" expand={true} richColors />
+	<Toaster />
 	<GlobalLoading />
 
 	{#if page.url.pathname === '/login'}

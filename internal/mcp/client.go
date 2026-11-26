@@ -78,6 +78,8 @@ type Clients struct {
 	File      carbonpanelv1connect.FileServiceClient
 	Upload    carbonpanelv1connect.UploadServiceClient
 
+	StagedConfig carbonpanelv1connect.StagedConfigServiceClient
+
 	// httpClient, baseURL and token are retained so NewServer can derive the
 	// family clients from the exact same authenticated connection. No tool
 	// ever sees the token directly and no anonymous fallback is possible.
@@ -125,6 +127,8 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		Backup:    carbonpanelv1connect.NewBackupServiceClient(httpClient, baseURL, opts...),
 		File:      fileClient,
 		Upload:    carbonpanelv1connect.NewUploadServiceClient(httpClient, baseURL, opts...),
+
+		StagedConfig: carbonpanelv1connect.NewStagedConfigServiceClient(httpClient, baseURL, append(opts, connect.WithReadMaxBytes(stagedConfigResponseLimit))...),
 
 		httpClient: httpClient,
 		baseURL:    baseURL,

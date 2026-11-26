@@ -44,6 +44,9 @@ const (
 	// contains PlayerService, WorldService, WorldViewService and
 	// ModBrowseService.
 	PanelBuildPostStable PanelBuild = "post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e"
+	// PanelBuildProductRPCs is the first main build with the generated
+	// Packwiz and StagedConfig services mounted.
+	PanelBuildProductRPCs PanelBuild = "post-v1.0.40+eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3"
 )
 
 // CatalogEntry is one declared tool tuple. Scope is a canonical string of the
@@ -139,7 +142,7 @@ var firstSliceTools = []ToolSpec{
 	{Name: "get_world_entry", Procedure: "/carbonpanel.v1.WorldService/GetWorldEntry", Class: ClassSafe, Description: "Get one world library entry by id."},
 	{Name: "list_world_revisions", Procedure: "/carbonpanel.v1.WorldService/ListRevisions", Class: ClassSafe, Description: "List immutable revisions for one world entry."},
 	{Name: "get_world_revision", Procedure: "/carbonpanel.v1.WorldService/GetRevision", Class: ClassSafe, Description: "Get one immutable world revision."},
-	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: ClassSafe, Description: "List active world bindings for one server."},
+	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: ClassSafe, Description: "List active world bindings and the configured save folder for one server, when known."},
 	{Name: "get_world_binding", Procedure: "/carbonpanel.v1.WorldService/GetBinding", Class: ClassSafe, Description: "Get the active world binding for a server level."},
 	{Name: "list_import_jobs", Procedure: "/carbonpanel.v1.WorldService/ListImportJobs", Class: ClassSafe, Description: "List recent world import jobs with a bounded limit."},
 	{Name: "get_import_job", Procedure: "/carbonpanel.v1.WorldService/GetImportJob", Class: ClassSafe, Description: "Get one world import job."},

@@ -147,6 +147,8 @@ message GetCurrentUserRequest {}
 message GetCurrentUserResponse {
   User user = 1;
   repeated Permission permissions = 2;
+  // The current session can start an explicit self-service OIDC link.
+  bool can_link_oidc = 3;
 }
 
 // Password change

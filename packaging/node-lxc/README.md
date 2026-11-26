@@ -13,9 +13,8 @@ redefines or re-implements that contract.**
 > Behavioral qualification, however, is exercised only by disposable offline
 > fixtures using the explicitly synthetic `config/provenance.fixture.json`.
 > No live host was provisioned, no global host config was changed, no image was
-> imported or booted, and nothing was published. Real guest boot is
-> [externally blocked](qualification/QUALIFICATION.md) on this host (no
-> `/dev/kvm`, no LXC tooling); live import/boot evidence (M5) is **not** claimed.
+> imported or booted, and nothing was published. Live guest evidence requires a
+> [designated disposable Proxmox fixture](qualification/QUALIFICATION.md).
 
 ## Why a separate lane
 
@@ -43,7 +42,7 @@ decision is recorded in
 | `config/provenance.fixture.json` | SYNTHETIC fixture profile only; never usable for an artifact claim |
 | `fixtures/rootfs-minimal/` | Synthetic, credential-free rootfs tree used by offline builds |
 | `fixtures/capability-*.json` | Supported and unsupported host capability snapshots |
-| `tests/test_node_lxc.py` | Offline and fail-closed qualification suite (25 scenarios, including real-GPG signed-archive and boot-qualify blocker/reporting checks) |
+| `tests/test_node_lxc.py` | Offline and fail-closed qualification suite (including real-GPG signed-archive and read-only readiness checks) |
 | `run-fixtures.sh` | Runs the suite with no host, network, root or live daemon |
 
 ## Verification gates
@@ -109,13 +108,10 @@ decision is recorded in
 sh run-fixtures.sh
 ```
 
-All 25 scenarios pass at the recorded head, including real-GPG signed-archive
-checks and fail-closed boot-qualify blocker/reporting checks. `boot-qualify`
-always verifies real signed upstream archive bytes in an owned disposable path
-and then probes for an unprivileged LXC import/boot-capable disposable runner;
-it reports qualification as ok only when actual import and boot are performed
-and evidenced, and refuses with explicit blockers otherwise. The manual workflow
-`.github/workflows/lxc-boot-qualification.yml` runs this fail-closed check and
-uploads the JSON report. See `qualification/SIGNED-ARCHIVE-EVIDENCE.md`,
-`qualification/QUALIFICATION.md` and the external mode report for exact evidence
-and limits.
+The suite checks signed upstream evidence and fail-closed Proxmox readiness.
+`boot-qualify` verifies real signed upstream archive bytes in an owned
+disposable path, checks Proxmox prerequisites without launching guest
+management tools, and reports the block on guest qualification in JSON. The
+manual workflow `.github/workflows/lxc-boot-qualification.yml` uploads that
+report. See [signed-archive evidence](qualification/SIGNED-ARCHIVE-EVIDENCE.md)
+and [qualification status](qualification/QUALIFICATION.md).

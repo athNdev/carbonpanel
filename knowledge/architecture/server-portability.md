@@ -6,10 +6,9 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/serverarchive
-  - internal/rpc/services/server_archive.go
-  - internal/rpc/services/server_archive_import.go
+  - internal/rpc/services
   - internal/nodestorage/allocation.go
-  - proto/carbonpanel/v1/server.proto
+  - proto/carbonpanel/v1
   - web/carbon-panel/src/lib/features/servers/archive-presentation.ts
   - web/carbon-panel/src/lib/features/servers/archive-import-session.ts
   - web/carbon-panel/src/lib/features/servers/ServerArchiveExport.svelte

@@ -8,6 +8,7 @@
 - [Host-native private daemon mode — Rule](host-native-runtime-rule.md) — internal/noderuntime/native is the HOST-NATIVE LINUX PRIVATE DAEMON mode for
 - [Host-native private daemon mode — Rule (part 2)](host-native-runtime-rule-2.md) — issue-certificate-first atomic consume, controller-derived TLS topology
 - [Host-native private daemon mode — Why + How to check + Read next](host-native-runtime-why.md) — Parallel deployment modes share one enrollment/control contract. Keeping host
+- [Managed node outbound agent](managed-node-agent.md) — The managed agent binds enrollment and recurring health reports to an explicitly selected controller and private Docker daemon.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [Map viewing — Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
 - [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
@@ -25,7 +26,7 @@
 - [Module system — Shape + Rules](module-system-shape.md) — Modules are server-side content units. Hooks run inside the server's runtime;
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node control protocol — Rule](node-control-protocol-rule.md) — Managed-node control uses the separate versioned contract in
-- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — The contract ships without an implementation. New RPCs are denied by default
+- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — Node control stays separate from the panel RPC surface and uses explicit enrollment domains.
 - [Node control protocol — Why + How to check + Read next](node-control-protocol-why.md) — A direct Docker endpoint is not an authenticated node principal and has no
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Node resolution — Current state](node-resolution-current-state.md) — Module, snapshot and deep-sleep helpers were made fail-closed and record the
@@ -39,9 +40,10 @@
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Operation journal — Shape + Rules + Read next](operation-journal-shape.md) — Every create, start, stop, restart, delete and migrate is written to
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
+- [Player lookup profile](player-management-lookup-profile.md) — Read-only exact account resolution, bounded skin portraits and authorized session observations.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
+- [Player management - Identity, provenance and capabilities](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Player management — Authorization and audit](player-management-authorization-and-audit.md) — All PlayerService procedures are mapped to players:* permissions and
-- [Player management — Identity and provenance + Sources and capabilities + Skins, identity lookup and deep data + Roster f](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 - [Portable node installer — How to check + Read next](node-installer-how-to-check.md) — go test ./internal/nodeinstall/... and
 - [Portable node installer — Rule + Why](node-installer-rule.md) — The portable installer in internal/nodeinstall and cmd/carbon-node-installer
@@ -83,4 +85,5 @@
 - [Unprivileged LXC node artifact lane — Rule](node-lxc-artifact-rule.md) — The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.
 - [World Library — Read next](world-library-read-next.md) — Fail-closed authorization
+- [World Library — Rollback rules (part 2)](world-library-shape-2.md) — Failed multi-family swap compensation: quarantine, byte proof and binding proof.
 - [World Library — Shape + Rules](world-library-shape.md) — A WorldEntry is a logical library identity (wld_*). A WorldRevision is an

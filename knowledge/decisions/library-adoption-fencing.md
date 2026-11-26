@@ -18,10 +18,11 @@ sources:
 
 A library binding is the only authority for a managed level. Otherwise an
 observed server-local level is `UNMANAGED`, a configured level without an
-observation is `UNBOUND`, and neither yields a guessed name. The view shows the
-binding, its revision, node/generation, consistency and configuration, and
-deep-links to World View and the World Library through `resolve()`. The
-`/worlds` packaged route is owned separately.
+observation is `UNBOUND`, and neither yields a guessed name. The World tab
+groups the active level, server environment and configuration. It shows binding
+and revision details when a binding exists and preserves a differing configured
+level as a separate fact. The tab opens the scoped map dialog on the current
+server route and links to the World Library through `resolve()`.
 
 Adoption reuses `CheckCompatibility`, `BindWorld` and `ResolveWorldOperation`
 only. Permission, verdict and unknown-finding gates match the library route;

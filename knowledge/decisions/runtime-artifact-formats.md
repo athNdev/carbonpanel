@@ -1,10 +1,10 @@
 ---
 type: Decision
 title: Runtime artifact format support
-description: Publish only disk formats with real clean import/boot evidence; the portable installer is the supported fallback.
+description: Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
 status: stable
 owners: [oss-runtime]
-code_refs: [scripts/runtime_artifacts.py, scripts/build-runtime-qcow2.sh, scripts/build-runtime-lxc.sh, scripts/build-runtime-installer.sh, scripts/node_vm_build.py, packaging/node-lxc/build-rootfs.sh, scripts/qualify-node-installer-systemd.sh, .github/workflows/runtime-artifacts.yml]
+code_refs: [scripts/runtime_artifacts.py, scripts/runtime_artifact_qualification.json, scripts/build-runtime-qcow2.sh, scripts/build-runtime-lxc.sh, scripts/build-runtime-installer.sh, scripts/node_vm_build.py, packaging/node-lxc/build-rootfs.sh, scripts/qualify-node-installer-systemd.sh, .github/workflows/runtime-artifacts.yml]
 sources:
   - title: Home-hypervisor format evidence
     resource: ../../docs/node-runtime/home-hypervisor-formats.md

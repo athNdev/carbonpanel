@@ -1,12 +1,9 @@
 # Recurring review: advisories without a patched release
 
-Some Dependabot alerts name a vulnerable dependency for which the advisory has
-no `first_patched_version` (for example `picomatch` 4.0.7,
-GHSA-fc5q-39xc-vjpf). Others have a patched release whose only viable upgrade
-path is a coordinated major migration of peer tooling (for example SvelteKit 3
-requires Vite 8, `@sveltejs/vite-plugin-svelte` 7 and TypeScript 6). Neither
-case produces a Dependabot version update that can be merged on its own, so
-these alerts need an explicit human review path.
+Some Dependabot alerts report no `first_patched_version`. Others need a
+coordinated migration to adopt the patched release. For example, SvelteKit 3
+requires Vite 8 and `@sveltejs/vite-plugin-svelte` 7, and its optional TypeScript
+peer is `^6.0.0`. Both cases need maintainer review before attempting an update.
 
 ## Cadence and owner
 
@@ -22,7 +19,7 @@ these alerts need an explicit human review path.
 1. Query the open alerts and read `security_vulnerability.first_patched_version`:
 
    ```sh
-   gh api repos/athNdev/carbon-panel/dependabot/alerts --paginate
+   gh api --paginate 'repos/athNdev/carbonpanel/dependabot/alerts?state=open&per_page=100'
    ```
 
 2. For each alert with **no** patched version, check the upstream advisory and
@@ -37,25 +34,29 @@ these alerts need an explicit human review path.
 5. Keep the decision and the verification evidence in the tracker (Jira) and
    the aggregate dependency PR; do not keep an activity log in `knowledge/`.
 
-## Current entries
+## Resolved advisories
 
-- `picomatch` 4.0.7 in `docs/carbon-panel/package-lock.json` — GHSA-fc5q-39xc-vjpf
-  (HIGH) had no `first_patched_version` at the OSS-390 aggregate. No alert is
-  open at the OSS-394 successor qualification (`gh api
-  repos/athNdev/carbon-panel/dependabot/alerts?state=open` returns 0); re-check
-  weekly and restore the entry if it reappears.
+- GitHub withdrew the
+  [picomatch advisory GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf).
+  The docs lockfile still uses `picomatch` 4.0.7. Continue to review new alerts
+  against the installed version during the weekly audit.
 - `@sveltejs/kit` — **resolved**. The four 2.x alerts were fixed by the narrow
   Kit 3.4.0 migration in PR #565 (ADR 0042); no SvelteKit alert remains open.
-  Kit 3.4.0 must not be downgraded to the 3.2.0 offered by the bot bundle.
-- `prettier` — held at 3.4.2 with `prettier-plugin-svelte` 3.x (ADR 0042,
-  decision 2). The 3.10.1 bump in bot PR #581 fails real `bun run lint` with
-  `getVisitorKeys is not a function` for every plugin version in range; hold it
-  until a verified compatible formatter stack passes lint.
-- `typescript` — held on the 5.x toolchain. The 7.0.2 bump in bot PR #581 fails
-  `bun run check` with `typescript_compiler_api_missing` (TypeScript 7 removed
-  the JS compiler API that SvelteKit's config loader uses; the supported range
-  is `typescript@^6`) and prevents the real Chromium harness from loading Vite
-  config. Hold it until `check` and the browser checks are green together.
+  Keep at least Kit 3.4.0 when qualifying the routine bundle.
+
+## Routine toolchain constraints
+
+- Upgrade `prettier` and the Tailwind formatter plugin together. Bot PR #581 hit
+  `getVisitorKeys is not a function` with Prettier 3.10.1 and the old Tailwind
+  formatter plugin. [Tailwind formatter plugin 0.7.2](https://github.com/tailwindlabs/prettier-plugin-tailwindcss/releases/tag/v0.7.2)
+  includes the fix for Prettier 3.7 and newer with the Svelte plugin. Keep the
+  current plugin order to preserve class sorting. Qualify formatter changes
+  with frontend lint and the generated-output check.
+- Keep `typescript` on the 6.0.x line while the ESLint parser requires
+  `<6.1.0`. Kit 3.4.0 and svelte-check 4.7.8 accept 6.0.x. The 7.0.2 bump in
+  bot PR #581 failed with `typescript_compiler_api_missing` when loading the
+  Vite configuration. Qualify a new compiler line with diagnostics, lint and
+  the production and browser builds.
 - `playwright` — the review driver stays at 1.61.0. The 1.65.1 bump in bot PR
   #581 passes the inventory harness but breaks the editor-dialog regression:
   its Chromium does not retain a failed bootstrap import in the document module

@@ -29,11 +29,7 @@ import { authStore } from '$lib/stores/auth';
 // credentials. It must not be rendered as a reconnect spinner or followed by
 // background retries; a new login creates a new client connection.
 export type ConnectionState =
-	| 'disconnected'
-	| 'connecting'
-	| 'connected'
-	| 'authenticated'
-	| 'signed-out';
+	'disconnected' | 'connecting' | 'connected' | 'authenticated' | 'signed-out';
 
 export interface WebSocketState {
 	connectionState: ConnectionState;
@@ -49,7 +45,6 @@ export interface WebSocketDependencies {
 	enabled: () => boolean;
 	url: () => string;
 	token: () => string;
-	setSessionCookie: (token: string) => void;
 	createSocket: (url: string) => WebSocket;
 	setTimeout: typeof setTimeout;
 	clearTimeout: typeof clearTimeout;
@@ -62,10 +57,11 @@ const defaultDependencies: WebSocketDependencies = {
 	url: () =>
 		`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
 	token: () => get(authStore).token || '',
-	setSessionCookie: (token) => {
-		document.cookie = `cp_session=${encodeURIComponent(token)}; Path=/; SameSite=Strict`;
+	createSocket: (url) => {
+		// Pre-upgrade authentication uses the cookie (MINE-164).
+		authStore.refreshBrowserSessionCookie();
+		return new WebSocket(url);
 	},
-	createSocket: (url) => new WebSocket(url),
 	setTimeout: ((...args: Parameters<typeof setTimeout>) =>
 		globalThis.setTimeout(...args)) as typeof setTimeout,
 	clearTimeout: (timer) => globalThis.clearTimeout(timer),
@@ -124,12 +120,6 @@ class WebSocketClient {
 		this.state.connectionState = 'connecting';
 		this.state.error = null;
 
-		// Pre-upgrade credential (MINE-164) rides the cp_session cookie so the
-		// session token is not written into the URL (MINE-185).
-		const preAuth = this.deps.token();
-		if (preAuth) {
-			this.deps.setSessionCookie(preAuth);
-		}
 		const wsUrl = this.deps.url();
 
 		try {
@@ -399,7 +389,7 @@ class WebSocketClient {
 		}
 	}
 
-	private send(data: Uint8Array): boolean {
+	private send(data: Uint8Array<ArrayBuffer>): boolean {
 		if (this.socket?.readyState !== 1) {
 			console.warn('[WS] Cannot send, socket not open');
 			return false;

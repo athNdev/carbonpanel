@@ -30,6 +30,7 @@ sources:
 - Proto generation uses pinned remote plugins rather than frontend-installed Buf
   or protoc generator executables. Keep the frontend protobuf runtime dependency;
   validate its compatibility through the actual generated client checks.
+- Follow [ADR 0042](../../docs/adr/0042-sveltekit3-security-migration.md) for TypeScript peers and formatter checks.
 - A missing metric is unavailable, not zero. Render `—`, `IDLE` or `AWAITING
   SAMPLE`; never substitute a plausible-looking number.
 - Use the approved artwork in [brand assets](../../assets/branding/README.md)
@@ -39,8 +40,8 @@ sources:
 - Server-detail working panes (console, lists, file tree, tables) fill the
   remaining height of `CarbonShell`'s main column through a `min-h-0` /
   `flex-1` chain and `.tab-fill`. Do not size them with `100vh` minus a chrome
-  constant: that leftover is a dead region whenever the chrome is shorter than
-  the constant. Every server-detail tab uses `ServerTabPanel`: one header
+  constant. Reserve a usable minimum height for the tab area so stacked runtime cards can scroll
+  above it without clipping tab controls. Every server-detail tab uses `ServerTabPanel`: one header
   (title, optional one-line description, optional chip, right-aligned
   `CarbonButton` size `sm` actions, shared min-height/padding/divider) and one
   bordered surface. Lists, logs and tables scroll inside the body (`mode=fill`);

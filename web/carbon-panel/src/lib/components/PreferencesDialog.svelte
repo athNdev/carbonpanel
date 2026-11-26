@@ -6,13 +6,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { browser } from '$app/env';
 	import CarbonModal from './carbon/CarbonModal.svelte';
 	import CarbonButton from './carbon/CarbonButton.svelte';
 	import CarbonSelect from './carbon/CarbonSelect.svelte';
 	import {
 		displayPreferences,
-		theme as themeStore,
 		motion as motionStore,
 		density as densityStore,
 		type ThemeChoice,
@@ -27,15 +25,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let { open = $bindable(false), onclose }: Props = $props();
 
-	let theme = $derived($themeStore);
+	const themeStore = displayPreferences.themeChoice;
 	let motion = $derived($motionStore);
 	let density = $derived($densityStore);
-
-	$effect(() => {
-		// Re-read stored values when the dialog opens; the shell already owns
-		// application on boot. The shared store validates and applies them.
-		if (browser && open) displayPreferences.hydrate();
-	});
 
 	function handleClose() {
 		open = false;
@@ -50,7 +42,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonModal
 	bind:open
 	title="Preferences"
-	description="Local display preferences stored in this browser only"
+	description="Changes apply immediately and are saved in this browser."
 	size="md"
 	hasFooter={false}
 	onclose={handleClose}
@@ -58,10 +50,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<div class="space-y-4">
 		<CarbonSelect
 			label="Theme"
-			value={theme}
+			value={$themeStore}
 			onchange={(event) => displayPreferences.setTheme(event.currentTarget.value as ThemeChoice)}
-			helperText="Light or dark Carbon theme via data-carbon-theme"
+			helperText="System follows your device, including changes while the panel is open."
 		>
+			<option value="system">System (default)</option>
 			<option value="dark">Dark</option>
 			<option value="light">Light</option>
 		</CarbonSelect>

@@ -27,6 +27,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -168,6 +169,13 @@ func (s *WorldService) ListBindings(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list bindings"))
 	}
 	out := &v1.ListBindingsResponse{}
+	if id := req.Msg.GetServerId(); id != "" {
+		// Level identity is supplemental. Older callers still receive their
+		// bindings if this separate configuration observation is unavailable.
+		if cfg, err := s.store.GetServerConfig(ctx, id); err == nil {
+			out.ConfiguredLevelName = worldview.ActualLevelName(cfg)
+		}
+	}
 	for _, b := range bindings {
 		out.Bindings = append(out.Bindings, bindingProto(b))
 	}
@@ -269,7 +277,11 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	if targetMC == "" {
 		targetMC = revision.MCVersion
 	}
-	report, err := s.compat.Check(ctx, revision.StoragePath, worldlib.Target{
+	archivePath, err := worldlib.ResolveRevisionArchive(s.libraryRoot, revision.StoragePath)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	report, err := s.compat.Check(ctx, archivePath, worldlib.Target{
 		ServerID: msg.GetServerId(), MCVersion: targetMC, Edition: edition,
 		ModLoader: loader, DataVersion: revision.DataVersion,
 	})
@@ -339,14 +351,6 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 			requestID = strings.TrimSpace(msg.GetRequestId())
 		}
 		operationID := result.OperationID
-		if operationID == "" && requestID != "" {
-			var op storage.ServerOperation
-			if err := s.store.DB().WithContext(ctx).
-				Where("server_id = ? AND request_key = ?", msg.GetServerId(), operation.StorageKey(requestID, "world-bind")).
-				First(&op).Error; err == nil && op.Kind == "world-bind" && op.Phase == storage.ServerOperationComplete {
-				operationID = op.ID
-			}
-		}
 		if operationID != "" && requestID != "" {
 			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, msg.GetLevelName(), msg.GetRevisionId(), operationID)
 		}
@@ -659,10 +663,15 @@ func notFoundOrInternal(err error, message string) error {
 }
 
 func worldError(err error) error {
+	var rpcErr *connect.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr
+	}
 	switch {
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
+		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, operation.ErrAlreadyFailed),
 		errors.Is(err, worldlib.ErrUncertainOutcome), errors.Is(err, worldlib.ErrDiskBudget),
 		errors.Is(err, storage.ErrWorldRevisionBound), errors.Is(err, storage.ErrWorldBindingStale),
 		errors.Is(err, storage.ErrWorldRevisionImmutable):

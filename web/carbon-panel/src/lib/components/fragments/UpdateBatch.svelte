@@ -368,10 +368,6 @@ one at https://mozilla.org/MPL/2.0/.
 		max-width: 100%;
 		width: 100%;
 		height: 36px;
-		background: var(--background);
-		color: var(--foreground);
-		border: 0;
-		border-bottom: 1px solid var(--input);
 		padding: 0 10px;
 		font: 12px var(--carbon-font-mono);
 		border-radius: 0;

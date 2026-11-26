@@ -21,7 +21,9 @@ import (
 
 type packwizServiceFixtureTransport func(*http.Request) (*http.Response, error)
 
-func (f packwizServiceFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func (f packwizServiceFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 // TestPackwizServiceUsesSharedOperation verifies the generated service reads
 // through the same PackwizOperations the compatibility adapter uses and maps
@@ -226,5 +228,57 @@ func TestPackwizServiceDependencyResolutionFailureIsSoft(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("requested mod was rolled back after a resolver failure")
+	}
+}
+
+// TestBatchPackModsReportsPerEntryFailures pins the truthful batch contract:
+// count is the number of successful entries and every requested slug has a
+// result, including the ones that failed. The legacy adapter discarded those
+// failures and reported the requested count, which prevented any wrapper from
+// describing what actually happened (OSS-372 / OSS-374).
+func TestBatchPackModsReportsPerEntryFailures(t *testing.T) {
+	mgr := packwiz.NewManager(t.TempDir(), logger.New())
+	created, err := mgr.CreatePack(&packwiz.Pack{
+		Name: "Batch Pack", Author: "qa", MCVersion: "1.21.1", ModLoader: "fabric",
+		Mods: []packwiz.ModItem{{Slug: "present", Name: "Present", FileName: "present.jar", Side: "both", Platform: "modrinth", FileSize: 10}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewPackwizService(handlers.NewPackwizOperations(mgr))
+	ctx := context.Background()
+
+	resp, err := svc.BatchPackMods(ctx, connect.NewRequest(&v1.BatchPackModsRequest{
+		PackId: created.ID, Action: "pin", Slugs: []string{"present", "absent"},
+	}))
+	if err != nil {
+		t.Fatalf("BatchPackMods must stay a soft result: %v", err)
+	}
+	if resp.Msg.Count != 1 {
+		t.Fatalf("count = %d, want 1 successful entry", resp.Msg.Count)
+	}
+	if len(resp.Msg.Results) != 2 {
+		t.Fatalf("got %d results, want one per requested slug", len(resp.Msg.Results))
+	}
+	first, second := resp.Msg.Results[0], resp.Msg.Results[1]
+	if first.Slug != "present" || !first.Success || first.ErrorCode != "" {
+		t.Fatalf("successful entry: %+v", first)
+	}
+	if second.Slug != "absent" || second.Success || second.ErrorCode != "not_found" {
+		t.Fatalf("failed entry: %+v", second)
+	}
+	if second.Message == "" {
+		t.Fatal("failed entry must carry a human-readable message")
+	}
+
+	invalid, err := svc.BatchPackMods(ctx, connect.NewRequest(&v1.BatchPackModsRequest{
+		PackId: created.ID, Action: "unknown", Slugs: []string{"present"},
+	}))
+	if err != nil || invalid.Msg.Count != 0 {
+		t.Fatalf("unknown action must report zero successes: %v %+v", err, invalid.Msg)
+	}
+	if len(invalid.Msg.Results) != 1 || invalid.Msg.Results[0].Success ||
+		invalid.Msg.Results[0].ErrorCode != "invalid_action" {
+		t.Fatalf("unknown action result: %+v", invalid.Msg.Results)
 	}
 }

@@ -44,6 +44,7 @@ func allModels() []any {
 		&Module{},
 		&SystemSetting{},
 		&Node{},
+		&nodeEnrollmentAuthorityState{},
 		&ServerSnapshot{},
 		&StagedConfigChange{},
 		&ServerUpdateBatch{},

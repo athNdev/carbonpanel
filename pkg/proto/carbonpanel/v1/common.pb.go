@@ -201,16 +201,20 @@ func (ModLoader) EnumDescriptor() ([]byte, []int) {
 
 // System user account
 type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Email         *string                `protobuf:"bytes,3,opt,name=email,proto3,oneof" json:"email,omitempty"`
-	AuthProvider  string                 `protobuf:"bytes,4,opt,name=auth_provider,json=authProvider,proto3" json:"auth_provider,omitempty"`
-	IsActive      bool                   `protobuf:"varint,5,opt,name=is_active,json=isActive,proto3" json:"is_active,omitempty"`
-	Roles         []string               `protobuf:"bytes,6,rep,name=roles,proto3" json:"roles,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	LastLogin     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_login,json=lastLogin,proto3,oneof" json:"last_login,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Username     string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Email        *string                `protobuf:"bytes,3,opt,name=email,proto3,oneof" json:"email,omitempty"`
+	AuthProvider string                 `protobuf:"bytes,4,opt,name=auth_provider,json=authProvider,proto3" json:"auth_provider,omitempty"`
+	IsActive     bool                   `protobuf:"varint,5,opt,name=is_active,json=isActive,proto3" json:"is_active,omitempty"`
+	Roles        []string               `protobuf:"bytes,6,rep,name=roles,proto3" json:"roles,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	LastLogin    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_login,json=lastLogin,proto3,oneof" json:"last_login,omitempty"`
+	// Locally managed roles, populated by UserService.
+	LocalRoles []string `protobuf:"bytes,10,rep,name=local_roles,json=localRoles,proto3" json:"local_roles,omitempty"`
+	// Roles managed by the OIDC provider, populated by UserService.
+	OidcRoles     []string `protobuf:"bytes,11,rep,name=oidc_roles,json=oidcRoles,proto3" json:"oidc_roles,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -304,6 +308,20 @@ func (x *User) GetUpdatedAt() *timestamppb.Timestamp {
 func (x *User) GetLastLogin() *timestamppb.Timestamp {
 	if x != nil {
 		return x.LastLogin
+	}
+	return nil
+}
+
+func (x *User) GetLocalRoles() []string {
+	if x != nil {
+		return x.LocalRoles
+	}
+	return nil
+}
+
+func (x *User) GetOidcRoles() []string {
+	if x != nil {
+		return x.OidcRoles
 	}
 	return nil
 }
@@ -1604,7 +1622,7 @@ var File_carbonpanel_v1_common_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
-	"\x1bcarbonpanel/v1/common.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf4\x02\n" +
+	"\x1bcarbonpanel/v1/common.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb4\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x19\n" +
@@ -1617,7 +1635,12 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12>\n" +
 	"\n" +
-	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01B\b\n" +
+	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01\x12\x1f\n" +
+	"\vlocal_roles\x18\n" +
+	" \x03(\tR\n" +
+	"localRoles\x12\x1d\n" +
+	"\n" +
+	"oidc_roles\x18\v \x03(\tR\toidcRolesB\b\n" +
 	"\x06_emailB\r\n" +
 	"\v_last_login\"\x85\x11\n" +
 	"\x06Server\x12\x0e\n" +

@@ -19,7 +19,7 @@ test('the wizard submits the completed upload with the stable submission id', ()
 		'create must carry the completed archive upload'
 	);
 	assert.ok(
-		wizard.includes('requestId: archiveMode ? archiveImportState.requestId : attempt!.requestId'),
+		wizard.includes('createRequest.requestId = archiveImportState.requestId'),
 		'archive retries must reuse the same request id'
 	);
 	assert.ok(

@@ -7,16 +7,19 @@ package services
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/health"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
 
 func TestGetServer_StaleSLPIsNotCurrentPlayable(t *testing.T) {
@@ -247,5 +250,73 @@ func TestGetServer_StaleStoredStatusIsNotRunningSuccess(t *testing.T) {
 	}
 	if got.SlpAvailable || got.PlayersOnline != 0 || len(got.PlayerSample) != 0 {
 		t.Fatalf("stale status still presented as live join: available=%v players=%d sample=%v", got.SlpAvailable, got.PlayersOnline, got.PlayerSample)
+	}
+}
+
+func TestServerRPCsPublishOnlyCurrentDockerRAMAlongsideKnownPlayerZero(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	now := time.Now()
+	started := now.Add(-time.Second)
+	server := &storage.Server{
+		ID: "telemetry", Name: "Telemetry Fixture", NodeID: "unreachable-node",
+		ContainerID: "current-container", Status: storage.StatusRunning,
+		Port: 25565, Memory: 4096, DataPath: t.TempDir(), LastStarted: &started,
+	}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	log := logger.New()
+	collector := metrics.NewCollector(nil, nil, nil, nil, nil, log)
+	svc := &ServerService{store: store, config: &config.Config{}, log: log, metricsCollector: collector}
+	_, handler := carbonpanelv1connect.NewServerServiceHandler(svc)
+	panel := httptest.NewServer(handler)
+	t.Cleanup(panel.Close)
+	client := carbonpanelv1connect.NewServerServiceClient(panel.Client(), panel.URL)
+	fresh := metrics.DockerStatsSample{ContainerID: server.ContainerID, ObservedAt: now, ExpiresAt: now.Add(time.Minute)}
+	for _, tc := range []struct {
+		name       string
+		sample     metrics.DockerStatsSample
+		wantMemory int64
+	}{
+		{"current RAM", fresh, 1024},
+		{"missing Docker observation", metrics.DockerStatsSample{}, 0},
+		{"stale despite fresh disk and player telemetry", metrics.DockerStatsSample{
+			ContainerID: server.ContainerID, ObservedAt: now.Add(-time.Minute), ExpiresAt: now,
+		}, 0},
+		{"container replaced", metrics.DockerStatsSample{
+			ContainerID: "old-container", ObservedAt: now, ExpiresAt: fresh.ExpiresAt,
+		}, 0},
+		{"container restarted", metrics.DockerStatsSample{
+			ContainerID: server.ContainerID, ObservedAt: started.Add(-time.Millisecond), ExpiresAt: fresh.ExpiresAt,
+		}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collector.SeedMetrics(metrics.ServerMetrics{
+				ServerID: server.ID, MemoryUsage: 1024, DockerStats: tc.sample,
+				LastUpdated: now, SLPLastUpdated: now, SLPAvailable: true, DiskUsage: 8192,
+			})
+			detail, err := client.GetServer(ctx, connect.NewRequest(&v1.GetServerRequest{Id: server.ID}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			list, err := client.ListServers(ctx, connect.NewRequest(&v1.ListServersRequest{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(list.Msg.Servers) != 1 {
+				t.Fatalf("servers = %v", list.Msg.Servers)
+			}
+			for _, result := range []*v1.Server{detail.Msg.Server, list.Msg.Servers[0]} {
+				if result.MemoryUsage != tc.wantMemory {
+					t.Fatalf("RAM = %d, want %d", result.MemoryUsage, tc.wantMemory)
+				}
+				if result.DiskUsage != 8192 || result.PlayersOnline != 0 ||
+					result.JoinObservationKind != string(health.ReadingPlayable) {
+					t.Fatalf("RAM freshness changed disk or known-zero player telemetry: %v", result)
+				}
+			}
+		})
 	}
 }

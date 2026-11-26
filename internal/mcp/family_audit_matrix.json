@@ -3,33 +3,34 @@
   "issue": "OSS-375",
   "head": "7e6b12162ea891c6b5654981c932dd8e298517da",
   "sourceOfTruth": {
-    "proto": "proto/carbonpanel/v1/*.proto (26 services / 252 RPC methods)",
-    "mounts": "internal/rpc/server.go registerServices (27 services / 242 reachable RPCs); reflection list (19) and rbac parity list (24) are stale",
+    "proto": "proto/carbonpanel/v1/*.proto (28 services / 253 RPC methods)",
+    "mounts": "internal/rpc/server.go and internal/rpc/registered_services.go (27 services / 243 mounted RPCs)",
     "scopes": "internal/rbac/mapping.go PublicProcedures/AuthenticatedOnlyProcedures/ProcedurePermissions",
     "catalog": "internal/mcp/catalog_data.go (generated); internal/mcp/catalog.go (MountedServices, exposedTools)",
-    "fixtures": "internal/mcp/mcp_test.go registerToolHandlers/registerAuthHandlers"
+    "fixtures": "internal/mcp/integration_invocation_test.go and the scoped transfer fixtures",
+    "httpMounts": "internal/rpc/server.go setupHandler and setupFrontend (mounted HTTP route patterns)"
   },
-  "policy": "IN SCOPE = ordinary supported authenticated administration and data management, mapped to a typed ACL-scoped tool or a bounded composed workflow (upload/download/metrics). EXCLUDED = genuine private protocol mechanics, unmounted contracts, unauthenticated bootstrap, credential/secret dumps, free-form command, sensitive-location disclosure, third-party egress, and intentionally operator-only maintenance; each exclusion names a supported equivalent flow where one exists.",
+  "policy": "IN SCOPE = ordinary supported authenticated administration and data management, mapped to a typed ACL-scoped tool or a bounded composed workflow (upload/download). EXCLUDED = genuine private protocol mechanics, monitoring scrapes, unmounted contracts, unauthenticated bootstrap, credential/secret dumps, free-form command, sensitive-location disclosure, third-party egress, and intentionally operator-only maintenance; each exclusion names a supported equivalent flow where one exists.",
   "counts": {
-    "declared_rpcs": 252,
-    "mounted_reachable": 242,
-    "listed_in_tool_catalog": 239,
-    "reachable_by_tool_or_composed": 35,
-    "verified_by_fixture": 35,
-    "excluded_by_reason": 77,
-    "supported_operations": 203,
+    "declared_rpcs": 253,
+    "mounted_reachable": 243,
+    "listed_in_tool_catalog": 236,
+    "reachable_by_tool_or_composed": 34,
+    "verified_by_fixture": 34,
+    "excluded_by_reason": 76,
+    "supported_operations": 205,
     "unmounted_rpcs": 10,
     "non_rpc_surfaces": 28,
-    "listed_rpcs": 225,
-    "listed_surfaces": 14,
+    "listed_rpcs": 226,
+    "listed_surfaces": 10,
     "reachable_rpcs": 30,
-    "reachable_surfaces": 5,
+    "reachable_surfaces": 4,
     "verified_rpcs": 31,
-    "verified_surfaces": 4,
-    "excluded_rpcs": 52,
-    "excluded_surfaces": 25,
-    "supported_rpcs": 200,
-    "supported_surfaces": 3
+    "verified_surfaces": 3,
+    "excluded_rpcs": 50,
+    "excluded_surfaces": 26,
+    "supported_rpcs": 203,
+    "supported_surfaces": 2
   },
   "operations": [
     {
@@ -4472,6 +4473,29 @@
       }
     },
     {
+      "id": "rpc:/carbonpanel.v1.UserService/BeginOIDCLink",
+      "kind": "rpc",
+      "procedure": "/carbonpanel.v1.UserService/BeginOIDCLink",
+      "service": "carbonpanel.v1.UserService",
+      "method": "BeginOIDCLink",
+      "client": "NewUserServiceClient",
+      "scope": "users/update",
+      "declared": true,
+      "mounted": true,
+      "support": "excluded",
+      "class": "exclude",
+      "reason": "BROWSER-BOUND OIDC LINK. The operation binds the link intent to the initiating local admin session and its browser.",
+      "reasonRef": "internal/rpc/services/user.go BeginOIDCLink; internal/auth/oidc_link.go BeginLink",
+      "equivalentFlow": "An active local admin selects Link SSO account in Settings → Auth.",
+      "composedBy": "",
+      "suggestedTool": "",
+      "coverage": {
+        "listed": true,
+        "reachable": false,
+        "verified": false
+      }
+    },
+    {
       "id": "rpc:/carbonpanel.v1.UserService/CreateUser",
       "kind": "rpc",
       "procedure": "/carbonpanel.v1.UserService/CreateUser",
@@ -5191,13 +5215,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "nodes/read[*]",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "AUTOMATIC NETWORK DISCOVERY / SUBNET SCAN. nodes/read \"*\" global operation; explicitly outside the catalog.",
-      "reasonRef": "internal/rpc/server.go:308-309; internal/rpc/handlers/node_scan.go:50; proto/carbonpanel/v1/node.proto:69",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/node_scan.go:50; proto/carbonpanel/v1/node.proto:69",
       "equivalentFlow": "Operator supplies a known configured node id; agents use NodeService/PingNode and redacted GetNode only.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5205,7 +5229,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/nodes/scan"
+      ]
     },
     {
       "id": "surface:node_enrollment_tls_secrets",
@@ -5237,13 +5264,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "session authentication; servers/read[server_id] for subscribers and servers/command[server_id] for commands",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "PRIVATE BROWSER↔PANEL HANDSHAKE. /ws is a console/log/event hub; WebSocket upgrade is explicitly refused by the renderer proxy.",
-      "reasonRef": "internal/rpc/server.go:278; internal/worldview/proxy.go:105-110",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/worldview/proxy.go:105-110",
       "equivalentFlow": "WorldViewService/GetWorldViewStatus (pollable status) and ActivityService/ListActivityLogs via typed RPCs.",
       "composedBy": "/carbonpanel.v1.WorldViewService/GetWorldViewStatus",
       "suggestedTool": "get_world_view_status",
@@ -5251,7 +5278,10 @@
         "listed": true,
         "reachable": true,
         "verified": true
-      }
+      },
+      "httpMounts": [
+        "/ws"
+      ]
     },
     {
       "id": "surface:oidc_login",
@@ -5260,13 +5290,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public browser login",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "BROWSER IdP HANDSHAKE. OIDC login is a browser redirect flow, not a Connect RPC or an MCP credential flow.",
-      "reasonRef": "internal/rpc/server.go:290; internal/auth/oidc.go:134,583-593",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/auth/oidc.go:134,583-593",
       "equivalentFlow": "Agent uses a dp_ Bearer token; browser users use the panel UI.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5274,7 +5304,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/auth/oidc/login"
+      ]
     },
     {
       "id": "surface:oidc_callback",
@@ -5283,13 +5316,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public OIDC callback with signed state",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "BROWSER IdP CALLBACK. Redirects to /login?code=<one-time-code>; not an agent surface.",
-      "reasonRef": "internal/rpc/server.go:291; internal/auth/oidc.go:394",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/auth/oidc.go:394",
       "equivalentFlow": "Agent uses a dp_ Bearer token; browser users use the panel UI.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5297,7 +5330,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/auth/oidc/callback"
+      ]
     },
     {
       "id": "surface:oidc_exchange",
@@ -5306,13 +5342,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public one-time exchange",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "ONE-TIME CODE → SESSION TOKEN EXCHANGE. Redeems a single-use, IP-bound, TTL-60s code and returns the browser session token with Cache-Control: no-store; a session token is not an MCP credential.",
-      "reasonRef": "internal/rpc/server.go:292; internal/auth/oidc.go:596-627,134-188",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/auth/oidc.go:596-627,134-188",
       "equivalentFlow": "Agent uses a dp_ Bearer token provisioned out of band; never redeems browser codes.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5320,7 +5356,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/auth/oidc/exchange"
+      ]
     },
     {
       "id": "surface:healthz",
@@ -5329,13 +5368,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "UNAUTHENTICATED LIVENESS PROBE. Public, read-only, no ACL evidence.",
-      "reasonRef": "internal/rpc/server.go:282",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
       "equivalentFlow": "ServerService/GetServer and NodeService/PingNode (ACL-scoped status).",
       "composedBy": "/carbonpanel.v1.NodeService/PingNode",
       "suggestedTool": "",
@@ -5343,7 +5382,10 @@
         "listed": true,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/healthz"
+      ]
     },
     {
       "id": "surface:readyz",
@@ -5352,13 +5394,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "UNAUTHENTICATED READINESS PROBE. Public, read-only, no ACL evidence.",
-      "reasonRef": "internal/rpc/server.go:283",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
       "equivalentFlow": "ServerService/GetServer and NodeService/PingNode (ACL-scoped status).",
       "composedBy": "/carbonpanel.v1.NodeService/PingNode",
       "suggestedTool": "",
@@ -5366,7 +5408,10 @@
         "listed": true,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/readyz"
+      ]
     },
     {
       "id": "surface:health_detail",
@@ -5375,13 +5420,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "UNAUTHENTICATED DETAILED HEALTH PROBE. Public, read-only, no ACL evidence.",
-      "reasonRef": "internal/rpc/server.go:284",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
       "equivalentFlow": "ServerService/GetServer, GetServerLogs and NodeService/PingNode (ACL-scoped).",
       "composedBy": "/carbonpanel.v1.ServerService/GetServer",
       "suggestedTool": "get_server",
@@ -5389,7 +5434,10 @@
         "listed": true,
         "reachable": true,
         "verified": true
-      }
+      },
+      "httpMounts": [
+        "/health/detail"
+      ]
     },
     {
       "id": "surface:worker_protocol_jsonl",
@@ -5559,21 +5607,25 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public discovery",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
-      "reason": "GRPC REFLECTION. Static 19-service list, stale by 6 vs 25 mounted; explicitly never a catalog source.",
-      "reasonRef": "internal/rpc/server.go:253-275",
-      "equivalentFlow": "This machine-checkable family audit matrix is the authoritative catalog source.",
+      "reason": "PUBLIC DISCOVERY: reflection describes the registered Connect services and is outside the MCP product-data catalogue.",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
+      "equivalentFlow": "Use tools/list for callable product tools. The controller reflection service describes the registered RPC contracts.",
       "composedBy": "",
       "suggestedTool": "",
       "coverage": {
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/grpc.reflection.v1.ServerReflection/",
+        "/grpc.reflection.v1alpha.ServerReflection/"
+      ]
     },
     {
       "id": "surface:openapi",
@@ -5582,13 +5634,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "PUBLIC OPENAPI SPEC. Documentation, not an agent tool.",
-      "reasonRef": "internal/rpc/server.go:302-303",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
       "equivalentFlow": "Typed tool schemas in the MCP catalog.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5596,7 +5648,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/openapi.yaml"
+      ]
     },
     {
       "id": "surface:frontend_catchall",
@@ -5605,13 +5660,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "public assets",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "STATIC SVELTEKIT FRONTEND CATCH-ALL. Browser assets only.",
-      "reasonRef": "internal/rpc/server.go:341-342,551-615",
+      "reasonRef": "internal/rpc/server.go (HTTP registration)",
       "equivalentFlow": "Typed RPC tools.",
       "composedBy": "",
       "suggestedTool": "",
@@ -5619,7 +5674,10 @@
         "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/"
+      ]
     },
     {
       "id": "surface:rest_upload_stream",
@@ -5628,13 +5686,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "uploads/create[*] for PUT; files/create[server_id] for typed commit",
       "declared": false,
       "mounted": true,
       "support": "supported",
       "class": "safe",
       "reason": "BYTE-TRANSPORT ENDPOINT (PUT /api/v1/upload/{sessionId}). Represented in MCP by the composed typed upload path (rest_upload_stream_commit): a bounded session handle and bounded chunks, owner-bound and confirm-gated, never a raw or unbounded byte stream.",
-      "reasonRef": "internal/rpc/server.go:296-297; internal/rpc/handlers/upload.go:59",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/upload.go:59",
       "equivalentFlow": "Mapped through the composed workflow: UploadService/InitUpload + UploadChunk -> FileService/SaveUploadedFile (bounded, server-relative path).",
       "composedBy": "/carbonpanel.v1.FileService/SaveUploadedFile",
       "suggestedTool": "",
@@ -5642,7 +5700,10 @@
         "listed": true,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/upload/"
+      ]
     },
     {
       "id": "surface:rest_download_stream",
@@ -5651,13 +5712,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "files/read[session.server_id]; files/read[*] for legacy sessions",
       "declared": false,
       "mounted": true,
       "support": "supported",
       "class": "safe",
       "reason": "BYTE-TRANSPORT ENDPOINT (GET /api/v1/download/{sessionId}). Authz fail-closed (files/read[server_id]); represented by the download_stream composed tool with a bounded session id and 8 MiB admission bound, never a raw or unbounded byte stream or a gateway filesystem path.",
-      "reasonRef": "internal/rpc/server.go:299-300; internal/rpc/handlers/download.go:36-118",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/download.go:36-118",
       "equivalentFlow": "Mapped through the composed workflow: FileService/GetFile (bounded) or InitFileDownload + DownloadArchive.",
       "composedBy": "/carbonpanel.v1.FileService/GetFile",
       "suggestedTool": "get_file",
@@ -5665,7 +5726,10 @@
         "listed": true,
         "reachable": true,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/download/"
+      ]
     },
     {
       "id": "surface:rest_key_validator",
@@ -5674,21 +5738,24 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "settings/read[*]",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
-      "reason": "LEGACY REST KEY VALIDATOR. Credential in request body with global settings/read; prefer the generated RPC and never echo the key.",
-      "reasonRef": "internal/rpc/server.go:305-306; internal/rpc/handlers/key_validator.go:45",
-      "equivalentFlow": "ConfigService/ValidateProviderKey RPC (settings/read) with a never-echo guarantee.",
-      "composedBy": "/carbonpanel.v1.ConfigService/ValidateProviderKey",
+      "reason": "EXCLUDED: provider credentials and third-party egress. The REST adapter and ConfigService/ValidateProviderKey share the same operation and settings/read policy.",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/key_validator.go:45",
+      "equivalentFlow": "Validate provider credentials out of band using the panel's authorized settings workflow.",
+      "composedBy": "",
       "suggestedTool": "",
       "coverage": {
-        "listed": true,
+        "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/settings/validate-key"
+      ]
     },
     {
       "id": "surface:rest_mod_search",
@@ -5697,13 +5764,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "mods/read[server_id] or mods/create[server_id]; global object for server_id=none",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "DEPRECATED LEGACY REST MOD ADAPTER. Fail-closed shared policy but superseded by the generated browse contract.",
-      "reasonRef": "internal/rpc/server.go:311-314; internal/rpc/handlers/mod_search.go:209",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/mod_search.go:209",
       "equivalentFlow": "ModBrowseService/SearchMods, GetModVersions and InstallMods.",
       "composedBy": "/carbonpanel.v1.ModBrowseService/SearchMods",
       "suggestedTool": "",
@@ -5711,7 +5778,10 @@
         "listed": true,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/servers/"
+      ]
     },
     {
       "id": "surface:rest_packwiz",
@@ -5720,21 +5790,24 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "modpacks/read[*] or modpacks/create[*]; public loader catalogue and runtime files",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
-      "reason": "STUDIO OPERATOR AUTHORING ENDPOINT. Fail-closed but intentionally operator-facing, not an agent workflow.",
-      "reasonRef": "internal/rpc/server.go:325-329; internal/rpc/handlers/packwiz.go:106",
-      "equivalentFlow": "ModpackService typed RPCs (search, get, sync, import, delete).",
-      "composedBy": "/carbonpanel.v1.ModpackService/SearchModpacks",
+      "reason": "Mixed Studio adapter covering inventory reads, update checks, mutations, multipart import, raw pack files and exports. Only inventory reads have typed MCP equivalents in this slice.",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/packwiz.go:106",
+      "equivalentFlow": "Use packwiz_list_packs and packwiz_get_pack for inventory reads. Use Modpack Studio for other operations.",
+      "composedBy": "",
       "suggestedTool": "",
       "coverage": {
-        "listed": true,
+        "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/packwiz/"
+      ]
     },
     {
       "id": "surface:rest_staged_config",
@@ -5743,21 +5816,24 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "server_config/read[server_id] or server_config/create[server_id]; record owner checked on mutations",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
-      "reason": "LEGACY STAGED-CONFIG REST ADAPTER. Superseded by the generated config batch RPCs.",
-      "reasonRef": "internal/rpc/server.go:331-332; internal/rpc/handlers/staged_config.go:87,101",
-      "equivalentFlow": "ConfigService/GetUpdateBatch, DiscardUpdateBatch and UpdateServerConfig.",
-      "composedBy": "/carbonpanel.v1.ConfigService/GetUpdateBatch",
+      "reason": "EXCLUDED: the legacy adapter and StagedConfigService share the staged-change list, stage, apply, rollback and discard operations. The generated service carries the same server scope and reauthorizes the recorded owner on apply, rollback and discard.",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/staged_config.go:87,101",
+      "equivalentFlow": "MCP list_staged_config_changes returns rollout metadata. Use the panel staged changes workflow for configuration diffs and mutations.",
+      "composedBy": "",
       "suggestedTool": "",
       "coverage": {
-        "listed": true,
+        "listed": false,
         "reachable": false,
         "verified": false
-      }
+      },
+      "httpMounts": [
+        "/api/v1/staged-config/"
+      ]
     },
     {
       "id": "surface:rest_metrics",
@@ -5766,21 +5842,24 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "servers/read[*] for host; servers/read[server_id] for a server",
       "declared": false,
       "mounted": true,
-      "support": "supported",
-      "class": "safe",
-      "reason": "REST-ONLY HOST/SERVER METRICS with no typed client; authorizeRequestObject is fail-open on nil enforcer/no auth, so it is never ACL evidence on its own.",
-      "reasonRef": "internal/rpc/server.go:326-332; internal/rpc/handlers/metrics.go:75",
-      "equivalentFlow": "Mapped through the composed workflow: ServerService/GetServer + GetServerLogs and NodeService/PingNode (ACL-scoped).",
-      "composedBy": "/carbonpanel.v1.ServerService/GetServer",
-      "suggestedTool": "get_server",
+      "support": "excluded",
+      "class": "exclude",
+      "reason": "EXCLUDED: the host and per-server endpoints expose Prometheus snapshots for monitoring under separate global and server scopes.",
+      "reasonRef": "internal/rpc/server.go (HTTP registration); internal/rpc/handlers/metrics.go:75",
+      "equivalentFlow": "Use the controller's authenticated Prometheus scrape for monitoring. MCP get_server returns the latest cached operational metrics and player observations for one authorized server.",
+      "composedBy": "",
+      "suggestedTool": "",
       "coverage": {
-        "listed": true,
-        "reachable": true,
-        "verified": true
-      }
+        "listed": false,
+        "reachable": false,
+        "verified": false
+      },
+      "httpMounts": [
+        "/api/v2/metrics/"
+      ]
     },
     {
       "id": "surface:worldview_map_proxy",
@@ -5789,13 +5868,13 @@
       "service": "",
       "method": "",
       "client": "",
-      "scope": "",
+      "scope": "world_view/read[session.server_id]; session owner checked",
       "declared": false,
       "mounted": true,
       "support": "excluded",
       "class": "exclude",
       "reason": "BROWSER ASSET CHANNEL. Same-origin reverse proxy to a node-local renderer: GET/HEAD only, WebSocket upgrade refused, cp_session cookie + opaque per-user key + world_view/read[server_id] fail-closed. Binary content, not a product-data API or tool.",
-      "reasonRef": "internal/worldview/config.go:25-28; internal/rpc/server.go:334-339; internal/worldview/proxy.go:98-181",
+      "reasonRef": "internal/worldview/config.go:25-28; internal/rpc/server.go (HTTP registration); internal/worldview/proxy.go:98-181",
       "equivalentFlow": "WorldViewService RPCs: GetWorldViewSession (opaque per-user key), GetWorldViewStatus, ListCapabilities and ListMapOverlays.",
       "composedBy": "/carbonpanel.v1.WorldViewService/GetWorldViewStatus",
       "suggestedTool": "get_world_view_status",
@@ -5803,7 +5882,10 @@
         "listed": true,
         "reachable": true,
         "verified": true
-      }
+      },
+      "httpMounts": [
+        "/api/v1/worldview/map/"
+      ]
     },
     {
       "id": "rpc:/carbonpanel.v1.NodeControlService/CreateEnrollment",
@@ -6114,11 +6196,11 @@
       "scope": "modpacks/read",
       "declared": true,
       "mounted": true,
-      "support": "excluded",
-      "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
-      "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/read); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "support": "supported",
+      "class": "safe",
+      "reason": "Page through persisted Studio pack summaries under the global modpacks/read grant.",
+      "reasonRef": "internal/mcp/family_packwiz_read_tools.go; internal/rbac/mapping.go (global modpacks/read)",
+      "equivalentFlow": "",
       "composedBy": "",
       "suggestedTool": "packwiz_list_packs",
       "coverage": {
@@ -6137,11 +6219,11 @@
       "scope": "modpacks/read",
       "declared": true,
       "mounted": true,
-      "support": "excluded",
-      "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
-      "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/read); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "support": "supported",
+      "class": "safe",
+      "reason": "Read pack metadata and page through its content under global modpacks/read. The gateway omits URLs, paths and raw options.",
+      "reasonRef": "internal/mcp/family_packwiz_read_tools.go; internal/rbac/mapping.go (global modpacks/read)",
+      "equivalentFlow": "",
       "composedBy": "",
       "suggestedTool": "packwiz_get_pack",
       "coverage": {
@@ -6162,9 +6244,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "Outside the current MCP read contract. Cloning can copy an entire pack tree and its persisted assets. An MCP workflow needs a copy budget, collision checks and explicit confirmation.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_clone_pack",
       "coverage": {
@@ -6185,9 +6267,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "Outside the current MCP read contract. Reindexing changes pack metadata and can rehash the content tree. An MCP workflow needs an explicit confirmation and bounded refresh work.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_refresh_pack",
       "coverage": {
@@ -6208,9 +6290,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "Outside the current MCP read contract. Provider requests fan out across the full pack before the kind filter. An MCP workflow needs request and duration budgets plus a redacted response that omits download URLs and raw changelogs.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/read); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_check_updates",
       "coverage": {
@@ -6231,9 +6313,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "Outside the current MCP read contract. Deleting a pack recursively removes its authored content. An MCP workflow needs exact-target confirmation and evidence for dependent deployments and removal.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_delete_pack",
       "coverage": {
@@ -6254,9 +6336,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack mod mutation.",
+      "reason": "Outside the current MCP read contract. A mod payload can supply a download URL and trigger transitive dependency resolution. An MCP workflow needs confirmed operations and an approved, bounded source and dependency policy.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack mod control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_add_pack_mod",
       "coverage": {
@@ -6277,9 +6359,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack mod mutation.",
+      "reason": "Outside the current MCP read contract. The controller fetches a caller-supplied URL. An MCP workflow needs a validated content source, bounded verified bytes and confirmation.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack mod control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_add_url_mod",
       "coverage": {
@@ -6300,9 +6382,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack mod mutation.",
+      "reason": "Outside the current MCP read contract. Changing one content entry needs exact pack and slug targets, an allowlisted side, explicit pin semantics and confirm=true.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack mod control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_update_pack_mod",
       "coverage": {
@@ -6323,9 +6405,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack mod mutation.",
+      "reason": "Outside the current MCP read contract. Deleting one content entry needs exact pack and slug targets, explicit confirmation and resource-scope proof.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack mod control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_delete_pack_mod",
       "coverage": {
@@ -6346,9 +6428,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack mod mutation.",
+      "reason": "Outside the current MCP read contract. Batch operations need an explicit action allowlist, capped slugs, confirmation and truthful partial-failure reporting.",
       "reasonRef": "proto/carbonpanel/v1/packwiz.proto (rpc declaration); internal/rbac/mapping.go (scope modpacks/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack mod control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use Modpack Studio with its existing authorization.",
       "composedBy": "",
       "suggestedTool": "packwiz_batch_pack_mods",
       "coverage": {
@@ -6367,13 +6449,13 @@
       "scope": "server_config/read[server_id]",
       "declared": true,
       "mounted": true,
-      "support": "excluded",
-      "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
-      "reasonRef": "proto/carbonpanel/v1/staged_config.proto (rpc declaration); internal/rbac/mapping.go (scope server_config/read); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "support": "supported",
+      "class": "safe",
+      "reason": "The generated server-scoped read supports a status filter. The MCP tool returns bounded rollout metadata under server_config/read[server_id].",
+      "reasonRef": "proto/carbonpanel/v1/staged_config.proto; internal/rbac/mapping.go (ListStagedChanges); internal/mcp/staged_config_tools.go",
+      "equivalentFlow": "",
       "composedBy": "",
-      "suggestedTool": "stagedconfig_list_staged_changes",
+      "suggestedTool": "list_staged_config_changes",
       "coverage": {
         "listed": false,
         "reachable": false,
@@ -6392,9 +6474,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "EXCLUDED: server-scoped staged-change workflow shared with the generated panel client. Staging and mutation require server_config/create and an existing staged record's owner is reauthorized before apply, rollback or discard.",
       "reasonRef": "proto/carbonpanel/v1/staged_config.proto (rpc declaration); internal/rbac/mapping.go (scope server_config/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use the panel's staged changes workflow. The MCP ConfigService tools cover config batches under separate product permissions.",
       "composedBy": "",
       "suggestedTool": "stagedconfig_stage_config_change",
       "coverage": {
@@ -6415,9 +6497,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "EXCLUDED: server-scoped staged-change workflow shared with the generated panel client. Staging and mutation require server_config/create and an existing staged record's owner is reauthorized before apply, rollback or discard.",
       "reasonRef": "proto/carbonpanel/v1/staged_config.proto (rpc declaration); internal/rbac/mapping.go (scope server_config/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use the panel's staged changes workflow. The MCP ConfigService tools cover config batches under separate product permissions.",
       "composedBy": "",
       "suggestedTool": "stagedconfig_apply_staged_change",
       "coverage": {
@@ -6438,9 +6520,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "EXCLUDED: server-scoped staged-change workflow shared with the generated panel client. Staging and mutation require server_config/create and an existing staged record's owner is reauthorized before apply, rollback or discard.",
       "reasonRef": "proto/carbonpanel/v1/staged_config.proto (rpc declaration); internal/rbac/mapping.go (scope server_config/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use the panel's staged changes workflow. The MCP ConfigService tools cover config batches under separate product permissions.",
       "composedBy": "",
       "suggestedTool": "stagedconfig_rollback_staged_change",
       "coverage": {
@@ -6461,9 +6543,9 @@
       "mounted": true,
       "support": "excluded",
       "class": "review",
-      "reason": "EXCLUDED: product control RPC migrated for the console generated client; no MCP tool is exposed for pack/staged content mutation.",
+      "reason": "EXCLUDED: server-scoped staged-change workflow shared with the generated panel client. Staging and mutation require server_config/create and an existing staged record's owner is reauthorized before apply, rollback or discard.",
       "reasonRef": "proto/carbonpanel/v1/staged_config.proto (rpc declaration); internal/rbac/mapping.go (scope server_config/create); internal/mcp/catalog_data.go (ClassExclude)",
-      "equivalentFlow": "Use the generated Connect client in the console; pack and staged-config control stays outside the MCP tool surface.",
+      "equivalentFlow": "Use the panel's staged changes workflow. The MCP ConfigService tools cover config batches under separate product permissions.",
       "composedBy": "",
       "suggestedTool": "stagedconfig_discard_staged_change",
       "coverage": {

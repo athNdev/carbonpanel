@@ -15,13 +15,13 @@ is explicitly marked **UNKNOWN**.
 
 ## UPGRADE NOTES — read before upgrading from v1.0.40
 
-**The next stable is Carbon Panel 2.0.0 (`carbonpanel-v2.0.0`), a MAJOR
+**The next stable is Carbon Panel 2.0.1 (`carbonpanel-v2.0.1`), a MAJOR
 release.** `docs/releases.md:11` defines Major as *"incompatible operator or
 API changes that require migration."* Three intentional changes mean an
 unchanged v1.0.40 configuration does **not** upgrade cleanly. The Connect/HTTP
 wire contract and the database schema are additive and compatible; the breaks
 are in configuration and operating behavior. Plan a maintenance window, back
-up the database (db + wal + shm) and preserves worlds/backups before upgrading.
+up the database (db + wal + shm) and preserve worlds and backups before upgrading.
 
 ### B1 — OIDC users with the documented v1.0.40 config lose all roles
 
@@ -173,7 +173,9 @@ These facts remain **UNKNOWN** and are recorded as such, not guessed:
 
 ## Next stable
 
-`carbonpanel-v2.0.0` — displayed and immutable image version `2.0.0`, minor
+The `carbonpanel-v2.0.0` Git tag already identifies commit
+`69ddb46d596aea8ed117a3dba6a1f63521572664`. The next publishable product tag is
+`carbonpanel-v2.0.1`, displayed and immutable image version `2.0.1`, minor
 alias `2.0`, `latest` promoted only after both registries serve the same
 verified multi-architecture digest and the release assets are complete. The
 Git tag, displayed SemVer, internal v-form and archive filename remain separate

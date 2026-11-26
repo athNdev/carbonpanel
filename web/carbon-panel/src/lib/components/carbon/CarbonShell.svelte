@@ -7,15 +7,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import type { Component, Snippet } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import {
 		Blocks,
 		Boxes,
 		ChevronDown,
+		ChevronRight,
 		CirclePlus,
 		FileCode2,
-		Globe,
 		History,
 		LayoutGrid,
 		LibraryBig,
@@ -36,9 +36,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import PreferencesDialog from '../PreferencesDialog.svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { type Node } from '$lib/proto/carbonpanel/v1/node_pb';
-	import { describeNodeStatus, pickPrimaryNode } from '$lib/utils/node-status';
+	import { describeNodeStatus, summarizeNodes } from '$lib/utils/node-status';
 	import CarbonTag from './CarbonTag.svelte';
-	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
+	import { theme } from '$lib/display-preferences.svelte';
 
 	interface Props {
 		children?: Snippet;
@@ -48,6 +48,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let sideNavExpanded = $state(true);
 	let profileOpen = $state(false);
+	// Bound to the exact header menu trigger: a page-level menu or a remount
+	// must never receive focus restored from these shell dialogs.
+	let profileTriggerButton: HTMLButtonElement | null = $state(null);
 	let profileDialogOpen = $state(false);
 	let prefsOpen = $state(false);
 	let passwordOld = $state('');
@@ -57,12 +60,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let passwordSaving = $state(false);
 	let passwordDone = $state(false);
 
-	function toggleProfile() {
+	let profileMenu = $state<HTMLDivElement>();
+	async function toggleProfile() {
 		profileOpen = !profileOpen;
+		if (profileOpen) {
+			await tick();
+			profileMenu?.querySelector('button')?.focus();
+		}
 	}
 
 	function closeProfile() {
 		profileOpen = false;
+	}
+
+	async function restoreProfileFocus() {
+		await tick();
+		if (profileTriggerButton?.isConnected) profileTriggerButton.focus();
 	}
 
 	function openProfileDialog() {
@@ -111,10 +124,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function handleProfileKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
+	async function handleProfileKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && profileOpen) {
+			event.preventDefault();
 			profileOpen = false;
+			await tick();
+			profileTriggerButton?.focus();
+			return;
 		}
+		if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+		event.preventDefault();
+		const fromTrigger = event.currentTarget === profileTriggerButton;
+		profileOpen = true;
+		await tick();
+		if (!profileMenu) return;
+		const items = Array.from(profileMenu.querySelectorAll('button'));
+		const index = items.findIndex((item) => item === document.activeElement);
+		if (event.key === 'Home' || (fromTrigger && event.key === 'ArrowDown')) items[0]?.focus();
+		else if (event.key === 'End' || fromTrigger) items.at(-1)?.focus();
+		else
+			items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
 	}
 	let servers = $derived($activitySortedServers);
 	let runningCount = $derived($runningServers.length);
@@ -127,15 +156,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let isMobile = $state(false);
 	let nodes = $state<Node[]>([]);
 	let nodesLoaded = $state(false);
-	let appPort = $state('');
-
-	let primaryNode = $derived(pickPrimaryNode(nodes));
-	let primaryNodeStatus = $derived(describeNodeStatus(primaryNode?.status));
+	let nodesUnavailable = $state(false);
+	let fleet = $derived(summarizeNodes(nodes));
 
 	onMount(() => {
-		// One owner hydrates and applies preferences on boot, not only when the
-		// dialog opens: stored motion/density must hold on first paint.
-		displayPreferences.hydrate();
 		const media = window.matchMedia(MOBILE_QUERY);
 		const applyBreakpoint = () => {
 			isMobile = media.matches;
@@ -145,8 +169,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		applyBreakpoint();
 		media.addEventListener('change', applyBreakpoint);
 
-		appPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-
 		// Best-effort: the shell must render even when the node list fails (e.g. anonymous access).
 		rpcClient.node
 			.listNodes({}, silentCallOptions)
@@ -154,7 +176,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				nodes = res.nodes ?? [];
 			})
 			.catch((err) => {
-				console.error('Failed to fetch nodes for shell footer:', err);
+				nodesUnavailable = true;
+				console.debug('Failed to fetch nodes for shell footer:', err);
 			})
 			.finally(() => {
 				nodesLoaded = true;
@@ -186,7 +209,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			| '/servers'
 			| '/servers/new'
 			| '/players'
-			| '/worlds'
 			| '/library'
 			| '/modpacks/studio'
 			| '/modpacks'
@@ -207,7 +229,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{ href: '/servers', label: 'Servers', icon: Server, badge: true },
 		{ href: '/servers/new', label: 'Create Server', icon: CirclePlus },
 		{ href: '/players', label: 'Players', icon: Users },
-		{ href: '/worlds', label: 'World View', icon: Globe },
 		{ href: '/library', label: 'World Library', icon: LibraryBig },
 		{ href: '/modpacks/studio', label: 'Modpack Studio', icon: Blocks },
 		{ href: '/modpacks', label: 'Modpacks', icon: Package },
@@ -242,6 +263,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<header
 		class="fixed top-0 right-0 left-0 z-50 flex h-12 items-center justify-between border-b border-border bg-background px-3"
 	>
+		<a
+			href="#carbon-main"
+			class="focus-ring sr-only focus:not-sr-only focus:absolute focus:top-1 focus:left-2 focus:z-60 focus:bg-background focus:px-2 focus:py-1 focus:text-xs"
+		>
+			Skip to content
+		</a>
 		<div class="flex items-center gap-2">
 			<!-- Hamburger Button -->
 			<button
@@ -284,6 +311,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<div class="relative flex items-center gap-2 border-l border-border pl-2">
 					<button
 						type="button"
+						bind:this={profileTriggerButton}
 						class="focus-ring motion-press flex items-center gap-2 px-1 py-1 transition-colors hover:bg-accent"
 						aria-haspopup="menu"
 						aria-expanded={profileOpen}
@@ -311,8 +339,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							onkeydown={handleProfileKeydown}
 						></div>
 						<div
+							bind:this={profileMenu}
 							role="menu"
 							aria-label="Profile"
+							onkeydown={handleProfileKeydown}
 							class="absolute top-full right-0 z-50 mt-1 w-44 border border-border bg-popover py-1 shadow-[var(--carbon-shadow-overlay)]"
 						>
 							<button
@@ -352,17 +382,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- IBM Carbon SideNav: off-canvas overlay on narrow screens, rail/panel on md+ -->
 		<aside
 			id="carbon-sidenav"
-			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
+			inert={isMobile && !sideNavExpanded}
+			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 flex w-64 flex-col overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
 				? 'translate-x-0'
 				: '-translate-x-full'} {sideNavExpanded ? 'md:w-64' : 'md:w-12'} md:translate-x-0"
 		>
-			<nav class="motion-stagger flex flex-col py-2" aria-label="Main Navigation">
+			<nav class="motion-stagger flex shrink-0 flex-col py-2" aria-label="Main Navigation">
 				{#each navItems as item (item.href)}
 					{#if item.href !== '/settings' || showSettingsNav}
 						<!-- resolve() is typed from this app's generated routes; the sibling-epic
 						     destinations are explicit NavItem hrefs but their route files land
 						     in separate PRs. The cast is scoped to this single call. -->
 						<a
+							aria-current={isCurrentPath(item.href) ? 'page' : undefined}
 							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}
 							class="focus-ring relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded
@@ -388,27 +420,32 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/each}
 			</nav>
 
-			<!-- SideNav Footer: live node status, links to Docker Nodes settings -->
 			{#if sideNavExpanded}
 				<a
 					href={resolve('/settings?tab=nodes')}
 					onclick={closeMobileNav}
 					title="View Docker nodes"
-					class="focus-ring absolute right-0 bottom-0 left-0 border-t border-border bg-background p-3 font-mono text-xs text-muted-foreground transition-colors hover:bg-card"
+					class="focus-ring mt-auto flex shrink-0 items-center gap-3 border-t border-border px-3.5 py-3 text-foreground transition-colors hover:bg-card"
 				>
-					<div class="flex items-center justify-between gap-2">
-						<span class="truncate"
-							>{nodesLoaded
-								? primaryNode
-									? primaryNode.name.toUpperCase()
-									: 'NO NODES'
-								: '···'}</span
-						>
-						<span class="{primaryNodeStatus.dotClass} shrink-0 font-bold"
-							>{primaryNodeStatus.label}</span
-						>
+					<Boxes class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<div class="min-w-0 flex-1">
+						<div class="text-sm font-medium">Docker nodes</div>
+						<div class="mt-0.5 text-xs text-muted-foreground">
+							{#if !nodesLoaded}Loading nodes…
+							{:else if nodesUnavailable}Node status unavailable
+							{:else if fleet.total === 0}No nodes registered
+							{:else if fleet.total === 1}
+								<span class="break-all">{nodes[0].name}</span> · {describeNodeStatus(
+									nodes[0].status
+								).label.toLowerCase()}
+							{:else}
+								<span class={fleet.offline ? 'text-warning-text' : 'text-success-text'}
+									>{fleet.online} of {fleet.total} online</span
+								>
+							{/if}
+						</div>
 					</div>
-					<div class="mt-1 text-xs text-muted-foreground">PORT {appPort || '···'} · CARBON V11</div>
+					<ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 				</a>
 			{/if}
 		</aside>
@@ -426,11 +463,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Main Content Area -->
 		<main
+			id="carbon-main"
+			tabindex="-1"
 			class="scrollbar-stable ml-0 flex min-h-0 flex-1 flex-col overflow-y-auto p-4 transition-[margin] duration-(--motion-fast) ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
 				? 'md:ml-64'
 				: 'md:ml-12'}"
 		>
-			<div class="mx-auto flex min-h-full w-full max-w-7xl flex-1 flex-col">
+			<div
+				class="mx-auto flex min-h-full w-full max-w-7xl flex-col {page.url.pathname === '/'
+					? 'shrink-0 grow'
+					: 'flex-1'}"
+			>
 				{@render children?.()}
 			</div>
 		</main>
@@ -442,7 +485,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		description="Signed-in account summary"
 		size="md"
 		hasFooter={false}
-		onclose={() => (profileDialogOpen = false)}
+		onclose={() => {
+			profileDialogOpen = false;
+			void restoreProfileFocus();
+		}}
 	>
 		{#if user}
 			<div class="space-y-3">
@@ -538,5 +584,5 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</CarbonModal>
 
-	<PreferencesDialog bind:open={prefsOpen} />
+	<PreferencesDialog bind:open={prefsOpen} onclose={() => void restoreProfileFocus()} />
 </div>

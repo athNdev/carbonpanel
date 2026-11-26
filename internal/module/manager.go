@@ -122,7 +122,11 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // An unresolvable remote node is an error: silently using the local daemon would
 // start, stop, or delete containers on the wrong host.
 func (m *Manager) resolveDocker(nodeID string) (*docker.Client, error) {
-	return docker.NewLocator(m.pool, m.docker, m.store).For(context.Background(), nodeID)
+	return m.resolveDockerContext(context.Background(), nodeID)
+}
+
+func (m *Manager) resolveDockerContext(ctx context.Context, nodeID string) (*docker.Client, error) {
+	return docker.NewLocator(m.pool, m.docker, m.store).For(ctx, nodeID)
 }
 
 // isLocalNode reports whether nodeID addresses the local Docker daemon for this
@@ -302,7 +306,7 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 		}
 	}
 
-	dockerCli, err := m.resolveDocker(module.NodeID)
+	dockerCli, err := m.resolveDockerContext(ctx, module.NodeID)
 	if err != nil {
 		module.Status = storage.ModuleStatusError
 		if updateErr := m.store.UpdateModule(ctx, module); updateErr != nil {
@@ -323,6 +327,15 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	module.ContainerID = containerID
 	module.Status = storage.ModuleStatusStopped
 	if err := m.store.UpdateModule(ctx, module); err != nil {
+		if ctx.Err() != nil {
+			// Preserve the created container and its stopped state together
+			// when cancellation interrupted the initial write.
+			stateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if updateErr := m.store.RecordCreatedModuleContainer(stateCtx, module.ID, containerID); updateErr != nil {
+				m.logger.Error("Failed to record created module %s container: %v", module.ID, updateErr)
+			}
+		}
 		return fmt.Errorf("failed to update module with container ID: %w", err)
 	}
 
@@ -348,7 +361,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 
 	// Resolve before inspecting: an unresolvable node must not be mistaken for a
 	// missing container and recreated against the local daemon.
-	dockerCli, err := m.resolveDocker(module.NodeID)
+	dockerCli, err := m.resolveDockerContext(ctx, module.NodeID)
 	if err != nil {
 		return fmt.Errorf("failed to start module %s: %w", module.Name, err)
 	}
@@ -356,6 +369,9 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 	// Check if container still exists in Docker
 	_, err = dockerCli.GetContainerStatus(ctx, module.ContainerID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("failed to inspect module container: %w", err)
+		}
 		// Container doesn't exist, recreate it
 		m.logger.Info("Container for module %s no longer exists, recreating", module.Name)
 		module.ContainerID = ""
