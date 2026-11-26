@@ -74,7 +74,8 @@ jobs:
             "$BASE/ubuntu-24.04-server-cloudimg-arm64.img"
           curl -fSL --retry 3 --max-time 120 \
             -o "$WORK/inputs/SHA256SUMS" "$BASE/SHA256SUMS"
-          sha256sum "$WORK/inputs/SHA256SUMS"
+          test "$(sha256sum "$WORK/inputs/SHA256SUMS" | cut -d' ' -f1)" = \
+            "0449a33b78dddb301a3ce2b80398984bc3e1f7880e27b86a31e58bdcbd3d3816"
           test "$(stat -c %s "$WORK/inputs/ubuntu-24.04-server-cloudimg-arm64.img")" = "616522752"
 
       - name: Boot two distinct instance IDs and write the receipt
