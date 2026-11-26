@@ -154,6 +154,35 @@ class CommandTests(unittest.TestCase):
         self.assertIn("tcg", cmd)
         self.assertNotIn("-machine", cmd)
 
+    def test_qemu_command_default_user_network_keeps_generic_behavior(self):
+        orig = boot_qual.which_any
+        try:
+            boot_qual.which_any = lambda *names: "/usr/bin/qemu-system-x86_64" if "qemu-system-x86_64" in names else None
+            cmd = boot_qual.qemu_command(
+                "/tmp/disk.qcow2", "/tmp/seed.iso", "/tmp/serial.log",
+                accel="tcg")
+        finally:
+            boot_qual.which_any = orig
+        netdevs = [cmd[index + 1] for index, value in enumerate(cmd[:-1])
+                   if value == "-netdev"]
+        self.assertEqual(netdevs, ["user,id=net0"])
+        self.assertFalse(any("hostfwd" in value for value in cmd))
+
+    def test_qemu_command_restricted_user_network_has_no_forward(self):
+        orig = boot_qual.which_any
+        try:
+            boot_qual.which_any = lambda *names: "/usr/bin/qemu-system-x86_64" if "qemu-system-x86_64" in names else None
+            cmd = boot_qual.qemu_command(
+                "/tmp/disk.qcow2", "/tmp/seed.iso", "/tmp/serial.log",
+                accel="tcg", restrict_user_network=True)
+        finally:
+            boot_qual.which_any = orig
+        netdevs = [cmd[index + 1] for index, value in enumerate(cmd[:-1])
+                   if value == "-netdev"]
+        self.assertEqual(netdevs, ["user,id=net0,restrict=on"])
+        self.assertFalse(any("hostfwd" in value for value in cmd))
+        self.assertFalse(any(value in ("-net", "-nic") for value in cmd))
+
     def test_qemu_command_uefi_uses_pflash_and_machine(self):
         with tempfile.TemporaryDirectory() as directory:
             code = Path(directory) / "OVMF_CODE.fd"
@@ -622,6 +651,49 @@ class CliTests(unittest.TestCase):
             self.assertIn("failed to launch qemu", attempt["error"])
             self.assertIn("fixture qemu refused to launch", attempt["error"])
             self.assertTrue((work / "qemu.stderr.log").is_file())
+
+    def test_cli_restricted_network_is_recorded_for_a_uefi_boot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            fake_qemu = root / "qemu-system-x86_64"
+            fake_qemu.write_bytes(b"")
+            code = root / "OVMF_CODE.fd"
+            variables = root / "OVMF_VARS.fd"
+            code.write_bytes(b"code")
+            variables.write_bytes(b"vars")
+
+            def fake_which(*names):
+                if "qemu-system-x86_64" in names:
+                    return str(fake_qemu)
+                return None
+
+            with mock.patch.object(boot_qual, "which_any", new=fake_which), \
+                    mock.patch.object(boot_qual, "make_seed_iso", new=_fake_iso), \
+                    mock.patch.object(
+                        boot_qual, "find_uefi_firmware",
+                        new=lambda arch: (str(code), str(variables))), \
+                    mock.patch.object(boot_qual.subprocess, "Popen",
+                                      return_value=_FakeProc(0)):
+                rc, _stdout, _stderr = _run_main([
+                    "--image", str(image), "--seed-dir", str(seed),
+                    "--work-dir", str(work), "--firmware", "uefi",
+                    "--restrict-user-network", "--no-offline-inspect",
+                ])
+            self.assertEqual(rc, 0)
+            report = json.loads((work / "boot-qual-report.json").read_text())
+            self.assertTrue(report["gates"]["boot_attempt"]["network_restrict"])
+            self.assertFalse(
+                report["gates"]["boot_attempt"]["network_host_forward"])
+            command = json.loads((work / "qemu-command.json").read_text())
+            netdevs = [command[index + 1]
+                       for index, value in enumerate(command[:-1])
+                       if value == "-netdev"]
+            self.assertEqual(netdevs, ["user,id=net0,restrict=on"])
+            self.assertFalse(any("hostfwd" in value for value in command))
 
     def test_cli_mocked_boot_completes_with_valid_semantics(self):
         with tempfile.TemporaryDirectory() as directory:

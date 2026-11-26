@@ -359,7 +359,8 @@ def default_cpu(arch, accel=None):
 
 def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048,
                  cpus=2, accel=None, firmware="bios", uefi_code=None,
-                 uefi_vars=None, machine=None, cpu=None):
+                 uefi_vars=None, machine=None, cpu=None,
+                 restrict_user_network=False):
     validate_target(arch, firmware, machine)
     bin_name = "qemu-system-%s" % arch
     qemu = which_any(bin_name)
@@ -377,6 +378,12 @@ def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048
         cmd.extend(["-cpu", cpu])
     if machine:
         cmd.extend(["-machine", machine])
+    # Restricted user-mode networking adds no host forward and gives the guest
+    # no route beyond the QEMU NAT. The generic helper keeps plain user-mode
+    # networking unless the caller explicitly asks for the isolated mode.
+    netdev = "user,id=net0"
+    if restrict_user_network:
+        netdev += ",restrict=on"
     cmd.extend([
         "-drive", "file=%s,if=virtio,format=qcow2" % disk_path,
         "-drive", "file=%s,if=virtio,format=raw,readonly=on,media=cdrom" % seed_iso,
@@ -385,7 +392,7 @@ def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048
         "-monitor", "none",
         "-no-reboot",  # capture first-boot-to-reboot boundary as shutdown
         "-device", "virtio-net-pci,netdev=net0",
-        "-netdev", "user,id=net0",
+        "-netdev", netdev,
     ])
     if firmware == "uefi":
         if arch not in ("x86_64", "aarch64"):
@@ -550,7 +557,7 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
                      do_offline_inspect=True, verify_ref=None, profile="artifact",
                      sha256sums_text=None, seed_iso_path=None, firmware="uefi",
                      disk_size=None, machine=None, cpu=None,
-                     output_reservation=None):
+                     restrict_user_network=False, output_reservation=None):
     work_dir = Path(work_dir)
     validate_target(arch, firmware, machine)
 
@@ -669,7 +676,8 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         cmd = qemu_command(disk_info["path"], iso_info["path"], str(serial_log),
                            arch=arch, memory_mib=memory_mib, cpus=cpus, accel=accel,
                            firmware=firmware, uefi_code=uefi_code,
-                           uefi_vars=uefi_vars, machine=machine, cpu=cpu)
+                           uefi_vars=uefi_vars, machine=machine, cpu=cpu,
+                           restrict_user_network=restrict_user_network)
     except Exception as e:
         report["gates"]["boot_attempt"] = {"status": "FAIL", "error": str(e)}
         return _finish()
@@ -682,6 +690,8 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         "cpu": cpu or default_cpu(arch, accel),
         "firmware": firmware,
         "disk_size": disk_size,
+        "network_restrict": restrict_user_network,
+        "network_host_forward": False,
         "serial_log": str(serial_log),
         "note": "qemu started; -no-reboot captures first boot-to-reboot as process exit",
     }
@@ -826,6 +836,10 @@ def main(argv=None):
                         help="guest firmware; default uefi matches the declared artifact target")
     parser.add_argument("--disk-size", help="qcow2 overlay virtual size (for example 20G); requires qemu-img")
     parser.add_argument("--machine", help="qemu machine type (for example q35, pc or virt)")
+    parser.add_argument(
+        "--restrict-user-network", action="store_true",
+        help="render -netdev user,id=net0,restrict=on with no host forward "
+             "(isolated acceptance mode; the default keeps plain user-mode NAT)")
     parser.add_argument("--no-offline-inspect", action="store_true")
     parser.add_argument("--verify-ref", help="base image ref to verify bytes against pinned provenance before boot")
     parser.add_argument("--profile", choices=("artifact", "fixture"), default="artifact")
@@ -923,6 +937,7 @@ def main(argv=None):
         verify_ref=args.verify_ref, profile=args.profile, sha256sums_text=sums,
         seed_iso_path=args.seed_iso, firmware=args.firmware,
         disk_size=args.disk_size, machine=args.machine, cpu=args.cpu,
+        restrict_user_network=args.restrict_user_network,
         output_reservation=output_reservation,
     )
     print(json.dumps(report, sort_keys=True))

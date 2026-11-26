@@ -4,7 +4,7 @@ title: "Node VM artifact — Rule (part 2)"
 description: "Disposable boot and enrollment proof checks for the planned QCOW2 artifact."
 status: draft
 owners: [oss-runtime]
-code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, internal/rpc/oss377_managed_fixture_test.go, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
+code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/node_vm_arm64_acceptance.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, scripts/test_node_vm_arm64_acceptance.py, internal/rpc/oss377_managed_fixture_test.go, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
 sources:
   - title: Parent concept
     resource: node-vm-artifact.md
@@ -26,23 +26,35 @@ records (raw token, missing `node.key`, signed-JSON pseudo-CSR) are refused
 read-only with no automatic migration. Use a signed PKCS#10 DER `CSR_PRE` and an
 unpadded base64url secret for the shared protobuf string field. The default
 NoCloud seed enables IPv4 DHCP on Ubuntu's predictable Ethernet interface names.
-
 Clean boot can be checked on a disposable QEMU runner with hardware or software
 acceleration. Record the firmware, architecture, seed and base image digests.
-The helper defaults to the declared UEFI target and fails closed without
-OVMF/edk2 rather than booting SeaBIOS; it copies a fresh private variable store
-and can request an expanded overlay. Every attempt needs a fresh work directory:
-the helper reserves its output set before writing a seed, overlay or report,
-refuses reuse without changing prior bytes, rejects unsupported
-architecture/firmware/machine combinations before outputs, and persists a
-failure report when QEMU cannot launch. Measure network and identity persistence
-in the guest. The disposable amd64 20 GiB q35 run covers disk expansion and
-identity persistence across a clean second boot. The arm64 and supported-host
-matrix remain open. Shared enrollment authority checks validate
-proof and credential scope. `internal/rpc/oss377_managed_fixture_test.go` runs
-the real shared authority and `agent.Run` on Linux over loopback TLS 1.3 for
-challenge, scoped mTLS, heartbeat and a fake-daemon health probe. That is a
-controller/agent fixture, not VM evidence: the guest-to-controller claim, a real
-dockerd, a production-mounted control RPC, arm64 and the host matrix remain
-open. See
-[disposable VM qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).
+The helper defaults to the declared UEFI target, fails closed without OVMF/edk2
+instead of booting SeaBIOS, copies a fresh private variable store and can request
+an expanded overlay. Every attempt needs a fresh work directory: the helper
+reserves its output set before writing a seed, overlay or report, refuses reuse
+without changing prior bytes, rejects unsupported architecture/firmware/machine
+combinations before outputs, and persists a failure report when QEMU cannot
+launch. The arm64 acceptance mode passes an explicit restricted-user-network
+option, which the helper renders as `-netdev user,id=net0,restrict=on` with no
+host forward. The driver asserts that effective argv and records the per-instance
+seed ISO SHA-256, the seed-derived instance ID with its SHA-256, and cloud-init
+completion plus the reboot boundary in an allowlisted receipt. It refuses a node
+ID that does not derive from the seed instance ID and requires two distinct node
+IDs. Serial logs, seeds, keys and raw helper output stay out of the receipt.
+Measure network and identity persistence in the guest. The disposable amd64
+20 GiB q35 run covers disk expansion and identity persistence across a clean
+second boot. The base-sized arm64 run covers a guest-initiated restart, a
+separate QEMU launch on the same disk/UEFI/seed, and a QMP-initiated second-boot
+shutdown; local evidence was independently confirmed. The expanded 20 GiB arm64
+profile failed on the GPT alternate header and remains open, as do the exact-PR-
+head hosted path (prepared, no hosted run), the deployed controller, private
+daemon, Proxmox VE, libvirt/KVM and the host matrix. Shared enrollment authority
+checks validate proof and credential scope.
+`internal/rpc/oss377_managed_fixture_test.go` runs the real shared authority and
+`agent.Run` on Linux over loopback TLS 1.3 for challenge, scoped mTLS,
+heartbeat and a fake-daemon health probe. That is a controller/agent fixture,
+not VM evidence: the guest-to-controller claim, a real dockerd, a
+production-mounted control RPC and the host matrix remain open. Offline
+`scripts/test_node_vm_boot_qual.py` and `scripts/test_node_vm_arm64_acceptance.py`
+cover argv, receipt and identity refusals without QEMU. See [disposable VM
+qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).

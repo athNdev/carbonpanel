@@ -4,7 +4,8 @@ Sections 1–10 record the original provenance run before a QEMU runner was
 available. Sections 12 onward record the later QEMU results. The runtime
 publication entry point still emits an offline plan. These boots use disposable
 overlays of the pinned upstream image and a generated NoCloud seed. Section 18
-adds the arm64 `virt`/UEFI run; it does not replace the amd64 evidence.
+adds the arm64 `virt`/UEFI run; it does not replace the amd64 evidence. Section
+18.7 records the exact-PR-head hosted path prepared for this evidence.
 
 The shipped `carbon-node` command is a preflight/doctor CLI, and the Panel's
 `NodeControlService` is deliberately unmounted. Managed-node mTLS enrollment,
@@ -658,9 +659,12 @@ anywhere in the guest.
 
 ### 18.3 Clean reboot and identity persistence
 
-The second boot reused the verified byte-identical instance-A overlay, UEFI
-variable store and seed ISO. It omitted `-no-reboot` and added a private QMP
-socket:
+The first-boot QEMU invocation above ran with `-no-reboot`; the guest itself
+logged `reboot: Restarting system`, which QEMU treated as the end of that
+invocation. The second boot was a **separate QEMU invocation**, not an
+in-process restart, that reused the verified byte-identical instance-A overlay,
+UEFI variable store and seed ISO. It omitted `-no-reboot` and added a private
+QMP socket:
 
 ```sh
 qemu-system-aarch64 ... -qmp "unix:$WORK/qmp.sock,server=on,wait=off"
@@ -679,8 +683,11 @@ After cloud-init reported `finished`, the host sent the QEMU monitor
 | Enrollment bundle persistence | PASS | bundle SHA256 remained `906ada1a...`; inode mode `0600`, directory `0700`, owner `root:root`, mtime unchanged |
 | Disk integrity after shutdown | PASS | `qemu-img check` reported `No errors were found on the image` after the second boot |
 
-This is a real clean reboot of the same disposable arm64 guest, not a second
-fresh VM and not a host reboot.
+This is a clean guest-initiated restart followed by a separate emulator launch
+on the same disposable guest disk, not an in-process restart, not a second
+fresh VM and not a host reboot. The base-sized arm64 result in this section was
+independently confirmed against the recorded serial logs, bundle digests and
+inode metadata; that review did not rerun QEMU.
 
 ### 18.4 Second identity
 
@@ -708,9 +715,11 @@ disposable first boot, not two concurrently live VMs.
 - This is **QEMU arm64 virtual-machine boot/identity evidence only**. It is not
   Proxmox VE, generic KVM/libvirt, bare-metal, Secure Boot, a production
   enrollment or an effective network-isolation acceptance.
-- The 20 GiB arm64 disk profile, concurrent VM identity, live guest-to-controller
-  enrollment, mTLS, heartbeat, node daemon health and the host matrix remain
-  open.
+- The expanded 20 GiB arm64 disk profile remains open after the GPT alternate
+  header failure recorded in 18.1. The deployed controller listener, a real
+  private daemon, live guest-to-controller enrollment, mTLS, heartbeat, Proxmox
+  VE and generic libvirt/KVM hosts also remain open. Concurrent VM identity is
+  not claimed.
 
 ### 18.6 Current runtime-listener dependency for deployed enrollment
 
@@ -731,10 +740,26 @@ listener.
 `scripts/node_vm_arm64_acceptance.py`,
 `scripts/test_node_vm_arm64_acceptance.py` and
 `.github/workflows/node-vm-arm64-acceptance.yml` add a checked, read-only
-hosted path for this same first-boot/two-identity check. The workflow must run
-on `ubuntu-24.04-arm`, checks out `github.sha` explicitly and asserts the head,
-keeps `contents: read`, installs QEMU/AAVMF in the ephemeral runner, verifies
-the pinned arm64 image, boots two distinct instance IDs at the base virtual
-size and uploads only the allowlisted `receipt.json`. Serial logs, seeds and
-overlays stay in the runner. The workflow was not dispatched or run for this
-report; it is a prepared path, not hosted CI evidence.
+hosted path for this same first-boot/two-identity check. The workflow runs on
+`ubuntu-24.04-arm`, keeps `contents: read`, installs QEMU/AAVMF in the ephemeral
+runner and verifies the pinned arm64 image. It also runs on a path-filtered
+`pull_request` for a same-repository PR, checking out the exact PR head
+(`github.event.pull_request.head.sha`) with `persist-credentials: false`; a job
+guard refuses fork PRs. Manual dispatch remains for an explicit `expected_sha`.
+No `pull_request_target` and no hosted secret is used.
+
+The acceptance driver passes the helper's explicit `--restrict-user-network`
+option. The helper renders `-netdev user,id=net0,restrict=on` with no host
+forward, and the driver asserts that effective argv before accepting a boot.
+The uploaded `receipt.json` is allowlisted to image/firmware/toolchain digests,
+the seed-derived per-instance instance ID and its SHA-256, node ID and key
+fingerprint, per-instance seed ISO SHA-256 and size, cloud-init completion and
+reboot-boundary status, and serial-log size/SHA-256 plus scan status. It refuses
+a node ID that does not derive from the seed instance ID and requires distinct
+node IDs. It contains no serial logs, seed ISOs, keys, secrets or raw
+subprocess/error output. The workflow was not dispatched or run for this report;
+it is a prepared path, not hosted CI evidence.
+
+The local base-sized arm64 evidence in 18.1-18.5 remains local evidence. The
+expanded 20 GiB arm64 profile (18.1), the deployed controller listener, a real
+private daemon, Proxmox VE and the generic libvirt/KVM host matrix remain open.

@@ -5,8 +5,9 @@
 # pinned Ubuntu arm64 cloud image under QEMU TCG on the declared UEFI/virt
 # target. It proves first-boot identity for two distinct instance IDs only. It
 # does not mount the production controller listener, enroll against a live
-# controller or claim reboot persistence. Only a small allowlisted receipt is
-# uploaded; serial logs and overlays stay in the ephemeral runner.
+# controller or claim reboot persistence. The guest uses restricted QEMU
+# user-mode networking with no host forward. Only a small allowlisted receipt is
+# uploaded; serial logs, seeds, keys and overlays stay in the ephemeral runner.
 name: Node VM arm64 boot acceptance
 
 on:
@@ -16,6 +17,19 @@ on:
         description: Optional full commit SHA that must match the dispatched event SHA
         required: false
         type: string
+  # A same-repository draft can collect hosted evidence at its exact PR head
+  # before merge; workflow_dispatch alone would require this file on the default
+  # branch. The job guard below refuses fork PRs, and no secret is used.
+  pull_request:
+    paths:
+      - '.github/workflows/node-vm-arm64-acceptance.yml'
+      - 'scripts/node_vm_arm64_acceptance.py'
+      - 'scripts/test_node_vm_arm64_acceptance.py'
+      - 'scripts/node_vm_boot_qual.py'
+      - 'scripts/test_node_vm_boot_qual.py'
+      - 'scripts/node_vm_build.py'
+      - 'scripts/node_vm_verify_image.py'
+      - 'packaging/node-vm/**'
 
 permissions:
   contents: read
@@ -27,18 +41,19 @@ concurrency:
 jobs:
   arm64:
     name: arm64 UEFI/TCG first-boot identity
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     steps:
       - name: Checkout the event's exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Assert the checked-out head is the event SHA
         env:
-          EVENT_SHA: ${{ github.sha }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
@@ -81,7 +96,7 @@ jobs:
       - name: Boot two distinct instance IDs and write the receipt
         env:
           WORK: ${{ runner.temp }}/node-vm-arm64
-          HEAD_SHA: ${{ github.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           python3 scripts/node_vm_arm64_acceptance.py \
@@ -95,7 +110,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: node-vm-arm64-acceptance-${{ github.sha }}
+          name: node-vm-arm64-acceptance-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/node-vm-arm64/receipt.json
           if-no-files-found: error
           retention-days: 14

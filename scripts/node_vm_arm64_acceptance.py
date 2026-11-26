@@ -4,13 +4,17 @@
 This driver is the checked-in entry point for the hosted arm64 qualification
 path. It boots two fresh overlays of the pinned Ubuntu arm64 cloud image with
 distinct NoCloud instance IDs on QEMU ``virt`` under UEFI/TCG, asserts that each
-first boot emits the public node identity marker, and asserts that the two node
-IDs differ.
+first boot reaches cloud-init completion and the reboot boundary and emits the
+public node identity marker, and asserts that the two node IDs differ. The guest
+uses QEMU user-mode networking with ``restrict=on`` and no host forward; the
+driver asserts that effective argv before accepting a boot.
 
 It deliberately covers first-boot identity only. It does not mount the
 production controller listener, does not enroll against a live controller, and
 does not claim reboot persistence. The only uploaded output is a small,
-allowlisted receipt (no serial logs, seed ISOs, private keys or tokens).
+allowlisted receipt (no serial logs, seed ISOs, keys, secrets or raw
+subprocess/error output). Per-instance seed ISO digests, the seed-derived
+instance ID, cloud-init completion and the reboot boundary are recorded there.
 """
 import argparse
 import hashlib
@@ -25,11 +29,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 NODE_ID_RE = re.compile(r"^node-[0-9a-f]{32}$")
 FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
+SEED_INSTANCE_RE = re.compile(r"(?m)^instance-id:\s*([^\s#]+)\s*$")
 SECRET_RE = re.compile(
     r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|"
     r'"(?:enrollment_secret|token|password|private_key)"\s*:',
     re.IGNORECASE,
 )
+RESTRICTED_NETDEV = "user,id=net0,restrict=on"
+ERROR_MAX_CHARS = 200
 DEFAULT_INSTANCE_IDS = (
     "oss377-arm64-accept-0001",
     "oss377-arm64-accept-0002",
@@ -42,7 +49,10 @@ REQUIRED_GATES = (
     "qemu_available",
     "boot_disk",
     "boot_attempt",
+    "serial_console",
     "first_boot_identity_marker",
+    "serial_secret_scan",
+    "reboot_boundary",
 )
 
 
@@ -56,6 +66,26 @@ def sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def derived_node_id(instance_id):
+    """Mirror the guest's deterministic node-ID derivation for a seed ID."""
+    return "node-" + hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:32]
+
+
+def sanitize_error(exc):
+    """Reduce a failure to a bounded, path-free summary for artifacts and CI."""
+    text = re.sub(r"\s+", " ", str(exc)).strip()
+    text = re.sub(r"BEGIN [A-Z ]*PRIVATE KEY", "<redacted>", text,
+                  flags=re.IGNORECASE)
+    text = re.sub(
+        r"(?i)\b(enrollment_secret|token|password|private_key)\b[\"']?"
+        r"\s*[:=]\s*[\"']?\S+",
+        r"\1=<redacted>", text)
+    text = re.sub(r"(?:[A-Za-z]:)?(?:[\\/][^\s:'\"]+)+", "<path>", text)
+    if len(text) > ERROR_MAX_CHARS:
+        text = text[:ERROR_MAX_CHARS - 3] + "..."
+    return text or type(exc).__name__
 
 
 def parse_helper_output(stdout):
@@ -73,7 +103,58 @@ def parse_helper_output(stdout):
     raise AcceptanceError("boot helper did not emit a JSON report")
 
 
-def validate_instance_report(report, label):
+def collect_seed_evidence(work_dir, expected_instance_id):
+    """Read the generated NoCloud seed back; never assume the requested ID.
+
+    ``node_vm_boot_qual.py --generate-seed`` writes ``seed/nocloud/meta-data``
+    and ``seed.iso`` into the attempt directory. The instance ID comes from that
+    helper-produced seed, not from the argument vector, so the receipt can name
+    the identity that was actually handed to the guest.
+    """
+    work_dir = Path(work_dir)
+    meta = work_dir / "seed" / "nocloud" / "meta-data"
+    if not meta.is_file():
+        raise AcceptanceError("generated seed meta-data is missing")
+    match = SEED_INSTANCE_RE.search(
+        meta.read_text(encoding="utf-8", errors="replace"))
+    if not match:
+        raise AcceptanceError("generated seed has no instance-id")
+    observed = match.group(1)
+    if observed != expected_instance_id:
+        raise AcceptanceError(
+            "generated seed instance-id does not match the requested instance")
+    iso = work_dir / "seed.iso"
+    if not iso.is_file():
+        raise AcceptanceError("generated seed ISO is missing")
+    return {
+        "instance_id": observed,
+        "instance_id_sha256": hashlib.sha256(
+            observed.encode("utf-8")).hexdigest(),
+        "instance_id_source": "seed/nocloud/meta-data",
+        "seed_iso": {"sha256": sha256_file(iso), "bytes": iso.stat().st_size},
+    }
+
+
+def assert_restricted_user_network(command, label):
+    """Assert the effective argv has restricted user networking and no forward."""
+    if not isinstance(command, list) or not command:
+        raise AcceptanceError("%s: boot attempt did not record its argv" % label)
+    joined = " ".join(str(value) for value in command)
+    if "hostfwd" in joined or "guestfwd" in joined:
+        raise AcceptanceError(
+            "%s: boot attempt configured a host or guest forward" % label)
+    netdevs = [command[index + 1] for index, value in enumerate(command[:-1])
+               if value == "-netdev"]
+    if netdevs != [RESTRICTED_NETDEV]:
+        raise AcceptanceError(
+            "%s: boot attempt did not use restricted user networking" % label)
+    if any(value in ("-net", "-nic") for value in command):
+        raise AcceptanceError(
+            "%s: boot attempt used an unasserted network backend" % label)
+    return True
+
+
+def validate_instance_report(report, label, seed_evidence):
     """Require the gate shapes this acceptance path depends on."""
     gates = report.get("gates") or {}
     missing = [name for name in REQUIRED_GATES if name not in gates]
@@ -89,6 +170,15 @@ def validate_instance_report(report, label):
         raise AcceptanceError(
             "%s: boot attempt did not complete cleanly: status=%s returncode=%s"
             % (label, attempt.get("status"), attempt.get("returncode")))
+    assert_restricted_user_network(attempt.get("command"), label)
+    serial = gates["serial_console"]
+    if serial.get("status") != "SCANNED":
+        raise AcceptanceError("%s: serial console was not scanned" % label)
+    if serial.get("cloud_init_finished") is not True:
+        raise AcceptanceError("%s: first boot did not complete cloud-init" % label)
+    boundary = gates["reboot_boundary"]
+    if boundary.get("status") != "OBSERVED":
+        raise AcceptanceError("%s: first-boot reboot boundary was not observed" % label)
     identity = gates["first_boot_identity_marker"]
     if identity.get("status") != "PASS":
         raise AcceptanceError(
@@ -100,14 +190,26 @@ def validate_instance_report(report, label):
     if not fingerprint or not FINGERPRINT_RE.match(fingerprint):
         raise AcceptanceError(
             "%s: invalid public key fingerprint %r" % (label, fingerprint))
-    scan = gates.get("serial_secret_scan") or {}
+    expected_node_id = derived_node_id(seed_evidence["instance_id"])
+    if node_id != expected_node_id:
+        raise AcceptanceError(
+            "%s: guest node ID does not derive from the seed instance ID" % label)
+    scan = gates["serial_secret_scan"]
     if scan.get("status") != "NO_HIGH_SIGNAL_MARKERS":
         raise AcceptanceError(
             "%s: serial secret scan is %s" % (label, scan.get("status")))
     return {
-        "instance_id": report.get("instance_id"),
+        "instance_id": seed_evidence["instance_id"],
+        "instance_id_sha256": seed_evidence["instance_id_sha256"],
+        "instance_id_source": seed_evidence["instance_id_source"],
         "node_id": node_id,
         "approved_key_fingerprint": fingerprint,
+        "seed_iso": seed_evidence["seed_iso"],
+        "first_boot": {
+            "status": "PASS",
+            "cloud_init_finished": True,
+            "reboot_boundary": boundary.get("status"),
+        },
         "boot_attempt": {
             "status": attempt.get("status"),
             "returncode": attempt.get("returncode"),
@@ -115,18 +217,24 @@ def validate_instance_report(report, label):
             "cpu": attempt.get("cpu"),
             "accel": attempt.get("accel"),
             "firmware": attempt.get("firmware"),
+            "network_restrict": True,
+            "network_host_forward": False,
         },
         "serial_console": {
-            "size": (gates.get("serial_console") or {}).get("size"),
-            "sha256": (gates.get("serial_console") or {}).get("sha256"),
+            "size": serial.get("size"),
+            "sha256": serial.get("sha256"),
         },
         "serial_secret_scan": scan.get("status"),
     }
 
 
+def _all_instances(instances, predicate):
+    return bool(instances) and all(predicate(item) for item in instances)
+
+
 def build_receipt(head, arch, image, firmware, instances, toolchain=None, error=None):
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "disposable arm64 UEFI/TCG first-boot identity acceptance",
         "head": head,
         "arch": arch,
@@ -137,18 +245,36 @@ def build_receipt(head, arch, image, firmware, instances, toolchain=None, error=
         "checks": {
             "image_bytes_verified": error is None,
             "first_boot_identity": "PASS" if error is None else "FAIL",
+            "first_boot_completed": error is None and _all_instances(
+                instances,
+                lambda item: item.get("first_boot", {}).get("cloud_init_finished") is True),
+            "reboot_boundary_observed": error is None and _all_instances(
+                instances,
+                lambda item: item.get("first_boot", {}).get("reboot_boundary") == "OBSERVED"),
+            "restricted_user_network": error is None and _all_instances(
+                instances,
+                lambda item: item.get("boot_attempt", {}).get("network_restrict") is True
+                and item.get("boot_attempt", {}).get("network_host_forward") is False),
+            "seed_iso_sha256_recorded": error is None and _all_instances(
+                instances,
+                lambda item: len(str(item.get("seed_iso", {}).get("sha256", ""))) == 64),
             "distinct_node_ids": (
-                len({item["node_id"] for item in instances}) == len(instances)
+                _all_instances(instances, lambda item: bool(item.get("node_id")))
+                and len({item.get("node_id") for item in instances}) == len(instances)
+                if error is None else False),
+            "distinct_instance_ids": (
+                _all_instances(instances, lambda item: bool(item.get("instance_id")))
+                and len({item.get("instance_id") for item in instances}) == len(instances)
                 if error is None else False),
             "reboot_persistence": "NOT_RUN",
             "live_controller_enrollment": "NOT_RUN",
         },
         "limits": [
             "base 3.5 GiB virtual disk; the expanded 20 GiB arm64 profile is not qualified",
-            "first boots only; no clean second boot or reboot-persistence claim",
+            "first boots only; the guest may restart at the first-boot boundary, so no second boot or reboot-persistence claim",
             "no production controller listener, live enrollment, mTLS or heartbeat",
-            "QEMU user-mode networking restricted; no effective isolation claim",
-            "serial logs, seed ISOs and overlays stay in the ephemeral runner",
+            "QEMU user-mode netdev used restrict=on with no host forward; effective network isolation is not proven",
+            "serial logs, seed ISOs, overlays, keys and secrets stay in the ephemeral runner",
         ],
     }
     if error:
@@ -176,6 +302,7 @@ def run_instance(args, instance_id, index):
         "--verify-ref", "ubuntu-24.04-arm64",
         "--sha256sums", str(args.sha256sums),
         "--timeout", str(args.boot_timeout),
+        "--restrict-user-network",
     ]
     proc = subprocess.run(
         cmd, cwd=str(ROOT), capture_output=True, text=True,
@@ -194,8 +321,8 @@ def run_instance(args, instance_id, index):
                hashlib.sha256(proc.stderr.encode("utf-8", "replace")).hexdigest()))
     if report is None:
         raise AcceptanceError("%s: helper emitted no report" % label)
-    report["instance_id"] = instance_id
-    result = validate_instance_report(report, label)
+    seed_evidence = collect_seed_evidence(work_dir, instance_id)
+    result = validate_instance_report(report, label, seed_evidence)
     serial = work_dir / "serial-console.log"
     if serial.is_file():
         result["serial_console"] = {
@@ -226,11 +353,10 @@ def main(argv=None):
 
     args.workspace.mkdir(parents=True, exist_ok=True)
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
-    image_sha256 = sha256_file(args.image)
     image = {
         "ref": "ubuntu-24.04-arm64",
-        "sha256": image_sha256,
-        "bytes": args.image.stat().st_size,
+        "sha256": None,
+        "bytes": None,
         "verified": False,
     }
     try:
@@ -244,6 +370,10 @@ def main(argv=None):
     instances = []
     error = None
     try:
+        image.update({
+            "sha256": sha256_file(args.image),
+            "bytes": args.image.stat().st_size,
+        })
         from scripts import node_vm_verify_image as verify_image
         sums = args.sha256sums.read_text(encoding="utf-8")
         verified = verify_image.verify_pinned_image(
@@ -268,7 +398,7 @@ def main(argv=None):
         if len({item["node_id"] for item in instances}) != len(instances):
             raise AcceptanceError("distinct instance IDs produced the same node ID")
     except Exception as exc:  # keep failure evidence, but fail closed
-        error = str(exc)
+        error = sanitize_error(exc)
         print("node_vm_arm64_acceptance: %s" % error, file=sys.stderr)
 
     receipt = build_receipt(
