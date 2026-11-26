@@ -147,7 +147,10 @@ engine on its own bridge with separate storage, and runs
 Vanilla source without Docker overrides, requires the specific running-export
 refusal, saves a deterministic fixture, exports both native formats, verifies
 every archive and destination file hash, previews and creates both imports
-stopped, and then confirms Minecraft readiness on both. See
+stopped, and then confirms Minecraft readiness on both. Source and destination
+bytes are hashed through the server-scoped FileService on the verified data
+mounts (streaming files above the editor limit), so Minecraft-owned world files
+never need host read access or ownership changes. See
 [ADR 0057](adr/0057-disposable-server-archive-acceptance.md).
 
 The create-from-archive browser workflow (OSS-428) is not exercised by this job

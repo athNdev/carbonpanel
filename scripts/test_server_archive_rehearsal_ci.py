@@ -89,6 +89,39 @@ def write_archive(path, archive_format, files=None, manifest=None, extra=None):
     return path
 
 
+def file_inventory(files, sizes=None):
+    sizes = sizes or {}
+    return {
+        path: {
+            "path": path,
+            "name": path.rsplit("/", 1)[-1],
+            "is_dir": False,
+            "size": sizes.get(path, len(body)),
+        }
+        for path, body in files.items()
+    }
+
+
+class FakeFileSource:
+    """Stand-in for Controller file reads, without a controller or Docker."""
+
+    def __init__(self, inventory, bodies):
+        self.inventory = inventory
+        self.bodies = bodies
+        self.reads = []
+
+    def list_tree(self, _server_id, **_kwargs):
+        return self.inventory
+
+    def read_file_digest(self, _server_id, path, expected_size):
+        self.reads.append(path)
+        body = self.bodies[path]
+        if len(body) != expected_size:
+            raise rehearsal.RehearsalError(
+                "GetFile byte count for %s differs from inventory" % path)
+        return rehearsal.sha256_bytes(body), len(body)
+
+
 class ArchiveVerificationTests(unittest.TestCase):
     def test_zip_and_tar_round_trip_with_identical_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -182,52 +215,96 @@ class ArchiveVerificationTests(unittest.TestCase):
 
 class DestinationAndLifecycleTests(unittest.TestCase):
     def test_destination_requires_exact_verified_bytes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            files = fixture_files()
-            expected = {
-                path: {"size": len(body), "sha256": rehearsal.sha256_bytes(body)}
-                for path, body in files.items()
-            }
-            for path, body in files.items():
-                target = root / path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(body)
-            observed = rehearsal.verify_destination(root, expected)
-            self.assertEqual(observed[rehearsal.FIXTURE_PATH],
-                             rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES))
-            (root / "unexpected.txt").write_text("extra")
-            with self.assertRaisesRegex(rehearsal.RehearsalError, "unverified files"):
-                rehearsal.verify_destination(root, expected)
+        files = fixture_files()
+        expected = {
+            path: {"size": len(body), "sha256": rehearsal.sha256_bytes(body)}
+            for path, body in files.items()
+        }
+        source = FakeFileSource(file_inventory(files), files)
+        observed = rehearsal.verify_tree_files(source, "imported", expected,
+                                               "zip destination")
+        self.assertEqual(observed[rehearsal.FIXTURE_PATH],
+                         rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES))
+        inventory = file_inventory(files)
+        inventory["unexpected.txt"] = {
+            "path": "unexpected.txt", "name": "unexpected.txt",
+            "is_dir": False, "size": 5,
+        }
+        extra = FakeFileSource(inventory, {**files, "unexpected.txt": b"extra"})
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "unverified files"):
+            rehearsal.verify_tree_files(extra, "imported", expected,
+                                        "zip destination")
 
     def test_destination_digest_mismatch_is_refused(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / rehearsal.FIXTURE_PATH).parent.mkdir(parents=True)
-            (root / rehearsal.FIXTURE_PATH).write_bytes(b"changed")
-            expected = {rehearsal.FIXTURE_PATH: {
-                "size": len(rehearsal.FIXTURE_BYTES),
-                "sha256": rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES),
-            }}
-            with self.assertRaisesRegex(rehearsal.RehearsalError, "SHA-256 mismatch"):
-                rehearsal.verify_destination(root, expected)
+        files = {rehearsal.FIXTURE_PATH: b"x" * len(rehearsal.FIXTURE_BYTES)}
+        expected = {rehearsal.FIXTURE_PATH: {
+            "size": len(rehearsal.FIXTURE_BYTES),
+            "sha256": rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES),
+        }}
+        source = FakeFileSource(file_inventory(files), files)
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "SHA-256 mismatch"):
+            rehearsal.verify_tree_files(source, "imported", expected,
+                                        "tar.gz destination")
+
+    def test_destination_byte_count_mismatch_is_refused(self):
+        files = fixture_files()
+        expected = {
+            path: {"size": len(body), "sha256": rehearsal.sha256_bytes(body)}
+            for path, body in files.items()
+        }
+        bodies = dict(files)
+        bodies[rehearsal.FIXTURE_PATH] = files[rehearsal.FIXTURE_PATH][:-1]
+        inventory = file_inventory(files)
+        source = FakeFileSource(inventory, bodies)
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "byte count"):
+            rehearsal.verify_tree_files(source, "imported", expected,
+                                        "zip destination")
 
     def test_source_hashes_skip_archive_exclusions(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "world").mkdir()
-            (root / "world/level.dat").write_bytes(b"level")
-            (root / Path(rehearsal.FIXTURE_PATH).parent).mkdir()
-            (root / rehearsal.FIXTURE_PATH).write_bytes(rehearsal.FIXTURE_BYTES)
-            (root / Path(rehearsal.EXCLUDED_PATH).parent / ".env").write_bytes(b"secret")
-            (root / "logs").mkdir()
-            (root / "logs/latest.log").write_bytes(b"log")
-            (root / "session.lock").write_bytes(b"lock")
-            hashes = rehearsal.source_file_hashes(root)
-            self.assertEqual(set(hashes), {"world/level.dat",
-                                           rehearsal.FIXTURE_PATH})
-            self.assertEqual(hashes[rehearsal.FIXTURE_PATH]["sha256"],
-                             rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES))
+        files = {
+            "world/level.dat": b"level",
+            rehearsal.FIXTURE_PATH: rehearsal.FIXTURE_BYTES,
+            rehearsal.EXCLUDED_PATH: b"secret",
+            "logs/latest.log": b"log",
+            "session.lock": b"lock",
+        }
+        source = FakeFileSource(file_inventory(files), files)
+        hashes = rehearsal.tree_file_hashes(source, "source")
+        self.assertEqual(set(hashes), {"world/level.dat",
+                                       rehearsal.FIXTURE_PATH})
+        self.assertEqual(hashes[rehearsal.FIXTURE_PATH]["sha256"],
+                         rehearsal.sha256_bytes(rehearsal.FIXTURE_BYTES))
+        self.assertEqual(set(source.reads), {"world/level.dat",
+                                             rehearsal.FIXTURE_PATH})
+
+    def test_file_tree_walk_is_bounded_and_rejects_unexpected_paths(self):
+        pages = {
+            ".": [
+                {"name": "a.txt", "path": "a.txt", "size": "1"},
+                {"name": "nested", "path": "nested", "isDir": True, "size": "0"},
+            ],
+            "nested": [{"name": "b.txt", "path": "nested/b.txt", "size": 2}],
+            "nested/deeper": [],
+        }
+        pages["."].append({"name": "logs", "path": "logs",
+                           "isDir": True, "size": "0"})
+        pages["logs"] = [{"name": "latest.log", "path": "logs/latest.log",
+                          "size": 1}]
+        tree = rehearsal.collect_file_tree(pages.__getitem__)
+        self.assertEqual(set(tree), {"a.txt", "nested/b.txt", "logs/latest.log"})
+        self.assertEqual(tree["nested/b.txt"]["size"], 2)
+        source_tree = rehearsal.collect_file_tree(
+            pages.__getitem__, skip_dir=rehearsal.archive_excluded)
+        self.assertEqual(set(source_tree), {"a.txt", "nested/b.txt"})
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "bounded listing depth"):
+            rehearsal.collect_file_tree(lambda path: pages.get(path, []),
+                                        max_depth=0)
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "bounded file count"):
+            rehearsal.collect_file_tree(pages.__getitem__, max_files=1)
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "outside its listed"):
+            rehearsal.collect_file_tree(lambda _path: [
+                {"name": "b.txt", "path": "other/b.txt", "size": 1},
+            ])
 
     def test_lifecycle_gates_fail_closed(self):
         stopped = {"status": "SERVER_STATUS_STOPPED", "containerId": "container"}
@@ -369,6 +446,146 @@ class ControllerTransportTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+
+class FileServiceTransportTests(unittest.TestCase):
+    """Exercise the real Controller client against a FileService wire fake."""
+
+    def _serve(self, state):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def _json(self, code, body):
+                payload = json.dumps(body).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                method = self.path.rsplit("/", 1)[-1]
+                state["methods"].append(method)
+                if method == "ListFiles":
+                    self._json(200, {"files": state["pages"].get(
+                        body.get("path", "."), [])})
+                elif method == "GetFile":
+                    path = body.get("path", "")
+                    state["get_paths"].append(path)
+                    content = state["files"].get(path, b"")
+                    self._json(200, {
+                        "content": base64.b64encode(content).decode("ascii"),
+                        "mimeType": "application/octet-stream",
+                    })
+                elif method == "InitFileDownload":
+                    path = body.get("path", "")
+                    state["session_path"] = path
+                    state["stream_paths"].append(path)
+                    total = len(state["files"][path]) + state.get("size_delta", 0)
+                    self._json(200, {
+                        "sessionId": state["session"],
+                        "filename": state.get("filename",
+                                              path.rsplit("/", 1)[-1]),
+                        "totalSize": str(total),
+                    })
+                else:
+                    self._json(404, {"code": "not_found", "message": "unknown"})
+
+            def do_GET(self):
+                if not self.path.startswith("/api/v1/download/"):
+                    self._json(404, {"code": "not_found", "message": "unknown"})
+                    return
+                state["downloads"] += 1
+                content = state["files"][state["session_path"]]
+                if state.get("truncate"):
+                    content = content[:5]
+                self.send_response(200)
+                if not state.get("omit_content_length"):
+                    self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        controller = rehearsal.Controller(
+            "http://127.0.0.1:%d" % server.server_port)
+        controller.token = "fixture-token"
+        return controller
+
+    def _state(self):
+        large = b"streamed-file-bytes!" * 2
+        files = {
+            "plain.txt": b"plain",
+            "world/level.dat": b"lvl!",
+            "large.bin": large,
+        }
+        pages = {
+            ".": [
+                {"name": "plain.txt", "path": "plain.txt", "size": "5"},
+                {"name": "world", "path": "world", "isDir": True, "size": "0"},
+                {"name": "large.bin", "path": "large.bin",
+                 "size": str(len(large))},
+            ],
+            "world": [
+                {"name": "level.dat", "path": "world/level.dat", "size": 4},
+            ],
+        }
+        return {
+            "files": files, "pages": pages, "methods": [], "downloads": 0,
+            "session": "download-session", "session_path": "",
+            "get_paths": [], "stream_paths": [],
+        }
+
+    def test_list_tree_uses_returned_stats_and_streams_over_cap_files(self):
+        state = self._state()
+        controller = self._serve(state)
+        with mock.patch.object(rehearsal, "SMALL_FILE_BYTES", 8):
+            tree = controller.list_tree("srv-1")
+            self.assertEqual(set(tree), set(state["files"]))
+            self.assertEqual(tree["large.bin"]["size"],
+                             len(state["files"]["large.bin"]))
+            hashes = rehearsal.tree_file_hashes(controller, "srv-1", tree)
+        for path, body in state["files"].items():
+            self.assertEqual(hashes[path]["sha256"],
+                             rehearsal.sha256_bytes(body))
+            self.assertEqual(hashes[path]["size"], len(body))
+        self.assertEqual(state["stream_paths"], ["large.bin"])
+        self.assertEqual(set(state["get_paths"]),
+                         {"plain.txt", "world/level.dat"})
+        self.assertEqual(state["downloads"], 1)
+
+    def test_streamed_read_refuses_truncation_and_declared_size_mismatch(self):
+        state = self._state()
+        state.update({"truncate": True, "omit_content_length": True})
+        controller = self._serve(state)
+        with mock.patch.object(rehearsal, "SMALL_FILE_BYTES", 4):
+            with self.assertRaisesRegex(rehearsal.RehearsalError, "truncated"):
+                controller.read_file_digest(
+                    "srv-1", "large.bin", len(state["files"]["large.bin"]))
+        state = self._state()
+        state["size_delta"] = 1
+        controller = self._serve(state)
+        with mock.patch.object(rehearsal, "SMALL_FILE_BYTES", 4):
+            with self.assertRaisesRegex(rehearsal.RehearsalError,
+                                        "differs from inventory"):
+                controller.read_file_digest(
+                    "srv-1", "large.bin", len(state["files"]["large.bin"]))
+
+    def test_get_file_byte_count_must_match_inventory(self):
+        state = self._state()
+        state["pages"]["."] = [
+            {"name": "plain.txt", "path": "plain.txt", "size": "9"},
+        ]
+        controller = self._serve(state)
+        with self.assertRaisesRegex(rehearsal.RehearsalError,
+                                    "byte count.*differs from inventory"):
+            controller.read_file_digest("srv-1", "plain.txt", 9)
 
 
 def _write_private_json(path, record):

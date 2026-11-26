@@ -18,42 +18,42 @@ sources:
 ---
 
 Run the `Server archive acceptance rehearsal` workflow at the exact candidate
-head. It is CI-only for repository-owned pull requests and explicit dispatch:
-the wrapper refuses to run outside a GitHub-hosted job and outside a fresh
-`$RUNNER_TEMP` subdirectory, and it never publishes, deploys or contacts a live
-panel, world or registry.
+head. It is CI-only for repository PRs and explicit dispatch, refuses anything
+but a GitHub-hosted job and fresh `$RUNNER_TEMP`, and never publishes/deploys.
 
-The job checks out the same PR head SHA it exports as `STAGED_SHA` and builds a
-controller with an empty frontend embed. A second privileged Docker-in-Docker
-engine runs on an owned bridge with a separate `/storage` mount, no host
-networking and no published management port; its digest is pinned from primary
-Docker Hub metadata. The controller reaches the non-loopback bridge address,
-which also probes nested game ports.
+The job checks out the PR head it exports as `STAGED_SHA` and builds a controller
+with an empty frontend embed. A second privileged Docker-in-Docker engine runs
+on an owned bridge with separate `/storage`, no host networking and no published
+management port; its digest is pinned from Docker Hub metadata. The controller
+reaches the non-loopback bridge address, which also probes nested game ports.
 
-The Python harness requires the hosted caller, a fresh `RUNNER_TEMP`
-subdirectory and an exclusively created fixture record tying the clean exact
-checkout to both containers. It checks identity, bridge, exact storage binds
-and the controller's `-config` directory. It creates a managed Vanilla source,
-verifies the game and panel use the same world path and confirms the running
-export refusal. Then it saves, exports both formats and checks destination bytes.
-The pinned protocol client verifies both imported servers can be joined.
+The Python harness requires the hosted caller, a fresh `RUNNER_TEMP` and an
+exclusive fixture record tying the clean checkout to both containers. It checks
+identity, bridge, exact storage binds and the controller's `-config` directory.
+It creates a managed Vanilla source, verifies the game and panel share the world
+path and confirms the running export refusal. Then it saves, exports both
+formats and checks every source and destination byte. Minecraft-owned world
+files are hashed through the same server-scoped `FileService` mounts it proved:
+bounded `ListFiles` inventory, `GetFile` below 8 MiB and authenticated streamed
+`InitFileDownload` above it. The pinned protocol client verifies both imports
+can be joined.
 
-Every check fails closed. The report records the backend RPC scope, candidate
-commit, pinned digest, archive hashes, capacities, destination verification and
-readiness. The wrapper gates diagnostics and removal on resource IDs and the
-run label. Cleanup checks the run's servers are gone. A failed teardown fails
-the hosted job and is recorded alongside the RPC report.
+Every check fails closed. The report records the RPC scope, candidate commit,
+pinned digest, archive hashes, capacities, destination verification and
+readiness. Cleanup gates on resource IDs and the run label and fails the job on
+any surviving server or failed teardown.
 
 # Rules
 
 - This proves the backend archive RPC round trip and Minecraft readiness, not a
-  production host, ingress, proxy routing, OIDC, published release or live
-  deployment. State those limits in the PR receipt rather than upgrading them.
+  production host, ingress, proxy routing, OIDC, release or live deployment.
 - OSS-428 browser acceptance belongs to #686; this job uses RPC only, not UI.
 - Keep the engine off host networking on an owned bridge with no published
-  management port. A loopback Docker endpoint is invalid because the controller
-  classifies loopback as its own local engine.
-- Do not replace the exact-head build, pinned client or formats with fixtures.
-  Fake-Docker Go tests are not acceptance evidence, and offline tests must never
+  management port; loopback Docker is classified as the controller's own engine.
+- Keep the host bind and destination-ownership proofs; never chmod, chown, run
+  as root or weaken the engine to read Minecraft-owned files. Hash their bytes
+  through scoped `FileService` reads with independent size and digest checks.
+- Do not replace the exact-head build, pinned client or formats with fixtures;
+  fake-Docker Go tests are not acceptance evidence and offline tests must never
   record a round trip as verified.
 - Keep the fixture deterministic; never add a real secret or live endpoint.

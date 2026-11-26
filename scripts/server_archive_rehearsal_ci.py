@@ -31,6 +31,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import posixpath
 import re
 import socket
 import stat
@@ -77,6 +78,12 @@ ARCHIVE_TIMEOUT_SECONDS = 3600
 REPORT_NAME = "server-archive-rehearsal.json"
 MAX_ARCHIVE_FILES = 50000
 MAX_ARCHIVE_BYTES = 32 << 30
+# FileService.GetFile refuses content above storageworker.SmallFileBytes (8 MiB).
+# Larger source/destination files are read through the authenticated, streamed
+# InitFileDownload session instead of raising that cap.
+SMALL_FILE_BYTES = 8 << 20
+MAX_TREE_DEPTH = 64
+DOWNLOAD_CHUNK_BYTES = 1 << 20
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -341,39 +348,64 @@ def apply_properties(data, updates):
     return ("\n".join(output).rstrip("\n") + "\n").encode("utf-8")
 
 
-def verify_destination(root, manifest_files):
-    """Require the imported tree to be exactly the verified manifest bytes."""
-    root = Path(root)
-    if not root.is_dir():
-        raise RehearsalError("destination directory is missing: %s" % root)
-    observed = {}
-    for current, dirs, names in os.walk(root, followlinks=False):
-        for name in list(dirs):
-            path = Path(current) / name
-            if path.is_symlink():
-                raise RehearsalError("destination contains a symlinked directory: %s" % path)
-        for name in names:
-            path = Path(current) / name
-            if path.is_symlink() or not path.is_file():
-                raise RehearsalError("destination contains a non-regular file: %s" % path)
-            rel = path.relative_to(root).as_posix()
-            if not portable_relative_path(rel):
-                raise RehearsalError("destination contains a non-portable path: %s" % rel)
-            observed[rel] = path
-    expected = set(manifest_files)
-    missing = sorted(expected - set(observed))
-    extra = sorted(set(observed) - expected)
-    if missing:
-        raise RehearsalError("destination is missing files: %s" % ", ".join(missing[:5]))
-    if extra:
-        raise RehearsalError("destination has unverified files: %s" % ", ".join(extra[:5]))
-    verified = {}
-    for rel, record in manifest_files.items():
-        actual = sha256_file(observed[rel])
-        if actual != record["sha256"]:
-            raise RehearsalError("destination SHA-256 mismatch for %s" % rel)
-        verified[rel] = actual
-    return verified
+def normalize_file_info(entry, parent):
+    """Validate one FileService.FileInfo against the directory that listed it."""
+    if not isinstance(entry, dict):
+        raise RehearsalError("FileService returned a non-object file entry")
+    path = entry.get("path")
+    if not portable_relative_path(path):
+        raise RehearsalError("FileService returned a non-portable path: %r" % path)
+    if posixpath.dirname(path) != parent:
+        raise RehearsalError("FileService returned %s outside its listed directory %s"
+                             % (path, parent or "."))
+    name = entry.get("name")
+    if not isinstance(name, str) or name != posixpath.basename(path):
+        raise RehearsalError("FileService returned a mismatched name for %s" % path)
+    is_dir = entry.get("isDir", False)
+    if not isinstance(is_dir, bool):
+        raise RehearsalError("FileService returned a non-boolean type for %s" % path)
+    size = as_int(entry.get("size", 0), "FileInfo.size for %s" % path)
+    if size < 0:
+        raise RehearsalError("FileService returned a negative size for %s" % path)
+    return {"path": path, "name": name, "is_dir": is_dir, "size": size}
+
+
+def collect_file_tree(fetch_dir, max_files=MAX_ARCHIVE_FILES,
+                      max_depth=MAX_TREE_DEPTH, skip_dir=None):
+    """Walk bounded ListFiles pages and return regular files keyed by rel path.
+
+    ListFiles(tree=true) stops recursing at depth 10, so the rehearsal walks one
+    directory at a time and enforces its own explicit depth and file bounds.
+    """
+    if max_files < 1 or max_depth < 0:
+        raise RehearsalError("file tree bounds are invalid")
+    files = {}
+    seen = set()
+    pending = [("", ".", 0)]
+    while pending:
+        parent, request_path, depth = pending.pop()
+        entries = fetch_dir(request_path)
+        if not isinstance(entries, list):
+            raise RehearsalError("FileService returned a non-list directory page")
+        for raw in entries:
+            info = normalize_file_info(raw, parent)
+            rel = info["path"]
+            if rel in seen:
+                raise RehearsalError("FileService returned a duplicate path: %s" % rel)
+            seen.add(rel)
+            if info["is_dir"]:
+                if skip_dir is not None and skip_dir(rel):
+                    continue
+                if depth >= max_depth:
+                    raise RehearsalError(
+                        "source tree exceeds the bounded listing depth at %s" % rel)
+                pending.append((rel, rel, depth + 1))
+                continue
+            if len(files) >= max_files:
+                raise RehearsalError(
+                    "source tree exceeds the bounded file count at %s" % rel)
+            files[rel] = info
+    return files
 
 
 def archive_excluded(rel):
@@ -389,23 +421,46 @@ def archive_excluded(rel):
     return False
 
 
-def source_file_hashes(root):
-    """Hash every regular source file the archive format can carry verbatim."""
-    root = Path(root)
+def tree_file_hashes(controller, server_id, inventory=None):
+    """Hash every source file the archive can carry through the FileService."""
+    if inventory is None:
+        inventory = controller.list_tree(server_id, skip_dir=archive_excluded)
     observed = {}
-    for current, dirs, names in os.walk(root, followlinks=False):
-        dirs[:] = [name for name in dirs
-                   if not archive_excluded((Path(current) / name)
-                                           .relative_to(root).as_posix())]
-        for name in names:
-            path = Path(current) / name
-            rel = path.relative_to(root).as_posix()
-            if archive_excluded(rel):
-                continue
-            if path.is_symlink() or not path.is_file():
-                raise RehearsalError("source contains a non-regular file: %s" % rel)
-            observed[rel] = {"size": path.stat().st_size, "sha256": sha256_file(path)}
+    for rel in sorted(inventory):
+        info = inventory[rel]
+        if info["is_dir"] or archive_excluded(rel):
+            continue
+        digest, size = controller.read_file_digest(server_id, rel, info["size"])
+        observed[rel] = {"size": size, "sha256": digest}
     return observed
+
+
+def verify_tree_files(controller, server_id, manifest_files, label,
+                      inventory=None):
+    """Require the imported tree to be exactly the verified manifest bytes."""
+    if inventory is None:
+        inventory = controller.list_tree(server_id)
+    observed = {rel: info for rel, info in inventory.items() if not info["is_dir"]}
+    expected = set(manifest_files)
+    missing = sorted(expected - set(observed))
+    extra = sorted(set(observed) - expected)
+    if missing:
+        raise RehearsalError("%s is missing files: %s" % (label, ", ".join(missing[:5])))
+    if extra:
+        raise RehearsalError("%s has unverified files: %s" % (label, ", ".join(extra[:5])))
+    verified = {}
+    for rel, record in sorted(manifest_files.items()):
+        info = observed[rel]
+        if info["size"] != record["size"]:
+            raise RehearsalError("%s size mismatch for %s (inventory %d, manifest %d)"
+                                 % (label, rel, info["size"], record["size"]))
+        digest, size = controller.read_file_digest(server_id, rel, info["size"])
+        if size != record["size"]:
+            raise RehearsalError("%s byte count mismatch for %s" % (label, rel))
+        if digest != record["sha256"]:
+            raise RehearsalError("%s SHA-256 mismatch for %s" % (label, rel))
+        verified[rel] = digest
+    return verified
 
 
 def _host_is_loopback(host):
@@ -907,6 +962,113 @@ class Controller:
                 target.write(chunk)
         return Path(destination).stat().st_size
 
+    def list_files(self, server_id, path):
+        """One scoped FileService directory page, not a controller-local walk."""
+        response = self.call("FileService", "ListFiles", {
+            "serverId": server_id, "path": path, "tree": False,
+        })
+        entries = response.get("files", [])
+        if entries is None:
+            entries = []
+        if not isinstance(entries, list):
+            raise RehearsalError("FileService returned a non-list file page")
+        return entries
+
+    def list_tree(self, server_id, max_files=MAX_ARCHIVE_FILES,
+                  max_depth=MAX_TREE_DEPTH, skip_dir=None):
+        """Bounded recursive listing through the server's FileService scope."""
+        return collect_file_tree(
+            lambda path: self.list_files(server_id, path), max_files, max_depth,
+            skip_dir)
+
+    def read_file_digest(self, server_id, path, expected_size):
+        """Hash one file through FileService, checking its inventory byte count."""
+        if not portable_relative_path(path):
+            raise RehearsalError("refusing a non-portable FileService path: %r" % path)
+        expected_size = as_int(expected_size, "expected size for %s" % path)
+        if expected_size < 0:
+            raise RehearsalError("refusing a negative expected size for %s" % path)
+        if expected_size > SMALL_FILE_BYTES:
+            return self._streamed_file_digest(server_id, path, expected_size)
+        response = self.call("FileService", "GetFile", {
+            "serverId": server_id, "path": path,
+        })
+        encoded = response.get("content", "")
+        if not isinstance(encoded, str):
+            raise RehearsalError("GetFile returned non-string content for %s" % path)
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except ValueError as error:
+            raise RehearsalError("GetFile returned invalid base64 for %s: %s"
+                                 % (path, error))
+        if len(content) != expected_size:
+            raise RehearsalError(
+                "GetFile byte count for %s differs from inventory (%d != %d)"
+                % (path, len(content), expected_size))
+        return sha256_bytes(content), len(content)
+
+    def _streamed_file_digest(self, server_id, path, expected_size):
+        """Read an over-cap file through the authenticated staged download.
+
+        InitFileDownload stages a controller-owned copy with delete-after set;
+        its download manager owns the TTL cleanup because the RPC surface has no
+        explicit delete-session call. The harness still checks the returned
+        filename, size, Content-Length and streamed byte count before trusting it.
+        """
+        session = self.call("FileService", "InitFileDownload", {
+            "serverId": server_id, "path": path,
+        })
+        session_id = session.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise RehearsalError("InitFileDownload returned no session for %s" % path)
+        filename = session.get("filename")
+        if filename != posixpath.basename(path):
+            raise RehearsalError("InitFileDownload filename differs for %s" % path)
+        declared = as_int(session.get("totalSize"),
+                          "InitFileDownload.totalSize for %s" % path)
+        if declared != expected_size:
+            raise RehearsalError(
+                "InitFileDownload size for %s differs from inventory (%d != %d)"
+                % (path, declared, expected_size))
+        request = urllib.request.Request(
+            self.base + "/api/v1/download/" + urllib.parse.quote(session_id),
+            headers={"Authorization": "Bearer " + self.token},
+        )
+        try:
+            response = NO_REDIRECT_OPENER.open(request, timeout=ARCHIVE_TIMEOUT_SECONDS)
+        except urllib.error.HTTPError as error:
+            if 300 <= error.code < 400:
+                raise RehearsalError("file download redirected; refusing to follow")
+            raise RehearsalError("file download failed for %s: HTTP %s"
+                                 % (path, error.code))
+        digest = hashlib.sha256()
+        count = 0
+        with response:
+            length = response.headers.get("Content-Length")
+            if length is not None:
+                try:
+                    length = int(length)
+                except ValueError:
+                    raise RehearsalError("file download returned invalid Content-Length")
+                if length != declared:
+                    raise RehearsalError(
+                        "file download Content-Length differs for %s (%d != %d)"
+                        % (path, length, declared))
+            while True:
+                chunk = response.read(DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                count += len(chunk)
+                if count > declared:
+                    raise RehearsalError(
+                        "file download for %s exceeded its declared size" % path)
+                digest.update(chunk)
+        if count != declared:
+            raise RehearsalError(
+                "file download for %s was truncated (%d != %d)"
+                % (path, count, declared))
+        return digest.hexdigest(), count
+
     def upload_file(self, path, filename):
         path = Path(path)
         total = path.stat().st_size
@@ -1404,12 +1566,22 @@ def execute(args):
         source_dir = Path(source.get("dataPath", ""))
         if not source_dir.is_dir():
             raise RehearsalError("source data directory is not visible to the harness")
-        if sha256_file(source_dir / FIXTURE_PATH) != sha256_bytes(FIXTURE_BYTES):
+        # Minecraft writes the world as its own user. The harness proves the
+        # exact bind above and then reads bytes only through the server-scoped
+        # FileService, never the controller-local world path.
+        source_inventory = controller.list_tree(source_id,
+                                                skip_dir=archive_excluded)
+        source_hashes = tree_file_hashes(controller, source_id, source_inventory)
+        fixture_record = source_hashes.get(FIXTURE_PATH)
+        if not fixture_record or fixture_record["sha256"] != sha256_bytes(FIXTURE_BYTES):
             raise RehearsalError("fixture file did not persist on the source node")
-        world_level = source_dir / "world" / "level.dat"
-        if not world_level.is_file():
+        excluded_record = source_inventory.get(EXCLUDED_PATH)
+        if not excluded_record or excluded_record["is_dir"]:
+            raise RehearsalError("credential fixture was not created for the exclusion check")
+        world_level = source_hashes.get("world/level.dat")
+        if not world_level or world_level["size"] <= 0:
             raise RehearsalError("source world has no level.dat after save")
-        report["fixture"]["world_level_dat_sha256"] = sha256_file(world_level)
+        report["fixture"]["world_level_dat_sha256"] = world_level["sha256"]
         report["source"] = {
             "server_id": source_id,
             "node_id": local.get("id"),
@@ -1452,17 +1624,19 @@ def execute(args):
             ok("archive_%s_download_verified" % archive_format.replace(".", "_"))
         report["formats"] = archives
         phase = "verify_archive_source_parity"
-        source_hashes = source_file_hashes(source_dir)
-        source_hashes.pop("server.properties", None)
+        source_parity_hashes = {
+            rel: record for rel, record in source_hashes.items()
+            if rel != "server.properties"
+        }
         archived_hashes = {
             rel: record for rel, record in archives["zip"]["files"].items()
             if rel != "server.properties"
         }
-        if source_hashes != archived_hashes:
-            missing = sorted(set(source_hashes) - set(archived_hashes))
-            extra = sorted(set(archived_hashes) - set(source_hashes))
-            changed = sorted(rel for rel in set(source_hashes) & set(archived_hashes)
-                             if source_hashes[rel] != archived_hashes[rel])
+        if source_parity_hashes != archived_hashes:
+            missing = sorted(set(source_parity_hashes) - set(archived_hashes))
+            extra = sorted(set(archived_hashes) - set(source_parity_hashes))
+            changed = sorted(rel for rel in set(source_parity_hashes) & set(archived_hashes)
+                             if source_parity_hashes[rel] != archived_hashes[rel])
             raise RehearsalError(
                 "archive does not match the stopped source bytes "
                 "(missing=%s extra=%s changed=%s)"
@@ -1551,7 +1725,15 @@ def execute(args):
                 raise RehearsalError("%s import did not inherit archive runtime defaults"
                                      % archive_format)
             destination = remote_destination(controller_storage, imported.get("dataPath", ""))
-            verified_files = verify_destination(destination, verified["files"])
+            # The harness proves the mapped destination directory on the
+            # controller-side remote-storage mount, then reads/hashes the
+            # imported bytes through the imported server's FileService scope.
+            if not destination.is_dir():
+                raise RehearsalError("%s destination directory is missing: %s"
+                                     % (archive_format, destination))
+            verified_files = verify_tree_files(
+                controller, imported_id, verified["files"],
+                "%s destination" % archive_format)
             if len(verified_files) != verified["file_count"]:
                 raise RehearsalError("%s destination file count differs" % archive_format)
             engine_state = remote_container_state(
