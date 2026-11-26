@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/rpc/services/mod_update_apply.go
+  - internal/rpc/services/mod_update_preview.go
   - internal/rpc/services/mod_update_policy.go
   - internal/rpc/services/mod.go
   - internal/scheduler/scheduler.go
@@ -33,8 +34,7 @@ schedule state and opt-outs start disabled. See [Mod update safety guards](mod-u
 
 # Consequences
 
-- Drift, provider, download and checksum mismatches are per-item refusals;
-  other selected updates still stage.
+- Drift, provider, download and checksum mismatches are per-item refusals; other selected updates still stage.
 - Publishing, backup, rollback, apply windows and per-server serialization are
   the existing staged-batch guarantees.
 - The update flow extends `UpdateMod` rather than adding an RPC, so it reuses
@@ -43,18 +43,18 @@ schedule state and opt-outs start disabled. See [Mod update safety guards](mod-u
   stage a duplicate or an unchecked jar.
 - Apply revalidates the preview. Publish verifies the reviewed SHA-512 on the
   same stream used for undo, preserving staged bytes on drift.
-- Reviewed content checks the complete window before work, at batch
-  preparation, and at row insertion. Config targeting an open batch with
-  content or an independent cron row must match its complete window. A
-  config-only retarget resets the idle clock. Admission snapshots live config
-  in the write transaction and excludes pending cron and content symmetrically.
+- Reviewed content checks the complete window before work, at batch preparation
+  and at row insertion. Config targeting an open batch with content or an
+  independent cron row must match it. A config-only retarget resets the idle
+  clock; admission snapshots live config in the write transaction and excludes pending cron and content symmetrically.
 - Config and content cannot join while publication or discard owns the
   journal. The publisher rechecks batch changes after acquiring the journal.
 - Due publication of legacy mixed data excludes cron config from base checks,
-  rollback reconciliation and publication. The remaining cron row and its
-  trigger stay intact. Discard shares the operation lock, keeps its typed
-  Connect refusals and records its own operation name.
+  rollback reconciliation and publication; the remaining cron row and trigger
+  stay intact. Discard shares the lock, keeps typed Connect refusals and names its operation.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
+- A provider lookup failure is `unavailable` with `Provider lookup failed: Try
+  again later.`; diagnostics stay server-side and the prefix keeps apply/policy transient.
 - Mod-update dispatch requires the observed deadline, schedule, and policy revision.
   It refuses invalid policy windows and does not plan a concurrently changed policy.

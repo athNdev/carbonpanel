@@ -943,7 +943,9 @@ func TestScheduledProviderFailuresRetryEvenWithSomeStagedUpdates(t *testing.T) {
 			})
 			svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
 			staged, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
-			require.ErrorContains(t, err, "lookup unavailable")
+			require.ErrorContains(t, err, providerLookupReason)
+			require.NotContains(t, err.Error(), "lookup unavailable", "a private provider diagnostic must not reach the caller")
+			require.True(t, strings.HasPrefix(err.Error(), providerLookupPrefix), "the fixed reason must keep the transient classification")
 			require.Equal(t, tc.want, staged)
 		})
 	}
@@ -1026,6 +1028,30 @@ func TestTransientProviderFailureReturnsRetryableError(t *testing.T) {
 	staged, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
 	require.NoError(t, err)
 	require.Equal(t, 1, staged, "the retry must stage through the real planner")
+}
+
+func TestManualApplyClassifiesFixedProviderReasonAsTransient(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-apply-transient-reason", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchFixture{data: []byte("next")}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(&failingModPreviewFixture{
+		modPreviewFixture: newPreviewFixture(),
+		versionsErr:       errors.New("GET https://api.modrinth.com/v2/version_file: response body <html>internal</html>"),
+	})
+	svc.SetModCandidateFetcher(fetcher)
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, "transient_download", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.NotContains(t, res.Msg.GetStagedUpdates()[0].GetReason(), "api.modrinth.com")
+	require.Zero(t, fetcher.calls)
+	require.Empty(t, stagedFiles(t, server.DataPath))
 }
 
 func TestStagingRefusesToRetargetAnAlreadyReviewedBatch(t *testing.T) {

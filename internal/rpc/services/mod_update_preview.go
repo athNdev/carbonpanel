@@ -21,7 +21,12 @@ import (
 
 // providerLookupPrefix marks a failed provider lookup so a scheduled policy can
 // distinguish a provider outage from a genuinely unidentified local upload.
-const providerLookupPrefix = "Provider lookup failed: "
+// Provider errors may embed response bodies, request URLs and transport
+// details, so the client-visible reason is fixed instead of echoing them.
+const (
+	providerLookupPrefix = "Provider lookup failed: "
+	providerLookupReason = providerLookupPrefix + "Try again later."
+)
 
 type modUpdateLookup interface {
 	GetProjects(context.Context, []string) ([]modrinth.ProjectDetails, error)
@@ -136,7 +141,7 @@ func previewServerModUpdates(ctx context.Context, dataDir, modsDir string, serve
 			for _, hash := range batch {
 				for _, mod := range byHash[hash] {
 					mod.UpdatePreview.State = "unavailable"
-					mod.UpdatePreview.Reason = providerLookupPrefix + err.Error()
+					mod.UpdatePreview.Reason = providerLookupReason
 				}
 			}
 			continue
@@ -174,7 +179,7 @@ func previewServerModUpdates(ctx context.Context, dataDir, modsDir string, serve
 
 func classifyModUpdate(p *v1.InstalledModUpdate, installed, candidate modrinth.Version, project modrinth.ProjectDetails, loader, game string, lookupErr error) {
 	if lookupErr != nil {
-		p.State, p.Reason = "unavailable", providerLookupPrefix+lookupErr.Error()
+		p.State, p.Reason = "unavailable", providerLookupReason
 		return
 	}
 	if installed.ID == "" || installed.ProjectID == "" || !slices.ContainsFunc(installed.Files, func(f modrinth.File) bool { return f.Hashes.SHA512 == p.InstalledSha512 }) {
