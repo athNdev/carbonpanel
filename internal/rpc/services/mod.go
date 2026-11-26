@@ -535,6 +535,12 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
@@ -659,6 +665,12 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
@@ -864,6 +876,12 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"stack": "fabric-optimization", "error": "server mod loader is not Fabric or Quilt"})
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server mod loader is not Fabric or Quilt"))
 	}
+
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {

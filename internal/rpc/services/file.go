@@ -288,7 +288,7 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 // write is refused instead of racing that snapshot. Reads do not take a lease.
 // It also keeps the module archive-export fence: while the fence is held a
 // stopped archive export cannot claim consistency.
-func (s *FileService) beginDataWrite(serverID string) (func(), error) {
+func beginDataWrite(serverID string) (func(), error) {
 	exportWrite, err := module.TryBeginServerDataWrite(serverID)
 	if err != nil {
 		if errors.Is(err, module.ErrModuleArchiveExport) {
@@ -310,6 +310,10 @@ func (s *FileService) beginDataWrite(serverID string) (func(), error) {
 		write.Release()
 		exportWrite.Release()
 	}, nil
+}
+
+func (s *FileService) beginDataWrite(serverID string) (func(), error) {
+	return beginDataWrite(serverID)
 }
 
 // openMappedStorage resolves the owning node's data root and opens an accessor
