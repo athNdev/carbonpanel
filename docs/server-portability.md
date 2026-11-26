@@ -69,11 +69,16 @@ The consistency policy requires a stopped server. Export holds the server
 lifecycle transition and the server's module lifecycle gate for the whole read.
 The gate serializes module create, start, stop, update, recreate and delete
 paths, including their asynchronous workers; an export refuses while one of
-those operations is in flight. Export verifies the game container and attached
-module containers on their owning nodes. It refuses an attached module whose
-resolved bind mounts can write the server data directory, whose recorded
-container is missing, or whose live effective data-directory mounts differ from
-the stored configuration. That last check catches an asynchronous recreate that
+those operations is in flight. Module create and update reserve that gate before
+acknowledging the request, so a successful response cannot leave a worker that
+races a later export. Direct panel file writes hold a shared data-write claim
+and are refused while an export owns the server. Export verifies the game
+container and attached module containers on their owning nodes. It refuses an
+attached module whose resolved bind mounts can write the server data directory,
+whose recorded container is missing, or whose live effective data-directory
+mounts differ from the stored configuration. A writable mount whose source is
+an ancestor of the data directory is treated as an overlap just like a nested
+mount. The stored-versus-live comparison catches an asynchronous recreate that
 failed after the database changed. Make the module's data-directory bind mounts
 read-only and recreate it, or remove the module, before exporting.
 
@@ -101,24 +106,29 @@ have a one-hour controller deadline and respect earlier client cancellation.
 
 Provide a new name, a destination node and a free port when creating the
 server. Keep the same request ID for retries of the same submission; the
-identity excludes the upload id, so a fresh upload can retry after a controller
-restart. The controller validates the caller's upload and the destination
-again. It records the chosen destination durably in the same transaction as
-the request claim, allocates a fresh directory on that node, writes an
-ownership marker and then stages the data. It commits the new server and
-initial config together. If the copy is interrupted, it removes only the
-directory whose marker proves that attempt created it. Once the row is
-committed, the verified data is retained for recovery if container creation or
-boot fails.
+durable identity records the verified archive content and manifest, so a fresh
+upload id is accepted after a controller restart only when the independently
+validated content is identical. The controller validates the caller's upload
+and the destination again. It records the chosen destination and archive
+identity durably in the same transaction as the request claim, resolves and
+records the exact allocation root, allocates a fresh directory on that node,
+writes an ownership marker and then stages the data. It commits the new server,
+initial config and the intent's committed phase together. If the copy is
+interrupted, it removes only the directory whose marker and recorded allocation
+root prove that attempt created it. Once the row is committed, the verified
+data is retained for recovery if container creation or boot fails.
 
 After a crash between the request claim and the row commit, a retry reads the
-durable intent. A destination that exists and matches the recorded node, path
-and marker is reclaimed and the import resumes. A missing server row and a
-missing destination lets the import start again. A committed server row always
-wins and its data is never removed. If the marker is missing or does not match,
-the retry fails with a visible destination-ownership error and leaves the
-directory untouched; inspect the node's server storage before retrying, or use
-a new request id.
+durable intent. It validates the supplied upload against the recorded content
+identity before touching any destination. A destination that exists and
+matches the recorded node, allocation root, path and marker is reclaimed and
+the import resumes. A missing server row and a missing destination lets the
+import start again. Recovery never reclaims a destination whose intent phase is
+committed, including after a normal keep-data delete whose marker cleanup was
+interrupted; published data belongs to the operator. If the allocation root
+changed, or the marker is missing or does not match, the retry fails with a
+visible destination-ownership error and leaves the directory untouched. Inspect
+the node's server storage before retrying, or use a new request id.
 
 The initial import path supports the managed runtime and the Minecraft and
 loader versions recorded in the archive. Preview reports a blocker when the

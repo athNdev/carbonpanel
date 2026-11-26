@@ -151,9 +151,12 @@ type ArchiveGameplay struct {
 	PauseWhenEmptySeconds *int
 }
 
-// CreateArchiveServer commits the server and its initial config together after
-// its data has been verified and placed. An error leaves no server row.
-func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay) error {
+// CreateArchiveServer commits the server, its initial config and the archive
+// intent's committed phase together after its data has been verified and
+// placed. Marking the intent committed in the same transaction as publication
+// means recovery can never mistake published data for an interrupted
+// destination. An error leaves no server row and no committed intent.
+func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay, archiveRequestKey string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		scoped := &Store{db: tx, cfg: s.cfg}
 		if err := scoped.CheckArchiveServerName(ctx, server.Name); err != nil {
@@ -161,6 +164,17 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gamepla
 		}
 		if err := scoped.CreateServer(ctx, server); err != nil {
 			return err
+		}
+		if archiveRequestKey != "" {
+			result := tx.Model(&ArchiveImport{}).
+				Where("request_key = ?", strings.TrimSpace(archiveRequestKey)).
+				Update("phase", ArchiveImportCommitted)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence", archiveRequestKey)
+			}
 		}
 		updates := make(map[string]any, 5)
 		if gameplay.LevelName != "" {

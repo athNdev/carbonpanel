@@ -13,7 +13,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	first, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-1", "data/servers/one_srv-1")
+	first, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-1", "data/servers/one_srv-1", "digest-a")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 		t.Fatalf("idempotency row = %+v, err=%v", key, err)
 	}
 
-	second, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-2", "data/servers/two_srv-2")
+	second, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-2", "data/servers/two_srv-2", "digest-a")
 	if err != nil {
 		t.Fatalf("repeat claim: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 		t.Fatalf("repeat claim = %+v claimed=%v", second, claimed)
 	}
 
-	if _, _, err := store.ClaimArchiveImport(ctx, "request-key", "kind-b", "srv-3", "data/servers/three_srv-3"); !errors.Is(err, ErrRequestIDReused) {
+	if _, _, err := store.ClaimArchiveImport(ctx, "request-key", "kind-b", "srv-3", "data/servers/three_srv-3", "digest-b"); !errors.Is(err, ErrRequestIDReused) {
 		t.Fatalf("different kind = %v, want ErrRequestIDReused", err)
 	}
 }
@@ -44,7 +44,7 @@ func TestArchiveImportNodeAndPhaseAreTargeted(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1")
+	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest")
 	if err != nil || !claimed {
 		t.Fatalf("claim: %v claimed=%v", err, claimed)
 	}
@@ -66,6 +66,39 @@ func TestArchiveImportNodeAndPhaseAreTargeted(t *testing.T) {
 	}
 	if _, err := store.GetArchiveImport(ctx, intent.RequestKey); !errors.Is(err, ErrArchiveImportUnproven) {
 		t.Fatalf("missing intent = %v, want ErrArchiveImportUnproven", err)
+	}
+}
+
+func TestReleaseArchiveImportClaimRequiresOwnership(t *testing.T) {
+	store := setupTestStoreForArchiveImport(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest")
+	if err != nil || !claimed {
+		t.Fatalf("claim: %v claimed=%v", err, claimed)
+	}
+
+	released, err := store.ReleaseArchiveImportClaim(ctx, intent.RequestKey, intent.Kind, "wrong-token")
+	if err != nil || released {
+		t.Fatalf("wrong owner release = %v, %v; want false, nil", released, err)
+	}
+	if _, err := store.GetIdempotencyKey(ctx, intent.RequestKey); err != nil {
+		t.Fatalf("claim removed by wrong owner: %v", err)
+	}
+	if _, err := store.GetArchiveImport(ctx, intent.RequestKey); err != nil {
+		t.Fatalf("intent removed by wrong owner: %v", err)
+	}
+
+	released, err = store.ReleaseArchiveImportClaim(ctx, intent.RequestKey, intent.Kind, intent.ClaimToken)
+	if err != nil || !released {
+		t.Fatalf("owner release = %v, %v; want true, nil", released, err)
+	}
+	if key, err := store.GetIdempotencyKey(ctx, intent.RequestKey); err != nil || key != nil {
+		t.Fatalf("claim survived release: %+v, %v", key, err)
+	}
+	if _, err := store.GetArchiveImport(ctx, intent.RequestKey); !errors.Is(err, ErrArchiveImportUnproven) {
+		t.Fatalf("intent survived release: %v", err)
 	}
 }
 

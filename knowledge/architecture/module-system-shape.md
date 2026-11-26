@@ -22,7 +22,11 @@ describe a server's desired configuration.
 - Every module container mutation goes through the manager's per-server gate.
   A stopped server archive export holds that gate exclusively for the read;
   module create, start, stop, update, recreate and delete paths, including
-  their asynchronous workers, fail closed while it is held.
+  their asynchronous workers, fail closed while it is held. Create and update
+  reserve the gate before acknowledging an asynchronous worker. A delayed init
+  command and its optional restart take the same gate. Cross-server dependency
+  starts use non-waiting admission so crossed acyclic dependencies cannot
+  deadlock while each start holds its own server's gate.
 - Every module operation must use the Docker client resolved for the target
   server. Do not use the manager's client directly.
 - Surface indexer and delivery failures; do not turn a partial download into a

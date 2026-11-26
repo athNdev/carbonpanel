@@ -19,38 +19,42 @@ sources:
 
 Import records an `ArchiveImport` row in the same database transaction as the
 request's idempotency claim. The row stores the chosen server id, node, data
-path, a random claim token and a phase (`claimed`, `staged`, `committed`).
-After exclusive directory allocation the import writes
-`.carbon-archive-import` containing the token before copying archive bytes.
-The marker name is excluded by the archive format, so it can never be exported
-as server data.
+path, a deterministic digest of the independently verified archive content and
+manifest, the resolved allocation root, a random claim token and a phase
+(`claimed`, `staged`, `committed`). After exclusive directory allocation the
+import records the validated root, writes `.carbon-archive-import` containing
+the token, and only then copies archive bytes. The marker name is excluded by
+the archive format, so it can never be exported as server data.
 
-A retry with the same request id reads the durable intent instead of failing on
-the stranded claim. When no server row exists it removes the destination only
-if the recorded path, node and marker token all prove ownership. A committed
-server row always wins: recovery clears the marker but never removes data. If
-the marker is missing or different, recovery refuses with a visible
-failed-precondition error and keeps the durable claim so an operator can
-inspect the destination. No path is removed on a guess.
+A retry reads the durable intent instead of failing on the stranded claim. It
+verifies the supplied upload against the recorded content identity before
+touching anything, so a fresh upload id is accepted only for identical verified
+content. When no server row exists it removes the destination only if the
+resolved allocation root, recorded path, node and marker token prove ownership.
+A changed node storage root is a visible mismatch, never a redirect.
 
-The replay identity hashes the submission without its upload id. Upload
-sessions are in-memory and do not survive a controller restart, so the same
-request id must be retryable with a freshly uploaded copy of the bytes.
+The committed phase is written in the same transaction as the server and its
+initial config. It is durable publication evidence in its own right: recovery
+never reclaims a committed destination even when the server row is gone after a
+normal keep-data delete whose marker cleanup was interrupted. A missing marker,
+a changed allocation root, or an unverified replaced archive fails closed with a
+visible error and keeps the claim for inspection. Nothing is removed on a guess.
+
+The replay identity hashes the submission without its upload id, while the
+intent records the verified content identity. Upload sessions do not survive a
+restart, so the same request id must be retryable with a fresh copy of the same
+bytes.
 
 # Alternatives
 
-Reusing the server operation journal does not fit: that journal is keyed by an
-existing server row, while this window deliberately precedes the row commit.
-Trusting the idempotency claim plus a recomputed path cannot distinguish an
-interrupted destination from an operator-created directory. Deleting any
-directory at the recomputed path would remove data the panel never owned.
-Releasing the claim automatically when ownership is unproven makes the request
-usable again but leaves an untracked partial tree with no recovery evidence.
+The server operation journal is keyed by an existing server row, while this
+window precedes the row commit. Trusting a recomputed path would remove data the
+panel never owned, and releasing an unproven claim leaves an untracked partial
+tree with no recovery evidence.
 
 # Consequence
 
-`ClaimArchiveImport` must stay atomic with the idempotency row; a separate
-claim remains the original bug. Recovery is driven by the retry path and by
-in-process serialization of the same request, not by a second controller
-process. External writers, a replaced Docker daemon and process death remain
-outside what the stopped consistency policy proves.
+`ClaimArchiveImport` must stay atomic with the idempotency row. Recovery is
+driven by the retry path and in-process serialization, not a second controller.
+External writers, a replaced Docker daemon and process death remain outside the
+stopped consistency policy.

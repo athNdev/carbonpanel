@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -69,11 +70,35 @@ func (s *ServerService) SetServerArchiveUploads(uploads *upload.Manager) {
 type archiveImport struct {
 	file       *os.File
 	verified   serverarchive.Archive
+	digest     string
 	replayKey  string
 	replayKind string
 	// claim is set when a prior submission left a durable destination. The
 	// caller must recover it (or prove it absent) before placing fresh data.
 	claim *storage.ArchiveImport
+}
+
+// archiveContentIdentity is a deterministic digest of the independently
+// verified archive content: format, manifest (including per-file SHA-256),
+// expanded size and the allowlisted gameplay settings. Upload ids and byte
+// layout are deliberately excluded so a fresh upload of identical content is
+// accepted after a restart, while changed content is refused.
+func archiveContentIdentity(verified serverarchive.Archive) (string, error) {
+	body, err := json.Marshal(struct {
+		Format        serverarchive.Format
+		Manifest      serverarchive.Manifest
+		ExpandedBytes int64
+		Gameplay      serverarchive.Gameplay
+	}{
+		Format:        verified.Format,
+		Manifest:      verified.Manifest,
+		ExpandedBytes: verified.ExpandedBytes,
+		Gameplay:      verified.Gameplay,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(body)), nil
 }
 
 func (s *ServerService) PreviewServerArchive(ctx context.Context, req *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error) {
@@ -191,7 +216,29 @@ func (s *ServerService) openServerArchive(ctx context.Context, uploadID string) 
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid server archive: %w", err))
 		}
 	}
-	return &archiveImport{file: file, verified: verified}, nil
+	digest, err := archiveContentIdentity(verified)
+	if err != nil {
+		_ = file.Close()
+		return nil, connect.NewError(connect.CodeInternal, errors.New("could not identify the server archive content"))
+	}
+	return &archiveImport{file: file, verified: verified, digest: digest}, nil
+}
+
+// verifyArchiveClaimIdentity refuses a replacement upload unless it matches the
+// archive identity recorded with the durable submission.
+func verifyArchiveClaimIdentity(imported *archiveImport, intent *storage.ArchiveImport) error {
+	if imported == nil || intent == nil {
+		return connect.NewError(connect.CodeInternal, errors.New("archive import identity is unavailable"))
+	}
+	if intent.ArchiveDigest == "" {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("an interrupted archive submission has no recorded content identity; use a new request id and inspect the destination node's server storage"))
+	}
+	if imported.digest == "" || imported.digest != intent.ArchiveDigest {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("the uploaded archive does not match the interrupted submission; upload the original archive or use a new request id"))
+	}
+	return nil
 }
 
 func (i *archiveImport) requiredBytes() int64 {
@@ -430,6 +477,14 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 	if free < imported.requiredBytes() {
 		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("insufficient free space on the destination node"))
 	}
+	// Record the exact validated allocation root before creating anything.
+	// Cleanup after a restart must resolve this same root; a changed node
+	// storage root is a visible mismatch, never a redirect.
+	if err := s.store.SetArchiveImportAllocation(ctx, intent.RequestKey, server.NodeID, root.Root()); err != nil {
+		s.log.Error("Record archive allocation root for server %s: %v", server.ID, err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("could not record the archive destination"))
+	}
+	intent.StorageRoot = root.Root()
 	child := filepath.Base(server.DataPath)
 	if err := root.MkdirExclusive(child); err != nil {
 		if errors.Is(err, os.ErrExist) {
@@ -491,6 +546,14 @@ func (s *ServerService) recoverArchiveImport(ctx context.Context, intent *storag
 	if exists {
 		return nil
 	}
+	// A committed intent is durable publication evidence even when the server
+	// row is gone, for example after a normal keep_data delete whose marker
+	// cleanup was interrupted. Its data belongs to the operator and must never
+	// be reclaimed by a retry.
+	if intent.Phase == storage.ArchiveImportCommitted {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("this archive submission was already published and its retained server data must not be reclaimed; use a new request id or remove the retained data explicitly"))
+	}
 	if intent.NodeID == "" {
 		// No node was recorded, so placeArchive could not have allocated a
 		// destination for this intent.
@@ -533,6 +596,9 @@ func (s *ServerService) removeArchiveDestination(ctx context.Context, intent *st
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if intent.StorageRoot == "" || !sameArchiveRoot(root.Root(), intent.StorageRoot) {
+		return errArchiveDestinationUnproven
+	}
 	child := filepath.Base(intent.DataPath)
 	if !justCreated {
 		exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
@@ -598,6 +664,9 @@ func (s *ServerService) clearArchiveMarker(ctx context.Context, intent *storage.
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if intent.StorageRoot == "" || !sameArchiveRoot(root.Root(), intent.StorageRoot) {
+		return errArchiveDestinationUnproven
+	}
 	child := filepath.Base(intent.DataPath)
 	exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
 	if err != nil {
@@ -609,17 +678,15 @@ func (s *ServerService) clearArchiveMarker(ctx context.Context, intent *storage.
 	return root.Remove(path.Join(child, archiveOwnershipMarker))
 }
 
-// finishArchiveImport advances a committed intent and clears its marker. The
-// intent is retained if marker cleanup fails so a replay can retry it.
+// finishArchiveImport clears the marker of an intent whose committed phase was
+// written in the same transaction as the server row. The intent is retained if
+// marker cleanup fails so a replay can retry it; it never downgrades the phase.
 func (s *ServerService) finishArchiveImport(ctx context.Context, intent *storage.ArchiveImport) {
 	if intent == nil {
 		return
 	}
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err := s.store.SetArchiveImportPhase(bgCtx, intent.RequestKey, storage.ArchiveImportCommitted); err != nil {
-		s.log.Error("Record committed archive import %s: %v", intent.ServerID, err)
-	}
 	if err := s.clearArchiveMarker(bgCtx, intent); err != nil {
 		s.log.Error("Clear archive ownership marker for committed server %s: %v", intent.ServerID, err)
 		return

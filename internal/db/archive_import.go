@@ -37,6 +37,14 @@ type ArchiveImport struct {
 	ServerID   string `gorm:"not null"`
 	NodeID     string
 	DataPath   string `gorm:"not null"`
+	// StorageRoot records the allocation root that was validated when the
+	// destination was created. Cleanup must resolve the same root; a changed
+	// node storage configuration must not redirect removal to another tree.
+	StorageRoot string
+	// ArchiveDigest binds the submission to the exact independently verified
+	// archive content and manifest. A restart may supply a fresh upload id only
+	// when the verified content is identical.
+	ArchiveDigest string
 	// ClaimToken is the local ownership proof stored in the destination marker.
 	ClaimToken string `gorm:"not null"`
 	Phase      string `gorm:"not null"`
@@ -48,7 +56,7 @@ type ArchiveImport struct {
 // one transaction, so a crash cannot leave a request claim without the durable
 // record needed to recover its destination. A repeat of the same key returns
 // the existing intent and claimed=false.
-func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, serverID, dataPath string) (*ArchiveImport, bool, error) {
+func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, serverID, dataPath, archiveDigest string) (*ArchiveImport, bool, error) {
 	requestKey = strings.TrimSpace(requestKey)
 	if requestKey == "" || kind == "" || serverID == "" || dataPath == "" {
 		return nil, false, errors.New("archive import claim requires a request key, kind, server and destination")
@@ -91,12 +99,13 @@ func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, server
 		}
 
 		intent = ArchiveImport{
-			RequestKey: requestKey,
-			Kind:       kind,
-			ServerID:   serverID,
-			DataPath:   dataPath,
-			ClaimToken: uuid.NewString(),
-			Phase:      ArchiveImportClaimed,
+			RequestKey:    requestKey,
+			Kind:          kind,
+			ServerID:      serverID,
+			DataPath:      dataPath,
+			ArchiveDigest: archiveDigest,
+			ClaimToken:    uuid.NewString(),
+			Phase:         ArchiveImportClaimed,
 		}
 		claimed = true
 		return tx.Create(&intent).Error
@@ -128,6 +137,17 @@ func (s *Store) SetArchiveImportNode(ctx context.Context, requestKey, nodeID str
 		Updates(map[string]any{"node_id": nodeID, "updated_at": time.Now().UTC()}).Error
 }
 
+// SetArchiveImportAllocation records the node and the exact allocation root
+// that were validated before the destination directory was created. Cleanup
+// resolves the same root or refuses rather than guessing at a new location.
+func (s *Store) SetArchiveImportAllocation(ctx context.Context, requestKey, nodeID, storageRoot string) error {
+	return s.db.WithContext(ctx).Model(&ArchiveImport{}).
+		Where("request_key = ?", strings.TrimSpace(requestKey)).
+		Updates(map[string]any{
+			"node_id": nodeID, "storage_root": storageRoot, "updated_at": time.Now().UTC(),
+		}).Error
+}
+
 // SetArchiveImportPhase advances the durable phase without changing ownership.
 func (s *Store) SetArchiveImportPhase(ctx context.Context, requestKey, phase string) error {
 	return s.db.WithContext(ctx).Model(&ArchiveImport{}).
@@ -140,4 +160,39 @@ func (s *Store) SetArchiveImportPhase(ctx context.Context, requestKey, phase str
 func (s *Store) DeleteArchiveImport(ctx context.Context, requestKey string) error {
 	return s.db.WithContext(ctx).Where("request_key = ?", strings.TrimSpace(requestKey)).
 		Delete(&ArchiveImport{}).Error
+}
+
+// ReleaseArchiveImportClaim atomically releases a failed submission only when
+// the caller still owns the recorded intent. The claim token and kind must
+// match, so a retry that already advanced or replaced the intent cannot have its
+// claim removed by an older attempt. It reports whether a claim was released.
+func (s *Store) ReleaseArchiveImportClaim(ctx context.Context, requestKey, kind, claimToken string) (bool, error) {
+	requestKey = strings.TrimSpace(requestKey)
+	released := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var intent ArchiveImport
+		lookupErr := tx.Where("request_key = ?", requestKey).First(&intent).Error
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if intent.Kind != kind || intent.ClaimToken != claimToken {
+			return nil
+		}
+		if err := tx.Where("request_key = ?", requestKey).Delete(&ArchiveImport{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("request_id = ? AND kind = ? AND server_id = ?", requestKey, kind, intent.ServerID).
+			Delete(&IdempotencyKey{}).Error; err != nil {
+			return err
+		}
+		released = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return released, nil
 }

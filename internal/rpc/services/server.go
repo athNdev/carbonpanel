@@ -1078,36 +1078,11 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			}
 		}()
 
-		if imported.claim != nil {
-			// Resume an interrupted submission: first reclaim only the
-			// destination the durable intent proves this request created.
-			serverUUID = imported.claim.ServerID
-			archiveIntent = imported.claim
-			archiveCleanupNeeded = true
-			if err := s.recoverArchiveImport(ctx, archiveIntent); err != nil {
-				return nil, err
-			}
-			archiveCleanupNeeded = false
-			committed, exists, getErr := s.committedArchiveServer(ctx, archiveIntent.ServerID)
-			if getErr != nil {
-				return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
-			}
-			if exists {
-				s.settleCommittedArchiveImport(ctx, imported.replayKey)
-				return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
-			}
-			resumed, err := s.openServerArchive(ctx, msg.GetArchiveUploadId())
-			if err != nil {
-				return nil, err
-			}
-			imported.file = resumed.file
-			imported.verified = resumed.verified
-			if err := applyArchiveDefaults(msg, imported.verified.Manifest.Runtime); err != nil {
-				return nil, err
-			}
-		} else {
+		if imported.claim == nil {
+			// New submission: record the destination and the verified content
+			// identity in the same transaction as the idempotency claim.
 			archivePath = s.archiveDataPath(msg.Name, serverUUID)
-			intent, claimed, err := s.store.ClaimArchiveImport(ctx, imported.replayKey, imported.replayKind, serverUUID, archivePath)
+			intent, claimed, err := s.store.ClaimArchiveImport(ctx, imported.replayKey, imported.replayKind, serverUUID, archivePath, imported.digest)
 			if err != nil {
 				if errors.Is(err, storage.ErrArchiveImportUnproven) {
 					return nil, connect.NewError(connect.CodeFailedPrecondition,
@@ -1115,35 +1090,64 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 				}
 				return nil, archiveReplayError(err)
 			}
-			if !claimed {
+			if claimed {
+				archiveIntent = intent
+				imported.claim = intent
+			} else {
+				// Another attempt won the claim between the read-only prepare
+				// and this transaction. Adopt its durable intent and validate
+				// the current upload against the recorded content identity.
 				serverUUID = intent.ServerID
 				archiveIntent = intent
 				imported.claim = intent
-				committed, exists, getErr := s.committedArchiveServer(ctx, intent.ServerID)
-				if getErr != nil {
-					return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
-				}
-				if exists {
-					s.settleCommittedArchiveImport(ctx, imported.replayKey)
-					return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
-				}
-				archiveCleanupNeeded = true
-				if err := s.recoverArchiveImport(ctx, archiveIntent); err != nil {
-					return nil, err
-				}
-				archiveCleanupNeeded = false
-				committed, exists, getErr = s.committedArchiveServer(ctx, archiveIntent.ServerID)
-				if getErr != nil {
-					return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
-				}
-				if exists {
-					s.settleCommittedArchiveImport(ctx, imported.replayKey)
-					return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
-				}
-			} else {
-				archiveIntent = intent
-				imported.claim = intent
 			}
+		} else {
+			serverUUID = imported.claim.ServerID
+			archiveIntent = imported.claim
+		}
+
+		// A committed server always wins: answer idempotently before requiring
+		// the upload that may already have expired.
+		committed, exists, getErr := s.committedArchiveServer(ctx, archiveIntent.ServerID)
+		if getErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
+		}
+		if exists {
+			s.settleCommittedArchiveImport(ctx, imported.replayKey)
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
+		}
+		// Validate the supplied upload against the durable content identity
+		// before any destination is reclaimed. A restart may use a fresh upload
+		// id only for identical verified content.
+		if imported.file == nil {
+			resumed, err := s.openServerArchive(ctx, msg.GetArchiveUploadId())
+			if err != nil {
+				return nil, err
+			}
+			imported.file = resumed.file
+			imported.verified = resumed.verified
+			imported.digest = resumed.digest
+		}
+		if err := verifyArchiveClaimIdentity(imported, archiveIntent); err != nil {
+			return nil, err
+		}
+		if err := applyArchiveDefaults(msg, imported.verified.Manifest.Runtime); err != nil {
+			return nil, err
+		}
+		// Only now reclaim the destination this durable intent proves this
+		// submission created.
+		archiveCleanupNeeded = true
+		if err := s.recoverArchiveImport(ctx, archiveIntent); err != nil {
+			return nil, err
+		}
+		archiveCleanupNeeded = false
+		committed, exists, getErr = s.committedArchiveServer(ctx, archiveIntent.ServerID)
+		if getErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
+		}
+		if exists {
+			s.settleCommittedArchiveImport(ctx, imported.replayKey)
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
 		}
 		// A failed attempt releases the request claim only after its own
 		// destination is gone. If cleanup cannot prove and remove it, the
@@ -1161,8 +1165,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 					return
 				}
 			}
-			_ = s.store.ReleaseIdempotencyKey(context.WithoutCancel(ctx), imported.replayKey)
-			_ = s.store.DeleteArchiveImport(context.WithoutCancel(ctx), imported.replayKey)
+			// Release the durable claim and intent atomically, and only while
+			// this attempt still owns the recorded intent.
+			if archiveIntent == nil {
+				return
+			}
+			if _, err := s.store.ReleaseArchiveImportClaim(context.WithoutCancel(ctx),
+				imported.replayKey, imported.replayKind, archiveIntent.ClaimToken); err != nil {
+				s.log.Error("Release interrupted archive import %s: %v", serverUUID, err)
+			}
 		}()
 		if err := s.store.CheckArchiveServerName(ctx, msg.Name); err != nil {
 			return nil, archiveNameError(err)
@@ -1399,6 +1410,14 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		serverDataPath = filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
 	}
 
+	// Persist the requested provisioning intent with publication. A server
+	// that was explicitly created stopped must be recorded stopped, so a crash
+	// before the asynchronous container provision cannot make the reconciler
+	// recreate and start it behind the operator's back.
+	initialStatus := storage.StatusCreating
+	if !msg.StartImmediately {
+		initialStatus = storage.StatusStopped
+	}
 	server := &storage.Server{
 		ID:              serverUUID,
 		Name:            msg.Name,
@@ -1407,7 +1426,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		ModpackLoader:   modpackLoader,
 		MCVersion:       msg.McVersion,
 		LoaderVersion:   loaderVersion,
-		Status:          storage.StatusCreating,
+		Status:          initialStatus,
 		Port:            port,
 		ProxyHostname:   proxyHostname,
 		ProxyListenerID: proxyListenerID,
@@ -1634,7 +1653,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	createRecord := s.store.CreateServer
 	if imported != nil {
 		createRecord = func(ctx context.Context, server *storage.Server) error {
-			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay))
+			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay), archiveIntent.RequestKey)
 		}
 	}
 	if err := createRecord(ctx, server); err != nil {
@@ -1807,7 +1826,8 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		s.auditPrivilegedOverrides(ctx, peerIP, server.ID, msg.DockerOverrides)
 	}
 
-	// Return immediately with the server in "creating" state
+	// Return immediately with the server in its recorded provisioning state:
+	// creating when a start was requested, otherwise the safe stopped state.
 	return connect.NewResponse(&v1.CreateServerResponse{
 		Server: s.toProtoServer(ctx, server),
 	}), nil
