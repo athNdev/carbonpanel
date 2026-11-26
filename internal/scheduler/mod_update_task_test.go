@@ -266,7 +266,7 @@ func TestOneShotModUpdateSlotStaysDueWhenExecutionInsertFails(t *testing.T) {
 		"fixture:fail-claimed-execution-insert",
 		func(tx *gorm.DB) {
 			if failInsert && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_executions" {
-				tx.AddError(errors.New("fixture execution insert failure"))
+				_ = tx.AddError(errors.New("fixture execution insert failure"))
 			}
 		},
 	))
@@ -339,7 +339,7 @@ func TestRecurringModUpdateSlotStaysDueWhenExecutionInsertFails(t *testing.T) {
 				"fixture:fail-recurring-claimed-execution-insert",
 				func(tx *gorm.DB) {
 					if failInsert && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_executions" {
-						tx.AddError(errors.New("fixture recurring execution insert failure"))
+						_ = tx.AddError(errors.New("fixture recurring execution insert failure"))
 					}
 				},
 			))

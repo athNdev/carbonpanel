@@ -2560,7 +2560,6 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		// replacement. The operator's explicit start continues below.
 		publication.RuntimeAccepted = true
 		needsStagedRecreate = false
-		contentReady = false
 	}
 	stagedContainerStarted := false
 

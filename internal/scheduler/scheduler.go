@@ -637,7 +637,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 				Trigger:   trigger,
 				Error:     "server offline",
 			}
-			s.store.CreateTaskExecution(ctx, execution)
+			if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
+				s.log.Error("Task %s: failed to record skipped execution: %v", task.Name, err)
+			}
 		} else {
 			execution.Status = storage.ExecutionStatusSkipped
 			execution.EndedAt = &now

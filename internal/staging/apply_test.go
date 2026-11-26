@@ -529,11 +529,11 @@ func TestNextRestartCommitOwnsDataWriteThroughUndoOrFinish(t *testing.T) {
 				commit.Finish()
 				require.FileExists(t, filepath.Join(data, "mod.jar"))
 			} else {
-				commit.Undo()
+				require.NoError(t, commit.Undo())
 				require.NoFileExists(t, filepath.Join(data, "mod.jar"))
 			}
 			// Undo after Finish is a no-op, and double release stays safe.
-			commit.Undo()
+			require.NoError(t, commit.Undo())
 			commit.Finish()
 
 			after, err := datawrite.TryShared(server.ID)
@@ -586,7 +586,7 @@ func TestNextRestartContentIsNotAppliedByTheSweep(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(data, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "bytes", string(body))
-	commit.Undo()
+	require.NoError(t, commit.Undo())
 	require.NoFileExists(t, filepath.Join(data, "mod.jar"))
 	rows, err := store.ListStagedContent(ctx, server.ID)
 	require.NoError(t, err)

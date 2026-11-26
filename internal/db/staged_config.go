@@ -136,32 +136,6 @@ func configChangesReviewedModRuntime(changes map[string]any) bool {
 	return false
 }
 
-func guardServerConfigRuntimeChangeTx(tx *gorm.DB, config *ServerConfig) error {
-	if config == nil || config.ServerID == "" {
-		return nil
-	}
-	var current ServerConfig
-	err := tx.Where("server_id = ?", config.ServerID).Take(&current).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ensureNoStagedReviewedModCandidatesTx(tx, config.ServerID)
-	}
-	if err != nil {
-		return err
-	}
-	before, err := ServerConfigToMap(&current)
-	if err != nil {
-		return err
-	}
-	after, err := ServerConfigToMap(config)
-	if err != nil {
-		return err
-	}
-	if !configChangesReviewedModRuntime(DiffMaps(before, after)) {
-		return nil
-	}
-	return ensureNoStagedReviewedModCandidatesTx(tx, config.ServerID)
-}
-
 // RequireNoPendingReviewedModRuntimeChanges protects publication of legacy
 // mixed batches. The insert path checks inside its admission transaction.
 func (s *Store) RequireNoPendingReviewedModRuntimeChanges(ctx context.Context, serverID, batchID string) error {

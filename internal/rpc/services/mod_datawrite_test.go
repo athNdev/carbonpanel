@@ -127,7 +127,7 @@ func TestModWritesAreRefusedDuringNextRestartCompensation(t *testing.T) {
 	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), "the next-restart commit owns the data path until compensation resolves")
 	require.FileExists(t, live)
 
-	commit.Undo()
+	require.NoError(t, commit.Undo())
 	body, err = os.ReadFile(live)
 	require.NoError(t, err)
 	require.Equal(t, "installed", string(body), "compensation restores the pre-publication bytes")
