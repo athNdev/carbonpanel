@@ -63,10 +63,14 @@ node-control RPC. The bootstrap scopes are limited to
 The Ed25519 key (`node.key`), opaque secret (`enrollment-secret.bin`) and bundle
 (`enrollment-bundle.json`) are published together under
 `/var/lib/carbon-node/enrollment/`. Repeating first boot with the same instance
-identity reuses the existing files. Incomplete or mismatched state requires
-operator review and is preserved on failure. The secret encodes 256 random
-bits as unpadded base64url so it can cross the shared protobuf string field.
-`CSR_PRE` is a signed PKCS#10 DER request for the same key.
+identity reuses the existing files only after every required preregistration
+field (including `CSR_PRE` and `csr_pre_signature`) decodes within strict base64
+bounds and the saved `CSR_PRE` proof verifies with the stored `node.key`.
+Missing, malformed or inconsistent state requires operator review and is
+preserved on failure; an existing identity is never overwritten or regenerated.
+The secret encodes 256 random bits as unpadded base64url so it can cross the
+shared protobuf string field. `CSR_PRE` is a signed PKCS#10 DER request for the
+same key.
 
 The default NoCloud network seed requests IPv4 DHCP on predictable Ubuntu
 Ethernet interface names (`en*`). Attach the VM only to the intended private

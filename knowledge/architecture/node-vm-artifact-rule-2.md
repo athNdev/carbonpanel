@@ -11,8 +11,11 @@ sources:
 ---
 The build entry point emits a plan and NoCloud seed. The guest publishes
 the Ed25519 key, secret and digest-only bundle together in a root-only
-enrollment directory. Repeated first boot reuses matching state. Incomplete
-or mismatched state is preserved and refused. Use a signed PKCS#10 DER
+enrollment directory. Repeated first boot reuses matching state only after the
+complete saved preregistration record passes strict bounded base64, node/key/
+fingerprint/digest checks, and its `CSR_PRE` signature verifies with the stored
+key. Missing, malformed or inconsistent state is preserved and refused; no
+saved identity is overwritten or regenerated. Use a signed PKCS#10 DER
 `CSR_PRE` and an unpadded base64url secret for the shared protobuf string
 field. The default NoCloud seed enables IPv4 DHCP on Ubuntu's predictable
 Ethernet interface names.

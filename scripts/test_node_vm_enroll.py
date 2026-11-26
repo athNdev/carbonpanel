@@ -4,15 +4,19 @@
 Includes guest CLI tests with throwaway OpenSSL keys when OpenSSL is available.
 """
 import base64
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 ENROLL_PATH = ROOT / "packaging" / "node-vm" / "cloud-init" / "firstboot" / "enroll.py"
@@ -35,6 +39,20 @@ def repeating(pattern):
     def rng(n):
         return (pattern * ((n // len(pattern)) + 1))[:n]
     return rng
+
+
+class SavedFixtureKeyPair(enroll.FakeKeyPair):
+    """Stand-in for the guest OpenSSL key so saved-identity tests stay offline."""
+
+    def __init__(self, private_key_path):
+        super().__init__("fixture-key")
+        self.path = Path(private_key_path)
+
+    @classmethod
+    def generate(cls, private_key_path):
+        Path(private_key_path).write_bytes(b"SYNTHETIC-ED25519-PRIVATE-KEY")
+        os.chmod(private_key_path, 0o600)
+        return cls(private_key_path)
 
 
 class IdentityTests(unittest.TestCase):
@@ -206,6 +224,171 @@ class IdentityTests(unittest.TestCase):
 
     def test_guest_script_compiles(self):
         compile(ENROLL_PATH.read_text(), str(ENROLL_PATH), "exec")
+
+
+class SavedIdentityTests(unittest.TestCase):
+    """Saved-identity validation and CLI reuse without guest OpenSSL."""
+
+    def setUp(self):
+        self.policy = json.loads(POLICY_PATH.read_text())
+
+    def _save_identity(self, tmp, instance_id="instance-a", label="fixture-a"):
+        out = Path(tmp) / "enrollment"
+        out.mkdir(mode=0o700)
+        key_path = out / "node.key"
+        key_path.write_bytes(b"SYNTHETIC-ED25519-PRIVATE-KEY")
+        if os.name == "posix":
+            os.chmod(key_path, 0o600)
+            os.chmod(out, 0o700)
+        keypair = SavedFixtureKeyPair(key_path)
+        secret = base64.urlsafe_b64encode(
+            enroll.generate_secret(256, repeating(b"\x11")),
+        ).rstrip(b"=")
+        salt = enroll.generate_salt(16, repeating(b"\x22"))
+        node_id = enroll.derive_node_id(instance_id)
+        bundle, _, _ = enroll.build_preregistration_bundle(
+            node_id, label, salt, secret, keypair, self.policy,
+        )
+        enroll.write_identity(bundle, secret, out)
+        return out, node_id, bundle, secret
+
+    @staticmethod
+    def _snapshot(out):
+        return {path.name: path.read_bytes() for path in out.iterdir()}
+
+    @staticmethod
+    def _rewrite_bundle(out, bundle):
+        path = out / "enrollment-bundle.json"
+        path.write_text(json.dumps(bundle, sort_keys=True, indent=2) + "\n")
+        if os.name == "posix":
+            # Keep the fixture private even on filesystems that reset modes.
+            path.chmod(0o600)
+            out.chmod(0o700)
+
+    def _run_cli(self, out, instance_id="instance-a", label="fixture-a"):
+        stdout = io.StringIO()
+        argv = [
+            "first-boot", "--policy", str(POLICY_PATH),
+            "--instance-id", instance_id, "--node-label", label,
+            "--out-dir", str(out),
+        ]
+        with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair), \
+                contextlib.redirect_stdout(stdout):
+            code = enroll.main(argv)
+        return code, stdout.getvalue()
+
+    def test_first_boot_then_reboot_reuses_saved_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "enrollment"
+            code, output = self._run_cli(out)
+            self.assertEqual(code, 0)
+            self.assertEqual(set(json.loads(output)), {
+                "node_id", "approved_key_fingerprint", "bundle_path", "contract_ref",
+            })
+            first = self._snapshot(out)
+            self.assertEqual(set(first), {
+                "node.key", "enrollment-bundle.json", "enrollment-secret.bin",
+            })
+
+            code, reboot_output = self._run_cli(out)
+            self.assertEqual(code, 0)
+            self.assertEqual(self._snapshot(out), first)
+            self.assertEqual(json.loads(output), json.loads(reboot_output))
+
+    def test_cli_reuses_complete_saved_fixture_without_printing_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, node_id, bundle, secret = self._save_identity(tmp)
+            before = self._snapshot(out)
+            code, output = self._run_cli(out)
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(output)["node_id"], node_id)
+            self.assertEqual(json.loads(output)["bundle_path"],
+                             str(out / "enrollment-bundle.json"))
+            self.assertNotIn(secret.decode(), output)
+            self.assertNotIn(base64.b64encode(secret).decode(), output)
+            self.assertEqual(self._snapshot(out), before)
+
+            with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                self.assertEqual(
+                    enroll.load_identity(out, node_id, "fixture-a", self.policy), bundle,
+                )
+
+    def test_cli_refuses_saved_bundle_missing_csr_proof(self):
+        for field in ("csr_pre", "csr_pre_signature"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                out, _, _, _ = self._save_identity(tmp)
+                path = out / "enrollment-bundle.json"
+                bundle = json.loads(path.read_text())
+                del bundle[field]
+                self._rewrite_bundle(out, bundle)
+                before = self._snapshot(out)
+                with self.assertRaises(ValueError) as refused:
+                    self._run_cli(out)
+                self.assertIn(field, str(refused.exception))
+                self.assertEqual(self._snapshot(out), before)
+
+    def test_missing_preregistration_fields_are_refused_without_writes(self):
+        for field in sorted(enroll.REQUIRED_BUNDLE_FIELDS):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                out, node_id, _, secret = self._save_identity(tmp)
+                path = out / "enrollment-bundle.json"
+                bundle = json.loads(path.read_text())
+                del bundle[field]
+                self._rewrite_bundle(out, bundle)
+                before = self._snapshot(out)
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError) as refused:
+                        enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertIn(field, str(refused.exception))
+                self.assertNotIn(secret.decode(), str(refused.exception))
+                self.assertEqual(self._snapshot(out), before)
+
+    def test_malformed_oversized_or_inconsistent_records_are_refused(self):
+        cases = {
+            "malformed base64": lambda b: b.update(csr_pre="not-base64!!"),
+            "oversized base64": lambda b: b.update(
+                csr_pre=base64.b64encode(b"x" * (enroll.MAX_CSR_PRE_BYTES + 1)).decode(),
+            ),
+            "short salt": lambda b: b.update(enrollment_salt=base64.b64encode(b"x").decode()),
+            "oversized spki": lambda b: b.update(
+                approved_public_key_spki=base64.b64encode(
+                    b"x" * (enroll.MAX_SPKI_BYTES + 1),
+                ).decode(),
+            ),
+            "wrong proof": lambda b: b.update(
+                csr_pre_signature=base64.b64encode(b"\x00" * 64).decode(),
+            ),
+            "tampered csr": lambda b: b.update(
+                csr_pre=base64.b64encode(base64.b64decode(b["csr_pre"]) + b"\x00").decode(),
+            ),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                out, node_id, _, secret = self._save_identity(tmp)
+                path = out / "enrollment-bundle.json"
+                bundle = json.loads(path.read_text())
+                mutate(bundle)
+                self._rewrite_bundle(out, bundle)
+                before = self._snapshot(out)
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError) as refused:
+                        enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertNotIn(secret.decode(), str(refused.exception))
+                self.assertEqual(self._snapshot(out), before)
+
+    def test_malformed_secret_is_refused_without_writes(self):
+        for value in (b"not-base64!!", b"A" * 100):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                out, node_id, _, _ = self._save_identity(tmp)
+                path = out / "enrollment-secret.bin"
+                path.write_bytes(value)
+                if os.name == "posix":
+                    path.chmod(0o600)
+                before = self._snapshot(out)
+                with mock.patch.object(enroll, "OpenSSLKeyPair", SavedFixtureKeyPair):
+                    with self.assertRaises(ValueError):
+                        enroll.load_identity(out, node_id, "fixture-a", self.policy)
+                self.assertEqual(self._snapshot(out), before)
 
 
 @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("openssl"),

@@ -27,6 +27,7 @@ second encoder.
 """
 import argparse
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -67,6 +68,24 @@ FORBIDDEN_BUNDLE_FIELDS = frozenset({
     "enrollment_secret", "secret", "private_key", "privatekey", "token",
     "password", "passphrase", "secret_s", "s",
 })
+
+# Fields written by safe_bundle(); every saved identity must carry all of them.
+BUNDLE_FIELDS = frozenset({
+    "node_label", "enrollment_salt", "enrollment_secret_digest", "csr_pre",
+    "csr_pre_signature", "approved_public_key_spki", "approved_key_fingerprint",
+    "node_id", "bootstrap_scopes", "object_id_binding", "contract_ref",
+    "contract_is_shared", "fork_allowed",
+})
+REQUIRED_BUNDLE_FIELDS = BUNDLE_FIELDS
+BOOTSTRAP_SCOPES = ("BeginEnrollmentChallenge", "ClaimEnrollment")
+
+# Bounds reject malformed or oversized records before any crypto work. The salt
+# and secret bounds are overridden by the checked-in policy when it is loaded.
+DEFAULT_SECRET_BYTES = 32
+DEFAULT_SALT_BYTES = 16
+MAX_SPKI_BYTES = 4096
+MAX_CSR_PRE_BYTES = 16384
+MAX_CSR_PRE_SIGNATURE_BYTES = 64
 
 
 class KeyPair:
@@ -310,6 +329,13 @@ def verify_claim(keypair, context, signature):
     return bool(keypair.verify(context, signature))
 
 
+def verify_csr_pre(keypair, csr_pre, signature):
+    """Verify the saved CSR_PRE proof with the stored owning Ed25519 key."""
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment verification is Ed25519-only")
+    return bool(keypair.verify(csr_pre, signature))
+
+
 def _check_claim_context(context):
     # The server verifies the exact context constructed from its stored fields.
     # The opaque nonce and channel bytes may contain NUL and are not parsed here.
@@ -366,13 +392,7 @@ def assert_bundle_has_no_secret(bundle, secret, salt=None):
 
 def safe_bundle(bundle):
     """Return a copy with only allowlisted, non-secret fields."""
-    allowed = {
-        "node_label", "enrollment_salt", "enrollment_secret_digest", "csr_pre",
-        "csr_pre_signature", "approved_public_key_spki", "approved_key_fingerprint",
-        "node_id", "bootstrap_scopes", "object_id_binding", "contract_ref",
-        "contract_is_shared", "fork_allowed",
-    }
-    return {k: v for k, v in bundle.items() if k in allowed}
+    return {k: v for k, v in bundle.items() if k in BUNDLE_FIELDS}
 
 
 def write_identity(bundle, secret, out_dir):
@@ -410,7 +430,96 @@ def _load_policy(path):
     return json.loads(Path(path).read_text())
 
 
-def load_identity(out, node_id, node_label):
+def _bounded_b64(bundle, name, min_bytes, max_bytes):
+    """Decode one canonical, bounded standard-base64 bundle field."""
+    value = bundle.get(name)
+    if not isinstance(value, str) or not value:
+        raise ValueError("enrollment bundle field %s must be a non-empty base64 string" % name)
+    if len(value) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError("enrollment bundle field %s exceeds its %d-byte bound" % (name, max_bytes))
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("enrollment bundle field %s is not valid base64" % name) from None
+    if not min_bytes <= len(raw) <= max_bytes:
+        raise ValueError(
+            "enrollment bundle field %s must decode to %d-%d bytes" % (name, min_bytes, max_bytes),
+        )
+    if _b64(raw) != value:
+        raise ValueError("enrollment bundle field %s is not canonical base64" % name)
+    return raw
+
+
+def _bounded_b64url(secret, min_bytes, max_bytes):
+    """Decode the root-only secret as canonical, bounded unpadded base64url."""
+    if not isinstance(secret, bytes) or not secret:
+        raise ValueError("enrollment secret must be non-empty unpadded base64url")
+    if len(secret) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError("enrollment secret exceeds its %d-byte bound" % max_bytes)
+    padded = secret + b"=" * (-len(secret) % 4)
+    try:
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("enrollment secret is not valid unpadded base64url") from None
+    if not min_bytes <= len(raw) <= max_bytes:
+        raise ValueError("enrollment secret must decode to %d-%d bytes" % (min_bytes, max_bytes))
+    if base64.urlsafe_b64encode(raw).rstrip(b"=") != secret:
+        raise ValueError("enrollment secret is not canonical unpadded base64url")
+    return raw
+
+
+def _identity_sizes(policy):
+    """Expected secret and salt byte counts from the first-boot policy."""
+    if policy is None:
+        return DEFAULT_SECRET_BYTES, DEFAULT_SALT_BYTES
+    first_boot = policy.get("policy", policy).get("first_boot", {})
+    secret_bits = int(first_boot.get("generate_secret_bits", DEFAULT_SECRET_BYTES * 8))
+    salt_bytes = int(first_boot.get("generate_salt_bytes", DEFAULT_SALT_BYTES))
+    if secret_bits < 256 or secret_bits % 8:
+        raise ValueError("enrollment policy secret size is invalid")
+    if salt_bytes < 16:
+        raise ValueError("enrollment policy salt size is invalid")
+    return secret_bits // 8, salt_bytes
+
+
+def _require_sha256_hex(bundle, name):
+    value = bundle.get(name)
+    if (not isinstance(value, str) or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)):
+        raise ValueError("enrollment bundle field %s must be a lowercase SHA-256 hex digest" % name)
+    return value
+
+
+def _validate_bundle_schema(bundle):
+    """Require the complete saved preregistration record and safe metadata."""
+    if not isinstance(bundle, dict):
+        raise ValueError("enrollment bundle must be a JSON object")
+    missing = sorted(REQUIRED_BUNDLE_FIELDS - set(bundle))
+    if missing:
+        raise ValueError("enrollment bundle is missing required fields: %s" % ", ".join(missing))
+    if not isinstance(bundle.get("node_id"), str) or not bundle["node_id"]:
+        raise ValueError("enrollment bundle field node_id must be a non-empty string")
+    if not isinstance(bundle.get("node_label"), str):
+        raise ValueError("enrollment bundle field node_label must be a string")
+    for name in ("object_id_binding", "contract_ref"):
+        if not isinstance(bundle.get(name), str) or not bundle[name]:
+            raise ValueError("enrollment bundle field %s must be a non-empty string" % name)
+    scopes = bundle.get("bootstrap_scopes")
+    if (not isinstance(scopes, list) or not scopes
+            or not all(isinstance(scope, str) and scope for scope in scopes)):
+        raise ValueError("enrollment bundle bootstrap_scopes must be a non-empty string list")
+    if scopes != list(BOOTSTRAP_SCOPES):
+        raise ValueError("enrollment bundle bootstrap_scopes are not the bounded enrollment scopes")
+    if bundle.get("contract_is_shared") is not True:
+        raise ValueError("enrollment bundle contract_is_shared must be true")
+    if bundle.get("fork_allowed") is not False:
+        raise ValueError("enrollment bundle fork_allowed must be false")
+    _require_sha256_hex(bundle, "enrollment_secret_digest")
+    _require_sha256_hex(bundle, "approved_key_fingerprint")
+
+
+def load_identity(out, node_id, node_label, policy=None):
+    """Load and validate an already-published identity; never writes or regenerates."""
     if out.is_symlink() or not stat.S_ISDIR(out.stat().st_mode):
         raise ValueError("enrollment state must be a local directory")
     if os.name == "posix" and out.stat().st_mode & 0o077:
@@ -419,23 +528,37 @@ def load_identity(out, node_id, node_label):
         info = (out / name).lstat()
         if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and info.st_mode & 0o077):
             raise ValueError("enrollment identity files must be private regular files")
-    bundle = json.loads((out / "enrollment-bundle.json").read_text())
+    try:
+        bundle = json.loads((out / "enrollment-bundle.json").read_text())
+    except ValueError:
+        raise ValueError("enrollment bundle is not valid JSON") from None
+    _validate_bundle_schema(bundle)
     secret = (out / "enrollment-secret.bin").read_bytes()
-    keypair = OpenSSLKeyPair(out / "node.key")
-    salt = base64.b64decode(bundle["enrollment_salt"], validate=True)
+    secret_bytes, salt_bytes = _identity_sizes(policy)
+    _bounded_b64url(secret, secret_bytes, secret_bytes)
+    salt = _bounded_b64(bundle, "enrollment_salt", salt_bytes, salt_bytes)
+    spki = _bounded_b64(bundle, "approved_public_key_spki", 1, MAX_SPKI_BYTES)
+    csr_pre = _bounded_b64(bundle, "csr_pre", 1, MAX_CSR_PRE_BYTES)
+    csr_pre_signature = _bounded_b64(
+        bundle, "csr_pre_signature", 1, MAX_CSR_PRE_SIGNATURE_BYTES,
+    )
     assert_bundle_has_no_secret(bundle, secret, salt)
-    if (bundle["node_id"] != node_id or bundle["node_label"] != node_label
-            or bundle["approved_key_fingerprint"] != keypair.fingerprint()
-            or bundle["approved_public_key_spki"] != _b64(keypair.spki_der())
+    if bundle["node_id"] != node_id or bundle["node_label"] != node_label:
+        raise ValueError("enrollment identity does not match guest state")
+    keypair = OpenSSLKeyPair(out / "node.key")
+    if (bundle["approved_key_fingerprint"] != keypair.fingerprint()
+            or spki != keypair.spki_der()
             or bundle["enrollment_secret_digest"] != compute_digest(salt, secret)):
         raise ValueError("enrollment identity does not match guest state")
+    if not verify_csr_pre(keypair, csr_pre, csr_pre_signature):
+        raise ValueError("enrollment CSR_PRE proof does not verify with the stored key")
     return bundle
 
 
 def ensure_identity(out, instance_id, node_label, policy):
     node_id = derive_node_id(instance_id)
     if out.exists() or out.is_symlink():
-        return load_identity(out, node_id, node_label)
+        return load_identity(out, node_id, node_label, policy)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".enrollment-", dir=out.parent) as tmp:
         # Publish the key, secret, and bundle together. A failed first boot can
@@ -450,7 +573,7 @@ def ensure_identity(out, instance_id, node_label, policy):
         except OSError:
             if not out.exists():
                 raise
-            return load_identity(out, node_id, node_label)
+            return load_identity(out, node_id, node_label, policy)
         return identity["bundle"]
 
 
