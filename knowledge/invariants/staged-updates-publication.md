@@ -12,21 +12,20 @@ verified: { by: agent:opencode, at: 2026-11-26 }
 ---
 # Rule
 
-Publishing a due batch is journaled. A future timestamp or an unfinished idle
-stretch stays staged across an incidental restart. Idle does not fire unless
-the same player-count provider used by freeze and deep sleep is installed, and
-the time that stretch started is stored on the batch. A player joining clears
-it. Deep sleep commits the batch onto the stopped server and does not start
-the JVM. A running server is saved and restarted once. A frozen server gets a
-real stop and start and is left running. If that publish fails, the previous
-files and config are restored from the snapshot and the batch stays open. An
-interrupted publication or an unprovable commit outcome also keeps the full
-snapshot restore. Failed publications keep rows staged and reconcile
-rolled-back batch configs; retries after completed publication only finish
-bookkeeping. A live config field that moved after it was staged stops the
-publish before anything is written. A reviewed mod candidate is validated
-against the effective Docker `ServerConfig` type and version, and a runtime
-config rollback is refused while such a candidate is still staged.
+Publishing a due batch is journaled. A future timestamp or unfinished idle
+stretch stays staged across an incidental restart. Idle fires only with the
+freeze/deep-sleep player-count provider installed; the stretch start is stored
+on the batch and a player joining clears it. Deep sleep commits onto the
+stopped server without starting the JVM; a running server is saved and
+restarted once; a frozen server is stopped, started and left running. If that
+publish fails, the previous files and config are restored and the batch stays
+open. Interrupted or unprovable timed publications also restore the full
+snapshot. Failed publications keep rows staged and reconcile rolled-back batch
+configs; retries after completed publication only finish bookkeeping. A live config field that
+moved after it was staged stops the publish before anything is written. A
+reviewed mod candidate is validated against the effective Docker
+`ServerConfig` type and version, and a runtime config rollback is refused while
+such a candidate is still staged.
 
 The publisher owns the server data path exclusively from before the undo
 snapshot through publication and any rollback. Ordinary panel file writes,
@@ -39,29 +38,21 @@ that guard is typed and bound to the target, but an out-of-band process is not
 an atomic compare-and-swap. See ADR 0056.
 
 A restart selects its file and config rows in one exclusive snapshot. When a
-next-restart batch exists, only that batch plus legacy unbatched rows are
-included; an at-time or idle batch is never published by an incidental restart.
-Legacy unbatched rows cover both the zero-string batch id and SQL NULL written
-before batches existed. Rows already applied after the last start are included
-so a safe failure can return only this attempt's work to staged without
-applying them twice. A failure before this attempt mutated the runtime, or a
-typed Docker preflight, compensates only the files and config this attempt
-applied. Rows already applied before the snapshot stay applied because a prior
-replacement may embed them. That durable decision does not read the mutable
-server status, because a wake can leave DEEPSLEEP after a verified compensating
-stop and the reconciler can move a retained ERROR to STOPPED. Any other attempted
-runtime outcome, including a transport timeout or an accepted replacement, is
-retained in full: a stopped container is not proof that it is the old, unstaged
-one. Config-only finalize never opens file recovery storage. Applied content
-rows are durable cleanup evidence: a retry finishes that idempotent cleanup
-instead of republishing, and cleanup runs before a cron-coexistence batch is
-parked so the elapsed timed window can retry.
+next-restart batch exists, only that batch plus legacy unbatched rows (zero
+string or SQL NULL) are included; at-time and idle batches are excluded. A
+failure before this attempt mutated the runtime, or a typed Docker preflight,
+compensates only the files and config this attempt applied. Rows applied before
+the snapshot stay applied because a prior replacement may embed them; that
+decision reads durable rows, not mutable status (a wake can leave DEEPSLEEP and
+the reconciler can turn a retained ERROR into STOPPED). Any other attempted
+runtime outcome, including a timeout or accepted replacement, is retained in
+full. Config-only finalize never opens file recovery storage. Applied content
+rows are durable cleanup evidence: retry the idempotent cleanup instead of
+republishing, and clean up before parking a cron-coexistence batch.
 
-A modpack task can join that batch. The fetched tree is copied into the
-staging directory and the live pack stays as it is until the window. The same
-window commits the pack with any staged config, mods, and datapacks. A module
-config or container-spec change can join the same batch. The live module row
-stays as it is until the window, which recreates that module container when
-the spec changed and still does not start a deep-sleeping server.
+A modpack task or a module config/container-spec change can join the same
+batch. The fetched tree and live module row stay as they are until the window,
+which commits them; a module recreate still does not start a deep-sleeping
+server.
 
 See [timed/idle publisher limits](../failures/staged-publication-timed-outcome.md) and [storage recovery](../../docs/storage-streaming.md).
