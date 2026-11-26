@@ -113,9 +113,10 @@ UEFI is the declared target and the qualification helper's default. It resolves
 OVMF/edk2 or fails closed (use `CARBON_OVMF_CODE`/`CARBON_OVMF_VARS` for a
 non-standard host) rather than falling back to BIOS. On a capable disposable
 runner, `--firmware uefi --machine q35 --disk-size 20G` exercises the declared
-profile; that expanded-disk profile is not yet qualified. The helper copies a
-fresh private UEFI variable store per run and never writes system firmware. See
-[QEMU boot qualification](qualification/VM-BOOT-QUALIFICATION.md).
+profile. The isolated amd64 QEMU/TCG run covers filesystem expansion, a second
+boot and saved identity persistence. The helper copies a fresh private UEFI
+variable store per run and never writes system firmware. See
+[QEMU boot qualification](qualification/VM-BOOT-QUALIFICATION.md#16-expanded-20-gib-q35-boot-and-identity-persistence-2026-11-26).
 
 Use a fresh `--work-dir` for every attempt. The helper reserves the attempt
 output set before writing a seed, overlay or report and refuses to reuse a prior

@@ -36,8 +36,9 @@ the helper reserves its output set before writing a seed, overlay or report,
 refuses reuse without changing prior bytes, rejects unsupported
 architecture/firmware/machine combinations before outputs, and persists a
 failure report when QEMU cannot launch. Measure network and identity persistence
-in the guest. The 20 GiB q35 expanded-disk profile, arm64 and live mTLS
-enrollment remain unqualified. Shared enrollment authority checks validate
+in the guest. The disposable amd64 20 GiB q35 run covers disk expansion and
+identity persistence across a clean second boot. The arm64 and supported-host
+matrix remain open. Shared enrollment authority checks validate
 proof and credential scope. Live mTLS enrollment, heartbeat and daemon health
 require an installed node agent and a mounted controller service. See
 [disposable VM qualification](../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md).

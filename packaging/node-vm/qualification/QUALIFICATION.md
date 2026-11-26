@@ -32,13 +32,13 @@ used only by offline tests; artifact mode fails closed on them.
 | Persistent volume safety | Copy-only planner fixtures | Real volume import/recovery |
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids + observed first-boot bundle for the qualified instance | Two concurrently live VMs with completed out-of-band registration |
 | Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
-| Clean boot and identity persistence | Two disposable UEFI/TCG boots; cloud-init completion, DHCP lease, root-only bundle/key/secret and a non-repeated second boot | Live host deployment, arm64 boot, 20 GiB q35 boot, second clean shutdown receipt |
+| Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. | arm64 boot, Proxmox/libvirt host deployment and live standby recovery |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
-## Current disposable-run evidence (2026-11-19/20)
+## Current disposable-run evidence (2026-11-19 through 2026-11-26)
 
 Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
-12–14; that file owns the exact serial-log, seed, script and firmware digests.
+12–16. That file records serial-log, seed, script and firmware digests.
 
 - The verified amd64 base booted twice under UEFI/TCG on the same disposable
   3.5 GiB overlay. The first boot completed NoCloud cloud-init, acquired IPv4
@@ -53,19 +53,20 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   fresh signature to the checkout's shared Go enrollment authority. Valid proof
   was accepted with a matching certificate; changed signature, replay and wrong
   node scope were refused.
-- The 20 GiB q35 overlay entered emergency mode. The successful UEFI retry used
-  i440fx at the base image's 3.5 GiB virtual size, so the declared 20 GiB disk
-  profile remains unqualified. Live guest-to-authority registration over SSH,
+- A fresh 20 GiB q35 overlay booted twice with UEFI/TCG. The first boot grew
+  the root partition and ext4. The second retained the byte-identical bundle
+  and private file modes, emitted no new enrollment identity, and shut down
+  cleanly through ACPI. Live guest-to-authority registration over SSH,
   controller mTLS, heartbeat, daemon health, arm64 and the Proxmox/libvirt
-  deployment matrix also remain open.
+  deployment matrix remain open.
 - `scripts/node_vm_boot_qual.py` now resolves OVMF/edk2 for UEFI (failing closed
   instead of falling back to BIOS), copies a fresh private variable store per
   run, and can request an expanded qcow2 overlay. Each attempt requires a fresh
   work directory: the helper reserves its outputs before writing a seed, overlay
   or report, refuses reuse without changing prior bytes, rejects unsupported
   target combinations before outputs, and persists launch-failure evidence.
-  Those command paths are unit-tested only; they do not close the 20 GiB boot
-  gate.
+  Unit tests cover those command paths. Section 16 records the separate
+  expanded-disk guest evidence.
 
 ## Qualification scenarios (remaining runs on owned disposable VMs only)
 
@@ -73,11 +74,12 @@ Each requires a freshly owned, disposable VM that is torn down after the run;
 worlds/backups from other installations are never touched.
 
 1. **Clean boot.** Import QCOW2 + NoCloud seed, boot, verify cloud-init applies
-   and first boot writes a digest-only bundle to a root-only local path. Verify
+   and first boot writes the enrollment bundle to a root-only local path.
+   Confirm the bundle carries only a digest of the enrollment secret. Verify
    no secret appears in seed, serial console output or VM metadata. Verify a
-   unique `node_id` for two VMs with different instance-ids. *Partially observed
-   on the amd64 3.5 GiB overlay (identity persistence, second boot); the 20 GiB
-   profile, arm64 and two concurrent VMs remain to run.*
+   unique `node_id` for two VMs with different instance-ids. *Disposable amd64
+   tests cover identity persistence across second boots in both disk profiles.
+   The arm64 and two concurrent VM runs remain open.*
 2. **Enrollment refusal.** With the SHARED ADR0019 contract, verify a valid
    operator-approved key + fresh post-challenge signature enrolls; a mismatched
    key, replayed nonce, caller-declared fingerprint or CSR_PRE-as-proof is

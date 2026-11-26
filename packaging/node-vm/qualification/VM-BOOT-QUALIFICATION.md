@@ -390,8 +390,8 @@ systemd timed out waiting for `BOOT` and `UEFI` device labels. This run's
 serial log SHA256 was
 `6e4d11cb9b420a4f0a8e85c93212297107072cc276816c8770926266db5c023d`.
 The retry used OVMF with the i440fx machine and an overlay at the base image's
-original 3.5 GiB virtual size. The expanded 20 GiB profile still needs
-qualification.
+original 3.5 GiB virtual size. Section 16 records the later expanded-profile
+run.
 
 The retry mounted `/boot` and `/boot/efi`, obtained an IPv4 DHCP lease on
 `ens3`, and loaded the NoCloud seed from `/dev/vdb`. At 07:07:38 UTC
@@ -456,7 +456,35 @@ models the declared UEFI target instead of silently booting SeaBIOS:
   A QEMU launch failure also persists that report with a `FAIL` boot-attempt
   gate and returns non-zero instead of escaping with no JSON.
 
-These paths are unit-tested only. All 72 node-VM fixtures pass on Windows with
-two Linux-only OpenSSL guest fixtures skipped; they do not qualify the 20 GiB
-q35 profile or any open live-enrollment gate. A future run must provide fresh
-serial/disk evidence on a disposable guest.
+All 72 node-VM fixtures at this checkpoint passed on Windows with two
+Linux-only OpenSSL guest fixtures skipped. Section 16 records the later
+guest-level evidence.
+
+## 16. Expanded 20 GiB q35 boot and identity persistence (2026-11-26)
+
+The disposable amd64 run exercised commit
+`f7524831d56114caf28a852bdee5ae3cab97c659` with QEMU 7.2.22, q35, OVMF UEFI
+and software acceleration. It used the pinned Ubuntu base read-only, a
+distinct sparse 20 GiB overlay, a NoCloud seed and a private UEFI variable
+store. The container runner used an isolated network namespace with networking
+disabled.
+
+- The first guest completed cloud-init and reached its reboot request.
+  `growpart` expanded the root partition to 20,400,029,184 bytes, and
+  `resize2fs` expanded ext4 to 4,980,475 blocks of 4,096 bytes. The initial
+  GPT size warning cleared after the expansion. The first serial log SHA-256
+  was `fda744c3d71b4dcc2475bba8ee08ea96e9a0d9922509211b96f663431f3ee721`.
+- The second guest booted from verified byte-identical copies of the first
+  run's overlay, seed and UEFI variables. Cloud-init completed, a private QMP
+  socket sent the ACPI power button, and QEMU exited normally after guest
+  shutdown. The second serial log SHA-256 was
+  `618da070f22b22fc408c600cebda7507ae70cf9f52ef2d2ff59448317aaabc54`.
+- Offline inspection found byte-identical enrollment bundles and the original
+  node ID and public-key fingerprint. The enrollment directory remained
+  root-owned with mode `0700`. The bundle, key and secret files retained
+  mode `0600`. The second serial log contained no new enrollment identity
+  marker. Read-only ext4 and QCOW2 integrity checks passed after shutdown.
+
+This qualifies these two boots on the disposable amd64 QEMU/TCG fixture.
+Managed controller enrollment, mTLS, heartbeat, node daemon health, arm64
+and the Proxmox/libvirt host matrix still need separate evidence.
