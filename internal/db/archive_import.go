@@ -40,11 +40,22 @@ type ArchiveImport struct {
 	// StorageRoot records the allocation root that was validated when the
 	// destination was created. Cleanup must resolve the same root; a changed
 	// node storage configuration must not redirect removal to another tree.
+	// Remote Docker workers mount every host root at a constant path, so this
+	// alone is not a host allocation identity.
 	StorageRoot string
+	// AllocationEndpoint is the sanitised controller/daemon endpoint that owned
+	// the allocation. AllocationHostRoot is the host source bound at creation.
+	// Together with StorageRoot they distinguish two host paths that the worker
+	// presents under the same Root(). Credentials are never stored here.
+	AllocationEndpoint string
+	AllocationHostRoot string
 	// ArchiveDigest binds the submission to the exact independently verified
 	// archive content and manifest. A restart may supply a fresh upload id only
 	// when the verified content is identical.
 	ArchiveDigest string
+	// ArchiveUploadID is the upload identity that first passed verification.
+	// It permits an exact replay after the upload session has expired.
+	ArchiveUploadID string
 	// ClaimToken is the local ownership proof stored in the destination marker.
 	ClaimToken string `gorm:"not null"`
 	Phase      string `gorm:"not null"`
@@ -56,7 +67,7 @@ type ArchiveImport struct {
 // one transaction, so a crash cannot leave a request claim without the durable
 // record needed to recover its destination. A repeat of the same key returns
 // the existing intent and claimed=false.
-func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, serverID, dataPath, archiveDigest string) (*ArchiveImport, bool, error) {
+func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, serverID, dataPath, archiveDigest, archiveUploadID string) (*ArchiveImport, bool, error) {
 	requestKey = strings.TrimSpace(requestKey)
 	if requestKey == "" || kind == "" || serverID == "" || dataPath == "" {
 		return nil, false, errors.New("archive import claim requires a request key, kind, server and destination")
@@ -99,13 +110,14 @@ func (s *Store) ClaimArchiveImport(ctx context.Context, requestKey, kind, server
 		}
 
 		intent = ArchiveImport{
-			RequestKey:    requestKey,
-			Kind:          kind,
-			ServerID:      serverID,
-			DataPath:      dataPath,
-			ArchiveDigest: archiveDigest,
-			ClaimToken:    uuid.NewString(),
-			Phase:         ArchiveImportClaimed,
+			RequestKey:      requestKey,
+			Kind:            kind,
+			ServerID:        serverID,
+			DataPath:        dataPath,
+			ArchiveDigest:   archiveDigest,
+			ArchiveUploadID: archiveUploadID,
+			ClaimToken:      uuid.NewString(),
+			Phase:           ArchiveImportClaimed,
 		}
 		claimed = true
 		return tx.Create(&intent).Error
@@ -140,11 +152,15 @@ func (s *Store) SetArchiveImportNode(ctx context.Context, requestKey, nodeID str
 // SetArchiveImportAllocation records the node and the exact allocation root
 // that were validated before the destination directory was created. Cleanup
 // resolves the same root or refuses rather than guessing at a new location.
-func (s *Store) SetArchiveImportAllocation(ctx context.Context, requestKey, nodeID, storageRoot string) error {
+func (s *Store) SetArchiveImportAllocation(ctx context.Context, requestKey, nodeID, storageRoot, endpoint, hostRoot string) error {
 	return s.db.WithContext(ctx).Model(&ArchiveImport{}).
 		Where("request_key = ?", strings.TrimSpace(requestKey)).
 		Updates(map[string]any{
-			"node_id": nodeID, "storage_root": storageRoot, "updated_at": time.Now().UTC(),
+			"node_id":              nodeID,
+			"storage_root":         storageRoot,
+			"allocation_endpoint":  endpoint,
+			"allocation_host_root": hostRoot,
+			"updated_at":           time.Now().UTC(),
 		}).Error
 }
 

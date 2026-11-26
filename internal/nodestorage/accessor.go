@@ -228,6 +228,10 @@ type NodeInfo struct {
 	IsLocal               bool
 	StorageRoot           string
 	ControllerStorageRoot string
+	// Endpoint is the Docker daemon endpoint for this node. It may contain
+	// deployment credentials, so callers that persist an allocation identity
+	// must sanitise it first; it is never part of a storage path.
+	Endpoint string
 }
 
 // LocalNode returns the storage view of the controller's own daemon.

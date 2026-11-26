@@ -166,14 +166,34 @@ func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gamepla
 			return err
 		}
 		if archiveRequestKey != "" {
+			key := strings.TrimSpace(archiveRequestKey)
+			var intent ArchiveImport
+			if err := tx.Where("request_key = ?", key).First(&intent).Error; err != nil {
+				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence: %w", archiveRequestKey, err)
+			}
 			result := tx.Model(&ArchiveImport{}).
-				Where("request_key = ?", strings.TrimSpace(archiveRequestKey)).
+				Where("request_key = ?", key).
 				Update("phase", ArchiveImportCommitted)
 			if result.Error != nil {
 				return result.Error
 			}
 			if result.RowsAffected != 1 {
 				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence", archiveRequestKey)
+			}
+			// Persist the replay receipt in the same transaction as the server
+			// row. Marker cleanup may fail or run later; a committed replay must
+			// still be bound to the archive that was verified.
+			receipt := tx.Model(&IdempotencyKey{}).
+				Where("request_id = ? AND server_id = ?", key, server.ID).
+				Updates(map[string]any{
+					"archive_digest":    intent.ArchiveDigest,
+					"archive_upload_id": intent.ArchiveUploadID,
+				})
+			if receipt.Error != nil {
+				return receipt.Error
+			}
+			if receipt.RowsAffected != 1 {
+				return fmt.Errorf("archive replay receipt %q is missing; refusing to publish without durable replay evidence", archiveRequestKey)
 			}
 		}
 		updates := make(map[string]any, 5)

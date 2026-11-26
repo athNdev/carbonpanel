@@ -13,7 +13,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	first, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-1", "data/servers/one_srv-1", "digest-a")
+	first, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-1", "data/servers/one_srv-1", "digest-a", "upload-a")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 		t.Fatalf("idempotency row = %+v, err=%v", key, err)
 	}
 
-	second, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-2", "data/servers/two_srv-2", "digest-a")
+	second, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind-a", "srv-2", "data/servers/two_srv-2", "digest-a", "upload-a")
 	if err != nil {
 		t.Fatalf("repeat claim: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestClaimArchiveImportIsAtomicWithIdempotency(t *testing.T) {
 		t.Fatalf("repeat claim = %+v claimed=%v", second, claimed)
 	}
 
-	if _, _, err := store.ClaimArchiveImport(ctx, "request-key", "kind-b", "srv-3", "data/servers/three_srv-3", "digest-b"); !errors.Is(err, ErrRequestIDReused) {
+	if _, _, err := store.ClaimArchiveImport(ctx, "request-key", "kind-b", "srv-3", "data/servers/three_srv-3", "digest-b", "upload-b"); !errors.Is(err, ErrRequestIDReused) {
 		t.Fatalf("different kind = %v, want ErrRequestIDReused", err)
 	}
 }
@@ -44,7 +44,7 @@ func TestArchiveImportNodeAndPhaseAreTargeted(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest")
+	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest", "upload")
 	if err != nil || !claimed {
 		t.Fatalf("claim: %v claimed=%v", err, claimed)
 	}
@@ -74,7 +74,7 @@ func TestReleaseArchiveImportClaimRequiresOwnership(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest")
+	intent, claimed, err := store.ClaimArchiveImport(ctx, "request-key", "kind", "srv-1", "data/servers/one_srv-1", "digest", "upload")
 	if err != nil || !claimed {
 		t.Fatalf("claim: %v claimed=%v", err, claimed)
 	}

@@ -230,6 +230,63 @@ func TestExportServerArchiveRefusesWritableAttachedModules(t *testing.T) {
 	require.Contains(t, err.Error(), "can still write the server data directory")
 }
 
+// The expected mount resolver and the live-mount verifier must agree on an
+// ancestor of the data directory. A read-only ancestor is a matching safe
+// mount; a writable one still reaches the data root and is refused.
+func TestExportServerArchiveDataAncestorMount(t *testing.T) {
+	for _, readOnly := range []bool{true, false} {
+		name := "writable ancestor refused"
+		if readOnly {
+			name = "read-only ancestor accepted"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, _ := newDockerPrivilegeTestService(t)
+			svc.hostPortBound = func(int) bool { return false }
+			downloads := download.NewManager(t.TempDir(), time.Hour, svc.log)
+			t.Cleanup(downloads.Stop)
+			svc.SetServerArchiveDownloads(downloads)
+
+			ctx := ctxWithRole("operator")
+			server := &db.Server{
+				ID: "archive-ancestor-source", Name: "Ancestor Source", NodeID: "test-node",
+				Status: db.StatusStopped, ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1",
+				Memory: 1024, MaxPlayers: 10, Port: 25721,
+				DataPath: filepath.Join(svc.config.Storage.DataDir, "servers", "archive-ancestor-source"),
+			}
+			ancestor := filepath.Dir(server.DataPath)
+			svc.config.Storage.BackupDir = ancestor
+			require.NoError(t, svc.store.CreateServer(ctx, server))
+			writeArchiveFixture(t, filepath.Join(server.DataPath, "world", "level.dat"), "world")
+			require.NoError(t, svc.store.CreateModule(ctx, &db.Module{
+				ID: "archive-ancestor-module", Name: "Backup", ServerID: server.ID,
+				TemplateID: "custom", NodeID: server.NodeID, Status: db.ModuleStatusStopped,
+				ContainerID: "ancestor-container",
+				VolumeOverrides: `[{"source":"` + filepath.ToSlash(ancestor) +
+					`","target":"/backup","read_only":` + map[bool]string{true: "true", false: "false"}[readOnly] + `}]`,
+			}))
+			svc.inspectArchiveContainer = func(context.Context, string, string) (archiveContainerObservation, error) {
+				return archiveContainerObservation{
+					Status: db.StatusStopped,
+					Mounts: []docker.ContainerBindMount{{
+						Source: ancestor, Target: "/backup", ReadOnly: readOnly,
+					}},
+				}, nil
+			}
+
+			_, err := svc.ExportServerArchive(ctx, connect.NewRequest(&v1.ExportServerArchiveRequest{
+				ServerId: server.ID, Format: v1.ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_ZIP,
+				Consistency: v1.ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED,
+			}))
+			if readOnly {
+				require.NoError(t, err)
+				return
+			}
+			require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+			require.Contains(t, err.Error(), "can still write the server data directory")
+		})
+	}
+}
+
 // A stopped module with a read-only configuration is still unsafe if the
 // daemon's existing container carries an older mount set. Export compares the
 // stored configuration with the live effective mounts, and a concurrent module
@@ -384,6 +441,8 @@ func writeArchiveFixture(t *testing.T, destination, content string) {
 // controller path as the remote daemon's declared storage root.
 type archiveFixtureTransport struct {
 	root           string
+	workerRoot     string
+	failMarker     bool
 	interruptMu    sync.Mutex
 	interruptWrite context.CancelFunc
 }
@@ -400,7 +459,21 @@ func (a *archiveFixtureTransport) OpenStorageRoot(ctx context.Context, _ nodesto
 	return a.open(ctx, a.root)
 }
 
-func (a *archiveFixtureTransport) open(ctx context.Context, root string) (*storageworker.RemoteAccessor, error) {
+// archiveFixtureAccessor models a remote Docker worker whose mounted root is
+// constant regardless of the host path bound into it.
+type archiveFixtureAccessor struct {
+	*storageworker.RemoteAccessor
+	workerRoot string
+}
+
+func (a *archiveFixtureAccessor) Root() string {
+	if a.workerRoot != "" {
+		return a.workerRoot
+	}
+	return a.RemoteAccessor.Root()
+}
+
+func (a *archiveFixtureTransport) open(ctx context.Context, root string) (*archiveFixtureAccessor, error) {
 	local, err := nodestorage.NewLocal(root)
 	if err != nil {
 		return nil, err
@@ -426,13 +499,20 @@ func (a *archiveFixtureTransport) open(ctx context.Context, root string) (*stora
 		_ = closeWorker()
 		return nil, err
 	}
-	return storageworker.NewRemoteAccessor(session), nil
+	return &archiveFixtureAccessor{RemoteAccessor: storageworker.NewRemoteAccessor(session), workerRoot: a.workerRoot}, nil
 }
 
 // archiveFixtureFS cancels once at the first attempted bulk write.
 type archiveFixtureFS struct {
 	nodestorage.AllocationRoot
 	transport *archiveFixtureTransport
+}
+
+func (f archiveFixtureFS) WriteFile(rel string, data []byte) error {
+	if f.transport.failMarker && strings.HasSuffix(filepath.ToSlash(rel), "/"+archiveOwnershipMarker) {
+		return errors.New("injected ownership marker write failure")
+	}
+	return f.AllocationRoot.WriteFile(rel, data)
 }
 
 func (f archiveFixtureFS) BeginWrite(ctx context.Context, path string, limit int64) (storageworker.AtomicWriter, error) {

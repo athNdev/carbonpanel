@@ -1051,6 +1051,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	var imported *archiveImport
 	var archiveIntent *storage.ArchiveImport
 	var archiveCleanup func() error
+	var archiveRelease func()
 	var archiveCleanupNeeded bool
 	var archiveCommitted bool
 	var archivePath string
@@ -1082,7 +1083,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			// New submission: record the destination and the verified content
 			// identity in the same transaction as the idempotency claim.
 			archivePath = s.archiveDataPath(msg.Name, serverUUID)
-			intent, claimed, err := s.store.ClaimArchiveImport(ctx, imported.replayKey, imported.replayKind, serverUUID, archivePath, imported.digest)
+			intent, claimed, err := s.store.ClaimArchiveImport(ctx, imported.replayKey, imported.replayKind, serverUUID, archivePath, imported.digest, imported.uploadID)
 			if err != nil {
 				if errors.Is(err, storage.ErrArchiveImportUnproven) {
 					return nil, connect.NewError(connect.CodeFailedPrecondition,
@@ -1127,6 +1128,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			imported.file = resumed.file
 			imported.verified = resumed.verified
 			imported.digest = resumed.digest
+			imported.uploadID = resumed.uploadID
 		}
 		if err := verifyArchiveClaimIdentity(imported, archiveIntent); err != nil {
 			return nil, err
@@ -1153,6 +1155,11 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		// destination is gone. If cleanup cannot prove and remove it, the
 		// durable claim and intent stay so the next retry can recover them.
 		defer func() {
+			// The exact allocation opened for this request is always closed,
+			// whether the request committed or is rolling back.
+			if archiveRelease != nil {
+				defer archiveRelease()
+			}
 			if archiveCommitted {
 				return
 			}
@@ -1603,8 +1610,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}()
 
 	if imported != nil {
-		cleanup, err := s.placeArchive(ctx, imported, server)
+		cleanup, release, err := s.placeArchive(ctx, imported, server)
 		archiveCleanup = cleanup
+		archiveRelease = release
 		archiveCleanupNeeded = cleanup != nil
 		if err != nil {
 			return nil, err

@@ -57,10 +57,10 @@ func TestInterruptedArchiveSubmissionRecoversProvenDestination(t *testing.T) {
 
 			serverID := uuid.NewString()
 			dataPath := svc.archiveDataPath(req.Name, serverID)
-			intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+			intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 			require.NoError(t, err)
 			require.True(t, claimed)
-			require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, env.allocationRoot(dataPath)))
+			env.setAllocation(t, store, intent, env.allocationRoot(dataPath))
 			require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
 			child := filepath.Base(dataPath)
 			destination := filepath.Join(env.fixtureRoot, child)
@@ -149,10 +149,10 @@ func TestInterruptedArchiveSubmissionFailsVisiblyWhenOwnershipIsUnproven(t *test
 
 	serverID := uuid.NewString()
 	dataPath := svc.archiveDataPath(req.Name, serverID)
-	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 	require.NoError(t, err)
 	require.True(t, claimed)
-	require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, env.allocationRoot(dataPath)))
+	env.setAllocation(t, store, intent, env.allocationRoot(dataPath))
 	require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
 	destination := filepath.Join(env.fixtureRoot, filepath.Base(dataPath))
 	unowned := filepath.Join(destination, "world", "level.dat")
@@ -195,10 +195,10 @@ func TestCommittedArchiveServerIsNeverRemovedByRecovery(t *testing.T) {
 
 	serverID := uuid.NewString()
 	dataPath := svc.archiveDataPath(req.Name, serverID)
-	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 	require.NoError(t, err)
 	require.True(t, claimed)
-	require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, env.allocationRoot(dataPath)))
+	env.setAllocation(t, store, intent, env.allocationRoot(dataPath))
 	require.NoError(t, store.CreateServer(ctxWithRole("operator"), &db.Server{
 		ID: serverID, Name: req.Name, NodeID: env.node.ID, Status: db.StatusStopped,
 		ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1", DataPath: dataPath,
@@ -273,10 +273,10 @@ func TestCommittedArchiveIntentIsNotReclaimedAfterKeepDataDelete(t *testing.T) {
 
 	serverID := uuid.NewString()
 	dataPath := svc.archiveDataPath(req.Name, serverID)
-	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 	require.NoError(t, err)
 	require.True(t, claimed)
-	require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, env.allocationRoot(dataPath)))
+	env.setAllocation(t, store, intent, env.allocationRoot(dataPath))
 	require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
 
 	server := &db.Server{
@@ -335,11 +335,11 @@ func TestArchiveRecoveryUsesOriginalAllocationRoot(t *testing.T) {
 
 			serverID := uuid.NewString()
 			dataPath := svc.archiveDataPath(req.Name, serverID)
-			intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+			intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			originalRoot := env.allocationRoot(dataPath)
-			require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, originalRoot))
+			env.setAllocation(t, store, intent, originalRoot)
 			require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
 			child := filepath.Base(dataPath)
 			partial := filepath.Join(originalRoot, child, "world", "partial.dat")
@@ -353,6 +353,9 @@ func TestArchiveRecoveryUsesOriginalAllocationRoot(t *testing.T) {
 			writeArchiveFixture(t, unrelated, "unrelated operator data")
 			if fixture.remote {
 				env.transport.root = remappedRoot
+				remappedNode := *env.node
+				remappedNode.StorageRoot = remappedRoot
+				require.NoError(t, store.UpdateNode(ctxWithRole("operator"), &remappedNode))
 			} else {
 				// Local allocation is derived from the durable path, not the
 				// current controller data directory. Repointing the directory
@@ -393,11 +396,11 @@ func TestArchiveRecoveryRefusesDifferentContentBeforeReclaim(t *testing.T) {
 
 	serverID := uuid.NewString()
 	dataPath := svc.archiveDataPath(req.Name, serverID)
-	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest)
+	intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey, imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	root := env.allocationRoot(dataPath)
-	require.NoError(t, store.SetArchiveImportAllocation(ctxWithRole("operator"), intent.RequestKey, env.node.ID, root))
+	env.setAllocation(t, store, intent, root)
 	require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
 	child := filepath.Base(dataPath)
 	partial := filepath.Join(root, child, "world", "partial.dat")
@@ -413,6 +416,222 @@ func TestArchiveRecoveryRefusesDifferentContentBeforeReclaim(t *testing.T) {
 	require.NoError(t, readErr)
 	require.Equal(t, "belongs to the interrupted submission", string(body))
 	require.FileExists(t, filepath.Join(root, child, archiveOwnershipMarker))
+
+	// The rejected replacement must not become the binding for this request:
+	// the original archive still recovers the same destination.
+	retry.ArchiveUploadId = env.upload(t, svc, original)
+	created, err := svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(retry))
+	require.NoError(t, err)
+	require.Equal(t, serverID, created.Msg.Server.Id)
+	_, err = os.Stat(partial)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.FileExists(t, filepath.Join(root, child, "world", "level.dat"))
+}
+
+// An options-only committed row without a receipt cannot prove which archive
+// was verified. It must fail closed rather than returning the prior server for
+// an arbitrary upload.
+func TestCommittedArchiveWithoutReceiptFailsClosed(t *testing.T) {
+	env := newArchiveRecoveryEnv(t, false)
+	archiveData := buildArchiveFixtureBytes(t)
+	store := openArchiveRecoveryStore(t, env.dbPath)
+	defer store.Close()
+	svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
+	ctx := ctxWithRole("operator")
+	req := env.request(t, svc, archiveData)
+
+	hashed := protoCloneRequest(req)
+	hashed.ArchiveUploadId = ""
+	body, err := proto.MarshalOptions{Deterministic: true}.Marshal(hashed)
+	require.NoError(t, err)
+	kind := "server-archive-create:" + hexSum(body)
+	replayKey := archiveReplayKey(uploadOwnerID(ctx), req.RequestId)
+	const serverID = "legacy-options-only-server"
+	_, claimed, err := store.ClaimIdempotencyKey(ctx, replayKey, serverID, kind)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, store.CreateServer(ctx, &db.Server{
+		ID: serverID, Name: req.Name, NodeID: env.node.ID, Status: db.StatusStopped,
+		ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1", DataPath: svc.archiveDataPath(req.Name, serverID),
+	}))
+
+	_, err = svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "no durable archive identity")
+}
+
+// A committed archive import persists its replay receipt independently of the
+// ownership marker. The exact original upload may replay after expiry, a fresh
+// upload must verify and match the recorded digest, and different or unknown
+// uploads fail clearly instead of returning the committed server.
+func TestCommittedArchiveReplayIdentity(t *testing.T) {
+	env := newArchiveRecoveryEnv(t, false)
+	original := buildArchiveFixtureBytesWith(t, "replay world")
+	store := openArchiveRecoveryStore(t, env.dbPath)
+	defer store.Close()
+	svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
+	ctx := ctxWithRole("operator")
+	req := env.request(t, svc, original)
+
+	created, err := svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+	require.NoError(t, err)
+	serverID := created.Msg.Server.Id
+	originalUpload := req.ArchiveUploadId
+
+	// The intent is gone after marker cleanup, so the idempotency receipt is
+	// the only durable replay evidence.
+	_, err = store.GetArchiveImport(ctx, archiveReplayKey(uploadOwnerID(ctx), req.RequestId))
+	require.ErrorIs(t, err, db.ErrArchiveImportUnproven)
+	receipt, err := store.GetIdempotencyKey(ctx, archiveReplayKey(uploadOwnerID(ctx), req.RequestId))
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.NotEmpty(t, receipt.ArchiveDigest)
+	require.Equal(t, originalUpload, receipt.ArchiveUploadID)
+
+	// The exact original upload id replays even after the upload session and
+	// its temp file have expired.
+	require.NoError(t, svc.archiveUploads.CleanupSessionFor(originalUpload, uploadOwnerID(ctx)))
+	exact, err := svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+	require.NoError(t, err)
+	require.Equal(t, serverID, exact.Msg.Server.Id)
+
+	// A fresh upload of the same content is verified against the recorded
+	// digest and replays.
+	fresh := protoCloneRequest(req)
+	fresh.ArchiveUploadId = env.upload(t, svc, original)
+	same, err := svc.CreateServer(ctx, connect.NewRequest(fresh))
+	require.NoError(t, err)
+	require.Equal(t, serverID, same.Msg.Server.Id)
+
+	// A different valid archive cannot borrow the committed result.
+	different := protoCloneRequest(req)
+	different.ArchiveUploadId = env.upload(t, svc, buildArchiveFixtureBytesWith(t, "different replay world"))
+	_, err = svc.CreateServer(ctx, connect.NewRequest(different))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "does not match the archive of the committed submission")
+
+	// An unknown upload id fails clearly without returning the prior server.
+	bogus := protoCloneRequest(req)
+	bogus.ArchiveUploadId = uuid.NewString()
+	_, err = svc.CreateServer(ctx, connect.NewRequest(bogus))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.NotContains(t, err.Error(), serverID)
+}
+
+// A remote Docker storage worker sees every host root under one constant
+// mounted path. Recovery must therefore bind the allocation to the daemon
+// endpoint and host source, not to Root() alone.
+func TestArchiveRecoveryBindsRemoteHostIdentity(t *testing.T) {
+	const workerRoot = "/carbon-storage-root"
+	for _, remap := range []bool{false, true} {
+		name := "original host proof is reclaimed"
+		if remap {
+			name = "remapped host root is not deleted"
+		}
+		t.Run(name, func(t *testing.T) {
+			env := newArchiveRecoveryEnv(t, true)
+			archiveData := buildArchiveFixtureBytes(t)
+			store := openArchiveRecoveryStore(t, env.dbPath)
+			defer store.Close()
+			svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
+			env.transport.workerRoot = workerRoot
+			req := env.request(t, svc, archiveData)
+
+			imported, prior, err := svc.prepareArchiveImport(ctxWithRole("operator"), protoCloneRequest(req))
+			require.NoError(t, err)
+			require.Nil(t, prior)
+			defer func() { _ = imported.file.Close() }()
+
+			serverID := uuid.NewString()
+			dataPath := svc.archiveDataPath(req.Name, serverID)
+			intent, claimed, err := store.ClaimArchiveImport(ctxWithRole("operator"), imported.replayKey,
+				imported.replayKind, serverID, dataPath, imported.digest, imported.uploadID)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			env.setAllocation(t, store, intent, workerRoot)
+			require.NoError(t, store.SetArchiveImportPhase(ctxWithRole("operator"), intent.RequestKey, db.ArchiveImportStaged))
+
+			child := filepath.Base(dataPath)
+			originalDestination := filepath.Join(env.fixtureRoot, child)
+			partial := filepath.Join(originalDestination, "world", "partial.dat")
+			writeArchiveFixture(t, partial, "interrupted on the original host")
+			require.NoError(t, os.WriteFile(filepath.Join(originalDestination, archiveOwnershipMarker),
+				[]byte(intent.ClaimToken+"\n"), 0o644))
+
+			remappedRoot := filepath.Join(t.TempDir(), "remapped-host")
+			unrelated := filepath.Join(remappedRoot, child, "world", "level.dat")
+			writeArchiveFixture(t, unrelated, "unrelated data on the new host")
+
+			if remap {
+				env.transport.root = remappedRoot
+				remappedNode := *env.node
+				remappedNode.StorageRoot = filepath.Join(t.TempDir(), "remapped-node-storage")
+				require.NoError(t, store.UpdateNode(ctxWithRole("operator"), &remappedNode))
+			}
+
+			retry := protoCloneRequest(req)
+			retry.ArchiveUploadId = env.upload(t, svc, archiveData)
+			_, err = svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(retry))
+			if remap {
+				require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+				require.Contains(t, err.Error(), "cannot prove it created")
+				body, readErr := os.ReadFile(unrelated)
+				require.NoError(t, readErr)
+				require.Equal(t, "unrelated data on the new host", string(body))
+				body, readErr = os.ReadFile(partial)
+				require.NoError(t, readErr)
+				require.Equal(t, "interrupted on the original host", string(body))
+				return
+			}
+
+			require.NoError(t, err)
+			_, err = os.Stat(partial)
+			require.ErrorIs(t, err, os.ErrNotExist)
+			require.FileExists(t, filepath.Join(originalDestination, "world", "level.dat"))
+			_, err = os.Stat(filepath.Join(originalDestination, archiveOwnershipMarker))
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
+// If the ownership marker write fails there is no durable proof to reopen. The
+// request must still roll back through the exact allocation it just created,
+// leaving no destination and no held claim.
+func TestArchiveMarkerWriteFailureRollsBackOpenAllocation(t *testing.T) {
+	env := newArchiveRecoveryEnv(t, true)
+	archiveData := buildArchiveFixtureBytes(t)
+	store := openArchiveRecoveryStore(t, env.dbPath)
+	defer store.Close()
+	svc := newArchiveRecoveryService(t, store, &env, t.TempDir())
+	env.transport.failMarker = true
+	ctx := ctxWithRole("operator")
+	req := env.request(t, svc, archiveData)
+
+	_, err := svc.CreateServer(ctx, connect.NewRequest(protoCloneRequest(req)))
+	require.Equal(t, connect.CodeInternal, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "could not prepare the destination directory")
+
+	entries, readErr := os.ReadDir(env.fixtureRoot)
+	require.NoError(t, readErr)
+	require.Empty(t, entries, "a failed marker write must remove the exact open allocation")
+
+	// Releasing the claim means the same request can be retried once the
+	// storage failure is gone, rather than being stuck on an unproven intent.
+	env.transport.failMarker = false
+	retry := protoCloneRequest(req)
+	retry.ArchiveUploadId = env.upload(t, svc, archiveData)
+	created, err := svc.CreateServer(ctx, connect.NewRequest(retry))
+	require.NoError(t, err)
+	require.NotEmpty(t, created.Msg.Server.Id)
+	require.FileExists(t, filepath.Join(env.fixtureRoot, filepath.Base(created.Msg.Server.DataPath), "world", "level.dat"))
+}
+
+func TestArchiveAllocationEndpointOmitsCredentials(t *testing.T) {
+	identity := archiveEndpointIdentity("tcp://operator:super-secret@10.2.0.11:2375?token=hidden")
+	require.Equal(t, "tcp://10.2.0.11:2375", identity)
+	require.NotContains(t, identity, "secret")
+	require.NotContains(t, identity, "operator")
+	require.NotContains(t, identity, "token")
 }
 
 // --- fixtures -----------------------------------------------------------------
@@ -511,6 +730,17 @@ func (e archiveRecoveryEnv) allocationRoot(dataPath string) string {
 		return filepath.Dir(dataPath)
 	}
 	return e.fixtureRoot
+}
+
+// setAllocation records the same accessor root, sanitised endpoint and host
+// source that placeArchive would persist for this fixture node.
+func (e archiveRecoveryEnv) setAllocation(t *testing.T, store *db.Store, intent *db.ArchiveImport, root string) {
+	t.Helper()
+	info := e.node.StorageInfo()
+	require.NoError(t, store.SetArchiveImportAllocation(
+		ctxWithRole("operator"), intent.RequestKey, e.node.ID, root,
+		archiveEndpointIdentityFor(info), archiveHostRootFor(info, root),
+	))
 }
 
 func (e archiveRecoveryEnv) request(t *testing.T, svc *ServerService, archiveData []byte) *v1.CreateServerRequest {
