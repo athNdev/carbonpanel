@@ -31,6 +31,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/snippet}
 	</CarbonPageHeader>
 
-	<PlayerLookup />
+	<PlayerLookup {serverOptions} />
 	<PlayerRoster syncUrl={true} {serverOptions} />
 </div>

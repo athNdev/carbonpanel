@@ -49,15 +49,41 @@ var (
 	ErrManagedUnsupported     = errors.New("bluemap managed install: unsupported world storage or dimension")
 )
 
+type nodeStore interface {
+	GetNode(ctx context.Context, id string) (*storage.Node, error)
+}
+
+// PrivateRendererNode resolves the controller-local storage identity shared by
+// managed installation and private discovery. Registered nodes use the same
+// persisted locality marker as node-owned storage. A host or IP alone is not
+// evidence of ownership.
+func PrivateRendererNode(ctx context.Context, store nodeStore, nodeID string) (nodestorage.NodeInfo, error) {
+	if nodestorage.IsLegacyLocalNodeID(nodeID) {
+		return nodestorage.LocalNode(), nil
+	}
+	node, err := store.GetNode(ctx, nodeID)
+	if err != nil || node == nil {
+		return nodestorage.NodeInfo{}, errors.New("the renderer's Docker node ownership could not be verified")
+	}
+	info := node.StorageInfo()
+	if !info.IsLocal {
+		return nodestorage.NodeInfo{}, errors.New("private BlueMap discovery is unavailable on a remote node; configure an explicit node-local world_view endpoint instead")
+	}
+	if !node.Enabled {
+		return nodestorage.NodeInfo{}, errors.New("the renderer's local Docker node is disabled")
+	}
+	return info, nil
+}
+
 // InspectManagedWorld reads the ACTUAL world folder for the server's canonical
 // level name and derives deterministic per-dimension map facts. Only the data
 // root of this server is accessible; all reads are bounded by the accessor.
-func InspectManagedWorld(ctx context.Context, resolver *nodestorage.Resolver, server *storage.Server, level string) (ManagedWorldFacts, error) {
+func InspectManagedWorld(ctx context.Context, resolver *nodestorage.Resolver, node nodestorage.NodeInfo, server *storage.Server, level string) (ManagedWorldFacts, error) {
 	facts := ManagedWorldFacts{Level: level, Storage: "file"}
-	if resolver == nil || server == nil || !plainComponent(level) {
+	if resolver == nil || !node.IsLocal || server == nil || !plainComponent(level) {
 		return facts, ErrManagedUnsupported
 	}
-	accessor, err := resolver.ForNode(ctx, nodestorage.LocalNode(), server.DataPath)
+	accessor, err := resolver.ForNode(ctx, node, server.DataPath)
 	if err != nil {
 		return facts, fmt.Errorf("open server data: %w", err)
 	}
@@ -116,6 +142,34 @@ const managedConfigMarker = "# Managed by Carbon Panel (OSS-388)."
 // preserved verbatim; the managed installer never overwrites it.
 var ErrManagedConfigExists = errors.New("bluemap managed install: existing BlueMap config is preserved; do not overwrite")
 
+var (
+	ErrReuseConfigMissing   = errors.New("the server has no existing BlueMap core.conf")
+	ErrReuseDownloadConsent = errors.New("the existing BlueMap configuration requires download acknowledgement in core.conf")
+	ErrReuseWorldConfig     = errors.New("the existing BlueMap configuration needs an Overworld map pointing to /app/world")
+)
+
+// CheckRetainedConfig verifies the existing configuration without rewriting it.
+// The managed container still uses its own private port and read-only world bind.
+func CheckRetainedConfig(ctx context.Context, resolver *nodestorage.Resolver, node nodestorage.NodeInfo, server *storage.Server) error {
+	accessor, err := resolver.ForNode(ctx, node, server.DataPath)
+	if err != nil {
+		return fmt.Errorf("open saved BlueMap configuration: %w", err)
+	}
+	defer func() { _ = accessor.Close() }()
+	if _, err := accessor.Stat("modules/bluemap/config/core.conf"); errors.Is(err, os.ErrNotExist) {
+		return ErrReuseConfigMissing
+	} else if err != nil {
+		return fmt.Errorf("inspect saved BlueMap configuration: %w", err)
+	}
+	if !readAcceptDownload(accessor) {
+		return ErrReuseDownloadConsent
+	}
+	if _, ok := readMapConfig(accessor); !ok {
+		return ErrReuseWorldConfig
+	}
+	return nil
+}
+
 // managedAccessor is the confined, bounded, node-owned write seam.
 type managedAccessor interface {
 	Stat(rel string) (os.FileInfo, error)
@@ -150,8 +204,8 @@ type ManagedConfigStager struct {
 // and stages it without touching any live config path. An existing config that
 // is not an identical managed file is refused and preserved. Idempotent retries
 // of the same managed config are a no-op.
-func StageManagedConfig(ctx context.Context, resolver *nodestorage.Resolver, server *storage.Server, facts ManagedWorldFacts) (*ManagedConfigStager, error) {
-	if resolver == nil || server == nil || facts.Level == "" || len(facts.Dimensions) == 0 {
+func StageManagedConfig(ctx context.Context, resolver *nodestorage.Resolver, node nodestorage.NodeInfo, server *storage.Server, facts ManagedWorldFacts) (*ManagedConfigStager, error) {
+	if resolver == nil || !node.IsLocal || server == nil || facts.Level == "" || len(facts.Dimensions) == 0 {
 		return nil, ErrManagedUnsupported
 	}
 	desired := map[string][]byte{
@@ -168,7 +222,7 @@ func StageManagedConfig(ctx context.Context, resolver *nodestorage.Resolver, ser
 			managedConfigMarker, facts.Level, dim.MapID, dim.MapID, dim.WorldPath, dim.Dimension))
 	}
 
-	accessor, err := resolver.ForNode(ctx, nodestorage.LocalNode(), server.DataPath)
+	accessor, err := resolver.ForNode(ctx, node, server.DataPath)
 	if err != nil {
 		return nil, fmt.Errorf("open server data: %w", err)
 	}
@@ -313,6 +367,13 @@ func ManagedVolumes(server *storage.Server, level string) (string, error) {
 		{Source: data + "/" + level, Target: "/app/world", ReadOnly: true},
 		{Source: base + "/data", Target: "/app/data", CreateDir: true},
 		{Source: base + "/web", Target: "/app/web", CreateDir: true},
+		// BlueMap downloads Mojang client resources into ./bluemap relative to
+		// its working directory. The module root filesystem is deliberately
+		// read-only, so without a panel-owned writable mount the renderer exits
+		// with "Resource-File missing" (and never serves a map). Keep this
+		// cache inside the server's module tree; the world stays read-only and
+		// container privileges are unchanged.
+		{Source: base + "/resources", Target: "/app/bluemap", CreateDir: true},
 	}
 	raw, err := json.Marshal(vols)
 	if err != nil {

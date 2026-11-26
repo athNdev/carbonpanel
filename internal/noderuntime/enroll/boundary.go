@@ -70,7 +70,7 @@ func (b *Boundary) CreateEnrollment(ctx context.Context, cred Credential, req *v
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return b.Authority.CreateEnrollment(cred, req)
+	return b.Authority.createEnrollment(ctx, cred, req)
 }
 
 // RevokeCredential is an operator-domain enrollment management action.
@@ -78,7 +78,7 @@ func (b *Boundary) RevokeCredential(ctx context.Context, cred Credential, req *v
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return b.Authority.RevokeCredential(cred, req)
+	return b.Authority.revokeCredential(ctx, cred, req)
 }
 
 // Rotate is an operator-domain credential action, never a node action.
@@ -86,7 +86,7 @@ func (b *Boundary) Rotate(ctx context.Context, cred Credential, nodeID string) (
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	return b.Authority.Rotate(cred, nodeID)
+	return b.Authority.rotate(ctx, cred, nodeID)
 }
 
 // AuthorizeNodeOperation is the single production entry point for the enrolled

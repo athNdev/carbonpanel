@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package db
 
 import (
@@ -37,7 +36,7 @@ func TestUser_CRUD(t *testing.T) {
 		t.Fatalf("get failed: %v", err)
 	}
 	u.Username = "alice2"
-	if err := store.UpdateUser(ctx, u); err != nil {
+	if err := store.UpdateUserProfile(ctx, u); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
 	got, err := store.GetUser(ctx, "u1")

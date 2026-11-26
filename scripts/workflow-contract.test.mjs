@@ -84,11 +84,12 @@ test('showcase capture is read-only and publication is confined to the asset bra
   assert.doesNotMatch(publish, /python3 \/tmp\/showcase-artifact\/showcase_assets\.py/);
   assert.match(publish, /artifact may not carry executable code or a plan/);
 
-  // Publication refuses delayed/older/divergent captures and partial sets.
-  assert.match(publish, /is not live main/);
+  // Publication advances through trusted main history and needs a canonical set.
+  assert.match(publish, /outside live main history/);
   assert.match(publish, /merge-base --is-ancestor/);
   assert.match(publish, /README-canonical screenshot missing/);
-  assert.match(publish, /would replace published assets with different bytes/);
+  assert.match(publish, /already-current=true/);
+  assert.match(publish, /needs\.capture\.outputs\.canonical == 'true'/);
 
   // No new secret or token: the only secret reference is the built-in token.
   const secretRefs = source.match(/secrets\.[A-Z_]+/g) ?? [];

@@ -8,13 +8,40 @@ package worldlib
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/pkg/files"
 )
+
+// ResolveRevisionArchive resolves imported library-relative keys and older
+// archives recorded with the library directory already in their path.
+func ResolveRevisionArchive(libraryRoot, storedPath string) (string, error) {
+	if libraryRoot == "" || storedPath == "" {
+		return "", fmt.Errorf("%w: revision archive path is missing", ErrArchiveRejected)
+	}
+	archive := filepath.Clean(filepath.FromSlash(storedPath))
+	if !files.Within(libraryRoot, archive) && filepath.IsLocal(archive) {
+		archive = filepath.Join(libraryRoot, archive)
+	}
+	if !files.WithinReal(libraryRoot, archive) {
+		return "", fmt.Errorf("%w: revision archive is outside the World Library", ErrArchiveRejected)
+	}
+	info, err := os.Stat(archive)
+	if err != nil {
+		return "", fmt.Errorf("%w: locate revision archive: %v", ErrArchiveRejected, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: revision archive is not a regular file", ErrArchiveRejected)
+	}
+	return archive, nil
+}
 
 // Archive hardening limits. These are deliberately stricter than the generic
 // extraction caps because a library revision is retained on the node: a small
@@ -105,14 +132,27 @@ func rejected(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrArchiveRejected, fmt.Sprintf(format, args...))
 }
 
-// inspectZip walks one archive level. The report is shared across levels so
-// totals and warnings cover the whole nested tree.
+// inspectZip walks one archive level with an unbounded context. Preflight callers
+// use inspectZipCtx so cancellation is honoured inside the bounded scan.
 func inspectZip(zr *zip.Reader, depth int, report *ArchiveReport) error {
+	return inspectZipCtx(context.Background(), zr, depth, report)
+}
+
+// inspectZipCtx walks one archive level. The report is shared across levels so
+// totals and warnings cover the whole nested tree. Entry count, declared and
+// actual sizes and nesting depth stay bounded; ctx is checked during the walk.
+func inspectZipCtx(ctx context.Context, zr *zip.Reader, depth int, report *ArchiveReport) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(zr.File) > maxArchiveEntries {
 		return rejected("archive has %d entries, exceeding the %d entry limit", len(zr.File), maxArchiveEntries)
 	}
 
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		name := normalizeMemberName(f.Name)
 		if unsafeMemberName(name) {
 			return rejected("unsafe entry path %q", f.Name)
@@ -150,9 +190,9 @@ func inspectZip(zr *zip.Reader, depth int, report *ArchiveReport) error {
 		// checked. Everything else is read to EOF to verify the stored CRC.
 		if nestedArchiveExts[strings.ToLower(path.Ext(name))] {
 			var buf bytes.Buffer
-			n, err := copyEntry(&buf, f, maxNestedInspectBytes)
+			n, err := copyEntry(ctx, &buf, f, maxNestedInspectBytes)
 			if err != nil {
-				return rejected("unreadable entry %q: %v", f.Name, err)
+				return entryInspectionError(f.Name, err)
 			}
 			if n > maxNestedInspectBytes {
 				return rejected("nested archive candidate %q exceeds the %d byte inspection limit", f.Name, maxNestedInspectBytes)
@@ -165,31 +205,52 @@ func inspectZip(zr *zip.Reader, depth int, report *ArchiveReport) error {
 				if depth+1 > maxNestingDepth {
 					return rejected("nested archive depth exceeds %d at %q", maxNestingDepth, f.Name)
 				}
-				if err := inspectZip(nested, depth+1, report); err != nil {
+				if err := inspectZipCtx(ctx, nested, depth+1, report); err != nil {
 					return err
 				}
 			}
 			continue
 		}
 
-		if _, err := copyEntry(io.Discard, f, maxEntryUncompressed); err != nil {
-			return rejected("unreadable entry %q: %v", f.Name, err)
+		if _, err := copyEntry(ctx, io.Discard, f, maxEntryUncompressed); err != nil {
+			return entryInspectionError(f.Name, err)
 		}
 	}
 	return nil
 }
 
+func entryInspectionError(name string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return rejected("unreadable entry %q: %v", name, err)
+}
+
+// contextReader checks cancellation on every Read, including long inflation of
+// a single compressed entry.
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c contextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
 // copyEntry reads an entry to EOF through a hard bound. Reading to EOF is what
 // makes a corrupt or encrypted entry fail here rather than during a later
 // extraction; LimitReader(max+1) lets us detect an overshoot without buffering
-// an unbounded payload.
-func copyEntry(dst io.Writer, f *zip.File, max int64) (int64, error) {
+// an unbounded payload. ctx is honoured during a single large inflation.
+func copyEntry(ctx context.Context, dst io.Writer, f *zip.File, max int64) (int64, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return 0, err
 	}
-	n, copyErr := io.Copy(dst, io.LimitReader(rc, max+1))
-	closeErr := rc.Close() // zip CRC mismatch is reported on Close.
+	n, copyErr := io.Copy(dst, io.LimitReader(contextReader{ctx: ctx, r: rc}, max+1))
+	closeErr := rc.Close()
 	if copyErr != nil {
 		return n, copyErr
 	}

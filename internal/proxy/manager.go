@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	db "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/moby/moby/client"
 )
 
@@ -783,15 +785,20 @@ func (m *Manager) AllocateProxyPort(serverID string) (int, error) {
 	return 0, fmt.Errorf("no available proxy ports in range %d-%d", m.config.PortRangeMin, m.config.PortRangeMax)
 }
 
+// routableModulePort excludes private renderer ports with no host listener.
+func routableModulePort(port *v1.ModulePort) bool {
+	return port != nil && port.ProxyEnabled && port.HostPort > 0
+}
+
 // AddModuleRoute adds a proxy route for a module's ports
 // Modules use their own ports on the same hostname as their parent server
 func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.config.Enabled || server.ProxyHostname == "" {
+	if !m.config.Enabled || server.ProxyHostname == "" || !slices.ContainsFunc(module.Ports, routableModulePort) {
 		return nil
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Get the container IP first
 	if module.ContainerID == "" {
@@ -805,7 +812,7 @@ func (m *Manager) AddModuleRoute(module *db.Module, server *db.Server) error {
 
 	// Add routes for all proxy-enabled ports
 	for _, port := range module.Ports {
-		if port == nil || !port.ProxyEnabled || port.HostPort == 0 {
+		if !routableModulePort(port) {
 			continue
 		}
 
@@ -933,7 +940,7 @@ func (m *Manager) removePortRouteUnlocked(hostPort int, hostname, moduleName, po
 
 // UpdateModuleRoute updates proxy routes for a module's ports
 func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error {
-	if !m.config.Enabled || server.ProxyHostname == "" {
+	if !m.config.Enabled || server.ProxyHostname == "" || !slices.ContainsFunc(module.Ports, routableModulePort) {
 		return nil
 	}
 
@@ -952,7 +959,7 @@ func (m *Manager) UpdateModuleRoute(module *db.Module, server *db.Server) error 
 
 	// Update routes for all proxy-enabled ports
 	for _, port := range module.Ports {
-		if port == nil || !port.ProxyEnabled || port.HostPort == 0 {
+		if !routableModulePort(port) {
 			continue
 		}
 

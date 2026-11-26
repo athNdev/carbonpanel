@@ -31,7 +31,7 @@ test('tile values are sans semibold 32px tabular-nums (mono numerals only)', () 
 test('tile footers are 11px muted with mt-3 pt-3 border-t', () => {
 	assert.match(
 		source,
-		/mt-3 flex items-center justify-between[^"]*border-t border-border pt-3 font-sans text-\[11px\]/
+		/mt-3 flex flex-wrap items-start justify-between[^"]*border-t border-border pt-3 font-sans text-\[11px\]/
 	);
 });
 
@@ -54,5 +54,8 @@ test('node inventory row shows per-node status, servers, and memory', () => {
 test('system health strip extends to node counts', () => {
 	assert.ok(source.includes('data-testid="health-nodes"'), 'Health strip needs a nodes cell');
 	assert.ok(source.includes('nodeStats.online'), 'Health strip must count online nodes');
-	assert.ok(source.includes('lg:grid-cols-4'), 'Health strip must fit the fourth cell');
+	assert.ok(
+		source.includes('auto-fit,minmax(min(100%,15rem),1fr)'),
+		'Health columns must follow the available card width'
+	);
 });

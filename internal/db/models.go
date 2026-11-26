@@ -361,6 +361,7 @@ type Mod struct {
 }
 
 type IndexedModpack struct {
+	ServerSide    string    `json:"server_side"`                               // Project-level server support declared by the indexer.
 	ID            string    `json:"id" gorm:"primaryKey"`                      // Format: "indexer-originalId"
 	IndexerID     string    `json:"indexer_id" gorm:"index;column:indexer_id"` // Original ID from indexer
 	Indexer       string    `json:"indexer" gorm:"index"`                      // "fuego", "modrinth", etc.
@@ -472,12 +473,12 @@ type Role struct {
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// UserRole links users to roles
+// UserRole records a role grant from a specific source.
 type UserRole struct {
 	ID        string    `json:"id" gorm:"primaryKey"`
-	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
-	RoleName  string    `json:"role_name" gorm:"not null;index;column:role_name"`
-	Source    string    `json:"source" gorm:"not null;default:'local'"`
+	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id;index:idx_user_role_source,priority:1"`
+	RoleName  string    `json:"role_name" gorm:"not null;index;column:role_name;index:idx_user_role_source,priority:3"`
+	Source    string    `json:"source" gorm:"not null;default:'local';index:idx_user_role_source,priority:2"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 
@@ -500,14 +501,17 @@ type APIToken struct {
 	User          *User      `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
 
-// Session represents an active user session
+// Session represents an active user session. AuthProvider records the
+// credential used for this session and is empty for sessions created before
+// credential provenance was recorded.
 type Session struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	UserID    string    `json:"user_id" gorm:"not null;index;column:user_id"`
-	Token     string    `json:"-" gorm:"not null;uniqueIndex"`
-	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
-	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+	ID           string    `json:"id" gorm:"primaryKey"`
+	UserID       string    `json:"user_id" gorm:"not null;index;column:user_id"`
+	Token        string    `json:"-" gorm:"not null;uniqueIndex"`
+	AuthProvider string    `json:"-" gorm:"not null;default:''"`
+	ExpiresAt    time.Time `json:"expires_at" gorm:"not null;index"`
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
+	User         *User     `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }
 
 // ServerSnapshot represents a volume snapshot taken before modpack updates or upgrades (MINE-23)
@@ -708,8 +712,8 @@ type ScheduledTask struct {
 	Server *Server `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
-// ActivityLog is an append-only audit trail (MINE-141) for mutating ops:
-// auth, power, file, backup, subuser and schedule actions.
+// ActivityLog is an append-only audit trail. A server-scoped action can have
+// a different subject, such as the target of a moderation action.
 type ActivityLog struct {
 	ID         string `json:"id" gorm:"primaryKey"`
 	ActorID    string `json:"actor_id" gorm:"index;column:actor_id"`
@@ -718,6 +722,7 @@ type ActivityLog struct {
 	Event      string `json:"event" gorm:"not null;index"`
 	SubjectTyp string `json:"subject_type" gorm:"index;column:subject_type"` // e.g. "server", "user"
 	SubjectID  string `json:"subject_id" gorm:"index;column:subject_id"`
+	ServerID   string `json:"server_id" gorm:"index;column:server_id"`
 	Properties string `json:"properties" gorm:"type:text"` // JSON details
 	// RequestID is the client request id of a journaled lifecycle operation,
 	// so an activity row can be joined to the matching journal row. Empty

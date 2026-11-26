@@ -1284,9 +1284,12 @@
     "permanent_ban_on_future_1_0_x": false,
     "notes": "1.0 currently points at 1.0.40 in both registries. A future 1.0.x maintenance patch is not banned; it may move the 1.0 alias only via explicit, monotonic promotion."
   },
+  "occupied_product_tags": {
+    "carbonpanel-v2.0.0": "69ddb46d596aea8ed117a3dba6a1f63521572664"
+  },
   "next_stable": {
-    "git_tag": "carbonpanel-v2.0.0",
-    "semver": "2.0.0",
+    "git_tag": "carbonpanel-v2.0.1",
+    "semver": "2.0.1",
     "minor_alias": "2.0",
     "latest": true,
     "boundary": "major",

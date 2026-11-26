@@ -41,13 +41,14 @@ test('tab-fill is a flex fill, not a viewport-minus-chrome height', () => {
 test('server-tab-header is one shared height, type, padding and divider', () => {
 	const header = cssRule('.server-tab-header');
 	assert.match(header, /min-height:\s*4\.5rem/);
-	assert.match(header, /padding:\s*0\.75rem 1\.25rem/);
+	assert.match(header, /padding:\s*1rem 1\.25rem/);
+	assert.match(header, /background:\s*var\(--secondary\)/);
 	// The divider follows the theme through the border role; a literal here
 	// would keep the dark rule under the light palette.
 	assert.match(header, /border-bottom:\s*1px solid var\(--border\)/);
 	const title = cssRule('.server-tab-title');
-	assert.match(title, /font-size:\s*1\.125rem/);
-	assert.match(title, /font-weight:\s*300/);
+	assert.match(title, /font-size:\s*clamp\(1\.1875rem,/);
+	assert.match(title, /font-weight:\s*600/);
 	assert.match(title, /color:\s*var\(--foreground\)/);
 	assert.match(panel, /class="server-tab-header"/);
 	assert.match(panel, /class="server-tab-body server-tab-body--\{mode\}"/);
@@ -63,7 +64,8 @@ test('compact density tightens the same shared header without changing its token
 test('the shell bounds height so tab panes can fill the remaining column', () => {
 	assert.match(shell, /h-dvh/);
 	assert.match(shell, /flex min-h-0 flex-1 flex-col overflow-y-auto p-4/);
-	assert.match(shell, /min-h-full w-full max-w-7xl flex-1 flex-col/);
+	assert.match(shell, /min-h-full w-full max-w-7xl flex-col/);
+	assert.match(shell, /page\.url\.pathname === '\/'\s*\? 'shrink-0 grow'\s*: 'flex-1'/);
 });
 
 test('the server detail page passes min-h-0 through the tab panel', () => {

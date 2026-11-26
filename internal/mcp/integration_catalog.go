@@ -72,7 +72,7 @@ var exposedTools = []ToolSpec{
 	{Name: "get_modpack_by_url", Procedure: "/carbonpanel.v1.ModpackService/GetModpackByURL", Class: Class("safe"), Confirm: false, Description: "Look up one modpack by website URL. The URL is validated as https without embedded credentials; the controller applies its own redirect and host policy.", Source: "content"},
 	{Name: "get_modpack_config", Procedure: "/carbonpanel.v1.ModpackService/GetModpackConfig", Class: Class("safe"), Confirm: false, Description: "Get a modpack's configuration map. Read-only.", Source: "content"},
 	{Name: "get_modpack_files", Procedure: "/carbonpanel.v1.ModpackService/GetModpackFiles", Class: Class("safe"), Confirm: false, Description: "List a modpack's version files. Read-only.", Source: "content"},
-	{Name: "get_modpack_versions", Procedure: "/carbonpanel.v1.ModpackService/GetModpackVersions", Class: Class("safe"), Confirm: false, Description: "List available versions for one modpack. Read-only.", Source: "content"},
+	{Name: "get_modpack_versions", Procedure: "/carbonpanel.v1.ModpackService/GetModpackVersions", Class: Class("safe"), Confirm: false, Description: "List available releases for one modpack, including Minecraft versions reported for each release. Read-only.", Source: "content"},
 	{Name: "get_module", Procedure: "/carbonpanel.v1.ModuleService/GetModule", Class: Class("safe"), Confirm: false, Description: "Get one module instance by exact id. Read-only.", Source: "content"},
 	{Name: "get_module_logs", Procedure: "/carbonpanel.v1.ModuleService/GetModuleLogs", Class: Class("safe"), Confirm: false, Description: "Get bounded recent log lines for one module. Read-only.", Source: "content"},
 	{Name: "get_module_template", Procedure: "/carbonpanel.v1.ModuleService/GetModuleTemplate", Class: Class("safe"), Confirm: false, Description: "Get one module template by exact id. Read-only.", Source: "content"},
@@ -133,17 +133,20 @@ var exposedTools = []ToolSpec{
 	{Name: "list_server_executions", Procedure: "/carbonpanel.v1.TaskService/ListServerExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions for one server with a bounded limit.", Source: "server"},
 	{Name: "list_server_players", Procedure: "/carbonpanel.v1.ServerService/ListServerPlayers", Class: Class("safe"), Confirm: false, Description: "Read the live online player list for one server. Read-only metrics; no health endpoint.", Source: "server"},
 	{Name: "list_servers", Procedure: "/carbonpanel.v1.ServerService/ListServers", Class: Class("safe"), Confirm: false, Description: "List Minecraft servers visible to this token. Read-only.", Source: "first_slice"},
+	{Name: "list_staged_config_changes", Procedure: "/carbonpanel.v1.StagedConfigService/ListStagedChanges", Class: Class("safe"), Confirm: false, Description: "List recent staged configuration changes for one server. Returns rollout metadata and status. Read-only.", Source: "integration"},
 	{Name: "list_subusers", Procedure: "/carbonpanel.v1.SubuserService/ListSubusers", Class: Class("safe"), Confirm: false, Description: "List per-server subuser grants. Read-only; the server_id is the RBAC object.", Source: "admin"},
 	{Name: "list_task_executions", Procedure: "/carbonpanel.v1.TaskService/ListTaskExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions of one task with a bounded limit.", Source: "server"},
 	{Name: "list_tasks", Procedure: "/carbonpanel.v1.TaskService/ListTasks", Class: Class("safe"), Confirm: false, Description: "List scheduled tasks for one server. Task config is redacted.", Source: "server"},
 	{Name: "list_users", Procedure: "/carbonpanel.v1.UserService/ListUsers", Class: Class("safe"), Confirm: false, Description: "List system users visible to this token. Read-only.", Source: "admin"},
-	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: Class("safe"), Confirm: false, Description: "List active world bindings for one server.", Source: "first_slice"},
+	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: Class("safe"), Confirm: false, Description: "List active world bindings and the configured save folder for one server, when known.", Source: "first_slice"},
 	{Name: "list_world_entries", Procedure: "/carbonpanel.v1.WorldService/ListWorldEntries", Class: Class("safe"), Confirm: false, Description: "Browse world library metadata with a bounded limit.", Source: "first_slice"},
 	{Name: "list_world_revisions", Procedure: "/carbonpanel.v1.WorldService/ListRevisions", Class: Class("safe"), Confirm: false, Description: "List immutable revisions for one world entry.", Source: "first_slice"},
 	{Name: "list_world_view_capabilities", Procedure: "/carbonpanel.v1.WorldViewService/ListCapabilities", Class: Class("safe"), Confirm: false, Description: "List verified renderer capabilities for one server.", Source: "first_slice"},
 	{Name: "list_world_view_targets", Procedure: "/carbonpanel.v1.WorldViewService/ListWorldViewTargets", Class: Class("safe"), Confirm: false, Description: "List world-view targets visible to this token. No renderer URLs.", Source: "first_slice"},
 	{Name: "migrate_server", Procedure: "/carbonpanel.v1.ServerService/MigrateServer", Class: Class("review"), Confirm: true, Description: "Move one server to a known configured node. Requires confirm=true, a request_id and an exact node id; no discovery fallback.", Source: "server"},
 	{Name: "move_file", Procedure: "/carbonpanel.v1.FileService/MoveFile", Class: Class("review"), Confirm: true, Description: "Move one server-relative file or directory. Requires confirm=true.", Source: "content"},
+	{Name: "packwiz_get_pack", Procedure: "/carbonpanel.v1.PackwizService/GetPack", Class: Class("safe"), Confirm: false, Description: "Read Packwiz pack metadata and a page of content across mods, datapacks, resource packs and shaders. Requires global modpacks/read. Omits download URLs, paths and raw options.", Source: "content"},
+	{Name: "packwiz_list_packs", Procedure: "/carbonpanel.v1.PackwizService/ListPacks", Class: Class("safe"), Confirm: false, Description: "List Packwiz Studio packs. Requires global modpacks/read. Use next_offset to page through pack summaries.", Source: "content"},
 	{Name: "ping_node", Procedure: "/carbonpanel.v1.NodeService/PingNode", Class: Class("safe"), Confirm: false, Description: "Ping one configured node by exact id for status and latency. No discovery, no TLS material.", Source: "server"},
 	{Name: "player_service_ban_player", Procedure: "/carbonpanel.v1.PlayerService/BanPlayer", Class: Class("review"), Confirm: true, Description: "Ban one player on one server by exact identity key. Requires confirm=true and a bounded reason.", Source: "integration"},
 	{Name: "player_service_bulk_player_action", Procedure: "/carbonpanel.v1.PlayerService/BulkPlayerAction", Class: Class("review"), Confirm: true, Description: "Apply one bounded typed action to a small list of exact identity keys. Requires confirm=true.", Source: "integration"},
@@ -219,9 +222,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 250
-	IntegrationMountedRPCs = 240
-	IntegrationExcludedOps = 77
-	IntegrationSupportedOps = 201
-	IntegrationCombinedTools = 211
+	IntegrationDeclaredRPCs = 251
+	IntegrationMountedRPCs = 241
+	IntegrationExcludedOps = 76
+	IntegrationSupportedOps = 203
+	IntegrationCombinedTools = 214
 )

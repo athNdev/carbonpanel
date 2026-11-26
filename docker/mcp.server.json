@@ -13,8 +13,6 @@
     {
       "registryType": "oci",
       "identifier": "ghcr.io/athndev/carbonpanel-mcp:v0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "registryBaseUrl": "https://ghcr.io",
-      "version": "v0.1.0",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"
@@ -33,7 +31,7 @@
         },
         {
           "name": "CARBONPANEL_TOKEN",
-          "description": "Dedicated expiring least-privilege Carbon Panel API token.",
+          "description": "Expiring Carbon Panel API token from an account with only the permissions you need.",
           "isRequired": true,
           "isSecret": true,
           "format": "string"

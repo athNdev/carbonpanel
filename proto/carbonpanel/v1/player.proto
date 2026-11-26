@@ -265,6 +265,8 @@ service PlayerService {
 // No partial, fuzzy or name-history matching is performed.
 message LookupPlayerRequest {
   string query = 1;
+  // Include a best-effort full-body PNG for an online account.
+  bool include_skin = 2;
 }
 
 // Lookup response. This is an EPHEMERAL public result: a lookup is read-only
@@ -279,6 +281,12 @@ message LookupPlayerResponse {
   string uuid = 3;
   PlayerObservation observation = 4;
   string note = 5;
+  PlayerSkinAsset skin = 6;
+  // Existing roster record matched by identity; omitted when no match is known.
+  string observed_identity_key = 7;
+  // Historical activity is available through ListPlayerSessions.
+  reserved 8;
+  reserved "last_seen";
 }
 
 // Roster request. An empty server_id means a cross-server search.

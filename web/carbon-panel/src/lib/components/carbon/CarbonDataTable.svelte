@@ -29,7 +29,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="w-full border border-border bg-background {className}">
 	{#if title || toolbar}
-		<div class="flex items-center justify-between border-b border-border bg-card p-4">
+		<div
+			class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card p-4"
+		>
 			<div>
 				{#if title}
 					<h3 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
@@ -41,7 +43,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			</div>
 			{#if toolbar}
-				<div class="flex items-center gap-2">
+				<div class="flex min-w-0 items-center gap-2">
 					{@render toolbar()}
 				</div>
 			{/if}

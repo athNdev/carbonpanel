@@ -1012,6 +1012,58 @@ func TestReconcileBootWithoutCrashEvidenceStaysStarting(t *testing.T) {
 	}
 }
 
+func TestReconcileKeepsLoaderFailureAfterExit(t *testing.T) {
+	boot := time.Date(2026, 11, 20, 6, 56, 43, 0, time.UTC)
+	for _, tc := range []struct {
+		name       string
+		desired    db.ServerStatus
+		exitCode   int
+		oomKilled  bool
+		wantStatus db.ServerStatus
+		wantReason string
+	}{
+		{"failed boot", db.StatusStarting, 1, false, db.StatusError, "athena"},
+		{"entrypoint masked the exit code", db.StatusStarting, 0, false, db.StatusError, "athena"},
+		{"existing generic exit reason", db.StatusError, 1, false, db.StatusError, "athena"},
+		{"oom takes precedence", db.StatusStarting, 137, true, db.StatusError, "OOM-killed"},
+		{"operator stop", db.StatusStopping, 0, false, db.StatusStopped, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &db.Server{
+				ID: "s1", Name: "Homestead", NodeID: "default", ContainerID: "c1", Status: tc.desired,
+			}
+			store := newFakeStore(server)
+			cli := &fakeClient{
+				summary: &container.Summary{ID: "c1"},
+				state: &docker.ContainerState{
+					ContainerID: "c1", Status: db.StatusStopped, HasExited: true,
+					ExitCode: tc.exitCode, OOMKilled: tc.oomKilled, StartedAt: boot,
+				},
+				logLines: []string{
+					boot.Format(time.RFC3339Nano) + " [main/INFO]: Loading Minecraft 1.20.1 with Fabric Loader 0.19.5",
+					boot.Add(time.Second).Format(time.RFC3339Nano) + " [main/INFO]: Mod 'Chipped' requires athena, which is missing!",
+				},
+			}
+			r := newTestReconciler(t, store, cli, &fakeProxy{}, &fakeBus{})
+			for pass := 1; pass <= 2; pass++ {
+				if err := r.ReconcileServer(context.Background(), server.ID); err != nil {
+					t.Fatalf("reconcile pass %d: %v", pass, err)
+				}
+				got, err := store.GetServer(context.Background(), server.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Status != tc.wantStatus {
+					t.Fatalf("pass %d: status = %q, want %q", pass, got.Status, tc.wantStatus)
+				}
+				if tc.wantReason == "" && got.StatusReason != "" || !contains(got.StatusReason, tc.wantReason) {
+					t.Fatalf("pass %d: reason = %q, want %q", pass, got.StatusReason, tc.wantReason)
+				}
+			}
+		})
+	}
+}
+
 func TestReconcileRecoveryClearsStatusReason(t *testing.T) {
 	server := &db.Server{
 		ID: "s1", Name: "Homestead", NodeID: "default", ContainerID: "c1",

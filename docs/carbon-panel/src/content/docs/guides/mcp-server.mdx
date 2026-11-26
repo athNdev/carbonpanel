@@ -1,6 +1,6 @@
 ---
 title: AI assistant integration (MCP)
-description: Connect an AI assistant to a self-hosted Carbon Panel with a pinned, read-first MCP artifact and build-bound tool compatibility.
+description: Connect an AI assistant to a self-hosted Carbon Panel with a pinned MCP image and an expiring API token.
 ---
 {/*
 SPDX-License-Identifier: MPL-2.0
@@ -9,115 +9,75 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */}
 
-:::caution[Publication status]
-This guide and its packaging are prepared in the repository. At the time of
-this change no image has been pushed to GHCR, no MCP Registry entry has been
-submitted and no live fresh-install smoke has been run. Do not treat a locally
-built or preview artifact as the official stable one.
+:::caution[Public installation pending]
+The public registry listing and an anonymous GHCR pull must both be available
+before you can use the official setup template below. Check the exact registry
+name `io.github.athNdev/carbon-panel`.
 :::
 
-Carbon Panel can expose a read-first [Model Context Protocol](https://modelcontextprotocol.io/)
-(MCP) stdio server to an AI assistant. The MCP artifact is independently
-versioned and owned: it does not move a panel release tag, a Docker Hub panel
-image or a GitHub Release. See [ADR 0034](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md).
+Carbon Panel includes a read-first Model Context Protocol (MCP) stdio gateway.
+The gateway's OCI package has its own version and release workflow.
+[Distribution decision](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md)
 
-The gateway mounts the generated **211-tool combined catalogue**. It is derived
-from 250 declared RPCs across 26 proto services, of which 240 are mounted/reachable
-across 27 mounted services. Tool coverage is not the same as RPC coverage;
-the audit matrix records 201 supported operations (all listed, reachable and
-verified) and 77 excluded operations with exact reasons and equivalent flows.
+The gateway mounts the generated **214-tool combined catalogue**. The
+controller has 251 declared RPCs across 28 proto services and
+241 mounted/reachable RPCs across 27 services. The strict gate verifies the
+203 supported operations. The audit matrix documents 76 excluded operations
+and their equivalents where available.
 
-## Two different claims: available versus compatible
+Use `get_server` for per-server status and cached CPU, memory, disk, TPS and
+player telemetry when the controller has a sample. It requires `servers/read`
+on that server.
 
-- **Public package availability** means the official OCI artifact and registry
-  listing exist, are immutable and install. It says nothing about your panel.
-- **Compatible server capabilities** means the panel build behind
-  `CARBONPANEL_URL` actually implements the RPC backing a tool. It is
-  determined from a tested, pinned panel build.
-
-A successful `docker pull`, client handshake or `tools/list` is **not** proof
-that a tool works. Never infer capability from the MCP client version.
+`list_staged_config_changes` requires `server_config/read` on the selected
+server. It returns rollout status and scheduling metadata, with an optional
+status filter and a result limit of 1 to 100. It omits saved config payloads.
+This tool requires a controller with `StagedConfigService`.
 
 ## Choose the panel build first
 
-The default is your **existing stable install**. The latest stable panel is
-`v1.0.40` (`f88748be6a216b187e675bbb1f110df07e544148`). The pinned post-stable
-build (`fa23a8d73c181f9907633024d9023aead928324e`) adds the new RPCs, but it is
-not the stable install path. The panel must have authentication enabled: legacy
-no-auth installations are refused.
+Connect to your existing authentication-enabled panel and record its version
+and commit for the compatibility check. For a new panel, install a separate
+Stable instance and create the first administrator account before connecting
+MCP. Preserve any existing panel, worlds and database.
+[Docker Compose](../../getting-started/docker-compose/) · [Prebuilt binaries](../../getting-started/prebuilt-binaries/)
 
-- **New self-hosted install:** you MAY start one by following [Docker Compose](../getting-started/docker-compose/)
-  or [prebuilt binaries](../getting-started/prebuilt-binaries/), open
-  [http://localhost:8080](http://localhost:8080), create the first administrator account, then create
-  a dedicated API token. A new install must NOT replace, reconfigure, migrate
-  or delete an existing panel, world or database; if one already exists, use
-  it instead. Install the panel before attaching MCP.
-- **Existing self-hosted install:** do not re-run an installer over it. Keep
-  the existing `config.yaml`, controller database, worlds and backups. Only
-  create a scoped token with an expiry and point the client at the existing
-  panel URL.
-
-Switching an existing install to nightly is **never automatic**. It is only an
-operator-initiated change: back up the database and worlds, choose a qualified
-build explicitly and verify it before pointing MCP at it. Connecting or
-smoke-testing the MCP server must never restart shared services or rewrite
-data.
+Choose any panel upgrade or channel change separately and follow the panel
+upgrade procedure with backups.
 
 ## Pin the official artifact
 
-Pin one exact stable MCP artifact version and its immutable `sha256` digest.
-Never use `latest`, `@main`, a branch tag, a moving minor tag or a locally
-built image. The Go SDK and artifact versions are independent of the panel
-release version; the local manifest is [`docker/mcp.server.json`](https://github.com/athNdev/carbonpanel/blob/main/docker/mcp.server.json)
-and it currently carries an all-zero placeholder digest until a real digest is
-published. `scripts/validate_mcp_server_json.py` checks the required fields and
-refuses `latest`; the publication workflow injects the verified digest before
-any registry write.
+Look up the exact registry name and version, copy the OCI package identifier
+with its `sha256` digest, and confirm you can pull that digest anonymously.
+The manifest in the source tree carries a placeholder digest for the
+publication workflow. [Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.athNdev%2Fcarbon-panel)
 
-## Authentication is required
+## Create a dedicated API token
 
-The MCP server refuses a legacy no-auth installation. It verifies that
-authentication is enabled (`AuthService/GetAuthStatus`) and uses the token's
-identity for authorization. A missing or invalid credential is an error; there
-is no anonymous fallback and no way to connect to a panel with authentication
-disabled.
+The gateway verifies that panel authentication is enabled and checks the API
+token's identity at startup. Create a dedicated account with `servers:read` on
+the servers you want to list. Grant `files:read` for file calls and
+`backups:read` for backup calls on those servers as needed. An API token
+inherits its owner's grants, so mint an expiring `dp_` token from that
+account.
 
-## Create a dedicated token
-
-In the panel, create an API token with the narrowest permissions and a finite
-expiry. It must be a real `dp_` token, not a browser session token or an
-anonymous bypass. Pass it only through `CARBONPANEL_TOKEN` in the client
-configuration (or an environment variable). Do not put a token in command
-arguments, commit it to a repository or write it to stdout. The registry
-metadata marks this variable `isSecret: true`.
+Supply the token through the client's secret store or private environment
+configuration as `CARBONPANEL_TOKEN`. Keep the value out of shell arguments,
+logs and source control.
 
 ## Client configuration
 
-The URL must be reachable **from where the MCP process runs**. Pick one case.
+Use a Docker runtime that can launch Linux containers from your MCP client.
 
-**(a) Host-installed MCP binary** — loopback on the host reaches a panel
-published on that host:
+- **Windows** uses Docker Desktop with the WSL 2 backend and Linux containers.
+- **macOS** uses Docker Desktop. The digest selects a Linux image for Apple
+  Silicon or Intel.
+- **Linux** uses Docker Engine. Run `docker` from the same account as the MCP
+  client and restrict access to any client configuration containing a token.
 
-```json
-{
-  "mcpServers": {
-    "carbon-panel": {
-      "command": "<PATH_TO_MCP_BINARY>",
-      "args": ["stdio"],
-      "env": {
-        "CARBONPANEL_URL": "http://127.0.0.1:8080",
-        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
-      }
-    }
-  }
-}
-```
-
-Use the official stable binary release and verify its published checksum; never
-a locally built or preview binary.
-
-**(b) Compose-deployed MCP container** — the MCP process is in a separate
-container, so it must use the panel's Compose service DNS name and port:
+Use a controller URL reachable from the MCP container. This example starts
+the official image on a shared Compose bridge network. Replace the network,
+image and token placeholders with your own values.
 
 ```json
 {
@@ -140,110 +100,112 @@ container, so it must use the panel's Compose service DNS name and port:
 }
 ```
 
-Get `<COMPOSE_NETWORK>` from `docker compose config`; the service name is
-`carbon-panel` in the shipped Compose file. Never use `localhost` or
-`127.0.0.1` as a fallback inside the MCP container: that address is the MCP
-container itself. The shipped Compose file uses host networking by default,
-which suits case (a); a separate container still needs a shared network and
-DNS. No world, database, backup or Docker socket mount is used in either case.
-The process is non-root, serves JSON-RPC on stdin/stdout, writes diagnostics
-to stderr and exits on stdin EOF. There is no HTTP healthcheck port: the stdio
-session is the liveness signal.
+Use `docker compose config` to identify the service and bridge network for
+your installation. The shipped Compose example uses host networking by
+default. For a host-networked or remote panel with an existing HTTPS address,
+use that address if reachable from the container and omit the shared network
+argument. Container loopback reaches only the MCP process's own container.
 
-### OS-specific notes
+The gateway runs as a non-root stdio process with JSON-RPC on stdout,
+diagnostics on stderr and a clean exit on stdin EOF. It needs no panel data
+mounts or Docker socket mount.
 
-- **Windows:** use Docker Desktop with WSL2 and
-  `%APPDATA%\Claude\claude_desktop_config.json`. Double backslashes in any
-  host path you add. Only Linux is fully supported and tested; Windows
-  installations may have issues.
-- **macOS:** use `~/Library/Application Support/Claude/claude_desktop_config.json`.
-  The multi-arch image provides `arm64` for Apple Silicon and `amd64` for
-  Intel; pull by manifest digest so the client resolves its own platform.
-- **Linux:** use `~/.config/Claude/claude_desktop_config.json` and keep it
-  readable only by your user (`chmod 600`).
+### Development with a locally built binary
+
+For repository development, build `./cmd/carbonpanel-mcp` from the checkout.
+The binary starts stdio with no arguments. When it runs on the same host as a
+panel listening on port 8080, use the host's loopback address.
+
+```json
+{
+  "mcpServers": {
+    "carbon-panel": {
+      "command": "<PATH_TO_MCP_BINARY>",
+      "args": [],
+      "env": {
+        "CARBONPANEL_URL": "http://127.0.0.1:8080",
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
+      }
+    }
+  }
+}
+```
 
 ## Compatibility matrix
 
-Tool names match the implemented **combined 211-tool catalogue** exactly
-(250 declared RPCs, 240 mounted/reachable). All ten tools below are mounted; the
-columns report whether the panel build behind `CARBONPANEL_URL` implements the
-RPC that backs each tool. Exclusions and policy boundaries are recorded in the
-OSS-375 audit matrix.
-Evidence basis: the RPC list at tag `v1.0.40` (`f88748be…`) and at the
-pinned post-stable build `fa23a8d73c181f9907633024d9023aead928324e`, read from
-the checked-in protos. "Qualification pending" means the RPC exists in that
-build but no passing smoke evidence has been recorded for it yet.
+The table records RPC presence in Stable `v1.0.40` (`f88748be…`) and the
+pinned post-stable source at `fa23a8d73c181f9907633024d9023aead928324e`.
+A listed tool requires both a compatible controller and an authorized token.
 
 | MCP tool | Backing RPC | `v1.0.40` | Pinned post-stable build |
 | --- | --- | --- | --- |
-| `list_servers` | `ServerService/ListServers` | available | available |
-| `get_server` | `ServerService/GetServer` | available | available |
-| `list_files` | `FileService/ListFiles` | available | available |
-| `get_file` | `FileService/GetFile` | available | available |
-| `list_backups` | `BackupService/ListBackups` | available | available |
-| `list_players` | `PlayerService/ListPlayers` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
-| `get_player` | `PlayerService/GetPlayer` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
-| `list_world_entries` | `WorldService/ListWorldEntries` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
-| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
-| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `list_servers` | `ServerService/ListServers` | Present | Present |
+| `get_server` | `ServerService/GetServer` | Present | Present |
+| `list_files` | `FileService/ListFiles` | Present | Present |
+| `get_file` | `FileService/GetFile` | Present | Present |
+| `list_backups` | `BackupService/ListBackups` | Present | Present |
+| `list_players` | `PlayerService/ListPlayers` | Absent | Present |
+| `get_player` | `PlayerService/GetPlayer` | Absent | Present |
+| `list_world_entries` | `WorldService/ListWorldEntries` | Absent | Present |
+| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | Absent | Present |
+| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | Absent | Present |
 
-A tool is qualified only after its RPC is present in an explicitly pinned build
-and a smoke result for that build is retained. Until then it must be reported as
-not qualified on that build rather than attempted optimistically.
+The checked-in fixtures exercise the five Stable-era read tools and the
+missing-procedure response. Hosted CI also drives the compiled binary through
+authentication, `tools/list` and `list_servers` against an isolated mock
+controller. See the runbook for the additional evidence required to qualify a
+public digest and a specific controller build.
+[Binary smoke run](https://github.com/athNdev/carbonpanel/actions/runs/44689211233/job/136130719518) · [Distribution smoke runbook](https://github.com/athNdev/carbonpanel/blob/main/docs/runbook-mcp-smoke.md)
 
-## Verified minimal smoke on stable
+## Packwiz Studio inventory
 
-The verified minimal tool set that works against `v1.0.40` is `list_servers`,
-`get_server`, `list_files`, `get_file` and `list_backups`, matching the core
-lane's stable smoke path. This is a **verified-by-contract** set: the RPCs were
-read directly from the tagged protos. Execution against a real `v1.0.40`
-fixture is a separate gate and has not been performed in this change.
+For the Studio authoring library, `packwiz_list_packs` lists pack summaries and
+`packwiz_get_pack` shows metadata and content for an exact pack ID. Both tools
+require the global `modpacks/read` grant on a controller containing the
+generated `PackwizService`. The first `main` build that mounts it is
+`eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3`. The service is absent from `v1.0.40`
+and from the earlier post-stable build listed above.
 
-1. Check the panel health endpoints before connecting: `GET /healthz`,
-   `GET /readyz` and `GET /health/detail`. Report `healthy`,
-   `degraded`/`unavailable` and `unknown` separately. A stored `Running` status
-   is not playable evidence, and a missing check is never reported healthy.
-2. Start the pinned image by digest with a dedicated token and call
-   `tools/list`. The stable tool set above may be listed; listing a main-only
-   tool is not proof that it works.
-3. Call `list_servers` and show the unmodified result. Optionally call
-   `get_server` with a server id, then `list_files`/`get_file` (bounded,
-   server-relative) and `list_backups`.
-4. No write, restart, delete, prune or config/world/database change is
-   attempted, so no rollback is needed.
-5. If a tool returns `Unimplemented` or an unavailable-RPC error, stop that
-   call and surface the structured capability error below. Do not retry with a
-   different MCP client version and do not report the call as successful.
-6. Confirm stdout contains only JSON-RPC and diagnostics go to stderr, then
-   remove the owned fixture. See [MCP distribution smoke](https://github.com/athNdev/carbonpanel/blob/main/docs/runbook-mcp-smoke.md)
-   for the full evidence and hard-stop procedure.
+Each call returns up to 50 entries. Use `next_offset` to request the next page.
+Pack details include mods, datapacks, resource packs and shaders. The response
+omits download URLs, file names, folders and raw pack options. The gateway
+rejects controller responses over 4 MiB. Use Modpack Studio for edits, imports,
+exports and provider update checks.
+
+## Check the connection
+
+1. From the MCP container's network, check `GET /healthz`, `GET /readyz`
+   and `GET /health/detail`. Report each observed status. A stored
+   `Running` state alone cannot verify that a player can join.
+2. Start the pinned gateway and call `tools/list`, then `list_servers`.
+   Record the result with the installed controller build.
+3. If you have read access to a known server, optionally call `get_server`,
+   `list_files`, `get_file` with a server-relative path, or `list_backups`.
+   Keep the check read-only.
 
 ## Capability errors
 
-When a tool's RPC is absent, `Unimplemented` or unavailable, return an MCP
-tool error (`isError: true`) with an honest structured payload:
+When the controller reports a missing procedure, the gateway returns
+`isError: true`. The `structuredContent` identifies the affected tool and
+the catalog's minimum panel build.
 
 ```json
-{"error":{"code":"CAPABILITY_UNAVAILABLE","tool":"list_players",
- "rpc":"carbonpanel.v1.PlayerService/ListPlayers",
- "required_panel_build":"post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e","observed_panel_build":"v1.0.40 (f88748be)",
- "retryable":false,"guidance":"Upgrade the panel in a separate operator-initiated change."}}
+{
+  "status": "error",
+  "error": {
+    "kind": "capability_unavailable",
+    "code": "unimplemented",
+    "message": "The controller reported an unimplemented procedure.",
+    "tool": "list_players",
+    "procedure": "/carbonpanel.v1.PlayerService/ListPlayers",
+    "minimum_panel_build": "post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e"
+  }
+}
 ```
 
-The semantic requirement (`CAPABILITY_UNAVAILABLE`, named tool/RPC, required
-and observed builds, no false success, no silent omission) is fixed by
-[ADR 0034](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md).
-The exact wire field names are owned by the core implementation lane and must
-be kept in sync with this guide.
+Record the installed controller build separately. A missing domain record uses
+`error.kind: not_found`, and an authorization denial uses
+`error.kind: permission_denied`.
 
-:::caution[Data preservation]
-Do not run `docker compose down -v`, `docker system prune`, `rm -rf` on data
-paths, or any delete/stop/start/recreate command as part of connecting or
-smoke-testing MCP. Keep world data and the panel database intact before and
-after. Stop and report if any tool asks for a write.
-:::
-
-The published site shows the exact application commit its pages describe on
-the [documentation version](../versions/) page. This page is in the source
-tree; it becomes visible on carbonpanel.dev after the website source pin is
-advanced by the normal publication process.
+The published site's documentation version identifies the commit its pages
+describe. [Documentation version](../../versions/)

@@ -7,14 +7,18 @@ package enroll
 
 import (
 	"bytes"
+	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -73,11 +77,12 @@ const (
 // It carries no secret; a bootstrap "credential" is only a marker for the
 // bounded bootstrap phase, not a wire-authenticated principal.
 type Credential struct {
-	Kind     CredentialKind
-	NodeID   string
-	Serial   string
-	Scopes   []string
-	ObjectID string
+	Kind                 CredentialKind
+	NodeID               string
+	Serial               string
+	Scopes               []string
+	ObjectID             string
+	CredentialGeneration int64
 }
 
 func hasScope(scopes []string, want string) bool {
@@ -109,16 +114,18 @@ type Enrollment struct {
 	CredentialGeneration int64
 	Revoked              bool
 	CertSerial           string
+	CertificateDigest    []byte
+	CertificateExpiresAt time.Time
 	ChallengeID          string
+	ChallengeBinding     []byte
 	Nonce                []byte
 	NonceExpiresAt       time.Time
 	NonceUsed            bool
-	challengeCount       int
+	ChallengeCount       int
 }
 
-// EnrollmentAuthority is the controller-side live enrollment boundary. It uses
-// an owned in-memory store; nothing is persisted to a live DB by this package.
-// Rotation/revocation state survives a snapshot restore in fixtures.
+// EnrollmentAuthority owns enrollment, certificate issuance and revocation.
+// The production constructor uses a versioned store and an operator-owned CA.
 type EnrollmentAuthority struct {
 	mu               sync.Mutex
 	enrollments      map[string]*Enrollment
@@ -128,7 +135,8 @@ type EnrollmentAuthority struct {
 	failBeforeCommit bool
 	failIssue        bool
 	clock            func() time.Time
-	caKey            ed25519.PrivateKey
+	caKey            crypto.Signer
+	stateStore       StateStore
 	caCert           *x509.Certificate
 	serialCounter    int64
 }
@@ -204,11 +212,15 @@ func (a *EnrollmentAuthority) InjectIssuanceFailure(v bool) {
 // CreateEnrollment is in the operator provisioning domain. All REQUIRED proof
 // fields must be present; the plaintext secret is never accepted or returned.
 func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEnrollmentRequest) (*v1.CreateEnrollmentResponse, error) {
+	return a.createEnrollment(context.Background(), cred, req)
+}
+
+func (a *EnrollmentAuthority) createEnrollment(ctx context.Context, cred Credential, req *v1.CreateEnrollmentRequest) (*v1.CreateEnrollmentResponse, error) {
 	if err := a.AuthorizeOperator(cred); err != nil {
 		return nil, err
 	}
-	if req == nil || req.GetNodeId() == "" || len(req.GetApprovedPublicKeySpki()) == 0 ||
-		len(req.GetApprovedKeyFingerprint()) == 0 || len(req.GetEnrollmentSecretDigest()) == 0 ||
+	if req == nil || req.GetNodeId() == "" || strings.ContainsRune(req.GetNodeId(), 0) || len(req.GetApprovedPublicKeySpki()) == 0 ||
+		len(req.GetApprovedKeyFingerprint()) == 0 || len(req.GetEnrollmentSecretDigest()) != sha256.Size ||
 		len(req.GetEnrollmentSalt()) == 0 || len(req.GetCsrPre()) == 0 {
 		return nil, ErrMissingProof
 	}
@@ -237,20 +249,22 @@ func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEn
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	id := fmt.Sprintf("enroll-%d", len(a.enrollments)+1)
-	e := &Enrollment{
-		ID: id, NodeID: req.GetNodeId(), Label: req.GetNodeLabel(),
-		State: "pending", ExpiresAt: a.clock().Add(ttl),
-		Salt: append([]byte{}, req.GetEnrollmentSalt()...),
-		Digest: append([]byte{}, req.GetEnrollmentSecretDigest()...),
-		ApprovedSPKI: append([]byte{}, req.GetApprovedPublicKeySpki()...),
-		ApprovedFingerprint: append([]byte{}, req.GetApprovedKeyFingerprint()...),
-		CSRPre: append([]byte{}, req.GetCsrPre()...),
-		Capabilities: append([]v1.NodeCapability{}, req.GetRequiredCapabilities()...),
-		ProtocolVersion: req.GetProtocolVersion(),
-	}
-	a.enrollments[id] = e
-	return &v1.CreateEnrollmentResponse{Enrollment: enrollmentView(e)}, nil
+	return commitMutationLocked(ctx, a, func() (*v1.CreateEnrollmentResponse, error) {
+		id := "enroll-" + rand.Text()
+		e := &Enrollment{
+			ID: id, NodeID: req.GetNodeId(), Label: req.GetNodeLabel(),
+			State: "pending", ExpiresAt: a.clock().Add(ttl),
+			Salt:                append([]byte{}, req.GetEnrollmentSalt()...),
+			Digest:              append([]byte{}, req.GetEnrollmentSecretDigest()...),
+			ApprovedSPKI:        append([]byte{}, req.GetApprovedPublicKeySpki()...),
+			ApprovedFingerprint: append([]byte{}, req.GetApprovedKeyFingerprint()...),
+			CSRPre:              append([]byte{}, req.GetCsrPre()...),
+			Capabilities:        append([]v1.NodeCapability{}, req.GetRequiredCapabilities()...),
+			ProtocolVersion:     req.GetProtocolVersion(),
+		}
+		a.enrollments[id] = e
+		return &v1.CreateEnrollmentResponse{Enrollment: enrollmentView(e)}, nil
+	})
 }
 
 // BeginEnrollmentChallenge is unauthenticated on the wire by design but bounded
@@ -259,32 +273,45 @@ func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEn
 // field. The returned expires_at is the ENROLLMENT expiry bound into SIG_CLAIM;
 // the nonce has its own shorter internal TTL used only for staleness rejection.
 func (a *EnrollmentAuthority) BeginEnrollmentChallenge(req *v1.BeginEnrollmentChallengeRequest) (*v1.BeginEnrollmentChallengeResponse, error) {
-	if req == nil || req.GetEnrollmentId() == "" {
-		return nil, ErrRefused
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.beginEnrollmentChallengeLocked(req, a.channelContextLocked(), false)
+}
+
+func (a *EnrollmentAuthority) beginEnrollmentChallengeLocked(req *v1.BeginEnrollmentChallengeRequest, binding []byte, bound bool) (*v1.BeginEnrollmentChallengeResponse, error) {
+	if a.stateStore != nil && !bound {
+		return nil, ErrTopology
+	}
+	if req.GetEnrollmentId() == "" {
+		return nil, ErrRefused
+	}
 	e := a.enrollments[req.GetEnrollmentId()]
 	if e == nil || e.State != "pending" || a.clock().After(e.ExpiresAt) {
 		return nil, ErrRefused
 	}
-	if e.challengeCount >= 3 {
+	if e.ChallengeCount >= 3 {
 		return nil, ErrRateLimited
 	}
-	e.challengeCount++
-	e.ChallengeID = fmt.Sprintf("challenge-%s-%d", e.ID, e.challengeCount)
-	nonceInput := sha256.Sum256([]byte("nonce:" + e.ChallengeID + ":" + string(e.Nonce) + ":" + fmt.Sprint(a.clock().UnixNano())))
-	e.Nonce = nonceInput[:]
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, ErrRefused
+	}
+	e.ChallengeCount++
+	e.ChallengeID = "challenge-" + rand.Text()
+	e.ChallengeBinding = nil
+	if bound {
+		e.ChallengeBinding = append([]byte{}, binding...)
+	}
+	e.Nonce = nonce
 	e.NonceExpiresAt = a.clock().Add(2 * time.Minute)
 	e.NonceUsed = false
-	ctx := a.channelContextLocked()
 	return &v1.BeginEnrollmentChallengeResponse{
-		ChallengeId: e.ChallengeID,
-		ServerNonce: append([]byte{}, e.Nonce...),
-		ExpiresAt:   timestamppb.New(e.ExpiresAt),
-		NodeId:      e.NodeID,
-		EnrollmentId: e.ID,
-		ChannelContext: append([]byte{}, ctx...),
+		ChallengeId:    e.ChallengeID,
+		ServerNonce:    append([]byte{}, e.Nonce...),
+		ExpiresAt:      timestamppb.New(e.ExpiresAt),
+		NodeId:         e.NodeID,
+		EnrollmentId:   e.ID,
+		ChannelContext: append([]byte{}, binding...),
 	}, nil
 }
 
@@ -296,6 +323,13 @@ func (a *EnrollmentAuthority) BeginEnrollmentChallenge(req *v1.BeginEnrollmentCh
 func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*v1.ClaimEnrollmentResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.claimEnrollmentLocked(req, a.channelContextLocked(), false)
+}
+
+func (a *EnrollmentAuthority) claimEnrollmentLocked(req *v1.ClaimEnrollmentRequest, binding []byte, bound bool) (*v1.ClaimEnrollmentResponse, error) {
+	if a.stateStore != nil && !bound {
+		return nil, ErrTopology
+	}
 	if req == nil {
 		return nil, ErrRefused
 	}
@@ -308,6 +342,12 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 	}
 	if len(e.ApprovedSPKI) == 0 || len(e.ApprovedFingerprint) == 0 || len(e.CSRPre) == 0 {
 		return nil, ErrMissingProof
+	}
+	// A bound challenge is redeemable only on the connection that issued it.
+	// The offline fixture entry point cannot complete a bound challenge.
+	if bound != (len(e.ChallengeBinding) != 0) ||
+		(bound && subtle.ConstantTimeCompare(binding, e.ChallengeBinding) != 1) {
+		return nil, ErrTopology
 	}
 	// CSR_PRE is registration material: its key must be the approved key.
 	csr, err := x509.ParseCertificateRequest(e.CSRPre)
@@ -329,7 +369,7 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 	claimedCaps := req.GetCapabilities().GetCapabilities()
 	if !ok || !ed25519.Verify(pub, ClaimContext(
 		e.NodeID, e.ID, req.GetChallengeId(), e.Nonce,
-		e.ExpiresAt, claimedCaps, a.channelContextLocked(),
+		e.ExpiresAt, claimedCaps, binding,
 	), req.GetFreshClaimSignature()) {
 		return nil, ErrMismatchedKey
 	}
@@ -344,11 +384,7 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 		return nil, ErrStaleNonce
 	}
 	// TLS topology support/refusal, controller-derived only.
-	ctx := a.channelContextLocked()
-	if ctx == nil {
-		return nil, ErrTopology
-	}
-	if subtle.ConstantTimeCompare(ctx, req.GetChannelBindingEvidence()) != 1 {
+	if binding == nil || subtle.ConstantTimeCompare(binding, req.GetChannelBindingEvidence()) != 1 {
 		return nil, ErrTopology
 	}
 	// Fault seam: after verification but before issuance or any mutation.
@@ -356,46 +392,57 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 		return nil, ErrRefused
 	}
 
-	// ---- ISSUE FIRST, COMMIT SECOND -------------------------------------
-	// Compute prospective values without touching owned state. The serial
-	// counter advances only in the single commit step below.
+	// Prepare issuance before publishing any ownership changes.
+	generation := int64(1)
+	if a.stateStore != nil {
+		var err error
+		generation, err = a.nextNodeCredentialGenerationLocked(e.NodeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if a.serialCounter >= math.MaxInt64-1000 {
+		return nil, ErrRefused
+	}
 	nextCounter := a.serialCounter + 1
-	certSerial := fmt.Sprintf("cn-%s-%d", e.NodeID, nextCounter)
 	der, err := a.issueClientCertificateLocked(e.NodeID, nextCounter, pub)
 	if err != nil {
 		return nil, fmt.Errorf("%w: certificate issuance failed", ErrRefused)
 	}
-
-	// ---- SINGLE COMMIT ---------------------------------------------------
-	// Every ownership field flips together; there is no failure path after
-	// this point, so no partial active/consumed state can be observed.
+	issued, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, ErrRefused
+	}
+	fingerprint := sha256.Sum256(der)
 	now := a.clock()
 	e.NonceUsed = true
 	e.State = "active"
 	e.ConsumedAt = &now
-	e.ChannelBinding = append([]byte{}, ctx...)
-	e.CredentialGeneration = 1
-	e.CertSerial = certSerial
+	e.ChannelBinding = append([]byte{}, binding...)
+	e.ChallengeBinding = nil
+	e.CredentialGeneration = generation
+	e.CertSerial = issued.SerialNumber.String()
+	e.CertificateDigest = fingerprint[:]
+	e.CertificateExpiresAt = issued.NotAfter
 	a.serialCounter = nextCounter
 
-	fp := sha256.Sum256(der)
 	return &v1.ClaimEnrollmentResponse{
 		Identity: &v1.NodeIdentity{
 			NodeId: e.NodeID, Name: e.Label, KeyFingerprint: fmt.Sprintf("%x", e.ApprovedFingerprint),
-			CredentialGeneration: 1, Transport: v1.NodeTransport_NODE_TRANSPORT_MANAGED_AGENT,
+			CredentialGeneration: generation, Transport: v1.NodeTransport_NODE_TRANSPORT_MANAGED_AGENT,
 		},
 		Claims: &v1.NodeAuthorizationClaims{
 			NodeId: e.NodeID, ObjectId: e.NodeID,
-			Scopes: []string{"node:heartbeat", "node:report", "node:ack"},
-			CredentialGeneration: 1, IssuedAt: timestamppb.New(now),
-			ExpiresAt: timestamppb.New(now.Add(24 * time.Hour)),
+			Scopes:               enrolledNodeScopes(),
+			CredentialGeneration: generation, IssuedAt: timestamppb.New(now),
+			ExpiresAt: timestamppb.New(issued.NotAfter),
 		},
 		EnrolledClientCertificateDer: der,
 		CertificateSerial:            e.CertSerial,
-		CertificateFingerprint:       fp[:],
-		CertificateNotAfter:          timestamppb.New(now.Add(24 * time.Hour)),
+		CertificateFingerprint:       append([]byte(nil), fingerprint[:]...),
+		CertificateNotAfter:          timestamppb.New(issued.NotAfter),
 		IssuingCaDigest:              caDigest(a.caCert.Raw),
-		CredentialGeneration:         1,
+		CredentialGeneration:         generation,
 	}, nil
 }
 
@@ -421,11 +468,23 @@ func (a *EnrollmentAuthority) issueClientCertificateLocked(nodeID string, serial
 		return nil, errors.New("injected certificate issuance failure")
 	}
 	now := a.clock()
+	notBefore, notAfter := now.Add(-time.Minute), now.Add(24*time.Hour)
+	if a.stateStore != nil {
+		if now.Before(a.caCert.NotBefore) || !now.Before(a.caCert.NotAfter) {
+			return nil, ErrRefused
+		}
+		if notBefore.Before(a.caCert.NotBefore) {
+			notBefore = a.caCert.NotBefore
+		}
+		if notAfter.After(a.caCert.NotAfter) {
+			notAfter = a.caCert.NotAfter
+		}
+	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(serialCounter + 1000),
 		Subject:               pkix.Name{CommonName: nodeID},
-		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(24 * time.Hour),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
@@ -440,6 +499,9 @@ func (a *EnrollmentAuthority) issueClientCertificateLocked(nodeID string, serial
 func (a *EnrollmentAuthority) IssueClientCertificate(nodeID string, serialCounter int64, pub ed25519.PublicKey) ([]byte, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.stateStore != nil {
+		return nil, ErrScope
+	}
 	return a.issueClientCertificateLocked(nodeID, serialCounter, pub)
 }
 
@@ -460,9 +522,9 @@ func enrollmentView(e *Enrollment) *v1.OneTimeEnrollment {
 	return &v1.OneTimeEnrollment{
 		EnrollmentId: e.ID, NodeLabel: e.Label,
 		TokenFingerprint: fmt.Sprintf("sha256:%x", e.Digest[:4]),
-		CreatedAt: timestamppb.New(e.ExpiresAt.Add(-time.Hour)),
-		ExpiresAt: timestamppb.New(e.ExpiresAt),
-		State: state, RequiredCapabilities: e.Capabilities,
+		CreatedAt:        timestamppb.New(e.ExpiresAt.Add(-time.Hour)),
+		ExpiresAt:        timestamppb.New(e.ExpiresAt),
+		State:            state, RequiredCapabilities: e.Capabilities,
 		ProtocolVersion: e.ProtocolVersion, NodeId: e.NodeID,
 		ApprovedKeyFingerprint: append([]byte{}, e.ApprovedFingerprint...),
 	}
@@ -472,6 +534,9 @@ func enrollmentView(e *Enrollment) *v1.OneTimeEnrollment {
 func (a *EnrollmentAuthority) EnrollmentView(id string) (*v1.OneTimeEnrollment, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.refreshStateLocked(context.Background()); err != nil {
+		return nil, err
+	}
 	e := a.enrollments[id]
 	if e == nil {
 		return nil, ErrRefused
@@ -479,58 +544,85 @@ func (a *EnrollmentAuthority) EnrollmentView(id string) (*v1.OneTimeEnrollment, 
 	return enrollmentView(e), nil
 }
 
-// RevokeCredential is durable in this owned store and invalidates the serial
-// immediately. It requires the operator domain and an exact confirmation.
+// RevokeCredential invalidates every enrollment and certificate for a node.
+// It requires the operator domain and an exact confirmation.
 func (a *EnrollmentAuthority) RevokeCredential(cred Credential, req *v1.RevokeCredentialRequest) (*v1.RevokeCredentialResponse, error) {
+	return a.revokeCredential(context.Background(), cred, req)
+}
+
+func (a *EnrollmentAuthority) revokeCredential(ctx context.Context, cred Credential, req *v1.RevokeCredentialRequest) (*v1.RevokeCredentialResponse, error) {
 	if err := a.AuthorizeOperator(cred); err != nil {
 		return nil, err
 	}
-	if req == nil || req.GetConfirmationPhrase() != "REVOKE "+req.GetNodeId() {
+	nodeID := req.GetNodeId()
+	if nodeID == "" || req.GetConfirmationPhrase() != "REVOKE "+nodeID {
 		return nil, ErrRefused
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, e := range a.enrollments {
-		if e.NodeID != req.GetNodeId() {
-			continue
+	return commitMutationLocked(ctx, a, func() (*v1.RevokeCredentialResponse, error) {
+		found := false
+		for _, enrollment := range a.enrollments {
+			if enrollment.NodeID != nodeID {
+				continue
+			}
+			found = true
+			if enrollment.Revoked {
+				continue
+			}
+			if enrollment.CredentialGeneration == math.MaxInt64 {
+				return nil, ErrRefused
+			}
+			if enrollment.CertSerial != "" {
+				a.revokedSerials[enrollment.CertSerial] = true
+			}
+			enrollment.Revoked = true
+			enrollment.State = "revoked"
+			enrollment.CredentialGeneration++
 		}
-		if e.CertSerial != "" {
-			a.revokedSerials[e.CertSerial] = true
+		if !found {
+			return nil, ErrRefused
 		}
-		e.Revoked = true
-		e.State = "revoked"
-		e.CredentialGeneration++
-		return &v1.RevokeCredentialResponse{NodeId: e.NodeID, State: v1.NodeEnrollmentState_NODE_ENROLLMENT_STATE_REVOKED}, nil
-	}
-	return nil, ErrRefused
+		return &v1.RevokeCredentialResponse{
+			NodeId: nodeID, State: v1.NodeEnrollmentState_NODE_ENROLLMENT_STATE_REVOKED,
+		}, nil
+	})
 }
 
-// Rotate issues a new generation with a bounded overlap and revokes the old
-// serial. It is an operator action, never a node action.
+// Rotate advances the sole active credential generation and rejects its old
+// certificate. New credentials must be obtained through enrollment.
 func (a *EnrollmentAuthority) Rotate(cred Credential, nodeID string) (int64, error) {
+	return a.rotate(context.Background(), cred, nodeID)
+}
+
+func (a *EnrollmentAuthority) rotate(ctx context.Context, cred Credential, nodeID string) (int64, error) {
 	if err := a.AuthorizeOperator(cred); err != nil {
 		return 0, err
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, e := range a.enrollments {
-		if e.NodeID != nodeID {
-			continue
+	return commitMutationLocked(ctx, a, func() (int64, error) {
+		var active *Enrollment
+		for _, enrollment := range a.enrollments {
+			if enrollment.NodeID == nodeID && a.activeCertificateLocked(enrollment) {
+				if active != nil {
+					return 0, ErrRefused
+				}
+				active = enrollment
+			}
 		}
-		if e.CertSerial != "" {
-			a.revokedSerials[e.CertSerial] = true
+		if active == nil || active.CredentialGeneration == math.MaxInt64 {
+			return 0, ErrRefused
 		}
-		e.CredentialGeneration++
-		return e.CredentialGeneration, nil
-	}
-	return 0, ErrRefused
+		a.revokedSerials[active.CertSerial] = true
+		active.CredentialGeneration++
+		return active.CredentialGeneration, nil
+	})
 }
 
-// IsSerialRevoked reports durable revocation state.
+// IsSerialRevoked reports revocation state and rejects failed state reads.
 func (a *EnrollmentAuthority) IsSerialRevoked(serial string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.revokedSerials[serial]
+	return a.serialRevoked(serial) != nil
 }
 
 // Snapshot and Restore model a controller restart for owned fixtures. Only
@@ -575,7 +667,10 @@ func (a *EnrollmentAuthority) AuthorizeNodeOperation(c Credential, objectID, sco
 	if c.Kind != CredentialNode || c.ObjectID != objectID || !hasScope(c.Scopes, scope) {
 		return ErrScope
 	}
-	return a.serialRevoked(c.Serial)
+	if a.stateStore == nil {
+		return a.serialRevoked(c.Serial)
+	}
+	return a.authorizeActiveCredential(context.Background(), c)
 }
 
 // AuthorizePreflight additionally refuses a report carrying scopes beyond its
@@ -595,6 +690,9 @@ func (a *EnrollmentAuthority) AuthorizePreflight(c Credential, objectID string, 
 func (a *EnrollmentAuthority) serialRevoked(serial string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.refreshStateLocked(context.Background()); err != nil {
+		return err
+	}
 	if a.revokedSerials[serial] {
 		return ErrRevoked
 	}
@@ -666,10 +764,13 @@ func (b *NodeBundle) String() string { return "NodeBundle[" + b.EnrollmentID + "
 // and the private key are written to a 0600 file under runtimeDir; the caller
 // receives a PublicBundle and a handle for the later claim.
 func GenerateNodeBundle(runtimeDir, nodeID, label string) (*NodeBundle, *v1.CreateEnrollmentRequest, error) {
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
+	entropy := make([]byte, 32)
+	if _, err := rand.Read(entropy); err != nil {
 		return nil, nil, err
 	}
+	// The protobuf claim carries S in a string. Hash the same base64url
+	// bytes the node stores and sends, retaining all 256 bits of entropy.
+	secret := []byte(base64.RawURLEncoding.EncodeToString(entropy))
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, nil, err
@@ -708,12 +809,12 @@ func GenerateNodeBundle(runtimeDir, nodeID, label string) (*NodeBundle, *v1.Crea
 			v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET,
 			v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS,
 		},
-		ProtocolVersion: ProtocolVersion,
-		ApprovedPublicKeySpki: spki,
+		ProtocolVersion:        ProtocolVersion,
+		ApprovedPublicKeySpki:  spki,
 		ApprovedKeyFingerprint: fp[:],
 		EnrollmentSecretDigest: digest[:],
-		EnrollmentSalt: salt,
-		CsrPre: csrDER,
+		EnrollmentSalt:         salt,
+		CsrPre:                 csrDER,
 	}
 	return bundle, req, nil
 }
@@ -730,11 +831,11 @@ func (b *NodeBundle) BuildClaim(enrollmentID string, challenge *v1.BeginEnrollme
 		challenge.GetServerNonce(), expires, capabilities, challenge.GetChannelContext())
 	sig := ed25519.Sign(b.key, ctx)
 	return &v1.ClaimEnrollmentRequest{
-		EnrollmentId: enrollmentID,
-		EnrollmentToken: string(b.secret),
-		ChallengeId: challenge.GetChallengeId(),
-		FreshClaimSignature: sig,
-		Capabilities:        &v1.NodeCapabilities{Capabilities: capabilities},
+		EnrollmentId:           enrollmentID,
+		EnrollmentToken:        string(b.secret),
+		ChallengeId:            challenge.GetChallengeId(),
+		FreshClaimSignature:    sig,
+		Capabilities:           &v1.NodeCapabilities{Capabilities: capabilities},
 		ChannelBindingEvidence: append([]byte{}, challenge.GetChannelContext()...),
 	}, nil
 }

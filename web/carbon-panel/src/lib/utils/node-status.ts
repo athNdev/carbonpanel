@@ -29,22 +29,8 @@ export function describeNodeStatus(status: NodeStatus | null | undefined): NodeS
 	return STATUS_DESCRIPTIONS[status] ?? { label: 'UNKNOWN', dotClass: 'text-muted-foreground' };
 }
 
-export interface PrimaryNodeCandidate {
-	id: string;
-	name: string;
-	isLocal: boolean;
-	status: NodeStatus;
-}
-
-/**
- * Pick the node shown in the shell footer: prefer the local node, then any
- * online node, then the first node. Returns null when there are no nodes.
- */
-export function pickPrimaryNode<T extends PrimaryNodeCandidate>(nodes: T[]): T | null {
-	if (nodes.length === 0) return null;
-	return (
-		nodes.find((node) => node.isLocal) ??
-		nodes.find((node) => node.status === NodeStatus.ONLINE) ??
-		nodes[0]
-	);
+/** Counts include every registered host, including offline and unknown nodes. */
+export function summarizeNodes(nodes: ReadonlyArray<{ status: NodeStatus }>) {
+	const online = nodes.filter((node) => node.status === NodeStatus.ONLINE).length;
+	return { online, total: nodes.length, offline: nodes.length - online };
 }

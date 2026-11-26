@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MPL-2.0
+name: MCP Packaged Smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mcp-dist.yml'
+      - '.github/workflows/mcp-packaged-smoke.yml'
+      - '.dockerignore'
+      - 'docker/Dockerfile.mcp*'
+      - 'docker/mcp.server.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'cmd/carbonpanel-mcp/**'
+      - 'internal/mcp/**'
+      - 'scripts/mcp_build_only_packaged_smoke.py'
+      - 'scripts/mcp_mock_controller.py'
+      - 'scripts/mcp_stdio_smoke.py'
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  packaged-smoke:
+    name: Cross-build and exercise packaged MCP
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build both platforms and verify executable architecture
+        env:
+          MCP_VERSION: ${{ inputs.version || 'v0.0.0-ci' }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          build_date=$(git show -s --format=%cI HEAD)
+          build_args=(--file docker/Dockerfile.mcp
+            --build-arg "MCP_ARTIFACT_VERSION=$MCP_VERSION"
+            --build-arg "MCP_ARTIFACT_COMMIT=$GITHUB_SHA"
+            --build-arg "MCP_ARTIFACT_BUILDDATE=$build_date")
+          rootfs="$RUNNER_TEMP/mcp-rootfs"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output "type=local,dest=$rootfs" "${build_args[@]}" .
+          export LC_ALL=C
+          readelf -h "$rootfs/linux_amd64/usr/local/bin/carbonpanel-mcp" | tee "$RUNNER_TEMP/mcp-amd64-elf.txt"
+          readelf -h "$rootfs/linux_arm64/usr/local/bin/carbonpanel-mcp" | tee "$RUNNER_TEMP/mcp-arm64-elf.txt"
+          grep -q 'Machine:.*X86-64' "$RUNNER_TEMP/mcp-amd64-elf.txt"
+          grep -q 'Machine:.*AArch64' "$RUNNER_TEMP/mcp-arm64-elf.txt"
+          docker buildx build --platform linux/amd64 --load --tag carbonpanel-mcp:packaged-smoke "${build_args[@]}" .
+          docker run --rm --pull never --network none carbonpanel-mcp:packaged-smoke -version \
+            | tee "$RUNNER_TEMP/mcp-binary-version.txt"
+          test "$(cat "$RUNNER_TEMP/mcp-binary-version.txt")" = \
+            "carbonpanel-mcp $MCP_VERSION commit=$GITHUB_SHA built=$build_date"
+          docker build --file docker/Dockerfile.mcp-mock --tag carbonpanel-mcp-mock:packaged-smoke .
+      - name: Run packaged stdio against the isolated fixture
+        run: |
+          set -euo pipefail
+          python3 scripts/mcp_build_only_packaged_smoke.py --skip-build \
+            --image-tag carbonpanel-mcp:packaged-smoke \
+            --mock-tag carbonpanel-mcp-mock:packaged-smoke \
+            --evidence "$RUNNER_TEMP/mcp-packaged-smoke.json" \
+            --fixture-log "$RUNNER_TEMP/mcp-packaged-fixture.log"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Exercise packaged streams with controller authorization
+        run: |
+          set -euo pipefail
+          CARBONPANEL_MCP_SMOKE_IMAGE_ID=$(jq -er '.image_id' "$RUNNER_TEMP/mcp-packaged-smoke.json")
+          export CARBONPANEL_MCP_SMOKE_IMAGE_ID
+          go test -v -count=1 -timeout=3m ./internal/mcp \
+            -run '^TestIntegrationControllerStream(EntryPoint|Refusals|SizeContract)$' \
+            | tee "$RUNNER_TEMP/mcp-packaged-stream.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mcp-build-only-packaged-smoke
+          path: |
+            ${{ runner.temp }}/mcp-*-elf.txt
+            ${{ runner.temp }}/mcp-binary-version.txt
+            ${{ runner.temp }}/mcp-packaged-smoke.json
+            ${{ runner.temp }}/mcp-packaged-fixture.log
+            ${{ runner.temp }}/mcp-packaged-stream.log

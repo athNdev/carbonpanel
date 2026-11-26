@@ -30,6 +30,8 @@ live only on owning node storage.
   `request_id` idempotency, an operator-resolution path for unknown outcomes,
   and an idempotent request-keyed activity event on successful bind/unbind.
   A folder rename is not a hot swap. Never auto-retry an uncertain outcome.
+  Rollback data preservation is in
+  [World Library — Rollback rules](world-library-shape-2.md).
 - Node resolution is strict and fail-closed: remote-without-transport returns
   `ErrUnavailable`; there is no controller-local fallback. Work that outlives
   the request uses an owned context with cancel-and-wait on shutdown; mutation
@@ -42,13 +44,12 @@ live only on owning node storage.
 - The server-detail World tab reports unmanaged and unbound states without
   inventing a level, and reuses these binding gates for pick/swap. See
   [Library adoption fencing](../decisions/library-adoption-fencing.md).
-- Imports verify the operator-supplied SHA-256 against a whole-archive SHA-256
-  in node-local staging; `archive/zip` CRC checks entries, but no per-file
-  SHA-256 manifest is verified. Inspection rejects traversal/unsafe paths,
-  symlink, special and encrypted entries, nesting deeper than two levels, and
-  size/entry/manifest caps. Executable/plugin payloads (`.jar`, `.dll`, `.so`,
-  `.mcfunction`) are only detected and reported, never installed or run.
-  Container privileges are unchanged.
+- Imports verify whole-archive SHA-256; ZIP CRC is the only per-file check.
+  Cancellable inspection and compatibility use extraction-normalized paths.
+  Import, preview and bind refuse unusable layouts; a version-only preview must
+  name its target version. See [Import layout](../../docs/world-library-import-layout.md).
+- A world-bind journal protects the configured level and custom-property
+  override from staged configuration and global sync.
 - Platform support has two axes: API-backed artifact support (Modrinth,
   CurseForge content artifacts) and experimental/manual prebuilt-world import.
   A modpack or datapack is not a prebuilt world. CurseForge `x-api-key` goes

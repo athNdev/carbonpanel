@@ -10,6 +10,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { CarbonTabs, CarbonPageHeader } from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import TemplateManagement from './TemplateManagement.svelte';
 	import ActiveModules from './ActiveModules.svelte';
 
@@ -33,10 +34,17 @@ one at https://mozilla.org/MPL/2.0/.
 	/>
 
 	<!-- Carbon Navigation Tabs -->
-	<CarbonTabs tabs={moduleTabs} bind:selectedTab={activeTab} />
+	<CarbonTabs tabs={moduleTabs} bind:selectedTab={activeTab} idPrefix="modules" />
+	<CarbonInactiveTabPanels tabs={moduleTabs} selectedTab={activeTab} idPrefix="modules" />
 
 	{#key activeTab}
-		<div class="motion-fade-in">
+		<div
+			id="modules-panel-{activeTab}"
+			role="tabpanel"
+			aria-labelledby="modules-tab-{activeTab}"
+			class="focus-ring motion-fade-in"
+			tabindex="0"
+		>
 			{#if activeTab === 'templates'}
 				<TemplateManagement />
 			{:else if activeTab === 'active'}

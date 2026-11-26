@@ -30,8 +30,8 @@ import (
 )
 
 type PackwizHandler struct {
-	uploadManager   *upload.Manager
-	manager         *packwiz.Manager
+	uploadManager *upload.Manager
+	manager       *packwiz.Manager
 	// ops is the shared pack-control operation used by the generated
 	// PackwizService as well. Keep the manager for the binary/content routes
 	// that stay on HTTP (ADR 0012).
@@ -436,12 +436,23 @@ func (h *PackwizHandler) handleBatchMods(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	count, err := h.ops.BatchMods(r.Context(), packID, req.Action, req.Slugs, req.Side)
+	entries, err := h.ops.BatchMods(r.Context(), packID, req.Action, req.Slugs, req.Side)
 	if err != nil {
 		writePackwizError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": count})
+	results := make([]map[string]any, 0, len(entries))
+	var succeeded int
+	for _, entry := range entries {
+		results = append(results, map[string]any{
+			"slug": entry.Slug, "success": entry.Success,
+			"message": entry.Message, "error_code": entry.ErrorCode,
+		})
+		if entry.Success {
+			succeeded++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": succeeded, "results": results})
 }
 
 func (h *PackwizHandler) handleUpdateMod(w http.ResponseWriter, r *http.Request, packID, slug string) {
@@ -824,12 +835,19 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
+	if req.Mode != "sync" {
+		if err := pack.ValidateServerBake(); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	// Align Minecraft version and mod loader
 	server.MCVersion = pack.MCVersion
 	server.ModLoader = storage.ModLoader(strings.ToLower(pack.ModLoader))
-	_ = h.store.UpdateServer(r.Context(), server)
 
 	if req.Mode == "sync" {
+		_ = h.store.UpdateServer(r.Context(), server)
 		// Mode A: Live Sync URL
 		host := r.Host
 		if host == "" {
@@ -884,6 +902,7 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
+	_ = h.store.UpdateServer(r.Context(), server)
 	installed := []string{fmt.Sprintf("%d mod(s)", result.Mods)}
 	if result.Datapacks > 0 {
 		installed = append(installed, fmt.Sprintf("%d datapack(s)", result.Datapacks))

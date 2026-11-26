@@ -95,6 +95,7 @@ func TestDetectBootFailureIgnoresNoise(t *testing.T) {
 	lines := []string{
 		ts(2, 51) + " [init] Starting the Minecraft server...",
 		ts(2, 56) + " [main/WARN]: Mod simplehats uses the version 0.4.0a which isn't compatible with Loader's extended semantic version format",
+		ts(2, 56) + " [main/WARN]: - Mod 'ConquestReforged Fabric' (conquest) 1.7.0 recommends version 0.6.1+1.20.4 or later of animatica, which is missing!",
 		ts(2, 57) + " [main/ERROR]: [STDERR]: at net.minecraft.class_3238.channelRead(class_3238.java:95)",
 		ts(2, 58) + " [Server thread/ERROR]: Encountered an unexpected exception",
 		`not-a-timestamp at all`,

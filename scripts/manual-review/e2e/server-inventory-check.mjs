@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+import { checkFieldAppearance } from "./field-appearance.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -59,6 +60,8 @@ try {
       status: "SERVER_STATUS_ERROR",
       modLoader: "MOD_LOADER_VANILLA",
       statusReason: "Fixture failure",
+      joinObservationKind: "stale",
+      playersOnline: 7,
     },
     {
       id: "warning",
@@ -143,6 +146,8 @@ try {
         });
       return reply({ servers: empty ? [] : fleet });
     }
+    if (method === "ListWorldViewTargets")
+      return reply({ targets: [{ serverId: "ready", worldRef: { kind: "KIND_SERVER_LOCAL", serverId: "ready", levelName: "world" }, name: "Ready world", dimension: "overworld" }] });
     if (method === "GetServer")
       return reply({ server: fleet.find((s) => s.id === payload.id) });
     if (method === "StartServer") {
@@ -162,6 +167,51 @@ try {
   // while discovering a route's dependencies; those reloads are setup, not user actions.
   await page.goto(`${base}/servers/error`);
   await page.waitForLoadState("networkidle");
+  const detail = page.getByTestId("showcase-server-detail");
+  const count = detail.locator("dl > div").filter({ has: page.getByText("Players", { exact: true }) });
+  await detail.getByText("The last server reading is too old to confirm the current player count.").waitFor();
+  assert.equal(await count.locator("dd").innerText(), "stale");
+  for (const width of [360, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const headingSize = (heading) => heading.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    assert.ok(await headingSize(detail.getByRole("heading", { level: 1 })) >
+      await headingSize(detail.getByRole("heading", { name: "Server Settings" })));
+    const label = await count.locator("dt").boundingBox();
+    const value = await count.locator("dd").boundingBox();
+    assert.ok(value.x - label.x - label.width <= 10);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  }
+  results.push("detail groups player count, explains stale readings and preserves heading hierarchy at 360/768/1440");
+  const tile = detail.getByTestId("showcase-runtime-tile");
+  const drive = tile.locator(".drive-wheel").first();
+  for (const [state, motion] of [["RUNNING", "drive-turn"], ["STARTING", "drive-engage"]]) {
+    fleet[1].status = "SERVER_STATUS_" + state;
+    await page.reload();
+    await drive.waitFor();
+    assert.equal(await tile.locator(".runtime-shift").count(), 0, "initial status does not flash");
+    const animation = () => drive.evaluate(el => getComputedStyle(el).animationName);
+    assert.ok((await animation()).endsWith(motion));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await animation(), "none");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+  }
+  for (const [state, shift] of [["RUNNING", "sweep"], ["UNHEALTHY", "attention"], ["STOPPED", "settle"]]) {
+    fleet[1].status = "SERVER_STATUS_" + state;
+    const effect = tile.locator(`.runtime-shift[data-shift="${shift}"]`);
+    await effect.waitFor({ state: "attached" });
+    assert.equal(
+      await effect.evaluate((el) => getComputedStyle(el).animationIterationCount),
+      "1",
+    );
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await effect.waitFor({ state: "detached" });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    assert.equal(await effect.count(), 0, "restoring motion does not replay the transition");
+  }
+  fleet[1].status = "SERVER_STATUS_ERROR";
+  results.push("runtime drive and one-shot background effects reflect status changes and respect reduced motion");
+  await checkFieldAppearance(page, base);
+  results.push("server settings and inventory fields share accessible state treatments in both themes");
   await page.goto(base);
   await page.waitForLoadState("networkidle");
   await page.goto(`${base}/servers`);

@@ -161,6 +161,14 @@ def digest_of_files(files: dict[str, dict[str, str]]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def fixture_source_digest(files: dict[str, dict[str, str]]) -> str:
+    """Pin synthetic inputs independently of how a checkout supplies mode bits."""
+    return digest_of_files({
+        path: {"sha256": info["sha256"], "size": info["size"]}
+        for path, info in files.items()
+    })
+
+
 def write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -901,9 +909,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         files = canonical_files(source)
     except ValueError as exc:
         return refuse("UNSAFE_SOURCE", str(exc))
-    computed = digest_of_files(files)
-
     if args.fixture:
+        computed = fixture_source_digest(files)
         expected = prov.get("fixture", {}).get("manifest_sha256")
         if computed != expected:
             return refuse("PROVENANCE_DIGEST_MISMATCH", "fixture rootfs digest does not match pinned provenance",
@@ -1385,308 +1392,81 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
 BOOT_QUALIFICATION_SCHEMA = "carbonpanel.node-lxc.boot-qualification/v1"
 
 
-def _which(name: str) -> str | None:
-    return shutil.which(name)
-
-
-def _read_text_if(path: str) -> str | None:
-    try:
-        return Path(path).read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return None
-
-
-def probe_lxc_boot_prerequisites() -> tuple[bool, list[dict[str, Any]], list[str]]:
-    """Read-only probe for unprivileged LXC import/boot capability.
-
-    Returns (capable, checks, blockers). This never changes host configuration.
-    It is intentionally conservative: missing evidence is a blocker (fail closed).
-    """
-    checks: list[dict[str, Any]] = []
-    blockers: list[str] = []
-
-    def record(name: str, ok_flag: bool, detail: Any, blocker: str | None = None) -> None:
-        checks.append({"check": name, "ok": bool(ok_flag), "detail": detail})
-        if not ok_flag and blocker:
-            blockers.append(blocker)
-
-    tools = {name: _which(name) for name in ("lxc-create", "lxc-start", "lxc-stop", "lxc-destroy", "lxc-info", "lxc-wait", "tar")}
-    missing_tools = [name for name, path in tools.items() if path is None and name in {"lxc-create", "lxc-start", "lxc-stop", "lxc-destroy", "lxc-info"}]
-    record("lxc_tools", not missing_tools, tools, None if not missing_tools else f"missing LXC tools: {', '.join(sorted(missing_tools))}")
-
-    # Kernel / user namespaces are required for unprivileged LXC.
-    uname = {}
-    try:
-        uname = {
-            "sysname": os.uname().sysname if hasattr(os, "uname") else sys.platform,
-            "release": os.uname().release if hasattr(os, "uname") else "",
-            "machine": os.uname().machine if hasattr(os, "uname") else "",
-        }
-    except Exception:
-        uname = {"sysname": sys.platform}
-    record("platform", uname.get("sysname") == "Linux", uname,
-           None if uname.get("sysname") == "Linux" else "unprivileged LXC boot qualification requires a Linux host")
-
-    userns_clone = _read_text_if("/proc/sys/kernel/unprivileged_userns_clone")
-    if userns_clone is None:
-        # Many kernels enable user namespaces without this proc knob.
-        record("unprivileged_userns_clone", True, {"path": "/proc/sys/kernel/unprivileged_userns_clone", "value": None, "note": "proc knob absent; treated as unknown-available"})
-    else:
-        ok_clone = userns_clone == "1"
-        record("unprivileged_userns_clone", ok_clone, {"value": userns_clone},
-               None if ok_clone else "kernel.unprivileged_userns_clone is disabled")
-
-    cgroup_controllers = _read_text_if("/sys/fs/cgroup/cgroup.controllers")
-    has_cgroup_v2 = cgroup_controllers is not None
-    record("cgroup_v2", has_cgroup_v2, {"controllers": cgroup_controllers},
-           None if has_cgroup_v2 else "cgroup v2 controllers file not available")
-
-    # Subuid/subgid mappings are typically required for unprivileged LXC idmaps.
-    uid = os.getuid() if hasattr(os, "getuid") else None
-    username = None
-    try:
-        import pwd  # type: ignore
-        if uid is not None:
-            username = pwd.getpwuid(uid).pw_name
-    except Exception:
-        username = os.environ.get("USER") or os.environ.get("USERNAME")
-    subuid = _read_text_if("/etc/subuid")
-    subgid = _read_text_if("/etc/subgid")
-    has_subids = False
-    if uid == 0:
-        has_subids = True
-    elif username and subuid and subgid:
-        has_subids = any(line.startswith(username + ":") or line.startswith(str(uid) + ":") for line in subuid.splitlines()) and \
-            any(line.startswith(username + ":") or line.startswith(str(uid) + ":") for line in subgid.splitlines())
-    record("subid_maps", has_subids, {"uid": uid, "user": username, "subuid_present": subuid is not None, "subgid_present": subgid is not None},
-           None if has_subids else "unprivileged idmap configuration (/etc/subuid,/etc/subgid) not available for current user")
-
-    lxc_usernet = _read_text_if("/etc/lxc/lxc-usernet")
-    record("lxc_usernet", bool(lxc_usernet), {"present": lxc_usernet is not None},
-           None if lxc_usernet else "lxc user network configuration (/etc/lxc/lxc-usernet) not available")
-
-    capable = len(blockers) == 0
-    return capable, checks, blockers
+def probe_proxmox_readiness() -> tuple[list[dict[str, Any]], list[str]]:
+    """Read-only discovery. Host capabilities do not authorize guest operations."""
+    tools = {name: shutil.which(name) is not None for name in ("pct", "pveversion")}
+    platform_ok = sys.platform == "linux"
+    cgroup_v2 = Path("/sys/fs/cgroup/cgroup.controllers").is_file()
+    checks = [
+        {"check": "platform", "ok": platform_ok, "detail": sys.platform},
+        {"check": "proxmox_tools", "ok": all(tools.values()), "detail": tools},
+        {"check": "cgroup_v2", "ok": cgroup_v2},
+    ]
+    blockers = ["no authorized disposable Proxmox fixture is configured for this read-only command"]
+    if not platform_ok:
+        blockers.append("Proxmox LXC qualification requires a Linux host")
+    missing_tools = [name for name, present in tools.items() if not present]
+    if missing_tools:
+        blockers.append(f"missing Proxmox tools: {', '.join(missing_tools)}")
+    if not cgroup_v2:
+        blockers.append("cgroup v2 controllers file not available")
+    return checks, blockers
 
 
 def cmd_boot_qualify(args: argparse.Namespace) -> int:
-    """Fail-closed unprivileged LXC import/boot qualification.
-
-    Verifies signed upstream archive bytes (real archive evidence) in an owned
-    disposable work directory, probes for an approved/capable disposable runner
-    environment, and only reports qualification as ok when an actual
-    unprivileged import and boot is performed and evidenced. Missing capability
-    or any failed boot step is a refused result with explicit blockers.
-    """
+    """Verify archive bytes and report whether boot qualification can proceed."""
     provenance_path = Path(args.provenance)
     work = Path(args.work_dir)
     work.mkdir(parents=True, exist_ok=True)
-    archive_work = Path(getattr(args, "signed_archive_dir", None) or (work / "signed-archive"))
+    archive_work = Path(args.signed_archive_dir or (work / "signed-archive"))
     archive_work.mkdir(parents=True, exist_ok=True)
+    report_path = Path(args.report or (work / "boot-qualification-report.json"))
 
-    # Real archive evidence is mandatory: verify (or fetch+verify) the signed
-    # upstream archive bytes before any boot claim is considered.
     verify_rc, verify_payload = _verify_signed_archive_result(
-        provenance_path, args.arch, archive_work, bool(getattr(args, "fetch", False)),
+        provenance_path, args.arch, archive_work, args.fetch,
     )
-
-    report_path = Path(args.report) if getattr(args, "report", None) else (work / "boot-qualification-report.json")
-
-    base_report = {
-        "schema": BOOT_QUALIFICATION_SCHEMA,
-        "arch": args.arch,
-        "provenance": str(provenance_path),
-        "work_dir": str(work),
-        "signed_archive_dir": str(archive_work),
-        "signed_archive_verification": verify_payload,
-        "evidence_scope": (
-            "signed upstream archive bytes verified in an owned disposable path; "
-            "unprivileged import/boot qualification is reported separately and fail-closed"
-        ),
-    }
-
-    if verify_rc != 0 or verify_payload.get("status") != "ok":
-        payload = result_refused(
-            "SIGNED_ARCHIVE_NOT_VERIFIED",
-            "signed archive byte verification failed; boot qualification cannot proceed",
-            **base_report,
-            boot_qualification={"status": "blocked", "reason": "signed archive verification did not pass"},
-        )
-        try:
-            write_json(report_path, payload)
-            payload["report_path"] = str(report_path)
-        except Exception:
-            pass
-        emit(payload)
-        return 1
-
-    capable, checks, blockers = probe_lxc_boot_prerequisites()
-    boot: dict[str, Any] = {
-        "status": "blocked",
-        "capable_runner": capable,
-        "prerequisite_checks": checks,
-        "blockers": blockers,
-        "attempted": False,
-        "import_evidence": None,
-        "boot_evidence": None,
-        "first_boot_identity_evidence": None,
-        "cleanup_evidence": None,
-    }
-
-    if not capable:
-        boot["reason"] = "no approved/capable disposable runner environment for unprivileged LXC import+boot"
-        boot["note"] = (
-            "Fail-closed: signed archive bytes are verified, but actual unprivileged LXC import and boot "
-            "are not qualified on this runner. Provide a disposable runner with unprivileged LXC prerequisites "
-            "to obtain live boot evidence."
-        )
-        payload = result_refused(
-            "BOOT_QUALIFICATION_BLOCKED",
-            "runner lacks prerequisites for unprivileged LXC import/boot qualification",
-            **base_report,
-            boot_qualification=boot,
-        )
-        try:
-            write_json(report_path, payload)
-            payload["report_path"] = str(report_path)
-        except Exception:
-            pass
-        emit(payload)
-        return 1
-
-    # Prerequisites appear present; attempt an actual disposable import+boot.
-    # This path is intentionally conservative and best-effort: any failure is
-    # recorded as a fail-closed blocker with collected evidence.
-    boot["attempted"] = True
-    root_name = None
-    for item in verify_payload.get("bytes_checked", []) or []:
-        if isinstance(item, dict) and str(item.get("artifact", "")).endswith("-root.tar.xz"):
-            root_name = item.get("artifact")
-            break
-    if root_name is None:
-        boot["blockers"] = blockers + ["verified root tarball name not found in signed archive evidence"]
-        boot["status"] = "blocked"
-        payload = result_refused(
-            "BOOT_QUALIFICATION_BLOCKED",
-            "could not identify verified root tarball for import",
-            **base_report,
-            boot_qualification=boot,
-        )
-        try:
-            write_json(report_path, payload)
-            payload["report_path"] = str(report_path)
-        except Exception:
-            pass
-        emit(payload)
-        return 1
-
-    root_tarball = archive_work / str(root_name)
-    import_root = work / "import-rootfs"
-    container_name = f"cp-lxc-qual-{os.getpid()}"
-    boot_log: list[dict[str, Any]] = []
-    try:
-        if import_root.exists():
-            shutil.rmtree(import_root)
-        import_root.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(root_tarball, "r:*") as tf:
-            # Safe extraction: refuse absolute paths and traversal.
-            for member in tf.getmembers():
-                name = member.name.lstrip("/")
-                if not name or name.startswith("..") or "/../" in ("/" + name + "/"):
-                    raise ValueError(f"unsafe tar member: {member.name}")
-            tf.extractall(import_root, filter="data" if hasattr(tarfile, "data_filter") else None)
-        boot_log.append({"step": "extract_rootfs", "ok": True, "path": str(import_root)})
-
-        config_dir = work / "lxc-config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / "config"
-        config_lines = [
-            f"lxc.rootfs.path = dir:{import_root}",
-            "lxc.uts.name = cp-lxc-qual",
-            "lxc.namespace.clone = user pid uts ipc mnt",
-            "lxc.apparmor.profile = unconfined",
-            "lxc.seccomp.profile = ",
-            "lxc.init.cmd = /bin/true",
-        ]
-        config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
-        boot_log.append({"step": "write_config", "ok": True, "path": str(config_path)})
-
-        # Best-effort LXC lifecycle. Any non-zero result is treated as a
-        # fail-closed blocker with captured output.
-        def run_step(step: str, cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            boot_log.append({
-                "step": step, "cmd": cmd, "returncode": proc.returncode,
-                "stdout": (proc.stdout or "")[:4000], "stderr": (proc.stderr or "")[:4000],
-            })
-            return proc
-
-        p = run_step("lxc_create", ["lxc-create", "-n", container_name, "-f", str(config_path), "-t", "none"], timeout=120)
-        if p.returncode != 0:
-            raise RuntimeError("lxc-create failed")
-        boot["import_evidence"] = {"container": container_name, "config": str(config_path), "rootfs": str(import_root)}
-
-        p = run_step("lxc_start", ["lxc-start", "-n", container_name, "-F", "-l", "ERROR"], timeout=120)
-        if p.returncode != 0:
-            # Some environments need daemonized start; try once.
-            p = run_step("lxc_start_daemon", ["lxc-start", "-n", container_name], timeout=120)
-            if p.returncode != 0:
-                raise RuntimeError("lxc-start failed")
-        boot["boot_evidence"] = {"container": container_name, "started": True, "steps": [e["step"] for e in boot_log]}
-
-        # Minimal post-boot evidence: confirm init command completed / container reached a terminal state.
-        run_step("lxc_wait", ["lxc-wait", "-n", container_name, "-s", "STOPPED"], timeout=120)
-        info = run_step("lxc_info", ["lxc-info", "-n", container_name], timeout=30)
-        boot["first_boot_identity_evidence"] = {
-            "note": "container executed /bin/true in disposable unprivileged LXC context; upstream rootfs import+boot smoke verified",
-            "lxc_info_returncode": info.returncode,
-        }
-        boot["status"] = "ok"
-        boot["reason"] = "actual unprivileged LXC import and boot smoke completed on a capable disposable runner"
-
-    except Exception as exc:
-        boot["status"] = "blocked"
-        boot["blockers"] = blockers + [f"boot attempt failed: {type(exc).__name__}: {str(exc)[:300]}"]
-        boot["reason"] = "prerequisites were detected but actual import/boot could not be qualified (fail-closed)"
-    finally:
-        cleanup: dict[str, Any] = {}
-        try:
-            subprocess.run(["lxc-stop", "-n", container_name, "-k"], capture_output=True, text=True, timeout=30)
-            cleanup["stop"] = "attempted"
-        except Exception:
-            cleanup["stop"] = "skipped"
-        try:
-            proc = subprocess.run(["lxc-destroy", "-n", container_name], capture_output=True, text=True, timeout=30)
-            cleanup["destroy_rc"] = proc.returncode
-        except Exception as e:
-            cleanup["destroy_error"] = str(e)[:200]
-        boot["cleanup_evidence"] = cleanup
-        boot["steps"] = boot_log
-
-    qualified = boot.get("status") == "ok"
-    if qualified:
-        payload = result_ok(**base_report, boot_qualification=boot)
-        rc = 0
+    archive_verified = verify_rc == 0 and verify_payload.get("status") == "ok"
+    if archive_verified:
+        checks, blockers = probe_proxmox_readiness()
+        code = "BOOT_QUALIFICATION_BLOCKED"
+        reason = "an authorized disposable Proxmox fixture is required for guest qualification"
     else:
-        payload = result_refused(
-            "BOOT_QUALIFICATION_BLOCKED",
-            str(boot.get("reason") or "unprivileged LXC import/boot not qualified"),
-            **base_report,
-            boot_qualification=boot,
-        )
-        rc = 1
+        checks, blockers = [], ["signed archive verification did not pass"]
+        code = "SIGNED_ARCHIVE_NOT_VERIFIED"
+        reason = blockers[0]
+
+    payload = result_refused(
+        code,
+        reason,
+        schema=BOOT_QUALIFICATION_SCHEMA,
+        arch=args.arch,
+        provenance=str(provenance_path),
+        work_dir=str(work),
+        signed_archive_dir=str(archive_work),
+        signed_archive_verification=verify_payload,
+        evidence_scope="signed upstream archive verification and read-only Proxmox prerequisite discovery",
+        boot_qualification={
+            "status": "blocked",
+            "reason": reason,
+            "capable_runner": False,
+            "prerequisite_checks": checks,
+            "blockers": blockers,
+            "attempted": False,
+            "import_evidence": None,
+            "boot_evidence": None,
+            "first_boot_identity_evidence": None,
+            "cleanup_evidence": None,
+        },
+    )
     try:
         write_json(report_path, payload)
         payload["report_path"] = str(report_path)
-    except Exception:
-        pass
+    except OSError as exc:
+        payload["report_write_error"] = str(exc)
     emit(payload)
-    return rc
+    return 1
 
 
-# --------------------------------------------------------------------------- #
-# entrypoint
-# --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1752,14 +1532,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="direct-GET the pinned artifacts into --work-dir; otherwise verify files already staged there")
     sa.set_defaults(func=cmd_verify_signed_archive)
 
-    bq = sub.add_parser("boot-qualify")
+    bq = sub.add_parser("boot-qualify", help="verify signed archive and report Proxmox readiness (read-only)")
     bq.add_argument("--provenance", default=str(Path(__file__).parent / "config" / "provenance.json"))
     bq.add_argument("--arch", required=True, choices=("amd64", "arm64"))
     bq.add_argument("--work-dir", required=True)
     bq.add_argument("--signed-archive-dir",
                     help="directory containing staged signed archive files (defaults to <work-dir>/signed-archive)")
     bq.add_argument("--fetch", action="store_true",
-                    help="direct-GET and verify signed upstream archive bytes before probing import/boot")
+                    help="direct-GET and verify signed upstream archive bytes before the read-only readiness probe")
     bq.add_argument("--report", help="path to write the JSON qualification report (defaults to <work-dir>/boot-qualification-report.json)")
     bq.set_defaults(func=cmd_boot_qualify)
 

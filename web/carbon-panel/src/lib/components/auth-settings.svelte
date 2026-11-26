@@ -10,9 +10,13 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { replaceState } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { create } from '@bufbuild/protobuf';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import { canUpdateSettings } from '$lib/stores/auth';
+	import { Code, ConnectError } from '@connectrpc/connect';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { authStore, canUpdateSettings } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import { UpdateAuthSettingsRequestSchema } from '$lib/proto/carbonpanel/v1/auth_pb';
 	import type { GetAuthConfigResponse } from '$lib/proto/carbonpanel/v1/auth_pb';
@@ -30,6 +34,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let loading = $state(true);
 	let saving = $state(false);
 	let config = $state<GetAuthConfigResponse | null>(null);
+	let startingOIDCLink = $state(false);
+	let oidcLinkResult = $state('');
+	let oidcLinkError = $state('');
 
 	// Editable form state
 	let localAuthEnabled = $state(true);
@@ -41,6 +48,16 @@ one at https://mozilla.org/MPL/2.0/.
 	let configYamlOpen = $state(false);
 	let dockerComposeOpen = $state(false);
 	let envVarsOpen = $state(false);
+
+	const oidcEnvironmentVariables = [
+		'CARBONPANEL_AUTH_OIDC_ENABLED',
+		'CARBONPANEL_AUTH_OIDC_ISSUER_URI',
+		'CARBONPANEL_AUTH_OIDC_CLIENT_ID',
+		'CARBONPANEL_AUTH_OIDC_CLIENT_SECRET',
+		'CARBONPANEL_AUTH_OIDC_REDIRECT_URL',
+		'CARBONPANEL_AUTH_OIDC_SCOPES',
+		'CARBONPANEL_AUTH_OIDC_ROLE_CLAIM'
+	];
 
 	$effect(() => {
 		if (configYamlOpen) {
@@ -143,10 +160,72 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	async function beginOIDCLink() {
+		if (!$authStore.canLinkOidc || !config?.oidcEnabled || startingOIDCLink) return;
+		startingOIDCLink = true;
+		oidcLinkError = '';
+		const sessionRevision = authStore.getSessionRevision();
+		try {
+			const { linkToken } = await rpcClient.user.beginOIDCLink({}, silentCallOptions);
+			if (sessionRevision !== authStore.getSessionRevision()) {
+				startingOIDCLink = false;
+				return;
+			}
+			if (!linkToken) throw new Error('OIDC link intent missing');
+			const query = new URLSearchParams({ link_token: linkToken });
+			window.location.assign(`/api/v1/auth/oidc/login?${query}`);
+		} catch (error) {
+			startingOIDCLink = false;
+			if (sessionRevision !== authStore.getSessionRevision()) return;
+			oidcLinkError =
+				error instanceof ConnectError && error.code === Code.PermissionDenied
+					? 'Sign in locally as an administrator to link your SSO account.'
+					: 'Could not start SSO linking. Refresh the page and try again.';
+		}
+	}
+
+	function oidcLinkErrorMessage(code: string): string {
+		switch (code) {
+			case 'access_denied':
+				return 'The identity provider denied access. Try again with the account you want to link.';
+			case 'link_invalid':
+				return 'The link request expired or your local session changed. Start a new link request.';
+			case 'link_required':
+				return 'This SSO identity is already associated with an account.';
+			case 'role_conflict':
+				return 'A role conflict blocked linking. Review your SSO role mapping and try again.';
+			default:
+				return 'Could not link your SSO account. Try again.';
+		}
+	}
+
 	onMount(() => {
+		const url = new URL(window.location.href);
+		const result = url.searchParams.get('oidc_link');
+		if (result !== null) {
+			if (result === 'success') {
+				oidcLinkResult = 'SSO is linked to this account. You can now sign in with SSO.';
+			} else {
+				oidcLinkError = oidcLinkErrorMessage(result);
+			}
+			url.searchParams.delete('oidc_link');
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- preserve the resolved settings route, query and fragment
+			replaceState(`${resolve('/settings')}${url.search}${url.hash}`, page.state);
+		}
 		loadConfig();
 	});
 </script>
+
+{#if oidcLinkResult}
+	<p role="status" class="border border-border bg-card px-4 py-3 text-sm text-success-text">
+		{oidcLinkResult}
+	</p>
+{/if}
+{#if oidcLinkError}
+	<p role="alert" class="border border-border bg-card px-4 py-3 text-sm text-destructive-text">
+		{oidcLinkError}
+	</p>
+{/if}
 
 {#if loading}
 	<div class="flex items-center justify-center py-16">
@@ -339,6 +418,22 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<div class="space-y-4 p-5">
 				{#if config.oidcEnabled}
+					{#if $authStore.canLinkOidc}
+						<div class="space-y-3 border border-border bg-card p-3">
+							<p class="text-sm text-muted-foreground">
+								Sign in at your identity provider with the account you want to link.
+							</p>
+							<CarbonButton
+								type="button"
+								kind="secondary"
+								size="sm"
+								loading={startingOIDCLink}
+								onclick={beginOIDCLink}
+							>
+								Link SSO account
+							</CarbonButton>
+						</div>
+					{/if}
 					<div class="grid gap-3">
 						{#if config.oidcIssuerUri}
 							<div class="rounded-none border border-border bg-card p-3">
@@ -430,30 +525,17 @@ one at https://mozilla.org/MPL/2.0/.
 						</CarbonAccordionItem>
 
 						<CarbonAccordionItem title="Environment Variables" bind:open={envVarsOpen}>
-							<div class="space-y-1.5 font-mono text-xs text-muted-foreground">
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ISSUER_URI</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_ID</code>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5"
-										>CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
-									>
-								</p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code
-									>
-								</p>
-								<p><code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code></p>
-								<p>
-									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code>
-								</p>
-							</div>
+							<ul class="min-w-0 space-y-1.5 font-mono text-xs text-muted-foreground">
+								{#each oidcEnvironmentVariables as variable (variable)}
+									<li class="min-w-0">
+										<code
+											class="block w-fit max-w-full bg-background px-1.5 py-0.5 [overflow-wrap:anywhere]"
+										>
+											{variable}
+										</code>
+									</li>
+								{/each}
+							</ul>
 						</CarbonAccordionItem>
 					</CarbonAccordion>
 

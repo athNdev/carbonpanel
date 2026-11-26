@@ -26,6 +26,10 @@ The starter uses the first free game port from 25585 through 25605, keeping
 the ordinary 25565 development/test port available. `REVIEW_GAME_PORT` changes
 the start of that 21-port range for a fresh session.
 
+Use `scripts/review/devstack.sh up-controller` for authenticated controller
+journeys that need only an admin account. It uses the same named session and
+teardown and starts the panel without a Docker socket, game server, or renderer.
+
 - Node 24.
 - Bun and the locked Playwright package used by both review profiles.
 - A running panel with a local account. Credentials are read from the

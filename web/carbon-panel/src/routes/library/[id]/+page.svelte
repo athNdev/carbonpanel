@@ -47,6 +47,7 @@ SPDX-License-Identifier: MPL-2.0
 		CarbonTag,
 		CarbonTextInput
 	} from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { AlertTriangle, BookOpen, Link2, RefreshCw, ShieldCheck, Unlink2 } from '@lucide/svelte';
 
 	const entryId = $derived(page.params.id ?? '');
@@ -394,9 +395,16 @@ SPDX-License-Identifier: MPL-2.0
 
 		<div class="border border-border bg-card">
 			<CarbonTabs {tabs} bind:selectedTab idPrefix="world" />
+			<CarbonInactiveTabPanels {tabs} {selectedTab} idPrefix="world" />
 			<div class="p-4">
 				{#if selectedTab === 'revisions'}
-					<div id="world-panel-revisions" role="tabpanel" aria-labelledby="world-tab-revisions">
+					<div
+						id="world-panel-revisions"
+						role="tabpanel"
+						aria-labelledby="world-tab-revisions"
+						class="focus-ring"
+						tabindex="0"
+					>
 						{#if revisions.length === 0}
 							<CarbonEmptyState
 								title="No revisions"
@@ -471,7 +479,13 @@ SPDX-License-Identifier: MPL-2.0
 						{/if}
 					</div>
 				{:else if selectedTab === 'bindings'}
-					<div id="world-panel-bindings" role="tabpanel" aria-labelledby="world-tab-bindings">
+					<div
+						id="world-panel-bindings"
+						role="tabpanel"
+						aria-labelledby="world-tab-bindings"
+						class="focus-ring"
+						tabindex="0"
+					>
 						{#if bindings.length === 0}
 							<CarbonEmptyState
 								title="No active bindings"
@@ -537,7 +551,8 @@ SPDX-License-Identifier: MPL-2.0
 						id="world-panel-compatibility"
 						role="tabpanel"
 						aria-labelledby="world-tab-compatibility"
-						class="space-y-4"
+						class="focus-ring space-y-4"
+						tabindex="0"
 					>
 						<div class="flex flex-wrap items-end gap-3">
 							<div class="min-w-48 flex-1">
@@ -706,7 +721,13 @@ SPDX-License-Identifier: MPL-2.0
 						{/if}
 					</div>
 				{:else}
-					<div id="world-panel-jobs" role="tabpanel" aria-labelledby="world-tab-jobs">
+					<div
+						id="world-panel-jobs"
+						role="tabpanel"
+						aria-labelledby="world-tab-jobs"
+						class="focus-ring"
+						tabindex="0"
+					>
 						{#if jobs.length === 0}
 							<CarbonEmptyState
 								title="No import jobs"

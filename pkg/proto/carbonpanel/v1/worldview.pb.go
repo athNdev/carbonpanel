@@ -36,6 +36,7 @@ const (
 	RendererType_RENDERER_TYPE_SQUAREMAP   RendererType = 2
 	RendererType_RENDERER_TYPE_DYNMAP      RendererType = 3
 	RendererType_RENDERER_TYPE_STATIC      RendererType = 4
+	RendererType_RENDERER_TYPE_NATIVE      RendererType = 5 // Carbon Panel renders saved Java terrain directly
 )
 
 // Enum value maps for RendererType.
@@ -46,6 +47,7 @@ var (
 		2: "RENDERER_TYPE_SQUAREMAP",
 		3: "RENDERER_TYPE_DYNMAP",
 		4: "RENDERER_TYPE_STATIC",
+		5: "RENDERER_TYPE_NATIVE",
 	}
 	RendererType_value = map[string]int32{
 		"RENDERER_TYPE_UNSPECIFIED": 0,
@@ -53,6 +55,7 @@ var (
 		"RENDERER_TYPE_SQUAREMAP":   2,
 		"RENDERER_TYPE_DYNMAP":      3,
 		"RENDERER_TYPE_STATIC":      4,
+		"RENDERER_TYPE_NATIVE":      5,
 	}
 )
 
@@ -87,15 +90,16 @@ func (RendererType) EnumDescriptor() ([]byte, []int) {
 type RendererState int32
 
 const (
-	RendererState_RENDERER_STATE_UNSPECIFIED RendererState = 0
-	RendererState_RENDERER_STATE_ABSENT      RendererState = 1 // no renderer installed - onboarding
-	RendererState_RENDERER_STATE_INSTALLING  RendererState = 2 // module being created/started
-	RendererState_RENDERER_STATE_RENDERING   RendererState = 3 // initial/full render in progress
-	RendererState_RENDERER_STATE_READY       RendererState = 4 // tiles fresh and reachable
-	RendererState_RENDERER_STATE_STALE       RendererState = 5 // last-known tiles, renderer or server stopped
-	RendererState_RENDERER_STATE_STOPPED     RendererState = 6 // renderer stopped, no live overlay
-	RendererState_RENDERER_STATE_ERROR       RendererState = 7 // renderer failed/unreachable, diagnostics available
-	RendererState_RENDERER_STATE_UNSUPPORTED RendererState = 8 // renderer type has no verified adapter capability
+	RendererState_RENDERER_STATE_UNSPECIFIED      RendererState = 0
+	RendererState_RENDERER_STATE_ABSENT           RendererState = 1 // no renderer installed - onboarding
+	RendererState_RENDERER_STATE_INSTALLING       RendererState = 2 // module being created/started
+	RendererState_RENDERER_STATE_RENDERING        RendererState = 3 // initial/full render in progress
+	RendererState_RENDERER_STATE_READY            RendererState = 4 // tiles fresh and reachable
+	RendererState_RENDERER_STATE_STALE            RendererState = 5 // last-known tiles, renderer or server stopped
+	RendererState_RENDERER_STATE_STOPPED          RendererState = 6 // renderer stopped, no live overlay
+	RendererState_RENDERER_STATE_ERROR            RendererState = 7 // renderer failed/unreachable, diagnostics available
+	RendererState_RENDERER_STATE_UNSUPPORTED      RendererState = 8 // renderer type has no verified adapter capability
+	RendererState_RENDERER_STATE_NATIVE_AVAILABLE RendererState = 9 // saved terrain can be inspected; tile coverage is unknown
 )
 
 // Enum value maps for RendererState.
@@ -110,17 +114,19 @@ var (
 		6: "RENDERER_STATE_STOPPED",
 		7: "RENDERER_STATE_ERROR",
 		8: "RENDERER_STATE_UNSUPPORTED",
+		9: "RENDERER_STATE_NATIVE_AVAILABLE",
 	}
 	RendererState_value = map[string]int32{
-		"RENDERER_STATE_UNSPECIFIED": 0,
-		"RENDERER_STATE_ABSENT":      1,
-		"RENDERER_STATE_INSTALLING":  2,
-		"RENDERER_STATE_RENDERING":   3,
-		"RENDERER_STATE_READY":       4,
-		"RENDERER_STATE_STALE":       5,
-		"RENDERER_STATE_STOPPED":     6,
-		"RENDERER_STATE_ERROR":       7,
-		"RENDERER_STATE_UNSUPPORTED": 8,
+		"RENDERER_STATE_UNSPECIFIED":      0,
+		"RENDERER_STATE_ABSENT":           1,
+		"RENDERER_STATE_INSTALLING":       2,
+		"RENDERER_STATE_RENDERING":        3,
+		"RENDERER_STATE_READY":            4,
+		"RENDERER_STATE_STALE":            5,
+		"RENDERER_STATE_STOPPED":          6,
+		"RENDERER_STATE_ERROR":            7,
+		"RENDERER_STATE_UNSUPPORTED":      8,
+		"RENDERER_STATE_NATIVE_AVAILABLE": 9,
 	}
 )
 
@@ -1494,13 +1500,14 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\avisible\x18\x03 \x01(\bR\avisible\"v\n" +
 	"\x1bSetPlayerVisibilityResponse\x12\x18\n" +
 	"\avisible\x18\x01 \x01(\bR\avisible\x12=\n" +
-	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*\x99\x01\n" +
+	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*\xb3\x01\n" +
 	"\fRendererType\x12\x1d\n" +
 	"\x19RENDERER_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RENDERER_TYPE_BLUEMAP\x10\x01\x12\x1b\n" +
 	"\x17RENDERER_TYPE_SQUAREMAP\x10\x02\x12\x18\n" +
 	"\x14RENDERER_TYPE_DYNMAP\x10\x03\x12\x18\n" +
-	"\x14RENDERER_TYPE_STATIC\x10\x04*\x91\x02\n" +
+	"\x14RENDERER_TYPE_STATIC\x10\x04\x12\x18\n" +
+	"\x14RENDERER_TYPE_NATIVE\x10\x05*\xb6\x02\n" +
 	"\rRendererState\x12\x1e\n" +
 	"\x1aRENDERER_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RENDERER_STATE_ABSENT\x10\x01\x12\x1d\n" +
@@ -1510,7 +1517,8 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\x14RENDERER_STATE_STALE\x10\x05\x12\x1a\n" +
 	"\x16RENDERER_STATE_STOPPED\x10\x06\x12\x18\n" +
 	"\x14RENDERER_STATE_ERROR\x10\a\x12\x1e\n" +
-	"\x1aRENDERER_STATE_UNSUPPORTED\x10\b2\xfb\x05\n" +
+	"\x1aRENDERER_STATE_UNSUPPORTED\x10\b\x12#\n" +
+	"\x1fRENDERER_STATE_NATIVE_AVAILABLE\x10\t2\xfb\x05\n" +
 	"\x10WorldViewService\x12q\n" +
 	"\x14ListWorldViewTargets\x12+.carbonpanel.v1.ListWorldViewTargetsRequest\x1a,.carbonpanel.v1.ListWorldViewTargetsResponse\x12k\n" +
 	"\x12GetWorldViewStatus\x12).carbonpanel.v1.GetWorldViewStatusRequest\x1a*.carbonpanel.v1.GetWorldViewStatusResponse\x12n\n" +

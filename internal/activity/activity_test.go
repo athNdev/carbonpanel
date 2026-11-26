@@ -82,6 +82,10 @@ func TestRequestIDColumnIsAddedOnUpgrade(t *testing.T) {
 	)`).Error; err != nil {
 		t.Fatalf("seed previous schema: %v", err)
 	}
+	if err := db.Exec(`INSERT INTO activity_logs (id, actor_id, event, subject_type, subject_id, created_at)
+		VALUES ('pre-upgrade', 'original-actor', 'server.stop', 'server', 's1', ?)`, time.Now().Add(-time.Hour)).Error; err != nil {
+		t.Fatalf("seed pre-upgrade record: %v", err)
+	}
 	if err := db.AutoMigrate(&storage.ActivityLog{}); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
@@ -94,8 +98,12 @@ func TestRequestIDColumnIsAddedOnUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != 1 || got[0].RequestID != "req-upgrade" {
+	if len(got) != 2 || got[0].RequestID != "req-upgrade" || got[1].ID != "pre-upgrade" {
 		t.Fatalf("expected request id after upgrade, got %+v", got)
+	}
+	got, err = List(db, "s1", "original-actor", time.Time{}, 10)
+	if err != nil || len(got) != 1 || got[0].ID != "pre-upgrade" {
+		t.Fatalf("expected actor filter to retain the original row only: %+v, %v", got, err)
 	}
 }
 

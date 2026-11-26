@@ -27,6 +27,19 @@ service UserService {
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   // Remove user account
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  // Begin explicit local-admin OIDC identity linking. The authenticated local
+  // admin receives a short-lived single-use link token for the OIDC login URL.
+  rpc BeginOIDCLink(BeginOIDCLinkRequest) returns (BeginOIDCLinkResponse);
+}
+
+// Begin an explicit OIDC link for the calling local admin. There are no
+// attacker-supplied identity claims: issuer and subject are proven later by a
+// verified OIDC callback using the returned token.
+message BeginOIDCLinkRequest {}
+
+// Short-lived single-use token for /api/v1/auth/oidc/login?link_token=...
+message BeginOIDCLinkResponse {
+  string link_token = 1;
 }
 
 // Empty user list request
@@ -65,7 +78,14 @@ message UpdateUserRequest {
   string id = 1;
   optional string email = 2;
   optional bool is_active = 3;
+  // Legacy effective role list. Provider grants remain provider managed.
   repeated string roles = 4;
+  LocalRoleSelection local_roles_update = 5;
+}
+
+// Editable local roles. An empty selection clears all locally managed grants.
+message LocalRoleSelection {
+  repeated string roles = 1;
 }
 
 // Updated user

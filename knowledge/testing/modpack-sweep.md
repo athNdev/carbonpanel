@@ -23,6 +23,11 @@ packs as negative cases.
 
 # Rules
 
+- Sync Modrinth metadata before deployment. Create and pack changes reject a
+  Modrinth project that explicitly declares dedicated servers unsupported.
+  A missing declaration (including an older library row) leaves deployment
+  available. Deployment eligibility uses the project declaration; qualification
+  still requires runtime evidence for a server-capable pack.
 - Run sequentially, never in parallel; a failure must not be masked by another
   server competing for RAM or ports.
 - Use the newest game version the pack manifest advertises. Never force a

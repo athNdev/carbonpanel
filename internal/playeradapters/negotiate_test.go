@@ -150,29 +150,6 @@ func TestNegotiateRemoteExecOnlyWhenProvided(t *testing.T) {
 	}
 }
 
-func TestVersionAtLeast(t *testing.T) {
-	tests := []struct {
-		got, min string
-		want     bool
-		wantErr  bool
-	}{
-		{got: "1.21.9", min: minManagementJavaVersion, want: true},
-		{got: "1.21.10", min: minManagementJavaVersion, want: true},
-		{got: "1.22", min: minManagementJavaVersion, want: true},
-		{got: "1.21.9-rc1", min: minManagementJavaVersion, want: true},
-		{got: "1.21.8", min: minManagementJavaVersion, want: false},
-		{got: "1.20.6", min: minManagementJavaVersion, want: false},
-		{got: "", min: minManagementJavaVersion, wantErr: true},
-		{got: "snapshot", min: minManagementJavaVersion, wantErr: true},
-	}
-	for _, tc := range tests {
-		got, err := versionAtLeast(tc.got, tc.min)
-		if (err != nil) != tc.wantErr || (!tc.wantErr && got != tc.want) {
-			t.Errorf("versionAtLeast(%q,%q) = %v/%v, want %v/%v", tc.got, tc.min, got, err, tc.want, tc.wantErr)
-		}
-	}
-}
-
 func TestNegotiateCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

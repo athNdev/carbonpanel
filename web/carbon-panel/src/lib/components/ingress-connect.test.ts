@@ -27,12 +27,8 @@ test('Server detail page correctly differentiates proxied vs direct port ingress
 		'Must derive isProxied with proxy port guard'
 	);
 
-	// Must show PROXIED and DIRECT PORT badges
-	assert.ok(content.includes('PROXIED'), 'Must show PROXIED badge when server is proxied');
-	assert.ok(
-		content.includes('DIRECT PORT'),
-		'Must show DIRECT PORT badge when server is direct port'
-	);
+	assert.match(content, /onclick=\{\(\) => copyConnection\(connectAddress\)\}/);
+	assert.match(content, /<span>Copy Address<\/span>/);
 
 	// Direct port must use window.location.hostname for remote clients
 	assert.ok(

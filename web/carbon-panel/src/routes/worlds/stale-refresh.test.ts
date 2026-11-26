@@ -10,11 +10,11 @@ const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 
 test('a failed refresh keeps the last-good table visible', () => {
 	assert.ok(
-		source.includes('{:else if snapshot.error && snapshot.targets.length === 0}'),
+		source.includes('{:else if requestError && targets.length === 0}'),
 		'the full error state must be reserved for a cold failure with no rows'
 	);
 	assert.ok(
-		source.includes('showStaleBanner') && source.includes('snapshot.targets.length > 0'),
+		source.includes('showStaleBanner') && source.includes('targets.length > 0'),
 		'the stale banner must only appear when retained rows exist'
 	);
 });
@@ -22,10 +22,10 @@ test('a failed refresh keeps the last-good table visible', () => {
 test('the stale banner is dismissible per error and offers a retry', () => {
 	assert.ok(source.includes('role="alert"'), 'the stale notice must be announced');
 	assert.ok(
-		source.includes('dismissedStaleError !== snapshot.error'),
+		source.includes('dismissedStaleError !== requestError'),
 		'a new error must show the banner again after a dismissal'
 	);
-	assert.ok(source.includes('onclick={() => (dismissedStaleError = snapshot.error)}'));
+	assert.ok(source.includes('onclick={() => (dismissedStaleError = requestError)}'));
 	assert.ok(source.includes('onclick={retryTargets}'), 'the banner and header must share retry');
 	assert.ok(
 		source.includes('onretry={retryTargets}'),
@@ -37,7 +37,8 @@ test('the refresh retry path is single-sourced', () => {
 	const handlers = source.match(/onclick=\{retryTargets\}/g) ?? [];
 	assert.ok(handlers.length >= 2, 'header, cold error and stale banner must retry identically');
 	assert.ok(
-		source.includes('void store.refreshTargets().catch(handleListError)'),
-		'retry must keep the permission-denied handling'
+		source.includes('scopedStore.loadStatus(id, id, undefined) : store.refreshTargets()'),
+		'retry must dispatch to the selected inventory scope'
 	);
+	assert.ok(source.includes('requestError.code === Code.PermissionDenied'));
 });

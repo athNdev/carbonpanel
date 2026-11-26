@@ -30,13 +30,28 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
+// DockerStatsSample records when a successful resource poll began and
+// which container it sampled. Other collectors do not renew its deadline.
+type DockerStatsSample struct {
+	ContainerID string
+	ObservedAt  time.Time
+	ExpiresAt   time.Time
+}
+
+func (sample DockerStatsSample) CurrentFor(containerID string, lastStarted *time.Time, now time.Time) bool {
+	return containerID != "" && sample.ContainerID == containerID &&
+		!sample.ObservedAt.IsZero() && !now.Before(sample.ObservedAt) && now.Before(sample.ExpiresAt) &&
+		(lastStarted == nil || !sample.ObservedAt.Before(*lastStarted))
+}
+
 type ServerMetrics struct {
 	ServerID    string
 	CPUPercent  float64
 	MemoryUsage float64 // MB
-	DiskUsage   int64   // bytes (total server data)
-	DiskTotal   int64   // bytes
-	WorldSize   int64   // bytes (world directory only); storage.world_quota_mb admits against this
+	DockerStats DockerStatsSample
+	DiskUsage   int64 // bytes (total server data)
+	DiskTotal   int64 // bytes
+	WorldSize   int64 // bytes (world directory only); storage.world_quota_mb admits against this
 	// Separate resource budgets (OSS-239). These are measured or explicitly
 	// unknown; they are not a hard world quota and must not be inferred from
 	// DiskUsage or WorldSize.
@@ -253,14 +268,14 @@ func (c *Collector) SeedMetrics(m ServerMetrics) {
 	c.mu.Unlock()
 }
 
-// Get metrics for a specific server
+// GetMetrics returns the current read-only snapshot for one server.
 func (c *Collector) GetMetrics(serverID string) *ServerMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.metrics[serverID]
 }
 
-// Gets a copy of all metrics
+// GetAllMetrics returns a copy of the registry of read-only snapshots.
 func (c *Collector) GetAllMetrics() map[string]*ServerMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -374,7 +389,9 @@ func (c *Collector) collectDockerStats() {
 			continue
 		}
 
-		// Get container stats
+		// Bound freshness from the start of the poll so a slow response
+		// cannot renew an older observation for the full window.
+		observedAt := time.Now()
 		stats, err := dockerCli.GetContainerStats(ctx, server.ContainerID)
 		if err != nil {
 			c.log.Debug("Metrics collector: failed to get stats for %s: %v", server.ID, err)
@@ -384,6 +401,11 @@ func (c *Collector) collectDockerStats() {
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
 			m.CPUPercent = stats.CPUPercent
 			m.MemoryUsage = stats.MemoryUsage
+			m.DockerStats = DockerStatsSample{
+				ContainerID: server.ContainerID,
+				ObservedAt:  observedAt,
+				ExpiresAt:   observedAt.Add(2 * c.collectorConfig.StatsInterval),
+			}
 			m.LastUpdated = time.Now()
 		})
 	}
@@ -581,12 +603,14 @@ func (c *Collector) updateMetrics(serverID string, update func(*ServerMetrics)) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	metrics, exists := c.metrics[serverID]
-	if !exists {
-		metrics = &ServerMetrics{ServerID: serverID}
-		c.metrics[serverID] = metrics
+	// Readers can hold a snapshot outside the lock. Publish the value and
+	// its provenance together so a new poll cannot change either in place.
+	next := ServerMetrics{ServerID: serverID}
+	if previous := c.metrics[serverID]; previous != nil {
+		next = *previous
 	}
-	update(metrics)
+	update(&next)
+	c.metrics[serverID] = &next
 }
 
 // Removes metrics for a server on delete
