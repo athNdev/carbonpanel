@@ -297,6 +297,154 @@ func TestOneShotModUpdateSlotStaysDueWhenExecutionInsertFails(t *testing.T) {
 	require.Equal(t, storage.TaskStatusDisabled, stored.Status)
 }
 
+func TestRecurringModUpdateSlotStaysDueWhenExecutionInsertFails(t *testing.T) {
+	for _, schedule := range []struct {
+		name string
+		task func(*storage.ScheduledTask)
+	}{
+		{
+			name: "cron",
+			task: func(task *storage.ScheduledTask) {
+				task.Schedule = storage.ScheduleTypeCron
+				task.CronExpr = "0 3 * * *"
+			},
+		},
+		{
+			name: "interval",
+			task: func(task *storage.ScheduledTask) {
+				task.Schedule = storage.ScheduleTypeInterval
+				task.IntervalSecs = 3600
+			},
+		},
+	} {
+		t.Run(schedule.name, func(t *testing.T) {
+			s, store := newTriggerTestScheduler(t)
+			planner := &fakeModPlanner{staged: 1}
+			s.SetModUpdatePlanner(planner)
+			ctx := context.Background()
+
+			server := &storage.Server{ID: "srv-recurring-insert-" + schedule.name, Name: "recurring-insert", Status: storage.StatusStopped}
+			require.NoError(t, store.CreateServer(ctx, server))
+			past := time.Now().Add(-time.Minute)
+			task := &storage.ScheduledTask{
+				ID: "task-recurring-insert-" + schedule.name, ServerID: server.ID, Name: "recurring insert failure",
+				TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+				NextRun: &past, Config: `{"enabled":true}`,
+			}
+			schedule.task(task)
+			require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+			failInsert := true
+			require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(
+				"fixture:fail-recurring-claimed-execution-insert",
+				func(tx *gorm.DB) {
+					if failInsert && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "task_executions" {
+						tx.AddError(errors.New("fixture recurring execution insert failure"))
+					}
+				},
+			))
+
+			s.checkAndRunDueTasks()
+			s.wg.Wait()
+			require.Zero(t, planner.calls, "a failed execution insert must not dispatch")
+			executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+			require.NoError(t, err)
+			require.Empty(t, executions)
+			stored, err := store.GetScheduledTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.TaskStatusEnabled, stored.Status, "a recurring task stays enabled")
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.Equal(past), "the failed insert must roll the due slot back")
+			require.Nil(t, stored.LastRun)
+
+			failInsert = false
+			s.checkAndRunDueTasks()
+			s.wg.Wait()
+			require.Equal(t, 1, planner.calls, "the still-due slot retries after the insert failure clears")
+			executions, err = store.ListTaskExecutions(ctx, task.ID, 10)
+			require.NoError(t, err)
+			require.Len(t, executions, 1)
+			require.Equal(t, storage.ExecutionStatusCompleted, executions[0].Status)
+			stored, err = store.GetScheduledTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.TaskStatusEnabled, stored.Status)
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.After(time.Now()))
+			require.NotNil(t, stored.LastRun)
+		})
+	}
+}
+
+func TestRecurringModUpdateClaimSurvivesAbruptInterruption(t *testing.T) {
+	for _, schedule := range []struct {
+		name string
+		task func(*storage.ScheduledTask)
+	}{
+		{
+			name: "cron",
+			task: func(task *storage.ScheduledTask) {
+				task.Schedule = storage.ScheduleTypeCron
+				task.CronExpr = "0 3 * * *"
+			},
+		},
+		{
+			name: "interval",
+			task: func(task *storage.ScheduledTask) {
+				task.Schedule = storage.ScheduleTypeInterval
+				task.IntervalSecs = 3600
+			},
+		},
+	} {
+		t.Run(schedule.name, func(t *testing.T) {
+			s, store := newTriggerTestScheduler(t)
+			planner := &fakeModPlanner{}
+			s.SetModUpdatePlanner(planner)
+			ctx := context.Background()
+
+			server := &storage.Server{ID: "srv-recurring-crash-" + schedule.name, Name: "recurring-crash", Status: storage.StatusStopped}
+			require.NoError(t, store.CreateServer(ctx, server))
+			past := time.Now().Add(-time.Minute)
+			task := &storage.ScheduledTask{
+				ID: "task-recurring-crash-" + schedule.name, ServerID: server.ID, Name: "recurring crash window",
+				TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+				NextRun: &past, Config: `{"enabled":true}`,
+			}
+			schedule.task(task)
+			require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+			claim := newScheduledExecution(task, time.Now())
+			require.NoError(t, s.updateNextRun(task, claim))
+			stored, err := store.GetScheduledTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.TaskStatusEnabled, stored.Status)
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.After(past), "the claimed slot advances before dispatch")
+			require.NotNil(t, stored.LastRun)
+			recorded, err := store.GetTaskExecution(ctx, claim.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.ExecutionStatusRunning, recorded.Status)
+			require.Equal(t, "scheduled", recorded.Trigger)
+
+			// Simulate a process stop after the durable claim but before the
+			// asynchronous dispatch goroutine writes anything.
+			count, err := store.FailOrphanedTaskExecutions(ctx, "interrupted by panel restart; run the task again after the server is idle")
+			require.NoError(t, err)
+			require.EqualValues(t, 1, count)
+			recovered, err := store.GetTaskExecution(ctx, claim.ID)
+			require.NoError(t, err)
+			require.Equal(t, storage.ExecutionStatusFailed, recovered.Status)
+			require.NotNil(t, recovered.EndedAt)
+
+			s.checkAndRunDueTasks()
+			s.wg.Wait()
+			require.Zero(t, planner.calls, "an interrupted recurring attempt must not run the same slot again")
+			executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+			require.NoError(t, err)
+			require.Len(t, executions, 1, "the interrupted attempt leaves exactly one recoverable outcome")
+		})
+	}
+}
+
 func TestDueModUpdateTaskDoesNotDispatchAfterDisableEnable(t *testing.T) {
 	s, store := newTriggerTestScheduler(t)
 	planner := &fakeModPlanner{}

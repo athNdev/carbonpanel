@@ -122,6 +122,43 @@ func TestApplyDueStagedConfigsDoesNotMerge(t *testing.T) {
 	(&Scheduler{}).applyDueStagedConfigs(context.Background())
 }
 
+// TestApplyDueStagedConfigsLeavesCronRowsPending proves the scheduler has no
+// production cron consumer for retained legacy scheduled-config rows. They stay
+// staged for manual apply/discard or explicit operator conversion instead of
+// being merged silently on a tick.
+func TestApplyDueStagedConfigsLeavesCronRowsPending(t *testing.T) {
+	ctx := context.Background()
+	s, store := newTriggerTestScheduler(t)
+	server := &storage.Server{ID: "srv-cron-pending", Name: "cron-pending", Status: storage.StatusStopped}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	cron, err := store.StageConfigChange(ctx, server.ID, map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	if err != nil {
+		t.Fatalf("stage cron config: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		s.applyDueStagedConfigs(ctx)
+	}
+	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
+	if err != nil {
+		t.Fatalf("reload cron config: %v", err)
+	}
+	assert.Equal(t, storage.StagedStatusStaged, staged.Status)
+	assert.Equal(t, storage.StagedApplyScheduled, staged.ApplyMode)
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		t.Fatalf("reload server config: %v", err)
+	}
+	if cfg.MOTD != nil {
+		assert.NotEqual(t, "nightly", *cfg.MOTD, "a cron row must not be merged by a scheduler tick")
+	}
+}
+
 func TestApplyOnRestartStagedConfigs_StopsOnError(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStagedStore{

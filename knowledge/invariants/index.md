@@ -19,4 +19,5 @@
 - [Secrets and endpoints](secrets-and-endpoints.md) — Credentials, tokens, private endpoints and workstation paths never enter tracked source or the knowledge base.
 - [SSO identity and entitlement origin](sso-identity.md) — OIDC identity is issuer plus subject; no auto-link or implicit privilege, and OIDC roles are reconciled transactionally before session issue.
 - [Staged server updates](staged-updates.md) — Staging a config, mod, datapack, file, modpack, or module edit records the open batch and does not restart the server or write the live tree.
+- [Staged server updates — Publication](staged-updates-publication.md) — A due staged batch publishes through the journal; recovery and retry semantics preserve live data.
 - [Staged server updates — Rule](staged-updates-rule.md) — A server has one open update batch. Staging adds to that batch. It must not

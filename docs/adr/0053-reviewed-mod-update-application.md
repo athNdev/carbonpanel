@@ -90,18 +90,23 @@ request.
    mod content: the publisher excludes cron config from base checks, rollback
    reconciliation and publication, then parks the remaining batch on next
    restart. Cron rows keep their own trigger and batch; this adds no cron
-   executor. Every transferred byte is charged to the budget, including
-   rejected downloads. Discard shares operation ownership, preserves typed
-   Connect refusals and records the discard operation under its own name.
+   executor. No production cron consumer is enabled, so retained legacy
+   scheduled-config rows are pending manual apply/discard actions or an explicit
+   operator conversion, and must not be silently re-enabled. Every transferred
+   byte is charged to the budget, including rejected downloads. Discard shares
+   operation ownership, preserves typed Connect refusals and records the discard
+   operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused. Mod-update advancement
    checks the observed deadline, schedule, status and policy revision to fence
    stale due reads after a reschedule or policy edit. A one-shot slot persists
    its disabled status and inserts its execution record in the same guarded
    write, so the post-claim revalidation sees one consistent state and the run
-   dispatches exactly once. An interruption before the asynchronous dispatch
-   leaves a running record that startup recovery closes, and an execution
-   insert failure rolls the claim back so the slot stays due.
+   dispatches exactly once. The same durable execution claim covers due cron and
+   interval mod-update slots, not only one-shot policies. An interruption before
+   the asynchronous dispatch leaves a running record that startup recovery
+   closes, and an execution insert failure rolls the claim back so the slot
+   stays due.
    Invalid current schedules are disabled. The planner is installed before the
    scheduler starts so cold boot sees the real implementation.
 

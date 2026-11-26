@@ -425,12 +425,13 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		// task must not run: a still-due row would otherwise be claimed again
 		// on every tick. Disable it with the reason in the log.
 		//
-		// A due one-shot mod policy records its execution in the same durable
-		// write as the slot claim. An interruption before the async dispatch
-		// then leaves a recoverable running record instead of a silently
-		// consumed slot, and a failed insert leaves the slot due.
+		// Every due mod policy, including recurring cron and interval slots,
+		// records its execution in the same durable write as the slot claim. An
+		// interruption before the async dispatch then leaves a recoverable
+		// running record instead of a silently consumed slot, and a failed
+		// insert leaves the slot due. An event-driven policy has no due slot.
 		var claim *storage.TaskExecution
-		if task.TaskType == storage.TaskTypeModUpdate && task.Schedule == storage.ScheduleTypeOnce {
+		if task.TaskType == storage.TaskTypeModUpdate && task.Schedule != storage.ScheduleTypeEvent {
 			claim = newScheduledExecution(task, time.Now())
 		}
 		if err := s.updateNextRun(task, claim); err != nil {
