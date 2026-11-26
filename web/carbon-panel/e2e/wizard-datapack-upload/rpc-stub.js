@@ -124,6 +124,19 @@ export const rpcClient = {
 					};
 				});
 			}
+			if (mode === 'deferred') {
+				return new Promise((resolve, reject) => {
+					globalThis.__exportPending = globalThis.__exportPending || [];
+					globalThis.__exportPending.push({
+						format: payload.format,
+						sessionId: result.sessionId,
+						filename: result.filename,
+						resolve: () => resolve(result),
+						reject: (message = `deferred export refusal ${payload.format}`) =>
+							reject(new ConnectError(message, Code.Internal))
+					});
+				});
+			}
 			return Promise.resolve(result);
 		},
 		previewServerArchive(payload) {

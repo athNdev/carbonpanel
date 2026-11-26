@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 // Seeded Chromium fixture for the create-server wizard datapack upload slice
 // and the server archive export control.
-// Drives the real /servers/new page and the real export component through the
-// normal UI seam with only the transport and chunked-upload modules replaced by
-// deterministic fixtures. No live panel, credentials, worlds, daemon or
-// external infrastructure.
+//
+// Drives the real /servers/new route and the real archive components through
+// the normal UI seam. This fixture replaces the RPC transport, the resumable
+// chunked-upload helper and SvelteKit's app runtime modules, and narrows the
+// Carbon barrel; the route components, archive components, Carbon controls and
+// application CSS remain the production implementation. No live panel,
+// credentials, worlds, daemon or external infrastructure.
 //
 //   REVIEW_CHROME=/path/to/chrome.exe \
 //     node scripts/review/wizard-datapack-upload-check.mjs
@@ -13,11 +16,23 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchReviewBrowser } from "./browser.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "../..");
+// Evidence names the commit it was produced from, resolved independently from
+// the worktree rather than copied from a ticket or commit message.
+const verifiedHead = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+}).trim();
+const worktreeStatus = execFileSync("git", ["status", "--porcelain"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+}).trim();
 const project = path.resolve(here, "../../web/carbon-panel");
 const fixture = path.join(project, "e2e", "wizard-datapack-upload");
 const requireFrontend = createRequire(path.join(project, "package.json"));
@@ -34,6 +49,7 @@ const { default: tailwind } = await import(
 const cache = await fs.mkdtemp(
   path.join(os.tmpdir(), "carbon-wizard-datapack-"),
 );
+const downloadRequests = [];
 let server;
 let browser;
 
@@ -100,7 +116,101 @@ async function showWizardStep(page, title) {
   await page.getByRole("button", { name: new RegExp(title) }).click();
 }
 
+// Color measurement uses the rendered token values, including any ancestor
+// opacity, so a dimmed explanatory card cannot pass just because its source
+// class name looks semantic.
+function contrastRatio(foreground, background) {
+  const linear = (channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = ([r, g, b]) =>
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+async function renderedContrast(locator, { includeOpacity = true } = {}) {
+  const sample = await locator.evaluate(
+    (element, withOpacity) => {
+      const parse = (value) => {
+        const match = value.match(/rgba?\(([^)]+)\)/);
+        if (!match) return null;
+        const parts = match[1]
+          .split(/[ ,/]+/)
+          .filter(Boolean)
+          .map(Number);
+        return [parts[0], parts[1], parts[2], parts[3] ?? 1];
+      };
+      const composite = (top, bottom) => {
+        const alpha = top[3];
+        return [
+          top[0] * alpha + bottom[0] * (1 - alpha),
+          top[1] * alpha + bottom[1] * (1 - alpha),
+          top[2] * alpha + bottom[2] * (1 - alpha),
+          1,
+        ];
+      };
+      let background = [255, 255, 255, 1];
+      let accumulatedOpacity = 1;
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (withOpacity) accumulatedOpacity *= Number(style.opacity || 1);
+        const parsed = parse(style.backgroundColor);
+        if (parsed && parsed[3] > 0) {
+          background = composite(parsed, background);
+          if (parsed[3] === 1) break;
+        }
+      }
+      const foreground = parse(getComputedStyle(element).color) || [0, 0, 0, 1];
+      if (withOpacity && accumulatedOpacity < 1) {
+        foreground[3] *= accumulatedOpacity;
+      }
+      const effectiveForeground =
+        foreground[3] === 1
+          ? foreground
+          : [
+              foreground[0] * foreground[3] +
+                background[0] * (1 - foreground[3]),
+              foreground[1] * foreground[3] +
+                background[1] * (1 - foreground[3]),
+              foreground[2] * foreground[3] +
+                background[2] * (1 - foreground[3]),
+              1,
+            ];
+      return {
+        foreground: effectiveForeground,
+        background,
+        sourceColor: getComputedStyle(element).color,
+        sourceBackground: background,
+      };
+    },
+    includeOpacity,
+  );
+  return contrastRatio(
+    sample.foreground.slice(0, 3),
+    sample.background.slice(0, 3),
+  );
+}
+
+async function keyboardFocusLabel(page) {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    return (
+      active?.getAttribute("aria-label") ||
+      active?.textContent?.replace(/\s+/g, " ").trim() ||
+      active?.tagName ||
+      ""
+    );
+  });
+}
+
+const keyboard = [];
 const summaries = [];
+
+let runError;
 
 try {
   server = await createServer({
@@ -165,6 +275,22 @@ try {
               return;
             }
             const pathname = (req.url || "").split("?")[0];
+            if (pathname.startsWith("/api/v1/download/")) {
+              downloadRequests.push({
+                url: req.url,
+                method: req.method,
+                status: 200,
+                contentType: "application/gzip",
+              });
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/gzip");
+              res.setHeader(
+                "Content-Disposition",
+                'attachment; filename="fixture-server.tar.gz"',
+              );
+              res.end("current-tar-bytes");
+              return;
+            }
             const entries = {
               "/wizard.html": path.join(fixture, "main.js"),
               "/export.html": path.join(fixture, "export-main.js"),
@@ -624,8 +750,10 @@ try {
   await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
   await showWizardStep(page, "Cluster & Runtime");
   assert.equal(
-    await page.getByRole("radio", { name: /Auto-Placement/ }).isDisabled(),
-    true,
+    await page
+      .getByRole("radio", { name: /Auto-Placement/ })
+      .getAttribute("aria-disabled"),
+    "true",
     "archive mode must not use generic automatic placement",
   );
   assert.equal(
@@ -1216,7 +1344,47 @@ try {
     await page
       .getByPlaceholder("survival-smp-01")
       .fill(`archive-preview-${view.name}`);
-    await page.getByTestId("create-from-archive-tile").click();
+    await page.waitForTimeout(250);
+    const archiveTile = page.getByTestId("create-from-archive-tile");
+    await archiveTile.focus();
+    await page.keyboard.press("Space");
+    keyboard.push(`${view.name}: Space selected the archive tile`);
+    assert.equal(
+      await archiveTile.getAttribute("aria-checked"),
+      "true",
+      "the archive tile must be selectable from the keyboard",
+    );
+    await page.waitForTimeout(200);
+    const archiveDescription = archiveTile.locator("p");
+    const descriptionContrast = async () =>
+      renderedContrast(archiveDescription);
+    const restContrast = await descriptionContrast();
+    assert.ok(
+      restContrast >= 4.5,
+      `selected archive description contrast ${restContrast.toFixed(2)}:1`,
+    );
+    await archiveTile.hover();
+    await page.waitForTimeout(200);
+    const hoverContrast = await descriptionContrast();
+    assert.ok(
+      hoverContrast >= 4.5,
+      `hovered archive description contrast ${hoverContrast.toFixed(2)}:1`,
+    );
+    const archiveBox = await archiveTile.boundingBox();
+    assert.ok(archiveBox);
+    await page.mouse.move(
+      archiveBox.x + archiveBox.width / 2,
+      archiveBox.y + archiveBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.waitForTimeout(200);
+    const pressedContrast = await descriptionContrast();
+    await page.mouse.up();
+    await page.mouse.move(0, 0);
+    assert.ok(
+      pressedContrast >= 4.5,
+      `pressed archive description contrast ${pressedContrast.toFixed(2)}:1`,
+    );
     await uploadServerArchive(page, view.format);
     await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
     await page
@@ -1234,6 +1402,32 @@ try {
     });
     for (let step = 0; step < 3; step++)
       await page.getByRole("button", { name: "Next Step" }).click();
+    const autoPlacement = page.getByRole("radio", { name: /Auto-Placement/ });
+    await autoPlacement.waitFor();
+    assert.equal(
+      await autoPlacement.getAttribute("aria-disabled"),
+      "true",
+      "archive mode must not use generic automatic placement",
+    );
+    assert.equal(
+      await autoPlacement.getAttribute("disabled"),
+      null,
+      "the same-node explanation must stay focusable",
+    );
+    await autoPlacement.focus();
+    assert.match(
+      await keyboardFocusLabel(page),
+      /Auto-Placement/,
+      "the disabled Auto-Placement explanation remains keyboard reachable",
+    );
+    keyboard.push(
+      `${view.name}: focus reached the aria-disabled Auto-Placement card`,
+    );
+    const autoContrast = await renderedContrast(autoPlacement.locator("p"));
+    assert.ok(
+      autoContrast >= 4.5,
+      `same-node explanation contrast ${autoContrast.toFixed(2)}:1`,
+    );
     const options = page.getByTestId("archive-destination-option");
     assert.equal(
       await options.count(),
@@ -1246,6 +1440,7 @@ try {
       fullPage: true,
     });
     await page.keyboard.press("Space");
+    keyboard.push(`${view.name}: Space selected the second destination node`);
     await page.waitForFunction(
       () =>
         globalThis.__wizardCalls.some(
@@ -1522,9 +1717,35 @@ try {
       await page.evaluate(() => {
         globalThis.__wizardReset();
       });
-      await page.getByTestId("server-export-archive").click();
+      const exportTrigger = page.getByTestId("server-export-archive");
+      await exportTrigger.focus();
+      await page.keyboard.press("Enter");
+      keyboard.push(`${view.name}: Enter opened the export modal`);
       await page.getByTestId("archive-export-panel").waitFor();
-      await page.getByRole("radio", { name: label }).click();
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute("aria-label") === "Close modal",
+      );
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await keyboardFocusLabel(page),
+        "ZIP (.zip)",
+        "Tab moves from Close into the first format radio",
+      );
+      if (format === "tar.gz") {
+        await page.keyboard.press("Tab");
+        assert.equal(
+          await keyboardFocusLabel(page),
+          "TAR.GZ (.tar.gz)",
+          "Tab reaches the tar.gz format radio",
+        );
+      }
+      await page.keyboard.press("Space");
+      assert.equal(
+        await page.getByRole("radio", { name: label }).getAttribute("aria-checked"),
+        "true",
+        "Space selects the focused archive format",
+      );
+      keyboard.push(`${view.name}: Space selected ${label}`);
       await page.evaluate(() => {
         globalThis.__exportMode = "hold";
       });
@@ -1576,9 +1797,17 @@ try {
         path: path.join(out, `archive-export-ready-${view.name}-${format}.png`),
         fullPage: true,
       });
-      await page
-        .getByLabel("I have reviewed this notice before downloading.")
-        .check();
+      const acknowledgement = page.getByLabel(
+        "I have reviewed this notice before downloading.",
+      );
+      await acknowledgement.focus();
+      await page.keyboard.press("Space");
+      keyboard.push(`${view.name}: Space acknowledged the disclosure`);
+      assert.equal(
+        await acknowledgement.isChecked(),
+        true,
+        "the disclosure can be acknowledged from the keyboard",
+      );
       assert.equal(
         await page.getByTestId("archive-download").isEnabled(),
         true,
@@ -1589,12 +1818,214 @@ try {
       await page
         .getByTestId("archive-export-panel")
         .waitFor({ state: "hidden" });
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.getAttribute("data-testid") ===
+          "server-export-archive",
+      );
+      assert.equal(
+        await keyboardFocusLabel(page),
+        "Export server archive",
+        "Escape returns focus to the export trigger",
+      );
+      keyboard.push(`${view.name}: Escape closed and returned focus`);
       summaries.push({
         scenario: `archive export ${view.name} ${format}`,
         calls: await page.evaluate(() => globalThis.__wizardCalls),
       });
     }
   }
+
+  // Delayed ZIP then tar.gz with close/reopen. Only the current attempt may
+  // settle, and the authorized download must use the current session.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(exportBase);
+  await waitForExportReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__exportMode = "deferred";
+    globalThis.__exportPending = [];
+    globalThis.__wizardReset();
+  });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 1);
+  assert.equal(
+    await page.evaluate(() => globalThis.__exportPending[0].format),
+    1,
+    "the first delayed preparation is the ZIP request",
+  );
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByRole("radio", { name: "TAR.GZ (.tar.gz)" }).click();
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 2);
+  assert.equal(
+    await page.evaluate(() => globalThis.__exportPending[1].format),
+    2,
+    "the reopened dialog started a tar.gz request",
+  );
+
+  await page.evaluate(() => globalThis.__exportPending[0].resolve());
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.getByTestId("archive-export-ready").count(),
+    0,
+    "a stale ZIP success must not make the reopened tar.gz attempt ready",
+  );
+  assert.equal(
+    await page.getByText("fixture-server.zip", { exact: true }).count(),
+    0,
+    "a stale ZIP result must not replace the active filename",
+  );
+  assert.equal(
+    await page.getByText("Preparing archive…").count(),
+    1,
+    "the current tar.gz attempt still owns the preparing state",
+  );
+
+  await page.evaluate(() => globalThis.__exportPending[1].resolve());
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await page.getByText("fixture-server.tar.gz", { exact: true }).waitFor();
+
+  assert.equal(
+    await page.getByTestId("archive-download").isDisabled(),
+    true,
+    "the download stays disabled while the notice is unacknowledged",
+  );
+  assert.equal(
+    downloadRequests.length,
+    0,
+    "no download request exists before acknowledgement",
+  );
+  await page
+    .getByLabel("I have reviewed this notice before downloading.")
+    .check();
+  const downloadPromise = page.waitForEvent("download", { timeout: 15_000 });
+  await page.getByTestId("archive-download").click();
+  const download = await downloadPromise;
+  assert.equal(
+    download.suggestedFilename(),
+    "fixture-server.tar.gz",
+    "the download filename comes from the current tar.gz session",
+  );
+  assert.match(
+    download.url(),
+    /\/api\/v1\/download\/export-session-tar$/,
+    "the download must use only the current session",
+  );
+  assert.equal(downloadRequests.length, 1);
+  assert.match(
+    downloadRequests[0].url,
+    /\/api\/v1\/download\/export-session-tar$/,
+    "the browser request must use only the current session",
+  );
+  assert.equal(downloadRequests[0].status, 200);
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  assert.equal(
+    Buffer.concat(chunks).toString(),
+    "current-tar-bytes",
+    "the authorized transfer returns the current session bytes",
+  );
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  summaries.push({
+    scenario:
+      "delayed ZIP then tar.gz close/reopen fences stale success and downloads only the current session",
+    download: {
+      url: download.url(),
+      status: downloadRequests[0].status,
+      filename: download.suggestedFilename(),
+      bytes: Buffer.byteLength("current-tar-bytes"),
+    },
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
+  // A stale rejection from the closed ZIP attempt must not surface while the
+  // reopened tar.gz attempt can still fail on its own.
+  await page.goto(exportBase);
+  await waitForExportReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__exportMode = "deferred";
+    globalThis.__exportPending = [];
+    globalThis.__wizardReset();
+  });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 1);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByRole("radio", { name: "TAR.GZ (.tar.gz)" }).click();
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 2);
+  await page.evaluate(() =>
+    globalThis.__exportPending[0].reject("stale ZIP refusal"),
+  );
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.getByText("stale ZIP refusal", { exact: true }).count(),
+    0,
+    "a closed attempt must not surface its rejection",
+  );
+  assert.equal(
+    await page.getByText("Preparing archive…").count(),
+    1,
+    "the reopened attempt stays authoritative after a stale rejection",
+  );
+  await page.evaluate(() => globalThis.__exportPending[1].resolve());
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await page.getByText("fixture-server.tar.gz", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  summaries.push({
+    scenario: "delayed stale ZIP rejection is fenced after close/reopen",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+
+  // Polling a different server identity releases the attempt; its late result
+  // cannot make the new server ready.
+  await page.goto(exportBase);
+  await waitForExportReady(page);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-carbon-theme", "dark");
+    document.documentElement.classList.add("dark");
+    globalThis.__exportMode = "deferred";
+    globalThis.__exportPending = [];
+    globalThis.__wizardReset();
+  });
+  await page.getByTestId("server-export-archive").click();
+  await page.getByTestId("archive-export-panel").waitFor();
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 1);
+  await page.evaluate(() => globalThis.__exportSwitchServer("fixture-server-b"));
+  await page.getByTestId("archive-prepare").waitFor({ timeout: 15_000 });
+  await page.getByTestId("archive-prepare").click();
+  await page.waitForFunction(() => globalThis.__exportPending?.length === 2);
+  await page.evaluate(() => globalThis.__exportPending[0].resolve());
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.getByTestId("archive-export-ready").count(),
+    0,
+    "the former server result must not make the new server ready",
+  );
+  await page.evaluate(() => globalThis.__exportPending[1].resolve());
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  summaries.push({
+    scenario: "server change fences the former in-flight export",
+    calls: await page.evaluate(() => globalThis.__wizardCalls),
+  });
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(exportBase);
@@ -1671,7 +2102,16 @@ try {
     path.join(out, "results.json"),
     JSON.stringify(
       {
+        head: {
+          sha: verifiedHead,
+          source: "git rev-parse HEAD",
+          worktreeDirty: Boolean(worktreeStatus),
+          worktreeStatus: worktreeStatus ? worktreeStatus.split("\n") : [],
+        },
+        scope:
+          "Deterministic route/component UI fixture. Not browser evidence for hosted live-engine round trips.",
         scenarios: summaries.map(({ scenario }) => scenario),
+        keyboard,
         summaries,
         errors,
         browser: launched.metadata,
@@ -1681,10 +2121,38 @@ try {
     ),
   );
   console.log(
-    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, archive ZIP/tar.gz preview and create retry, upload progress, stale upload/destination fencing, empty preflight recovery, destination-preflight precedence and ZIP/tar.gz export at desktop/narrow light/dark",
+    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, archive ZIP/tar.gz preview and create retry, upload progress, stale upload/destination fencing, empty preflight recovery, destination-preflight precedence, archive export attempt fencing, keyboard focus return and ZIP/tar.gz export at desktop/narrow light/dark",
   );
+} catch (error) {
+  runError = error;
 } finally {
-  await browser?.close();
-  await server?.close();
-  await fs.rm(cache, { recursive: true, force: true });
+  // Every teardown is attempted even when an earlier one fails. The owned Vite
+  // cache, loopback server and locked browser are the only resources touched.
+  const cleanupErrors = [];
+  for (const [name, action] of [
+    ["browser", () => browser?.close()],
+    ["vite server", () => server?.close()],
+    ["owned vite cache", () => fs.rm(cache, { recursive: true, force: true })],
+  ]) {
+    try {
+      await action();
+    } catch (error) {
+      cleanupErrors.push({ name, error });
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    const details = cleanupErrors
+      .map(({ name, error }) => `${name}: ${error?.message ?? error}`)
+      .join("; ");
+    if (runError) {
+      runError.message = `${runError.message}\nCleanup also failed: ${details}`;
+      runError.cause = runError.cause ?? cleanupErrors[0].error;
+    } else {
+      runError = new AggregateError(
+        cleanupErrors.map(({ error }) => error),
+        `Fixture cleanup failed: ${details}`,
+      );
+    }
+  }
 }
+if (runError) throw runError;

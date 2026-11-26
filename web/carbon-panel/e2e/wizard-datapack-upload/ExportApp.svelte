@@ -7,10 +7,16 @@
 	// `?running=1` renders the same export control against a live server so the
 	// fixture can prove the disabled/refusal state without a live daemon.
 	const running = new URLSearchParams(window.location.search).get('running') === '1';
-	const server = {
+	let server = $state({
 		id: 'fixture-server',
 		name: 'Fixture Archive Server',
 		status: running ? ServerStatus.RUNNING : ServerStatus.STOPPED
+	});
+
+	// The fence must also release an in-flight preparation when the detail route
+	// polls a different server identity or status.
+	globalThis.__exportSwitchServer = (id, status = ServerStatus.STOPPED) => {
+		server = { id, name: `Fixture ${id}`, status };
 	};
 </script>
 

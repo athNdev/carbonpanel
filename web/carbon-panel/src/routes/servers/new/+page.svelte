@@ -1659,16 +1659,20 @@ one at https://mozilla.org/MPL/2.0/.
 								aria-checked={archiveMode}
 								disabled={Boolean(archiveSubmission)}
 								onclick={chooseArchiveMode}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 {archiveMode
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 {archiveMode
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
-									: 'border-border bg-background hover:bg-card'}"
+									: 'border-border bg-background transition-colors hover:bg-card'}"
 								data-testid="create-from-archive-tile"
 							>
 								<div class="flex items-center gap-2">
 									<Archive class="h-4 w-4 text-accent-text" />
 									<h4 class="text-sm font-semibold text-foreground">From Server Archive</h4>
 								</div>
-								<p class="mt-1 text-xs text-muted-foreground">
+								<p
+									class="mt-1 text-xs {archiveMode
+										? 'text-accent-foreground'
+										: 'text-muted-foreground'}"
+								>
 									Create a new server from a portable ZIP or tar.gz export.
 								</p>
 							</button>
@@ -2427,11 +2431,10 @@ one at https://mozilla.org/MPL/2.0/.
 								role="radio"
 								aria-checked={nodePlacementMode === 'auto'}
 								aria-disabled={archiveMode}
-								disabled={archiveMode}
 								onclick={() => {
 									if (!archiveMode) nodePlacementMode = 'auto';
 								}}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 {nodePlacementMode ===
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors aria-disabled:cursor-not-allowed {nodePlacementMode ===
 								'auto'
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
@@ -2442,7 +2445,7 @@ one at https://mozilla.org/MPL/2.0/.
 										Auto-Placement (Load Balanced)
 									</h4>
 								</div>
-								<p class="mt-1 text-xs text-muted-foreground">
+								<p class="mt-1 text-xs {archiveMode ? 'text-foreground' : 'text-muted-foreground'}">
 									{archiveMode
 										? 'Unavailable for archives: preview and create must bind the same node so storage is verified.'
 										: 'Cluster scheduler selects optimal worker node based on available memory and active workload.'}

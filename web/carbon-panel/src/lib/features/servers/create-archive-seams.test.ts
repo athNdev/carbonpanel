@@ -283,6 +283,49 @@ test('a replacement upload fences an older completion and blocks submission', ()
 	);
 });
 
+test('export results are fenced to the current modal attempt and server', () => {
+	assert.match(container, /let attempt = 0;/, 'preparations need a generation');
+	assert.match(
+		container,
+		/const generation = \+\+attempt;/,
+		'each preparation must take a new generation'
+	);
+	assert.ok(
+		container.includes('generation !== attempt || !open || server.id !== requestedServerId'),
+		'a late success or rejection must not touch a reopened dialog or another server'
+	);
+	assert.match(
+		container,
+		/const key = `\$\{server\.id\}:\$\{server\.status\}`;[\s\S]*reset\(\);/,
+		'a server identity or status change must release the former attempt'
+	);
+	assert.ok(
+		container.includes('onDestroy(invalidate)') &&
+			container.includes(
+				"if (!acknowledged || !sessionId || !filename || phase !== 'ready') return;"
+			),
+		'teardown must fence late work and download must require the current ready session'
+	);
+});
+
+test('archive cards keep selected descriptions and the same-node explanation readable', () => {
+	assert.match(
+		wizard,
+		/data-testid="create-from-archive-tile"[\s\S]*archiveMode\s*\? 'text-accent-foreground'/,
+		'the selected archive card description must use the accent foreground token'
+	);
+	assert.doesNotMatch(
+		wizard,
+		/(?<!aria-)disabled=\{archiveMode\}/,
+		'the archive-disabled Auto-Placement radio must stay focusable through aria-disabled'
+	);
+	assert.match(
+		wizard,
+		/aria-disabled=\{archiveMode\}[\s\S]*?class="mt-1 text-xs \{archiveMode\s*\? 'text-foreground'/,
+		'the essential same-node explanation must not inherit the disabled opacity'
+	);
+});
+
 test('the operator export control is mounted on server detail', () => {
 	assert.ok(detail.includes('ServerArchiveExport'), 'server detail must expose the export control');
 	assert.ok(

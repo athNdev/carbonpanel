@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { Archive } from '@lucide/svelte';
+	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
@@ -50,7 +51,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// on the controller; this control never issues a stop.
 	const running = $derived(server.status !== ServerStatus.STOPPED);
 
+	// A preparation result is only allowed to touch the modal while it still
+	// belongs to the current open attempt for the same server. Closing,
+	// reopening for another format, switching servers and unmounting all bump
+	// this generation, so a late response cannot overwrite the active session
+	// or surface a stale error.
+	let attempt = 0;
+
+	function invalidate() {
+		attempt += 1;
+	}
+
 	function reset() {
+		invalidate();
 		phase = 'idle';
 		sessionId = '';
 		filename = '';
@@ -64,6 +77,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		open = true;
 	}
 
+	let previousServerKey = `${server.id}:${server.status}`;
+	$effect(() => {
+		const key = `${server.id}:${server.status}`;
+		if (key === previousServerKey) return;
+		previousServerKey = key;
+		reset();
+	});
+
+	onDestroy(invalidate);
+
 	async function prepare() {
 		if (running) {
 			toast.error('Stop the server before exporting. It will not be stopped automatically.');
@@ -73,23 +96,27 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.error('Select ZIP or TAR.GZ as the archive format.');
 			return;
 		}
+		const generation = ++attempt;
+		const requestedServerId = server.id;
 		phase = 'preparing';
 		error = null;
 		acknowledged = false;
 		try {
 			const result = await rpcClient.server.exportServerArchive(
 				{
-					serverId: server.id,
+					serverId: requestedServerId,
 					format: format as ServerArchiveFormat,
 					consistency: STOPPED_CONSISTENCY
 				},
 				ARCHIVE_RPC_OPTIONS
 			);
+			if (generation !== attempt || !open || server.id !== requestedServerId) return;
 			sessionId = result.sessionId;
 			filename = result.filename;
 			totalSize = parseFileSize(result.totalSize);
 			phase = 'ready';
 		} catch (cause) {
+			if (generation !== attempt || !open || server.id !== requestedServerId) return;
 			error = cause instanceof Error ? cause.message : 'Archive preparation failed.';
 			phase = 'error';
 			if (!wasRpcErrorToasted(cause)) toast.error(error);
@@ -97,7 +124,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function download() {
-		if (!acknowledged || !sessionId || !filename) return;
+		if (!acknowledged || !sessionId || !filename || phase !== 'ready') return;
+		invalidate();
 		triggerStreamDownload(sessionId, filename);
 		toast.success('Archive download started.');
 		open = false;
