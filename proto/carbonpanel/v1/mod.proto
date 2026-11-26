@@ -48,11 +48,30 @@ message Mod {
   google.protobuf.Timestamp uploaded_at = 11;
   google.protobuf.Timestamp updated_at = 12;
   bool enabled = 13;
+  // Present only when the caller explicitly checks this installed file for updates.
+  InstalledModUpdate update_preview = 14;
+}
+
+// A read-only observation about the exact server file and the provider release.
+message InstalledModUpdate {
+  string state = 1; // available, current, unknown_source, review_required, unavailable
+  string reason = 2;
+  string installed_sha512 = 3;
+  string provider = 4;
+  string project_id = 5;
+  string installed_version_id = 6;
+  string installed_version = 7;
+  string candidate_version_id = 8;
+  string candidate_version = 9;
+  string candidate_sha512 = 10;
+  string candidate_filename = 11;
 }
 
 // Server mods request
 message ListModsRequest {
   string server_id = 1;
+  // Hash installed bytes and check the provider for compatible release versions.
+  bool check_updates = 2;
 }
 
 // All server mods
