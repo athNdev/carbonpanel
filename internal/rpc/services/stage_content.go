@@ -85,6 +85,12 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 	if err != nil {
 		return nil, err
 	}
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
@@ -218,6 +224,9 @@ func discardStagedContent(ctx context.Context, store *storage.Store, server *sto
 }
 
 func stageContentError(err error) error {
+	if connect.CodeOf(err) == connect.CodeAborted {
+		return err
+	}
 	switch {
 	case nodestorage.IsUnavailable(err):
 		return connect.NewError(connect.CodeUnavailable, err)

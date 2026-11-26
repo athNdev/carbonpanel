@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -636,7 +637,11 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 			if key == writableRootfsEnv || strings.EqualFold(key, skipNsswitchConfEnv) {
 				continue
 			}
-			config.Env = append(config.Env, fmt.Sprintf("%s=%s", key, value))
+			prefix := key + "="
+			config.Env = slices.DeleteFunc(config.Env, func(entry string) bool {
+				return entry == key || strings.HasPrefix(entry, prefix)
+			})
+			config.Env = append(config.Env, prefix+value)
 		}
 	}
 

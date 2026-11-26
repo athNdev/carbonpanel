@@ -406,6 +406,9 @@ func (s *Store) setOpenBatchWindow(ctx context.Context, serverID string, window 
 			if err := checkReviewedContentWindow(tx, batch, window, applyAt, idleMinutes); err != nil {
 				return err
 			}
+			if err := requireNoPendingReviewedModRuntimeChanges(tx, serverID, batch.ID); err != nil {
+				return err
+			}
 		}
 		return setBatchWindow(tx, batch, window, mode, applyAt, idleMinutes)
 	})

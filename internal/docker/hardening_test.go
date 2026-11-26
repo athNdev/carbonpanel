@@ -12,10 +12,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/db"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
+
+func TestApplyOverridesEmitsOnlyTheEffectiveRuntimeEnvironment(t *testing.T) {
+	typ, version := "FABRIC", "1.21.1"
+	cfg := &db.ServerConfig{Type: &typ, Version: &version}
+	overrides := &v1.DockerOverrides{Environment: map[string]string{"TYPE": "NEOFORGE", "VERSION": "1.21.4"}}
+	config := &container.Config{Env: buildEnvFromConfig(cfg)}
+	ApplyOverrides(overrides, config, &container.HostConfig{})
+	var target []string
+	for _, entry := range config.Env {
+		if strings.HasPrefix(entry, "TYPE=") || strings.HasPrefix(entry, "VERSION=") {
+			target = append(target, entry)
+		}
+	}
+	slices.Sort(target)
+	if want := []string{"TYPE=NEOFORGE", "VERSION=1.21.4"}; !slices.Equal(want, target) {
+		t.Fatalf("serialized runtime environment = %v, want %v", target, want)
+	}
+}
 
 func TestContainerHardening_ApplyOverrides(t *testing.T) {
 	// Base hardened hostConfig

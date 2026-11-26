@@ -64,6 +64,35 @@ func TestDirectModWritesAreRefusedDuringStagedPublication(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(modsDir+"_disabled", "mod.jar"))
 }
 
+func TestStagedContentAdmissionRefusesAnExclusivePublication(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "staged-content-gate", storage.StatusStopped)
+	live := filepath.Join(server.DataPath, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
+	mods := NewModService(store, nil, um, logger.New())
+	mods.SetModUpdateLookup(newPreviewFixture())
+	mods.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+
+	fence, err := datawrite.AcquireExclusive(ctx, server.ID)
+	require.NoError(t, err)
+	t.Cleanup(fence.Release)
+	_, err = stageContentBytes(ctx, store, server, nil, storage.StagedKindFile, storage.StagedActionReplace,
+		"mods/mod.jar", "mod.jar", []byte("ordinary"))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err))
+	_, err = mods.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err))
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch)
+	require.Empty(t, stagedFiles(t, server.DataPath))
+
+	fence.Release()
+	res, err := mods.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
+}
+
 func TestModWritesAreRefusedDuringNextRestartCompensation(t *testing.T) {
 	ctx := context.Background()
 	store, server, _ := newContentStageFixture(t, "mod-next-restart-gate", storage.StatusStopped)

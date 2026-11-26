@@ -120,6 +120,17 @@ func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListM
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	var runtimeErr error
+	if msg.CheckUpdates {
+		runtimeServer, err := s.reviewedModRuntimeServer(ctx, server)
+		if err == nil {
+			server = runtimeServer
+		} else if !errors.Is(err, storage.ErrReviewedModRuntimeUnknown) {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		runtimeErr = err
+	}
+
 	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
@@ -210,12 +221,22 @@ func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListM
 	}
 
 	if msg.CheckUpdates && len(mods) != 0 {
-		settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
-		if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to load provider settings"))
-		}
-		if err := previewServerModUpdates(ctx, root, modsDir, server, mods, modUpdateProvider(settings)); err != nil {
-			return nil, err
+		if runtimeErr != nil {
+			for _, mod := range mods {
+				mod.UpdatePreview = &v1.InstalledModUpdate{State: "review_required", Reason: runtimeErr.Error()}
+			}
+		} else {
+			settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
+			if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to load provider settings"))
+			}
+			lookup := s.updateLookup
+			if lookup == nil {
+				lookup = modUpdateProvider(settings)
+			}
+			if err := previewServerModUpdates(ctx, root, modsDir, server, mods, lookup); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return connect.NewResponse(&v1.ListModsResponse{
@@ -499,9 +520,13 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 				"error":     err.Error(),
 			})
 			code := connect.CodeInternal
+			if connect.CodeOf(err) == connect.CodeAborted {
+				return nil, err
+			}
 			if errors.Is(err, errInvalidModUpdateWindow) {
 				code = connect.CodeInvalidArgument
-			} else if errors.Is(err, storage.ErrUpdateBatchConflict) {
+			} else if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) ||
+				errors.Is(err, storage.ErrReviewedModRuntimeUnknown) {
 				code = connect.CodeFailedPrecondition
 			} else if strings.Contains(err.Error(), "server not found") || strings.Contains(err.Error(), "no mod updates") {
 				code = connect.CodeInvalidArgument

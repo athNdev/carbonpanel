@@ -123,6 +123,74 @@ func validateStagedConfigFields(config *ServerConfig, changes map[string]any) er
 // ErrStagedConfigMoved is returned when a live field changed after it was staged.
 var ErrStagedConfigMoved = errors.New("staged config field changed since it was recorded")
 
+func configChangesReviewedModRuntime(changes map[string]any) bool {
+	for key := range changes {
+		switch key {
+		case "type", "version", "forgeInstaller", "forgeInstallerUrl", "customJarExec",
+			"versionFromModrinthProjects", "modrinthProjects", "modrinthProjectsDefaultVersionType",
+			"cfPageUrl", "cfSlug", "cfFileId", "cfFilenameMatcher", "cfModpackZip",
+			"modrinthModpack", "modrinthVersion", "modrinthModpackVersionType", "modrinthLoader":
+			return true
+		}
+	}
+	return false
+}
+
+func guardServerConfigRuntimeChangeTx(tx *gorm.DB, config *ServerConfig) error {
+	if config == nil || config.ServerID == "" {
+		return nil
+	}
+	var current ServerConfig
+	err := tx.Where("server_id = ?", config.ServerID).Take(&current).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ensureNoStagedReviewedModCandidatesTx(tx, config.ServerID)
+	}
+	if err != nil {
+		return err
+	}
+	before, err := ServerConfigToMap(&current)
+	if err != nil {
+		return err
+	}
+	after, err := ServerConfigToMap(config)
+	if err != nil {
+		return err
+	}
+	if !configChangesReviewedModRuntime(DiffMaps(before, after)) {
+		return nil
+	}
+	return ensureNoStagedReviewedModCandidatesTx(tx, config.ServerID)
+}
+
+// RequireNoPendingReviewedModRuntimeChanges protects publication of legacy
+// mixed batches. The insert path checks inside its admission transaction.
+func (s *Store) RequireNoPendingReviewedModRuntimeChanges(ctx context.Context, serverID, batchID string) error {
+	return requireNoPendingReviewedModRuntimeChanges(s.db.WithContext(ctx), serverID, batchID)
+}
+
+func requireNoPendingReviewedModRuntimeChanges(tx *gorm.DB, serverID, batchID string) error {
+	var configs []StagedConfigChange
+	if err := tx.Select("payload").Where(
+		"server_id = ? AND batch_id = ? AND status = ? AND apply_mode <> ?",
+		serverID, batchID, StagedStatusStaged, StagedApplyScheduled,
+	).Find(&configs).Error; err != nil {
+		return err
+	}
+	for _, cfg := range configs {
+		var changes map[string]any
+		if err := json.Unmarshal([]byte(cfg.Payload), &changes); err != nil {
+			return fmt.Errorf("cannot verify staged config compatibility: %w", err)
+		}
+		if changes == nil {
+			return errors.New("cannot verify staged config compatibility: payload must be a JSON object")
+		}
+		if configChangesReviewedModRuntime(changes) {
+			return fmt.Errorf("%w: apply or discard the pending runtime configuration change before reviewing mod updates", ErrStagedModVersionChange)
+		}
+	}
+	return nil
+}
+
 // StageConfigChange records changes as a diff vs the live config. It works
 // regardless of the instance's operational state — nothing is applied here.
 func (s *Store) StageConfigChange(ctx context.Context, serverID string, changes map[string]any, mode StagedApplyMode, cronExpr string) (*StagedConfigChange, error) {
@@ -253,6 +321,11 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		diff := DiffMaps(current, changes)
 		if len(diff) == 0 {
 			return fmt.Errorf("no differences vs current config")
+		}
+		if configChangesReviewedModRuntime(diff) {
+			if err := ensureNoStagedReviewedModCandidatesTx(tx, serverID); err != nil {
+				return err
+			}
 		}
 		payload, err := json.Marshal(diff)
 		if err != nil {
@@ -427,17 +500,6 @@ func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedC
 
 // The staged row is claimed with a write before this check. SQLite therefore
 // serializes this config write with the world's durable operation admission.
-// configChangesRuntimeVersionOrLoader reports whether a config payload changes
-// the Docker TYPE or VERSION target.
-func configChangesRuntimeVersionOrLoader(changes map[string]any) bool {
-	if len(changes) == 0 {
-		return false
-	}
-	_, hasType := changes["type"]
-	_, hasVersion := changes["version"]
-	return hasType || hasVersion
-}
-
 func guardStagedWorldLevel(tx *gorm.DB, serverID string, diff map[string]any) error {
 	for field := range diff {
 		if !worldLevelConfigField(field) {
@@ -492,6 +554,11 @@ func (s *Store) ApplyStagedConfigChange(ctx context.Context, id string) (*Staged
 		}
 		if diff == nil {
 			return fmt.Errorf("staged payload must be a JSON object")
+		}
+		if configChangesReviewedModRuntime(diff) {
+			if err := ensureNoStagedReviewedModCandidatesTx(tx, staged.ServerID); err != nil {
+				return err
+			}
 		}
 		if err := guardStagedWorldLevel(tx, staged.ServerID, diff); err != nil {
 			return err
@@ -623,7 +690,7 @@ func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChan
 	// Rolling back a runtime config change is a version/loader change too. It
 	// must not invalidate reviewed mod candidates that were staged after the
 	// original change was applied.
-	if configChangesRuntimeVersionOrLoader(prevDiff) {
+	if configChangesReviewedModRuntime(prevDiff) {
 		if err := ensureNoStagedReviewedModCandidatesTx(tx, staged.ServerID); err != nil {
 			return err
 		}

@@ -210,19 +210,11 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("server not found: %w", err)
 	}
-	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
-	if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
-		return nil, nil, nil, fmt.Errorf("failed to load server configuration: %w", err)
+	runtimeServer, err := s.reviewedModRuntimeServer(ctx, server)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if errors.Is(err, storage.ErrServerConfigNotFound) {
-		serverConfig = nil
-	}
-	// The persisted config owns the Docker TYPE/VERSION values. Use that
-	// effective target for the mods directory, provider preview and candidate
-	// metadata instead of the possibly-stale Server projection.
-	runtimeServer := *server
-	runtimeServer.ModLoader, runtimeServer.MCVersion = serverConfig.EffectiveRuntimeTarget(server)
-	dataRoot, err := dataRootFor(ctx, s.store, &runtimeServer, false, s.storageResolver)
+	dataRoot, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -240,12 +232,6 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return nil, nil, nil, err
 	}
 	loader := string(runtimeServer.ModLoader)
-	if isModpackPlatformLoader(runtimeServer.ModLoader) {
-		loader = string(runtimeServer.ModpackLoader)
-	}
-	if loader == "" || runtimeServer.MCVersion == "" || strings.EqualFold(runtimeServer.MCVersion, "latest") {
-		return nil, nil, nil, errors.New("a known game version and loader are required")
-	}
 	settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
 	if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
 		return nil, nil, nil, fmt.Errorf("failed to load provider settings: %w", err)
@@ -282,7 +268,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		})
 	}
 	if len(previewMods) > 0 {
-		if err := previewServerModUpdates(ctx, dataRoot, modsDir, &runtimeServer, previewMods, lookup); err != nil {
+		if err := previewServerModUpdates(ctx, dataRoot, modsDir, runtimeServer, previewMods, lookup); err != nil {
 			return nil, nil, nil, err
 		}
 	}
@@ -341,7 +327,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			continue
 		}
 		data, consumed, outcome, fetchErr := fetcher.Fetch(ctx, settings, sel.GetCandidateVersionId(),
-			preview.GetProjectId(), sel.GetCandidateFilename(), sel.GetCandidateSha512(), loader, server.MCVersion, remaining)
+			preview.GetProjectId(), sel.GetCandidateFilename(), sel.GetCandidateSha512(), loader, runtimeServer.MCVersion, remaining)
 		// Count every transferred byte, including a rejected candidate: a
 		// provider that keeps sending bad bytes must not burn the budget for
 		// free.
@@ -386,8 +372,15 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			}
 			server = current
 		}
+		// Keep publication from taking an open-batch snapshot between preparing
+		// the window, writing the payloads, and recording their rows.
+		releaseWrite, err := beginDataWrite(server.ID)
+		if err != nil {
+			return err
+		}
+		defer releaseWrite()
+
 		// Commit the window before the first staged byte becomes visible.
-		var err error
 		batch, err = s.store.PrepareReviewedContentBatch(ctx, server.ID, windowName, applyAt, idle)
 		if err != nil {
 			return fmt.Errorf("failed to set the apply window: %w", err)
@@ -434,6 +427,16 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return results, nil, nil, err
 	}
 	return results, batch, transient, nil
+}
+
+func (s *ModService) reviewedModRuntimeServer(ctx context.Context, server *storage.Server) (*storage.Server, error) {
+	loader, game, err := s.store.ReviewedModRuntimeTarget(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	runtime := *server
+	runtime.ModLoader, runtime.MCVersion = loader, game
+	return &runtime, nil
 }
 
 // installedModLocation returns the live relative path and whether the reviewed

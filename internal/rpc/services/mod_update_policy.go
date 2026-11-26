@@ -36,6 +36,10 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
 		return 0, 0, []string{errModUpdateRunningSkipped.Error()}, nil
 	}
+	runtimeServer, err := s.reviewedModRuntimeServer(ctx, server)
+	if err != nil {
+		return 0, 0, nil, err
+	}
 	dataRoot, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return 0, 0, nil, err
@@ -45,19 +49,11 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		return 0, 0, nil, err
 	}
 	defer func() { _ = root.Close() }()
-	modsDir := minecraft.GetModsPath(dataRoot, server.ModLoader)
+	modsDir := minecraft.GetModsPath(dataRoot, runtimeServer.ModLoader)
 	if modsDir == "" {
 		return 0, 0, nil, errors.New("this server type does not support mods")
 	}
-	loader := string(server.ModLoader)
-	if isModpackPlatformLoader(server.ModLoader) {
-		loader = string(server.ModpackLoader)
-	}
-	if loader == "" || server.MCVersion == "" || strings.EqualFold(server.MCVersion, "latest") {
-		return 0, 0, nil, errors.New("a known game version and loader are required")
-	}
-
-	mods, err := installedModRows(ctx, serverID, server, modsDir)
+	mods, err := installedModRows(ctx, serverID, runtimeServer, modsDir)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -92,7 +88,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	if lookup == nil {
 		lookup = modUpdateProvider(settings)
 	}
-	if err := previewServerModUpdates(ctx, dataRoot, modsDir, server, mods, lookup); err != nil {
+	if err := previewServerModUpdates(ctx, dataRoot, modsDir, runtimeServer, mods, lookup); err != nil {
 		return 0, 0, nil, err
 	}
 

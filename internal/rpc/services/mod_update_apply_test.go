@@ -30,10 +30,13 @@ type modUpdateFetchFixture struct {
 	outcome string
 	err     error
 	calls   int
+	loader  string
+	game    string
 }
 
-func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string, int64) ([]byte, int64, string, error) {
+func (f *modUpdateFetchFixture) Fetch(_ context.Context, _ *storage.ServerConfig, _, _, _, _, loader, game string, _ int64) ([]byte, int64, string, error) {
 	f.calls++
+	f.loader, f.game = loader, game
 	return f.data, int64(len(f.data)), f.outcome, f.err
 }
 

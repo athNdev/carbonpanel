@@ -139,6 +139,9 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return err
 		}
+		if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
+			return err
+		}
 		var restore func() error
 		if len(content) > 0 {
 			acc, accErr := openAccessor(ctx, store, server, resolver)
@@ -305,6 +308,9 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 		return nil, err
 	}
+	if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
+		return nil, err
+	}
 	write, err := datawrite.AcquireExclusive(ctx, server.ID)
 	if err != nil {
 		return nil, err
@@ -434,6 +440,19 @@ func stagedModuleConflict(ctx context.Context, store *storage.Store, server *sto
 		}
 		if err := checkModuleBase(module, payload.Fields); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// requireReviewedModRuntimeConsistency refuses a legacy mixed batch whose
+// pending config rows would change the Docker runtime target while a reviewed
+// mod candidate is also staged in that batch. The insert path rejects this
+// state, so only pre-existing data reaches the check.
+func requireReviewedModRuntimeConsistency(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange) error {
+	for _, row := range rows {
+		if row.Kind == storage.StagedKindMod && row.ExpectedLiveSha512 != "" {
+			return store.RequireNoPendingReviewedModRuntimeChanges(ctx, server.ID, row.BatchID)
 		}
 	}
 	return nil
