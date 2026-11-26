@@ -695,6 +695,14 @@ def register_admin(controller, username, password):
     controller.token = token
 
 
+def config_value(payload, key):
+    for category in payload.get("categories", []):
+        for prop in category.get("properties", []):
+            if prop.get("key") == key:
+                return prop.get("value")
+    return None
+
+
 def ensure_node(controller, name, host, storage_root, controller_storage_root, local):
     nodes = controller.call("NodeService", "ListNodes").get("nodes", [])
     for node in nodes:
@@ -826,6 +834,17 @@ def execute(args):
             os.urandom(24)).decode("ascii")
         register_admin(controller, args.admin_username, password)
         ok("fixture_admin_authenticated")
+
+        # Offline readiness is a destination setting, not archive content. Set
+        # it explicitly on the disposable controller so the source and both
+        # imports agree without Docker overrides.
+        controller.call("ConfigService", "UpdateGlobalSettings", {
+            "updates": {"onlineMode": "false"},
+        })
+        settings = controller.call("ConfigService", "GetGlobalSettings")
+        if config_value(settings, "onlineMode") != "false":
+            raise RehearsalError("disposable controller did not accept offline mode")
+        ok("fixture_online_mode_disabled")
 
         local = ensure_node(controller, "archive-rehearsal-local",
                             args.local_docker, "", "", True)

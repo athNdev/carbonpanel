@@ -244,6 +244,14 @@ class DestinationAndLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(rehearsal.RehearsalError, "missing"):
             rehearsal.as_int(None, "total")
 
+    def test_config_property_lookup(self):
+        payload = {"categories": [{"properties": [
+            {"key": "difficulty", "value": "hard"},
+            {"key": "onlineMode", "value": "false"},
+        ]}]}
+        self.assertEqual(rehearsal.config_value(payload, "onlineMode"), "false")
+        self.assertIsNone(rehearsal.config_value(payload, "missing"))
+
 
 class SafetyValidationTests(unittest.TestCase):
     def test_loopback_remote_node_is_refused(self):
