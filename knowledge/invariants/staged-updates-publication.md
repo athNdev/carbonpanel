@@ -14,47 +14,29 @@ verified: { by: agent:opencode, at: 2026-11-27 }
 ---
 # Rule
 
-Publishing a due batch is journaled. A future timestamp or unfinished idle
-stretch stays staged across an incidental restart. Idle fires only with the
-freeze/deep-sleep player-count provider; the stretch start is stored on the
-batch and a player joining clears it. Deep sleep commits onto the stopped
-server without starting the JVM; a running server is saved and restarted once;
-a frozen server is stopped, started and left running. A failed publish restores
-the previous files and config and leaves the batch open. Failed publications
-keep rows staged and reconcile rolled-back configs; completed retries only
-finish bookkeeping. A live field changed after staging stops the publish before
-any write. A reviewed mod candidate is validated against the effective Docker
-`ServerConfig` type and version, and a runtime config rollback is refused while
-one is still staged. The publisher owns the server data path exclusively from
-before the undo snapshot through publication and rollback; ordinary writes take
-a shared lease and are refused meanwhile. A next-restart commit keeps that
-ownership until `Finish` or `Undo`. A reviewed target's live digest is rechecked
-immediately before its writer commits; an out-of-band process remains outside
-the typed guard. See ADR 0056.
-A restart selects its file and config rows in one exclusive snapshot. Each
-next-restart batch owns one durable `server_update_publications` record and
-attempt generation, with phases preparing, prepared, applying, dispatched,
-verified, cleaned and abandoned. The record, not mutable status, APPLIED rows or
-container discovery, decides whether a runtime dispatch happened. Dispatch
-records the exact applied config/content ids before the Docker call and captures
-the replacement identity returned at creation. A retry acknowledges only that
-exact identity for that attempt; reconciling another canonical container may
-repair the tracked id but is never publication evidence. A newly applied
-batch-owned row is refused, not covered by an older runtime. A pre-dispatch
-interruption with no container resumes ordinary creation. An unverified or
-ambiguous dispatch seals the batch and runs no cleanup; a verified publication
-is finalize-only and leaves the operator's explicit start or restart in control.
+Publishing a due batch is journaled. A future timestamp or unfinished idle stretch stays staged across an incidental restart. Idle fires only with the
+freeze/deep-sleep player-count provider; the stretch start is stored on the batch and a player joining clears it. Deep sleep commits onto the stopped
+server without starting the JVM; a running server is saved and restarted once; a frozen server is stopped, started and left running. A failed publish
+restores previous files/config and keeps rows staged for retry; completed retries only finish bookkeeping. A live field changed after staging stops the
+publish before any write. A reviewed mod candidate is validated against the effective Docker `ServerConfig` type and version, and a runtime config
+rollback is refused while one is still staged. The reviewed installed SHA-512 selects the copy: no match is drift, two matches are ambiguous. A fetched
+release with a required or incompatible dependency, or a temporary release lookup (network, timeout, rate limit, 5xx or decode), is refused before
+download; confirmed 404/410 is definitive. Per-item staging storage/IO failures keep earlier staged rows and retry, while validation refusals and batch
+conflicts stay per-item/admission refusals. The publisher owns the server data path exclusively from before the undo snapshot through publication and
+rollback; ordinary writes take a shared lease and are refused meanwhile. A next-restart commit keeps that ownership until `Finish` or `Undo`. A reviewed
+target's live digest is rechecked immediately before its writer commits; an out-of-band process remains outside the typed guard. See ADR 0056.
+A restart selects its file and config rows in one exclusive snapshot. Each next-restart batch owns one durable `server_update_publications` record and
+attempt generation, with phases preparing, prepared, applying, dispatched, verified, cleaned and abandoned. The record, not mutable status, APPLIED rows
+or container discovery, decides whether a runtime dispatch happened. Dispatch records the exact applied config/content ids before the Docker call and
+captures the replacement identity returned at creation. A retry acknowledges only that exact identity for that attempt; reconciling another canonical
+container may repair the tracked id but is never publication evidence. A newly applied batch-owned row is refused, not covered by an older runtime. A
+pre-dispatch interruption with no container resumes ordinary creation. An unverified or ambiguous dispatch seals the batch and runs no cleanup; a
+verified publication is finalize-only and leaves the operator's explicit start or restart in control.
 
-Interrupted recovery uses only the controller-owned snapshot (owned row ids,
-targets and backup digests), validating ownership and every backup reference
-before mutation. A preparing attempt may discard an incomplete backup; prepared
-has not written live data; applying restores the recorded snapshot and restages
-its rows. Module intent is durable before module rows or containers change, so
-an interrupted module transition is sealed, never auto-restored. Game-data
-manifests are never recovery evidence, and legacy batches without a record do
-not auto-restore. Applied content rows stay durable cleanup evidence: retry
-cleanup instead of republishing. Mixed rows resolve by discarding newly staged
-rows and retrying the retained snapshot; recovery is never overwritten to make
-room. Timed/idle publication still uses the operation journal and is not covered
-here; see [timed/idle publisher limits](../failures/staged-publication-timed-outcome.md).
+Interrupted recovery uses only the controller-owned snapshot (owned row ids, targets and backup digests), validating ownership and every backup reference
+before mutation. A preparing attempt may discard an incomplete backup; prepared has not written live data; applying restores the recorded snapshot and
+restages its rows. Module intent is durable before module rows or containers change, so an interrupted module transition is sealed, never auto-restored.
+Game-data manifests are never recovery evidence, and legacy batches without a record do not auto-restore. Applied content rows stay durable cleanup
+evidence: retry cleanup instead of republishing. Mixed rows resolve by discarding newly staged rows and retrying the retained snapshot; recovery is never
+overwritten to make room. Timed/idle publication still uses the operation journal and is not covered here; see [timed/idle publisher limits](../failures/staged-publication-timed-outcome.md).
 A modpack or module change can join the batch; a module recreate still does not start a deep-sleeping server. See [storage recovery](../../docs/storage-streaming.md).

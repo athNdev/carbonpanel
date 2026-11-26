@@ -29,6 +29,10 @@ const stagedContentRoot = ".carbon-panel/staged"
 
 var errStagedPath = errors.New("invalid staged path")
 
+// errStagedModValidation marks a definitive refusal of the reviewed mod bytes
+// or identity. It is not a storage failure and must not be retried.
+var errStagedModValidation = errors.New("invalid staged mod")
+
 func safeStageTarget(rel string) (string, error) {
 	rel = strings.TrimSpace(strings.ReplaceAll(rel, "\\", "/"))
 	if rel == "" || strings.HasPrefix(rel, "/") || strings.Contains(rel, ":") {
@@ -156,7 +160,7 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 	if approved.SHA512 != "" {
 		sum := sha512.Sum512(data)
 		if !strings.EqualFold(hex.EncodeToString(sum[:]), approved.SHA512) {
-			return nil, errors.New("candidate bytes do not match the approved SHA-512")
+			return nil, fmt.Errorf("%w: candidate bytes do not match the approved SHA-512", errStagedModValidation)
 		}
 		approved.SHA512 = strings.ToLower(approved.SHA512)
 		approved.Provider = strings.ToLower(strings.TrimSpace(approved.Provider))
@@ -164,7 +168,7 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 		approved.VersionID = strings.TrimSpace(approved.VersionID)
 		approved.Filename = strings.TrimSpace(approved.Filename)
 		if approved.Filename != "" && (strings.ContainsAny(approved.Filename, "/\\") || !strings.HasSuffix(strings.ToLower(approved.Filename), ".jar")) {
-			return nil, errors.New("approved candidate filename is not a bare JAR name")
+			return nil, fmt.Errorf("%w: approved candidate filename is not a bare JAR name", errStagedModValidation)
 		}
 	}
 	acc, err := serverAccessor(ctx, store, server, resolver)

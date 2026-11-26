@@ -53,19 +53,64 @@ type providerModCandidateFetcher struct {
 	client   *http.Client
 }
 
+// modReleaseLookupIsTransient reports whether a failed provider release lookup
+// is worth retrying. Structured indexer failures distinguish a network,
+// rate-limit, 5xx or decode problem from a confirmed 404/410 or other invalid
+// request; a canceled or timed-out context is always temporary.
+func modReleaseLookupIsTransient(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var indexerErr *indexers.IndexerError
+	if !errors.As(err, &indexerErr) {
+		return false
+	}
+	switch indexerErr.Kind {
+	case indexers.ErrNetwork, indexers.ErrRateLimit, indexers.ErrDecode:
+		return true
+	case indexers.ErrNotFound, indexers.ErrAuth:
+		return false
+	case indexers.ErrAPI:
+		if indexerErr.StatusCode >= 500 {
+			return true
+		}
+		switch indexerErr.StatusCode {
+		case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, int64, string, error) {
 	lookup := f.versions
 	if lookup == nil {
 		lookup = modUpdateProvider(settings)
 	}
 	version, err := lookup.GetVersion(ctx, versionID)
-	if err != nil || version == nil || version.ID == "" {
+	if err != nil {
+		if modReleaseLookupIsTransient(err) || ctx.Err() != nil {
+			return nil, 0, "transient_download", fmt.Errorf("provider release lookup failed: %w", err)
+		}
+		return nil, 0, "refused_provider", fmt.Errorf("provider did not confirm release %s: %w", versionID, err)
+	}
+	if version == nil || version.ID == "" {
 		return nil, 0, "refused_provider", fmt.Errorf("provider did not confirm release %s", versionID)
 	}
 	if version.Status != "listed" || version.VersionType != "release" ||
 		version.ProjectID != projectID ||
 		!slices.Contains(version.Loaders, loader) || !slices.Contains(version.GameVersions, game) {
 		return nil, 0, "refused_provider", errors.New("release is no longer listed, from the reviewed project and compatible")
+	}
+	// The preview marks a release with a required or incompatible dependency as
+	// review_required. Recheck the fetched definition so a dependency added
+	// after the review cannot bypass that operator gate.
+	for _, dependency := range version.Dependencies {
+		if dependency.DependencyType == "required" || dependency.DependencyType == "incompatible" {
+			return nil, 0, "refused_provider", errors.New("release dependencies changed since review; review the release again")
+		}
 	}
 	want, err := hex.DecodeString(sha512Hex)
 	if err != nil || len(want) != sha512.Size {
@@ -171,6 +216,15 @@ var errModUpdateRunningSkipped = errors.New("server is running; mod update polic
 // during provider retry or download cannot slip past the earlier snapshot.
 type modUpdateAdmission func(context.Context, *storage.Server) error
 
+// modStagingErrorIsDefinitive separates validation and batch state refusals
+// from storage/IO failures. Only the latter are worth retrying.
+func modStagingErrorIsDefinitive(err error) bool {
+	return errors.Is(err, storage.ErrUpdateBatchConflict) ||
+		errors.Is(err, storage.ErrStagedModVersionChange) ||
+		errors.Is(err, errStagedPath) ||
+		errors.Is(err, errStagedModValidation)
+}
+
 // stageReviewedModUpdates re-verifies the installed fingerprint, recomputes
 // the server-owned preview and download, then stages exact bytes into the open
 // batch. The live mods directory is untouched. The apply window, staged rows
@@ -257,9 +311,14 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	// cannot reuse a decision that became stale while the operator reviewed.
 	previewMods := make([]*v1.Mod, 0, len(selections))
 	locations := make(map[string]string, len(selections))
+	resolutionFailures := make(map[string]string)
 	for _, sel := range selections {
-		installed, enabled, err := installedModLocation(root, base, sel.GetFileName())
+		installed, enabled, reason, err := reviewedInstalledModLocation(ctx, root, base, sel.GetFileName(), sel.GetInstalledSha512())
 		if err != nil {
+			return nil, nil, nil, err
+		}
+		if reason != "" {
+			resolutionFailures[sel.GetFileName()] = reason
 			continue
 		}
 		locations[sel.GetFileName()] = installed
@@ -282,6 +341,11 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	var totalBytes int64
 	for _, sel := range selections {
 		result := stagedModUpdate{ModID: sel.GetModId(), FileName: sel.GetFileName()}
+		if reason, failed := resolutionFailures[sel.GetFileName()]; failed {
+			result.Outcome, result.Reason = "refused_drift", reason
+			results = append(results, result)
+			continue
+		}
 		installed := locations[sel.GetFileName()]
 		preview := previewByFile[sel.GetFileName()]
 		if installed == "" || preview == nil || strings.EqualFold(sel.GetInstalledSha512(), "") {
@@ -417,6 +481,12 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			}
 			if err != nil {
 				outcome.Outcome, outcome.Reason = "error", err.Error()
+				// A per-item storage/IO failure leaves the scheduler retryable
+				// while the rows staged before it stay committed. Definitive
+				// validation refusals remain ordinary per-item outcomes.
+				if !modStagingErrorIsDefinitive(err) {
+					transient = errors.Join(transient, fmt.Errorf("stage %s: %w", sel.GetFileName(), err))
+				}
 				continue
 			}
 			outcome.Outcome, outcome.StagedID = "staged", row.ID
@@ -439,24 +509,63 @@ func (s *ModService) reviewedModRuntimeServer(ctx context.Context, server *stora
 	return &runtime, nil
 }
 
-// installedModLocation returns the live relative path and whether the reviewed
-// file is in the enabled mods directory.
-func installedModLocation(root *os.Root, base, fileName string) (string, bool, error) {
-	active, err := modInstallPath(base, fileName)
-	if err != nil {
-		return "", false, err
+// reviewedInstalledModLocation returns the live relative path and enabled state
+// of the copy whose bytes match the reviewed installed SHA-512. The enabled and
+// disabled directories can both contain the same filename, so existence alone
+// cannot say which copy the operator reviewed. A missing match is drift; two
+// matching copies are ambiguous and must not be chosen arbitrarily.
+func reviewedInstalledModLocation(ctx context.Context, root *os.Root, base, fileName, reviewedSHA string) (string, bool, string, error) {
+	if strings.EqualFold(strings.TrimSpace(reviewedSHA), "") {
+		return "", false, "the reviewed file is not a valid installed mod", nil
 	}
-	if _, err := root.Lstat(active); err == nil {
-		return active, true, nil
+	type candidate struct {
+		path    string
+		enabled bool
 	}
-	disabled, err := modInstallPath(base+"_disabled", fileName)
-	if err != nil {
-		return "", false, err
+	candidates := make([]candidate, 0, 2)
+	for _, dir := range []struct {
+		base    string
+		enabled bool
+	}{{base, true}, {base + "_disabled", false}} {
+		path, err := modInstallPath(dir.base, fileName)
+		if err != nil {
+			return "", false, "the reviewed file is not a valid installed mod", nil
+		}
+		candidates = append(candidates, candidate{path: path, enabled: dir.enabled})
 	}
-	if _, err := root.Lstat(disabled); err != nil {
-		return "", false, err
+	var matches []candidate
+	existing := 0
+	for _, candidate := range candidates {
+		info, err := root.Lstat(candidate.path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", false, "", err
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxModUpdateBytes {
+			continue
+		}
+		existing++
+		hash, _, err := installedModHash(ctx, root, candidate.path, maxModUpdateBytes)
+		if err != nil {
+			return "", false, "", err
+		}
+		if strings.EqualFold(hash, reviewedSHA) {
+			matches = append(matches, candidate)
+		}
 	}
-	return disabled, false, nil
+	switch len(matches) {
+	case 1:
+		return matches[0].path, matches[0].enabled, "", nil
+	case 0:
+		if existing == 0 {
+			return "", false, "the reviewed file is not a valid installed mod", nil
+		}
+		return "", false, "installed bytes changed since the review; check again", nil
+	default:
+		return "", false, "both enabled and disabled copies match the reviewed digest; refusing to choose one", nil
+	}
 }
 
 var errInvalidModUpdateWindow = errors.New("invalid mod update window")

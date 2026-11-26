@@ -725,6 +725,87 @@ func TestStageReviewedModUpdateRefusesChecksumMismatch(t *testing.T) {
 	require.Empty(t, stagedFiles(t, server.DataPath), "a failed candidate must leave no staged bytes")
 }
 
+func TestReviewedModUpdateStagesTheCopyMatchingTheReviewedDigest(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-update-disabled-copy", storage.StatusStopped)
+	active := filepath.Join(server.DataPath, "mods")
+	disabled := filepath.Join(server.DataPath, "mods_disabled")
+	require.NoError(t, os.MkdirAll(active, 0o700))
+	require.NoError(t, os.MkdirAll(disabled, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(active, "mod.jar"), []byte("active-bytes"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(disabled, "mod.jar"), []byte("disabled-bytes"), 0o600))
+
+	lookup := newPreviewFixture()
+	lookup.current.Files[0].Hashes.SHA512 = installedModDigest("disabled-bytes")
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(lookup)
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+
+	request := modUpdateRequest(server.ID, installedModDigest("disabled-bytes"))
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "mods_disabled/mod.jar", rows[0].TargetPath,
+		"the reviewed disabled copy must not be replaced at the active path")
+}
+
+func TestReviewedModUpdateRefusesAmbiguousMatchingCopies(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-update-ambiguous-copy", storage.StatusStopped)
+	for _, name := range []string{"mods", "mods_disabled"} {
+		dir := filepath.Join(server.DataPath, name)
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "mod.jar"), []byte("installed"), 0o600))
+	}
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+
+	request := modUpdateRequest(server.ID, installedModDigest("installed"))
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, "refused_drift", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Contains(t, res.Msg.GetStagedUpdates()[0].GetReason(), "both enabled and disabled copies")
+	require.Empty(t, res.Msg.GetUpdateBatchId())
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch)
+}
+
+func TestReviewedModUpdateRefusesDependencyAddedAfterPreview(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-update-new-dependency", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	// The reviewed preview reported no dependencies, but the exact version,
+	// filename and SHA-512 now carry a required dependency.
+	version := candidateVersion("https://cdn.modrinth.test/files/mod-2.jar", installedModDigest("next"))
+	version.Dependencies = []modrinth.Dependency{{DependencyType: "required"}}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(providerModCandidateFetcher{versions: versionLookupFixture{version: version}})
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, "refused_provider", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Contains(t, res.Msg.GetStagedUpdates()[0].GetReason(), "dependencies changed since review")
+	require.Empty(t, res.Msg.GetUpdateBatchId())
+	require.Empty(t, stagedFiles(t, server.DataPath))
+}
+
 func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-policy", storage.StatusStopped)
@@ -881,6 +962,87 @@ func TestScheduledRetryDoesNotCountAlreadyStagedModAsRefused(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stored.NextRun, "manual execution can advance an observed NULL deadline")
 	require.NotNil(t, stored.LastRun)
+}
+
+func TestScheduledStagingStorageFailureIsRetryableAndPreservesStagedItems(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-stage-storage", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(&modUpdateFetchByFileFixture{data: map[string][]byte{
+		"a.jar": []byte("next-a"), "b.jar": []byte("next-b"),
+	}})
+
+	const callbackName = "fixture:fail-second-staged-content"
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(
+		callbackName,
+		func(tx *gorm.DB) {
+			row, ok := tx.Statement.Dest.(*storage.StagedContentChange)
+			if !ok || row.FileName != "b.jar" {
+				return
+			}
+			_ = tx.AddError(errors.New("storage write failed"))
+		},
+	))
+
+	staged, refused, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+		Enabled: true, MaxUpdatesPerRun: 2,
+	})
+	require.ErrorContains(t, err, "storage write failed", "a per-item storage failure must reach the scheduler retry policy")
+	require.Equal(t, 1, staged, "items staged before the failure stay committed")
+	require.Equal(t, 1, refused)
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "a.jar", rows[0].FileName)
+
+	require.NoError(t, store.DB().Callback().Create().Remove(callbackName))
+	staged, refused, _, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+		Enabled: true, MaxUpdatesPerRun: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, staged, "the retry stages only the file that failed")
+	require.Zero(t, refused)
+	rows, err = store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "the committed item must not be staged twice")
+}
+
+func TestScheduledStagingValidationRefusalIsNotRetryable(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-stage-validation", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	// The fetcher claims success but returns bytes that do not match the
+	// reviewed digest. Staging refuses them definitively; a retry cannot help.
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("tampered")})
+
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.NoError(t, err, "a definitive validation refusal is an ordinary policy outcome")
+	require.Zero(t, staged)
+	require.Equal(t, 1, refused)
+	require.NotEmpty(t, reasons)
+	require.Empty(t, stagedFiles(t, server.DataPath))
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	if batch != nil {
+		rows, err := store.ListBatchContent(ctx, batch.ID)
+		require.NoError(t, err)
+		require.Empty(t, rows)
+	}
 }
 
 func TestScheduledIdleWindowStagesThroughRealPlanner(t *testing.T) {

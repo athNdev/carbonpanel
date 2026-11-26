@@ -4,6 +4,7 @@ package services
 import (
 	"context"
 	"crypto/sha512"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,4 +169,60 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, strings.Contains(outcome, "refused_provider"), outcome)
 	})
+}
+
+func TestProviderFetcherClassifiesReleaseLookupFailures(t *testing.T) {
+	const allowedURL = "https://cdn.modrinth.test/files/mod-2.jar"
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		err     error
+		outcome string
+	}{
+		{"network timeout", indexers.NewNetworkError("modrinth", "https://api.modrinth.test", errors.New("timeout")), "transient_download"},
+		{"rate limit", indexers.NewAPIError("modrinth", http.StatusTooManyRequests, "https://api.modrinth.test", ""), "transient_download"},
+		{"server failure", indexers.NewAPIError("modrinth", http.StatusServiceUnavailable, "https://api.modrinth.test", ""), "transient_download"},
+		{"decode failure", indexers.NewDecodeError("modrinth", "https://api.modrinth.test", errors.New("bad json")), "transient_download"},
+		{"context deadline", fmt.Errorf("lookup: %w", context.DeadlineExceeded), "transient_download"},
+		{"not found", indexers.NewAPIError("modrinth", http.StatusNotFound, "https://api.modrinth.test", ""), "refused_provider"},
+		{"gone", indexers.NewAPIError("modrinth", http.StatusGone, "https://api.modrinth.test", ""), "refused_provider"},
+		{"invalid request", indexers.NewAPIError("modrinth", http.StatusBadRequest, "https://api.modrinth.test", ""), "refused_provider"},
+		{"unauthenticated", indexers.NewAuthConfigError("modrinth", "missing token"), "refused_provider"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher := providerModCandidateFetcher{versions: versionLookupFixture{err: tc.err}}
+			_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+			require.Error(t, err)
+			require.Equal(t, tc.outcome, outcome)
+		})
+	}
+
+	t.Run("missing release is definitive", func(t *testing.T) {
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{}}
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "refused_provider", outcome)
+	})
+
+	t.Run("canceled context is transient", func(t *testing.T) {
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: candidateVersion(allowedURL, candidateHash("next"))}}
+		_, _, outcome, err := fetcher.Fetch(canceled, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "transient_download", outcome)
+	})
+}
+
+func TestProviderFetcherRefusesDependencyAddedAfterReview(t *testing.T) {
+	const allowedURL = "https://cdn.modrinth.test/files/mod-2.jar"
+	version := candidateVersion(allowedURL, candidateHash("next"))
+	version.Dependencies = []modrinth.Dependency{{DependencyType: "required"}}
+	fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
+
+	_, _, outcome, err := fetcher.Fetch(context.Background(), nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+	require.Error(t, err)
+	require.Equal(t, "refused_provider", outcome)
+	require.Contains(t, err.Error(), "dependencies changed since review")
 }

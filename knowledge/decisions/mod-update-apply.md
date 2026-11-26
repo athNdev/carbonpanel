@@ -34,7 +34,14 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
 # Consequences
 
 - Drift, provider, download and checksum mismatches are per-item refusals;
-  other selected updates still stage.
+  other selected updates still stage. The reviewed installed digest selects the
+  actual live copy, and two matching copies are refused as ambiguous.
+- A required or incompatible dependency on the fetched release refuses the
+  update even when its version id, filename and SHA-512 match the preview.
+- A temporary release lookup is a retryable download refusal; a confirmed
+  missing, withdrawn or invalid release is a provider refusal. A per-item
+  staging storage/IO failure leaves earlier staged rows committed and returns a
+  retryable policy error; definitive validation refusals remain per-item.
 - Publishing, backup, rollback, apply windows and per-server serialization are
   the existing staged-batch guarantees. Durable approval, the data-write lease
   and window checks are in
