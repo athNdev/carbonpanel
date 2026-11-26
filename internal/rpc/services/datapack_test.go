@@ -146,7 +146,7 @@ func uploadSession(t *testing.T, um *upload.Manager, filename string, data []byt
 	return sess.ID
 }
 
-func TestDirectDatapackWritesShareDataGate(t *testing.T) {
+func TestDatapackWritesShareDataGate(t *testing.T) {
 	ctx := context.Background()
 	s, um, server := newUploadTestService(t)
 	s.indexer = &fakeDatapackIndexer{latest: &indexers.DatapackFile{Filename: "install.zip"}}
@@ -172,14 +172,18 @@ func TestDirectDatapackWritesShareDataGate(t *testing.T) {
 	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
 	require.FileExists(t, existing)
 
-	staged, err := s.UploadDatapack(ctx, connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: stagedSession, Stage: true}))
-	require.NoError(t, err)
-	require.True(t, staged.Msg.GetStaged())
+	stagedReq := connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: stagedSession, Stage: true})
+	_, err = s.UploadDatapack(ctx, stagedReq)
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
 	for _, name := range []string{"direct.zip", "install.zip", "staged.zip"} {
 		require.NoFileExists(t, filepath.Join(dir, name))
 	}
 	owned.Release()
 
+	staged, err := s.UploadDatapack(ctx, stagedReq)
+	require.NoError(t, err, "publication refusal should leave the staged upload available for retry")
+	require.True(t, staged.Msg.GetStaged())
+	require.NoFileExists(t, filepath.Join(dir, "staged.zip"))
 	_, err = s.UploadDatapack(ctx, connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: session}))
 	require.NoError(t, err, "publication refusal should leave the completed upload available for retry")
 	require.FileExists(t, filepath.Join(dir, "direct.zip"))
