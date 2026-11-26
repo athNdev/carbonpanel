@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
@@ -172,42 +173,18 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		return "", err
 	}
 
-	// Pre-create bind mounts, confined to the validated safe roots. Creating
-	// host directories outside the server data path / backup dir as a side
-	// effect of a module create is itself a host-write primitive, so mounts
-	// that fail the gate are skipped (they cannot reach ContainerCreate
-	// either, per the check above).
+	// Prepare explicitly requested bind sources on the controller's view of
+	// storage. A read-only mount stays read-only after its source exists.
 	for _, vol := range vols {
-		if vol.CreateDir && !vol.ReadOnly && (vol.Type == "" || vol.Type == "bind") {
+		if vol.CreateDir && (vol.Type == "" || vol.Type == "bind") {
 			if vol.Source == "" || vol.Target == "" {
 				continue
 			}
-			allowed := false
-			for _, root := range mkdirRoots {
-				if files.Within(root, vol.Source) {
-					allowed = true
-					break
+			if err := c.prepareModuleMountSource(server.DataPath, vol.Source, mkdirRoots); err != nil {
+				if vol.ReadOnly {
+					return "", fmt.Errorf("prepare read-only module bind source %q: %w", vol.Source, err)
 				}
-			}
-			if !allowed {
-				c.log.Warn("Skipping pre-create of mount directory outside safe roots: %q", vol.Source)
-				continue
-			}
-			// Pre-create on the filesystem that backs the bind: the
-			// controller's view of the node's storage (ADR 0005). A node that
-			// declares its own layout gets the mapped path; others keep the
-			// identical-path contract.
-			target := vol.Source
-			if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
-				target = nodestorage.MapPath(c.nodeStorage, server.DataPath, vol.Source)
-				if target == vol.Source {
-					continue
-				}
-			}
-			if _, err := os.Stat(target); os.IsNotExist(err) {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					c.log.Warn("Failed to pre-create mount directory %s: %v", target, err)
-				}
+				c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
 			}
 		}
 	}
@@ -379,7 +356,19 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 
 	// Sub aliases in paths
 	for i := range volumes {
-		volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
+		// Older Modules forms persist this exact template source. Resolve it
+		// to the actual level so an unset Level cannot mount the data root.
+		// A source explicitly chosen by the operator follows normal alias rules.
+		if aliasCtx != nil && aliasCtx.Module != nil && aliasCtx.Module.TemplateID == "builtin-bluemap" &&
+			volumes[i].Source == "{{server.data_path}}/{{server.config.level}}" && volumes[i].Target == "/app/world" {
+			level := aliasCtx.ServerConfig.ActualLevelName()
+			if aliasCtx.Server == nil || level == "" {
+				return nil, fmt.Errorf("cannot resolve BlueMap world volume without a valid configured level")
+			}
+			volumes[i].Source = filepath.Join(aliasCtx.Server.DataPath, level)
+		} else {
+			volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
+		}
 		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
 		if alias.HasUnresolvedVariables(volumes[i].Source) {
 			c.log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)
@@ -403,6 +392,62 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 	}
 
 	return volumes, nil
+}
+
+func (c *Client) prepareModuleMountSource(serverDataPath, source string, safeRoots []string) error {
+	for _, root := range safeRoots {
+		if !files.Within(root, source) {
+			continue
+		}
+		if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
+			rel, ok := relativeBindSource(serverDataPath, source)
+			if !ok {
+				return fmt.Errorf("source is outside the server's node storage mapping")
+			}
+			// A shared mount may have the same path on both hosts. MapDataPath
+			// checks storage availability; NewLocal opens the existing shared
+			// parent and confines directory creation to the mapped server root.
+			mapped, err := c.sharedModuleBindRoot(serverDataPath, root, source)
+			if err != nil {
+				return err
+			}
+			storage, err := nodestorage.NewLocal(mapped)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = storage.Close() }()
+			return storage.MkdirAll(rel)
+		}
+		if files.WithinReal(root, source) {
+			return os.MkdirAll(source, 0755)
+		}
+	}
+	return fmt.Errorf("source resolves outside the server data and backup directories")
+}
+
+// Verify the controller's view before either creating a directory or handing
+// its node-side path to Docker, which can itself create writable bind sources.
+func (c *Client) sharedModuleBindRoot(serverDataPath, safeRoot, source string) (string, error) {
+	mapped, err := nodestorage.MapDataPath(c.nodeStorage, serverDataPath)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(filepath.Dir(mapped)); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("shared storage mount is unavailable")
+	}
+	info, err := os.Lstat(mapped)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if info != nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("mapped server data directory is a symlink")
+	}
+	mappedSafeRoot := nodestorage.MapPath(c.nodeStorage, serverDataPath, safeRoot)
+	mappedSource := nodestorage.MapPath(c.nodeStorage, serverDataPath, source)
+	if !files.WithinReal(mappedSafeRoot, mappedSource) {
+		return "", fmt.Errorf("source resolves outside its shared storage root")
+	}
+	return mapped, nil
 }
 
 // Module volumes to Docker mount specs. safeRoots is the already-validated
@@ -436,6 +481,15 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount, serverDataPa
 			if !ok {
 				c.log.Warn("Skipping volume mount that cannot be mapped onto the node's storage layout: source=%q, target=%q", vol.Source, vol.Target)
 				continue
+			}
+			// Identical paths qualify as a shared mapping only when the
+			// controller can verify the storage it would hand to Docker.
+			if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" &&
+				(filepath.Clean(mapped) == filepath.Clean(source) || !nodestorage.RequiresRemoteTransport(c.nodeStorage)) {
+				if _, err := c.sharedModuleBindRoot(serverDataPath, serverDataPath, source); err != nil {
+					c.log.Warn("Skipping unavailable shared storage bind source %q: %v", source, err)
+					continue
+				}
 			}
 			source = mapped
 		}

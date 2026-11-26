@@ -39,17 +39,17 @@ const (
 	// Player management actions (OSS-345). Each typed moderation action, its
 	// undo and each bulk job carries a request id linking it to the player
 	// action journal. Subject type is "player" and subject id is the opaque
-	// pl_* identity key; properties carry reason, target count and outcome.
-	EventPlayerKick           = "player.kick"
-	EventPlayerBan            = "player.ban"
-	EventPlayerPardon         = "player.pardon"
-	EventPlayerOp             = "player.op"
-	EventPlayerDeop           = "player.deop"
-	EventPlayerWhitelistAdd   = "player.whitelist.add"
+	// pl_* identity key. ServerID carries the action's scope independently.
+	EventPlayerKick            = "player.kick"
+	EventPlayerBan             = "player.ban"
+	EventPlayerPardon          = "player.pardon"
+	EventPlayerOp              = "player.op"
+	EventPlayerDeop            = "player.deop"
+	EventPlayerWhitelistAdd    = "player.whitelist.add"
 	EventPlayerWhitelistRemove = "player.whitelist.remove"
-	EventPlayerBulk           = "player.bulk"
-	EventPlayerUndo           = "player.undo"
-	EventPlayerSkinRefresh    = "player.skin.refresh"
+	EventPlayerBulk            = "player.bulk"
+	EventPlayerUndo            = "player.undo"
+	EventPlayerSkinRefresh     = "player.skin.refresh"
 
 	// World Library bind and unbind operations (OSS-362). Subject type is
 	// "server" and subject id is the owning server. RequestID is the
@@ -67,6 +67,7 @@ type Entry struct {
 	Event      string
 	SubjectTyp string
 	SubjectID  string
+	ServerID   string
 	Properties string
 	RequestID  string
 }
@@ -82,6 +83,7 @@ func Log(db *gorm.DB, e Entry) error {
 		Event:      e.Event,
 		SubjectTyp: e.SubjectTyp,
 		SubjectID:  e.SubjectID,
+		ServerID:   e.ServerID,
 		Properties: e.Properties,
 		RequestID:  e.RequestID,
 	}).Error
@@ -130,9 +132,11 @@ func List(db *gorm.DB, serverID, actor string, since time.Time, limit int) ([]st
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	q := db.Model(&storage.ActivityLog{}).Order("created_at DESC").Limit(limit)
+	q := db.Model(&storage.ActivityLog{}).Order("created_at DESC, id DESC").Limit(limit)
 	if serverID != "" {
-		q = q.Where("subject_type = ? AND subject_id = ?", "server", serverID)
+		q = q.Where(`(server_id = ? OR
+			((server_id IS NULL OR server_id = '') AND subject_type = ? AND subject_id = ?))`,
+			serverID, "server", serverID)
 	}
 	if actor != "" {
 		q = q.Where("actor_id = ? OR actor_name = ?", actor, actor)

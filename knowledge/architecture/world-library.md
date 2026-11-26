@@ -12,5 +12,12 @@ sources:
 
 # Parts
 
+The library also displays running server worlds as read-only references. A
+server-scoped `ListBindings` supplies the configured level. Only a binding for
+that exact server and level identifies its revision. Listing creates no library
+entry and leaves the save and its bindings untouched.
+An explicit fleet read denial hides cached running worlds and stops their
+binding reads until a successful fleet response confirms access again.
+
 - [World Library — Shape + Rules](world-library-shape.md) — A WorldEntry is a logical library identity (wld_*). A WorldRevision is an
 - [World Library — Read next](world-library-read-next.md) — Fail-closed authorization

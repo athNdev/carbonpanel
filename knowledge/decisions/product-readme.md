@@ -31,12 +31,13 @@ asset: native browser captures of the current application
 running in an isolated installation with review data. Never substitute generated
 UI, the homepage's fixture islands or edited telemetry for an application capture.
 
-Use focused crops and native UI controls to make the represented feature readable.
+Use native UI controls and prefer full-window frames for page context.
 Do not repaint labels, invent activity or hide a missing reading behind a plausible
 metric. Capture provenance records the application revision, date, data origin and
 framing. Review exports at README display size and refresh them when that UI changes.
-The inline dashboard is a native-width content crop. Link it to the original
-full-window PNG so readers can inspect the surrounding shell at native scale.
+The README leads with the full dark dashboard and links to the full light
+alternate. The server overview requires decoded terrain in its map preview.
+Capture verifies the app's active theme at each screenshot.
 
 The review stack uses its own fixtures and preserves data on shutdown. The
 Players capture requires a scoped observation from a headless game client

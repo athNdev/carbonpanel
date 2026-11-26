@@ -462,13 +462,14 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 		docker.NewLocator(s.clientPool, s.docker, s.store),
 		bluemapDiscovery,
 	)
+	nativeMap := worldview.NewNativeMap(s.store, s.storageResolver)
 	worldViewService := worldview.NewService(worldview.ServiceDeps{
-		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,
+		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver, Native: nativeMap,
 		Auditor: worldview.NewAuditLogger(s.store.DB()), Log: s.log,
 	})
 	s.worldViewProxy = worldview.NewProxyHandler(worldview.ProxyDeps{
 		Auth: s.authManager, Authorizer: s.enforcer, Subusers: s.store, Servers: s.store,
-		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Log: s.log,
+		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Native: nativeMap, Log: s.log,
 	})
 
 	// World Library (OSS-347). Its binder takes explicit lifecycle, resolver

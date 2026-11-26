@@ -50,3 +50,7 @@ sources:
   grid children get `min-w-0` (or `[&>*]:min-w-0` on the grid) so tracks cannot
   blow out; UUIDs and other unbreakable strings are shortened or `break-all`.
   Verify with the overflow audit pattern before calling a surface responsive.
+- Give each `CarbonTabs` item a reciprocal panel ID. Use
+  `CarbonInactiveTabPanels` for empty, hidden targets so lazy content mounts
+  only when selected. Make the active panel the next keyboard Tab stop.
+  Packaged Chromium covers server detail and Modpacks.

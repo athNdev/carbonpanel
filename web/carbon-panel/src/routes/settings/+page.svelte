@@ -130,7 +130,8 @@ one at https://mozilla.org/MPL/2.0/.
 			id={activeTab ? `settings-tabs-panel-${activeTab}` : undefined}
 			role="tabpanel"
 			aria-labelledby={activeTab ? `settings-tabs-tab-${activeTab}` : undefined}
-			class="min-w-0"
+			class="focus-ring min-w-0"
+			tabindex={activeTab ? 0 : undefined}
 		>
 			{#if activeTab === 'server-config' && showSettings}
 				<div class="motion-fade-in space-y-4">

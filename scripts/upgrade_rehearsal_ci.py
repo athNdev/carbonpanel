@@ -57,7 +57,8 @@ RELEASE_BASE = "https://github.com/athNdev/carbonpanel/releases/download/{tag}"
 # CURRENT case derives counts from the binaries.
 LEGACY_TABLE_COUNT = 35
 CANDIDATE_TABLE_COUNT = 45
-NEW_MODEL_TABLES = {
+# These historical models must be present in the candidate; Stable may already have them.
+EXPECTED_CANDIDATE_MODEL_TABLES = {
     "player_identities", "player_aliases", "player_sessions",
     "player_access_states", "player_moderation_actions", "world_entries",
     "world_revisions", "world_bindings", "world_import_jobs",
@@ -491,9 +492,10 @@ def run_case(workspace, label, stable_binary, candidate_binary,
     else:
         candidate_db = run_service(candidate_binary, candidate_ws, expected_candidate_tables)
     upgraded_tables = tables(candidate_db)
+    candidate_only_tables = upgraded_tables - stable_tables
     upgraded_counts = row_counts(candidate_db, CORE_TABLES)
     check("upgrade_is_additive_superset", stable_tables.issubset(upgraded_tables))
-    check("upgrade_adds_expected_models", NEW_MODEL_TABLES.issubset(upgraded_tables))
+    check("upgrade_adds_expected_models", EXPECTED_CANDIDATE_MODEL_TABLES.issubset(upgraded_tables))
     check("upgrade_schema_grows_or_matches", len(upgraded_tables) >= len(stable_tables))
     if explicit_candidate_count:
         check("upgrade_table_count_expected", len(upgraded_tables) == expected_candidate_tables)
@@ -507,7 +509,7 @@ def run_case(workspace, label, stable_binary, candidate_binary,
     check("forced_failure_missing_snapshot_refused", missing.returncode != 0)
     check("forced_failure_missing_snapshot_no_mutation",
           before_failure == row_counts(candidate_db, CORE_TABLES) and
-          len(tables(candidate_db)) == expected_candidate_tables)
+          tables(candidate_db) == upgraded_tables)
 
     # Real app-level restore via the shipped -restore-panel-backup flag.
     premigrate = candidate_ws / "panel.db.pre-migrate.bak"
@@ -518,7 +520,7 @@ def run_case(workspace, label, stable_binary, candidate_binary,
         restored = run_restore(candidate_binary, candidate_ws, premigrate)
         check("app_level_restore_exit_zero", restored.returncode == 0)
         check("app_level_restore_returns_stable_tables",
-              len(tables(candidate_db)) == expected_stable_tables)
+              tables(candidate_db) == stable_tables)
         check("app_level_restore_integrity_ok", integrity(candidate_db) == "ok")
         check("app_level_restore_preserves_rows",
               stable_counts == row_counts(candidate_db, CORE_TABLES))
@@ -532,14 +534,16 @@ def run_case(workspace, label, stable_binary, candidate_binary,
     copy_seeded_worlds(backup_dir, copyback_ws)
     copyback_db = copyback_ws / "panel.db"
     check("copyback_integrity_ok", integrity(copyback_db) == "ok")
-    check("copyback_returns_stable_tables", len(tables(copyback_db)) == expected_stable_tables)
-    check("copyback_removes_new_models", not (NEW_MODEL_TABLES & tables(copyback_db)))
+    restored_tables = tables(copyback_db)
+    check("copyback_returns_stable_tables", restored_tables == stable_tables)
+    check("copyback_removes_new_models", candidate_only_tables.isdisjoint(restored_tables))
     check("copyback_preserves_rows", stable_counts == row_counts(copyback_db, CORE_TABLES))
     check("worlds_byte_identical_after_copyback", seeded_file_hashes(copyback_ws) == seeded)
 
     return checks, {
         "stable_tables": len(stable_tables),
         "candidate_tables": len(upgraded_tables),
+        "candidate_only_tables": sorted(candidate_only_tables),
         "expected_stable_tables": expected_stable_tables,
         "expected_candidate_tables": expected_candidate_tables,
         "core_rows_before": stable_counts,

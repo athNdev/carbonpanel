@@ -57,6 +57,7 @@ export default defineConfig({
 							label: 'Modpacks and content',
 							items: [
 								{ label: 'Modpack Studio', slug: 'guides/modpack-studio' },
+								{ label: 'Configure a new server', slug: 'guides/server-setup' },
 								{ label: 'Server datapacks', slug: 'guides/server-datapacks' },
 							],
 						},

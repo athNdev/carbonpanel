@@ -23,10 +23,10 @@ import (
 // Decoder limits. level.dat is a small file; anything approaching these bounds
 // is either corrupt or an attack, and is refused rather than partially parsed.
 const (
-	maxNBTDecompressed = 8 << 20   // 8 MiB of decompressed NBT
-	maxNBTString       = 64 << 10  // 64 KiB per NBT string
-	maxNBTEntries      = 100_000   // list/array elements and compound readers
-	maxNBTDepth        = 16        // nested compound/list depth
+	maxNBTDecompressed = 8 << 20  // 8 MiB of decompressed NBT
+	maxNBTString       = 64 << 10 // 64 KiB per NBT string
+	maxNBTEntries      = 100_000  // list/array elements and compound readers
+	maxNBTDepth        = 16       // nested compound/list depth
 )
 
 // NBT tag types (the Java edition wire format).
@@ -54,8 +54,21 @@ func (t nbtTag) valid() bool { return t <= nbtLongArray }
 // offsets into the already-bounded buffer, so no allocation is driven by an
 // untrusted length without first checking the remaining input.
 type nbtCursor struct {
-	data []byte
-	pos  int
+	data      []byte
+	pos       int
+	maxValues int
+	values    int
+}
+
+func (c *nbtCursor) checkValueBudget(count int) error {
+	limit := c.maxValues
+	if limit == 0 {
+		limit = maxNBTEntries + 1
+	}
+	if count > limit-c.values {
+		return fmt.Errorf("nbt: value budget of %d exceeded", limit)
+	}
+	return nil
 }
 
 func (c *nbtCursor) take(n int) ([]byte, error) {
@@ -199,6 +212,11 @@ func (c *nbtCursor) payload(typ nbtTag, depth int) (any, error) {
 		return nil, fmt.Errorf("nbt: nesting depth exceeds %d", maxNBTDepth)
 	}
 
+	if err := c.checkValueBudget(1); err != nil {
+		return nil, err
+	}
+	c.values++
+
 	switch typ {
 	case nbtByte:
 		v, err := c.u8()
@@ -243,6 +261,11 @@ func (c *nbtCursor) payload(typ nbtTag, depth int) (any, error) {
 				return nil, fmt.Errorf("nbt: list of End tags declares %d elements", n)
 			}
 			return []any{}, nil
+		}
+		// Every list element consumes at least one value. Check the shared
+		// budget before reserving space from an untrusted length.
+		if err := c.checkValueBudget(n); err != nil {
+			return nil, err
 		}
 		values := make([]any, 0, n)
 		for i := 0; i < n; i++ {
@@ -336,21 +359,9 @@ func LevelDataFacts(data []byte) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &nbtCursor{data: raw}
-	typ, name, err := c.tagHeader(1)
+	root, name, err := parseNBTDocument(&nbtCursor{data: raw})
 	if err != nil {
-		return nil, fmt.Errorf("nbt: root tag: %w", err)
-	}
-	if typ != nbtCompound {
-		return nil, fmt.Errorf("nbt: root tag has type %d, want compound", typ)
-	}
-	rootValue, err := c.payload(typ, 1)
-	if err != nil {
-		return nil, fmt.Errorf("nbt: root payload: %w", err)
-	}
-	root, ok := rootValue.(map[string]any)
-	if !ok {
-		return nil, errors.New("nbt: root payload is not a compound")
+		return nil, err
 	}
 	// Both shapes occur in the wild: an unnamed root holding a Data compound,
 	// and a root compound that is itself named "Data".
@@ -365,6 +376,27 @@ func LevelDataFacts(data []byte) (map[string]any, error) {
 		return dataCompound, nil
 	}
 	return root, nil
+}
+
+// parseNBTDocument reads the named root compound. The caller owns and bounds
+// the decompressed payload before calling it.
+func parseNBTDocument(c *nbtCursor) (map[string]any, string, error) {
+	typ, name, err := c.tagHeader(1)
+	if err != nil {
+		return nil, "", fmt.Errorf("nbt: root tag: %w", err)
+	}
+	if typ != nbtCompound {
+		return nil, "", fmt.Errorf("nbt: root tag has type %d, want compound", typ)
+	}
+	rootValue, err := c.payload(typ, 1)
+	if err != nil {
+		return nil, "", fmt.Errorf("nbt: root payload: %w", err)
+	}
+	root, ok := rootValue.(map[string]any)
+	if !ok {
+		return nil, "", errors.New("nbt: root payload is not a compound")
+	}
+	return root, name, nil
 }
 
 func stringsEqualFold(a, b string) bool {

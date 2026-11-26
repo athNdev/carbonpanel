@@ -6,10 +6,12 @@
 package playerskin
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -150,7 +152,13 @@ func (c *Cache) fetch(ctx context.Context, uuid, kind string) fetchResult {
 		return unavailableResult(errors.New("skin unavailable: identity service returned an unexpected status"))
 	}
 
-	hash, err := selectTextureHash(profile, kind)
+	if kind == KindPortrait {
+		idKind, returnedUUID := NormalizeQuery(profile.ID)
+		if idKind != "uuid" || returnedUUID != uuid {
+			return unavailableResult(errBadProfile)
+		}
+	}
+	hash, slim, err := selectTexture(profile, kind)
 	if err != nil {
 		return unavailableResult(err)
 	}
@@ -173,6 +181,13 @@ func (c *Cache) fetch(ctx context.Context, uuid, kind string) fetchResult {
 	if int64(len(data)) > maxTextureBytes {
 		return unavailableResult(errTooLarge)
 	}
+	if kind == KindPortrait {
+		// Check the atlas dimensions before allocating decoded image memory.
+		config, err := png.DecodeConfig(bytes.NewReader(data))
+		if err != nil || config.Width != 64 || (config.Height != 32 && config.Height != 64) {
+			return unavailableResult(errBadPNG)
+		}
+	}
 	img, err := decodePNG(data)
 	if err != nil {
 		return unavailableResult(errBadPNG)
@@ -184,6 +199,13 @@ func (c *Cache) fetch(ctx context.Context, uuid, kind string) fetchResult {
 		Source:      SourceIdentityService,
 		ObservedAt:  c.clock.Now(),
 		Confidence:  ConfidenceDetected,
+	}
+	if kind == KindPortrait {
+		rendered, err := renderPortrait(img, slim)
+		if err != nil {
+			return unavailableResult(errBadPNG)
+		}
+		a.Data = rendered
 	}
 	if kind == KindFace {
 		// The slim model differs only in arm width; its 8x8 face crop at
@@ -242,9 +264,8 @@ func (c *Cache) getTexture(ctx context.Context, textureURL string) ([]byte, int,
 	return body, http.StatusOK, nil
 }
 
-// selectTextureHash validates the profile payload and returns only a lowercase
-// 64-hex CDN hash. Nothing from the payload other than that hash is used.
-func selectTextureHash(payload profilePayload, kind string) (string, error) {
+// selectTexture validates the pinned CDN hash and reads the slim-arm flag.
+func selectTexture(payload profilePayload, kind string) (string, bool, error) {
 	textures := payload.Textures
 	if textures.SKIN == nil && textures.CAPE == nil {
 		for _, prop := range payload.Properties {
@@ -253,11 +274,11 @@ func selectTextureHash(payload profilePayload, kind string) (string, error) {
 			}
 			decoded, err := decodeBase64(prop.Value)
 			if err != nil {
-				return "", errUnsafeTexture
+				return "", false, errUnsafeTexture
 			}
 			var inner profilePayload
 			if json.Unmarshal(decoded, &inner) != nil {
-				return "", errUnsafeTexture
+				return "", false, errUnsafeTexture
 			}
 			textures = inner.Textures
 			break
@@ -266,20 +287,21 @@ func selectTextureHash(payload profilePayload, kind string) (string, error) {
 
 	var entry *textureEntry
 	switch kind {
-	case KindFace, KindSkin:
+	case KindFace, KindSkin, KindPortrait:
 		entry = textures.SKIN
 		if entry == nil {
-			return "", errNoSkinTexture
+			return "", false, errNoSkinTexture
 		}
 	case KindCape:
 		entry = textures.CAPE
 		if entry == nil {
-			return "", errNoCapeTexture
+			return "", false, errNoCapeTexture
 		}
 	default:
-		return "", errUnsafeTexture
+		return "", false, errUnsafeTexture
 	}
-	return validateTextureURL(entry.URL)
+	hash, err := validateTextureURL(entry.URL)
+	return hash, entry.Metadata.Model == "slim", err
 }
 
 func validateTextureURL(raw string) (string, error) {
@@ -291,7 +313,11 @@ func validateTextureURL(raw string) (string, error) {
 	if err != nil {
 		return "", errUnsafeTexture
 	}
-	if u.Scheme == "" || !strings.EqualFold(u.Scheme, base.Scheme) {
+	// Mojang still emits http locators for its CDN in otherwise valid profiles.
+	// Accept that spelling only for the pinned production CDN. The caller
+	// constructs the outbound URL from the fixed HTTPS base and validated hash.
+	legacyLocator := u.Scheme == "http" && textureBaseURL == textureBaseURLConst
+	if u.Scheme != base.Scheme && !legacyLocator {
 		return "", errUnsafeTexture
 	}
 	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
@@ -401,7 +427,7 @@ func sameHostRedirect(expected string) func(*http.Request, []*http.Request) erro
 		req.Header.Del("Cookie")
 		req.Header.Del("Authorization")
 		req.Header.Del("Proxy-Authorization")
-		if req.URL.Host != expected {
+		if req.URL.Host != expected || req.URL.Scheme != via[0].URL.Scheme {
 			return errRedirect
 		}
 		return nil

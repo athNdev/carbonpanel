@@ -25,6 +25,9 @@ sources:
 
 # Running servers
 
+- Bind and recovery read locality and endpoint generation from the owning
+  node row. A registered controller daemon uses its local data path even
+  with an assigned node ID. Legacy local aliases remain supported.
 - The binder holds the server transition across Docker observation, stop, swap
   and restart. The internal adapter requires server power grants and the
   active journal's matching server, container and node endpoint.
@@ -36,3 +39,12 @@ sources:
 - A bind request ID identifies one server, level, revision, activation window
   and node generation. A completed replay must still name the binding installed
   by that operation. Legacy journal rows rely on the binding and timestamps.
+
+# Revision archives
+
+- Import records a library-relative archive key. Preview and bind resolve it
+  under the configured World Library root and accept legacy paths within that
+  root. Bind validates the archive path before stopping the running server.
+- Match Java world data versions to the release JAR's `version.json`
+  `world_version`. Java 1.21.1 writes 3955 and Java 1.21 writes 3953, even
+  though they share a network protocol version.

@@ -6,11 +6,32 @@ modifies or teleports anything. The governing decisions are in
 [ADR 0015](adr/0015-world-viewing-renderer-proxy.md) and the durable rule is in
 `knowledge/architecture/world-viewing.md`.
 
+Open a server and expand its **World View** card to explore the map. The
+server’s **World** tab opens the same viewer through **Open map**. The card
+shows either a renderer preview or sampled saved terrain. Previously shared
+map links continue to open a standalone viewer for recipients with map access.
+If the active level is still unknown, Carbon Panel checks for
+the active map using that server’s World View read permission. A [built-in
+terrain map](world-terrain.md) opens supported local Java saves without a
+module. Choose **Set up a 3D map with BlueMap** from a built-in map, or
+**Install BlueMap** from the renderer setup screen, when the account and node
+support it. The managed sidecar renders textured buildings after Minecraft
+saves them and BlueMap processes the changed chunks. It has no player-location
+feed. **Map ready** means the renderer can serve a map.
+
+Map sessions renew automatically. During a temporary connection failure the
+page keeps an authorized map available until its session expires, then retries.
+
+The native saved-terrain map shows saved markers, waypoints and points of
+interest from the world’s Overworld. Select a pin for its coordinates. Open
+**Map markers** to center the map on a point or toggle pin visibility. Live
+player positions and regions are outside the native map’s coverage.
+
 ## 1. Renderer lifecycle
 
-BlueMap is the built-in default adapter (`builtin-bluemap` module template);
-squaremap and Dynmap are compatibility adapters and `STATIC` is an offline tile
-snapshot.
+BlueMap is the optional managed renderer (`builtin-bluemap` module template).
+Squaremap and Dynmap are compatibility adapters. The static adapter displays
+an offline tile snapshot.
 
 - **Install** a renderer through the existing module workflow
   (`ModuleService.CreateModule` / `StartModule`) using the built-in template or
@@ -32,21 +53,61 @@ node** through the private owned network (ADR 0040): the exact server/node/modul
 identity and node-scoped container metadata (labels, pinned image, owned-network
 membership and the effective read-only bind of the server's actual level folder)
 must verify before any HTTP request. Module config and tile assets are read only
-through the confined node data accessor. A remote node has no private path and
-stays unavailable until an explicit, allowlisted node-local endpoint is set.
+through the confined node data accessor. This includes an enabled Docker node
+registered as local to the controller. It can use managed BlueMap installation
+and private discovery with its registered ID and the configured controller
+Docker client. Unknown or disabled registered nodes cannot use the private path.
+A remote node needs an explicit, allowlisted node-local endpoint.
 No renderer is discovered by port probing or host-port bindings.
 
 A discovered module reaches READY after the renderer's `/settings.json` lists
-the configured map for the server's actual level and the node data accessor
-finds a scoped tile. Both discovered modules and explicit BlueMap endpoints
+the configured Overworld map for the server's actual level and the node data
+accessor finds a scoped tile. The map ID comes from its configuration filename,
+as in BlueMap's generated `overworld.conf`.
+Both discovered modules and explicit BlueMap endpoints
 also need to serve textures for every map they list, including secondary
 dimensions. A discovered renderer with unavailable textures shows an error
-and a retry action in World View.
+and a retry action in World View. When a discovered module is still starting,
+rendering, stopped or unavailable, World View shows the built-in saved-terrain
+map if the world supports it, with the module's current condition. The server
+preview and full viewer switch automatically after the required checks pass.
+
+For an existing BlueMap module, use the server's **Modules** tab to inspect
+its logs and current volume settings:
+
+- If the logs report a missing resource download, review the Minecraft EULA
+  and BlueMap's resource download terms. If you accept both, edit
+  `modules/bluemap/config/core.conf` from the server's **Files** tab and set
+  `accept-download: true`.
+- If the `/app/world` volume points to the server data root, edit BlueMap's
+  **Volumes** and set its host source to
+  `{{server.data_path}}/<active-level-folder>` with **Read Only** enabled. Use
+  the actual folder containing `level.dat`.
+- For older BlueMap modules without a writable resource cache, add a
+  **Volumes** entry from `{{server.data_path}}/modules/bluemap/resources`
+  to `/app/bluemap` with **Create Directory** enabled. The current template
+  supplies this mount for new Modules-tab installs.
+- Confirm that `modules/bluemap/config/maps/overworld.conf` (or an equivalent
+  Overworld map config) points to the mounted world at `/app/world`. Apply
+  volume changes through the module's existing save/recreate flow, then start
+  or restart the module. World View will pick it up after its first render.
+
 The in-context **Install BlueMap** action uses the existing
 ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
 principal and clock), adopts an existing module without mutation, and requires
 `modules/start` in addition to `modules/create` when starting immediately.
+If the module record is gone and its files remain, **Use existing configuration**
+registers and starts a new private BlueMap container with those files. The
+existing configuration needs a single `accept-download: true` entry in
+`modules/bluemap/config/core.conf` and an Overworld map pointing to
+`/app/world` (the stock relative value `world` also works). Review the
+download terms before changing the acknowledgement. Existing files are reused
+without a rewrite. Use **Open Modules** to inspect or restart an installed renderer.
+Docker image preparation, container creation and start share a two-minute
+startup limit. If the limit expires, the panel releases the server lifecycle
+transition and marks the module as errored. Open Modules and retry Start;
+the panel keeps the container ID when Docker already returned it.
 
 ## 2. Endpoint topology and the same-origin proxy
 
@@ -146,16 +207,16 @@ need it.
 Capabilities come from the adapter and gate visible controls. Unsupported means
 unsupported — no lookalike control is substituted.
 
-| Capability | BlueMap | squaremap | Dynmap | STATIC |
-| --- | --- | --- | --- | --- |
-| `map.2d` | yes | yes | yes | static tiles only |
-| `map.3d` | yes | no | no | no |
-| `dimensions` | yes | not verified | not verified | no |
-| `markers` | yes | not verified | not verified | no |
-| `players` | only with explicit bridge feed | no | no | no (offline) |
-| `time_weather` | no | no | no | no |
-| `telemetry` | no | no | no | no |
-| `static` | no | no | no | yes |
+| Capability | Built-in terrain | BlueMap | squaremap | Dynmap | Static |
+| --- | --- | --- | --- | --- | --- |
+| `map.2d` | saved Java Overworld | yes | yes | yes | static tiles only |
+| `map.3d` | no | yes | no | no | no |
+| `dimensions` | Overworld only | yes | not verified | not verified | no |
+| `markers` | saved Overworld points | yes | not verified | not verified | no |
+| `players` | no | only with explicit bridge feed | no | no | no (offline) |
+| `time_weather` | no | no | no | no | no |
+| `telemetry` | no | no | no | no | no |
+| `static` | no | no | no | no | yes |
 
 Live player positions additionally require `world_view/observe_players`. The
 console toggle is **UI consent**: it is hidden by default, requires that
@@ -215,12 +276,11 @@ Unmapped procedures and a nil enforcer are denied by the RPC interceptor.
   source and confidence, but no tile proxy is implemented for imported snapshot
   files. It therefore exposes freshness information without an iframe rather
   than a blank or broken map.
-- **Subuser discovery:** `ListWorldViewTargets` is a global listing and requires
-  an unscoped `world_view/read` grant (object `*`). A server-scoped subuser can
-  still open a granted world by deep link and use every scoped RPC and the
-  proxy, but cannot enumerate the picker. This is deliberate anti-enumeration;
-  a scoped picker would need an explicit `server_id` filter with service-side
-  enforcement.
+- **Subuser discovery:** The all-server catalogue uses
+  `ListWorldViewTargets` and requires an unscoped `world_view/read` grant.
+  A server-scoped subuser can follow a map deep link or use **Open map** from
+  the server’s **World** tab. The fallback page reads only that server’s active
+  map through `GetWorldViewStatus`.
 - **Sibling epics:** the shell links to `/players` and `/library`, which are
   owned by the player-management and World Library epics. The world-viewing PR
   is a cumulative draft and is expected to be integrated with those routes;

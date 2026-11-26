@@ -119,6 +119,11 @@ jobs:
       cancel-in-progress: ${{ !((github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly)) || (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true')) }}
 
     steps:
+      - name: Refuse manual Nightly while split recovery is active
+        if: github.event_name == 'workflow_dispatch' && inputs.nightly && vars.NIGHTLY_RECOVERY_ACTIVE == 'true'
+        run: |
+          echo "::error::Finish or compensate the active Nightly recovery before republishing"
+          exit 1
       - name: Resolve the pinned verified commit
         id: pinned
         env:
@@ -435,13 +440,15 @@ jobs:
     if: >-
       vars.NIGHTLY_RECOVERY_ACTIVE != 'true' &&
       ((github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'schedule' && github.event.schedule == '0 19 * * *'))
+      (github.event_name == 'schedule' && github.event.schedule == '0 19 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.nightly && inputs.recovery == 'off'))
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
     permissions:
       contents: read
       actions: read
+      deployments: read
       packages: write
       pages: write
       id-token: write
@@ -544,11 +551,49 @@ jobs:
         run: |
           OBS=$(python3 scripts/release.py channel-observe --reference "$REF" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: steps.pinned.outputs.stable == 'true'
+      - name: Sign in to the linked GitHub container registry
+        if: steps.pinned.outputs.stable == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Ensure immutable Nightly sha counterpart on GHCR (authorized only)
+        id: sha_mirror
+        if: >-
+          steps.pinned.outputs.stable == 'true' &&
+          ((github.event_name == 'workflow_dispatch' && inputs.nightly) ||
+          (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
+          RECOVERY: 'false'
+          PIN_STABLE: ${{ steps.pinned.outputs.stable }}
+          SCHEDULE_OPT_IN: ${{ vars.NIGHTLY_RECOVERY_ACTIVE != 'true' && vars.NIGHTLY_SCHEDULE_PUBLISH || 'false' }}
+        run: |
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)" != "$CHANNEL_COMMIT" ]; then
+            echo "::error::main moved after pinning; refusing the stale mirror"
+            exit 1
+          fi
+          python3 scripts/release.py mirror-ghcr-sha \
+            --commit "$CHANNEL_COMMIT" --event "$CHANNEL_EVENT" --ref "$CHANNEL_REF" \
+            --ci-verified "$CHANNEL_CI_VERIFIED" --nightly-opt-in "$NIGHTLY_OPT_IN" \
+            --recovery "$RECOVERY" --pin-stable "$PIN_STABLE" \
+            --schedule-opt-in "$SCHEDULE_OPT_IN" --apply
+          # Re-observe after any mirror attempt so activation/stage use real state.
+          OBS=$(python3 scripts/release.py channel-observe --reference "sha-$CHANNEL_COMMIT" | jq -c .observations)
+          printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
       - name: Classify first Nightly activation from real immutable observations
         id: activation
         if: steps.pinned.outputs.stable == 'true'
         env:
-          OBS: ${{ steps.sha_obs.outputs.observations }}
+          OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           # Mixed Hub/GHCR state is a BLOCKED qualification, never a silent skip.
           python3 scripts/release.py nightly-activation-decision \
@@ -565,7 +610,7 @@ jobs:
         id: stage
         if: steps.pinned.outputs.stable == 'true' && steps.activation.outputs.action == 'activate'
         env:
-          OBS: ${{ steps.sha_obs.outputs.observations }}
+          OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           PRESENT=$(printf '%s' "$OBS" | jq -r '.docker_hub[0] == "present" and .ghcr[0] == "present"')
           if [ "$PRESENT" = "true" ]; then
@@ -579,59 +624,31 @@ jobs:
             echo "::notice::no verified staged digest; this run is opt-off staging only"
           fi
 
-      # Stage artifact: the FULL canonical site (Stable + Nightly at their
-      # active routes, matching the registries) plus an OFF-PATH candidate
-      # probe. A candidate-only site must never become the Pages artifact.
-      - name: Build the full canonical site with the off-path candidate probe
+      - name: Build and validate the off-path candidate probe
         id: docs
-        if: steps.pinned.outputs.stable == 'true'
+        if: steps.stage.outputs.digest != ''
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
         run: |
-          if [ -n "$CHANNEL_DIGEST" ]; then
-            # Render the candidate from the exact pair, but keep only its
-            # off-path subtree for the probe - never as the published site.
-            python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
-              --nightly-digest "$CHANNEL_DIGEST" \
-              --promotion-receipt "staged-$CHANNEL_COMMIT"
-            rm -rf .website-build/candidate-probe
-            mkdir -p .website-build/candidate-probe
-            cp -a ".website-build/site/docs/candidate/$CHANNEL_COMMIT/." .website-build/candidate-probe/
-          fi
-          # The published artifact always starts as the full canonical site.
-          python3 scripts/build_website.py
-          python3 scripts/check_website.py
-          if [ -n "$CHANNEL_DIGEST" ]; then
-            mkdir -p ".website-build/site/docs/candidate/$CHANNEL_COMMIT"
-            cp -a .website-build/candidate-probe/. ".website-build/site/docs/candidate/$CHANNEL_COMMIT/"
-            # Non-canonical probe only: the canonical marker stays at the
-            # active receipt until the aliases actually move.
-            python3 scripts/release.py stage-channel-marker \
-              --site .website-build/site --channel nightly \
-              --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST"
-            PAGE=".website-build/site/docs/candidate/$CHANNEL_COMMIT/getting-started/proxmox/index.html"
-            test -s "$PAGE"
-            grep -q "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" "$PAGE"
-            echo "proxmox_page=$PAGE" >> "$GITHUB_OUTPUT"
-          fi
-          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
-          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
+          python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
+            --nightly-digest "$CHANNEL_DIGEST" --promotion-state candidate \
+            --promotion-receipt "staged-$CHANNEL_COMMIT"
+          python3 scripts/check_website.py --expect-nightly-revision "$CHANNEL_COMMIT" \
+            --expect-nightly-digest "$CHANNEL_DIGEST" --expect-promotion-state candidate \
+            --expect-promotion-receipt "staged-$CHANNEL_COMMIT"
+          mkdir -p .website-build/candidate-probe
+          cp -a ".website-build/site/docs/candidate/$CHANNEL_COMMIT/." .website-build/candidate-probe/
+          PAGE=".website-build/candidate-probe/getting-started/proxmox/index.html"
+          test -s "$PAGE"
+          grep -q "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" "$PAGE"
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to Docker Hub
         if: steps.pinned.outputs.stable == 'true'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-      - name: Sign in to the linked GitHub container registry
-        if: steps.pinned.outputs.stable == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
 
       - name: Observe live aliases and reconstruct the active receipt
         id: active
@@ -647,24 +664,73 @@ jobs:
           echo "commit=$(printf '%s' "$LIVE" | jq -r '.commit // empty')" >> "$GITHUB_OUTPUT"
           echo "digest=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')" >> "$GITHUB_OUTPUT"
 
+      # Preserve the EXACT bytes of the currently DEPLOYED Pages artifact before
+      # any write. A freshly rebuilt site is not a rollback source: the prior
+      # artifact is downloaded and byte-verified against the live index.
+      - name: Preserve the exact prior docs artifact before any candidate write
+        id: preserve_prior
+        if: steps.docs.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf .website-build/prior-site
+          # Single shared gate: successful deployment identity, exact artifact
+          # and real live-byte qualification all live in docs_publication_gate.
+          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
+            --repository "$GITHUB_REPOSITORY")
+          test "$(printf '%s' "$BASE" | jq -r .artifact_verified)" = "true"
+          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
+            --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
+            --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
+            --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
+          test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
+          echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
+          echo "artifact_commit=$(printf '%s' "$RESULT" | jq -r .artifact_commit)" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(printf '%s' "$BASE" | jq -r .run_id)" >> "$GITHUB_OUTPUT"
+
+      - name: Add the candidate probe to the exact currently deployed site
+        id: compose_stage
+        if: steps.preserve_prior.outcome == 'success'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+        run: |
+          rm -rf .website-build/site
+          cp -a .website-build/prior-site .website-build/site
+          target=".website-build/site/docs/candidate/$CHANNEL_COMMIT"
+          rm -rf "$target"
+          mkdir -p "$target"
+          cp -a .website-build/candidate-probe/. "$target/"
+          python3 scripts/release.py stage-channel-marker \
+            --site .website-build/site --channel nightly \
+            --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST"
+          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
+          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
+
       - name: PHASE 1 - qualified staging decision (zero writes)
         id: stage_decision
-        if: steps.pinned.outputs.stable == 'true' && steps.stage.outputs.digest != ''
+        if: steps.compose_stage.outcome == 'success'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
-          DOCS_HASH: ${{ steps.docs.outputs.hash }}
+          DOCS_HASH: ${{ steps.compose_stage.outputs.hash }}
           ALIASES: ${{ steps.active.outputs.aliases }}
           LIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
           LIVE_DIGEST: ${{ steps.live_marker.outputs.digest }}
           RUN_ID: ${{ github.run_id }}
           OBSERVED: ${{ steps.stage.outputs.observed }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
           IMMUTABLE_OK: ${{ steps.activation.outputs.action == 'activate' && steps.stage.outcome == 'success' }}
           SITE_OK: ${{ steps.docs.outcome == 'success' }}
         run: |
-          python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json
+          prior_index=.website-build/prior-site/version-index.json
+          python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json \
+            --stable-commit "$(jq -er .channels.stable.commit "$prior_index")" \
+            --stable-digest "$(jq -er .channels.stable.image.digest "$prior_index")"
           PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
             --channel nightly --aliases "$ALIASES" \
             --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
@@ -692,40 +758,14 @@ jobs:
           printf 'candidate=%s\n' "$CANDIDATE" >> "$GITHUB_OUTPUT"
           python3 scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
-            --event "$CHANNEL_EVENT"
-
-      # Preserve the EXACT bytes of the currently DEPLOYED Pages artifact before
-      # any write. A freshly rebuilt site is not a rollback source: the prior
-      # artifact is downloaded and byte-verified against the live index.
-      - name: Preserve the exact prior docs artifact before any candidate write
-        id: preserve_prior
-        if: steps.stage_decision.outputs.action == 'stage'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          rm -rf .website-build/prior-site
-          # Single shared gate: successful deployment identity, exact artifact
-          # and real live-byte qualification all live in docs_publication_gate.
-          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
-            --repository "$GITHUB_REPOSITORY")
-          test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
-          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
-            --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
-            --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
-            --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
-          test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
-          echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
-          echo "artifact_id=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
-          echo "artifact_commit=$(printf '%s' "$RESULT" | jq -r .artifact_commit)" >> "$GITHUB_OUTPUT"
-          echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
-          echo "run_id=$(printf '%s' "$BASE" | jq -r .run_id)" >> "$GITHUB_OUTPUT"
+            --event "$CHANNEL_EVENT" --nightly-opt-in "$NIGHTLY_OPT_IN"
 
       # Verify the staged artifact before any public write: the canonical
       # Stable/Nightly site must still match the live active receipt (the
       # registries' current state), with the exact pair only in the probe.
       - name: Verify the full canonical stage artifact with the off-path probe
         id: markers
-        if: steps.preserve_prior.outcome == 'success'
+        if: steps.stage_decision.outputs.action == 'stage'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -736,18 +776,23 @@ jobs:
             --site .website-build/site \
             --candidate-commit "$CHANNEL_COMMIT" --candidate-digest "$CHANNEL_DIGEST" \
             --active-commit "$ACTIVE_COMMIT" --active-digest "$ACTIVE_DIGEST" \
-            --stable-source docs/website-source.json
+            --stable-source .website-build/prior-site/version-index.json
           python3 scripts/release.py validate-channel-contract \
-            --path .website-build/site/version-index.json
+            --path .website-build/site/version-index.json \
+            --stable-commit "$(jq -er .channels.stable.commit .website-build/prior-site/version-index.json)" \
+            --stable-digest "$(jq -er .channels.stable.image.digest .website-build/prior-site/version-index.json)"
       - name: Upload the full canonical stage artifact with the candidate probe
         if: steps.markers.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
+          name: github-pages-nightly-probe
           path: .website-build/site
-      - name: Deploy the full canonical stage artifact
+      - name: Deploy the off-path Nightly candidate probe
         id: deploy
         if: steps.markers.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-nightly-probe
 
       # Probe the NON-ACTIVE staging route only. Canonical routes are never used
       # for the candidate probe.
@@ -782,6 +827,7 @@ jobs:
         if: steps.canonical.outcome == 'success'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
+          NIGHTLY_OPT_IN: ${{ inputs.nightly }}
           STAGED_CANDIDATE: ${{ steps.stage_decision.outputs.candidate }}
           PREV_JSON: ${{ steps.stage_decision.outputs.prior_receipt }}
           LIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
@@ -796,23 +842,41 @@ jobs:
             '{registries:{},docs_commit:$c,docs_digest:$d}')
           python3 scripts/release.py channel-transaction --phase commit \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
-            --event "$CHANNEL_EVENT"
+            --event "$CHANNEL_EVENT" --nightly-opt-in "$NIGHTLY_OPT_IN"
 
+      - name: Re-check the main pin before moving aliases
+        id: late_recheck
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$current" != "$PINNED_COMMIT" ]; then
+            echo "::error::main moved after pinning; refusing stale promotion"
+            exit 1
+          fi
+          python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
       - name: Move the nightly alias in BOTH registries by verified digest
         id: alias_move
-        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        if: steps.late_recheck.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
-          ALIASES: ${{ steps.active.outputs.aliases }}
-          SHA_OBS: ${{ steps.sha_obs.outputs.observations }}
+          PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
+          SHA_OBS: ${{ steps.sha_mirror.outputs.observations || steps.sha_obs.outputs.observations }}
         run: |
           # The real sha-tag observations from BOTH registries - no fabricated
           # identical pair. channel-promote re-verifies each observation.
           IMMUTABLE=$(printf '%s' "$SHA_OBS" | jq -c .)
+          PREVIOUS_COMMIT=$(jq -er 'select(.verified == true and .channel == "nightly") | .revision' <<< "$PRIOR")
+          PREVIOUS_DIGEST=$(jq -er '.digest' <<< "$PRIOR")
+          ALIASES=$(python3 scripts/release.py channel-observe --reference nightly | jq -ce .observations)
           python3 scripts/release.py channel-promote \
             --channel nightly --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
-            --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
+            --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" \
+            --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
+            --previous-binding true --apply
 
       # Reconcile the public canonical site with the NEW aliases only after both
       # registry moves succeed. Before this point the canonical docs stay at the
@@ -824,6 +888,13 @@ jobs:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
         run: |
+          prior_index=.website-build/prior-site/version-index.json
+          stable_tag=$(jq -er .channels.stable.tag "$prior_index")
+          if [ "$stable_tag" != "v1.0.40" ]; then
+            export CARBONPANEL_STABLE_TAG="$stable_tag"
+            export CARBONPANEL_STABLE_REVISION="$(jq -er .channels.stable.commit "$prior_index")"
+            export CARBONPANEL_STABLE_DIGEST="$(jq -er .channels.stable.image.digest "$prior_index")"
+          fi
           python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
             --nightly-digest "$CHANNEL_DIGEST" --promotion-state final \
             --promotion-receipt "final-$CHANNEL_COMMIT"
@@ -833,11 +904,20 @@ jobs:
             --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
             --page getting-started/proxmox \
             --contains "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" \
-            --stable-source docs/website-source.json
+            --stable-source .website-build/prior-site/version-index.json
           test -s .website-build/site/docs/index.html
           test -s .website-build/site/docs/getting-started/proxmox/index.html
           test -s .website-build/site/docs/nightly/index.html
           echo "final_built=true" >> "$GITHUB_OUTPUT"
+      - name: Provision Chromium for browser QA
+        id: chromium
+        if: steps.final_artifact.outcome == 'success'
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          # Use the exact browser installed by the pinned Playwright package;
+          # do not override it with an arbitrary cached binary.
       - name: Browser-qualify Stable/Nightly channels on the final artifact
         id: browser_ui
         if: steps.final_artifact.outcome == 'success'
@@ -847,25 +927,16 @@ jobs:
           CARBONPANEL_EXPECT_PROMOTION_STATE: final
         run: python3 scripts/browser_version_check.py
       - name: Upload the final canonical artifact
+        id: final_upload
         if: steps.browser_ui.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
       - name: Deploy the final canonical artifact
         id: final_deploy
-        if: steps.browser_ui.outcome == 'success'
+        if: steps.final_upload.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
-      - name: Provision Chromium for live browser QA
-        id: chromium
-        if: steps.final_deploy.outcome == 'success'
-        working-directory: scripts/manual-review/e2e
-        run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
-          CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1)
-          test -n "$CHROME" || { echo "::error::Chromium was not provisioned"; exit 1; }
-          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Live browser QA on deployed HTTPS (switcher, pins, both channels)
         id: live_browser
         if: steps.final_deploy.outcome == 'success'
@@ -904,8 +975,9 @@ jobs:
            steps.probe.outcome == 'failure' || steps.canonical.outcome == 'failure' ||
            steps.commit_decision.outcome == 'failure' ||
            steps.commit_decision.outputs.action == 'rollback' ||
-           steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
+           steps.late_recheck.outcome == 'failure' || steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
            steps.final_deploy.outcome == 'failure' || steps.chromium.outcome == 'failure' ||
+           steps.browser_ui.outcome == 'failure' || steps.final_upload.outcome == 'failure' ||
            steps.live_browser.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
@@ -917,19 +989,19 @@ jobs:
       # A re-stamp cannot restore byte identity, so a distinct artifact is used.
       - name: Upload the exact prior docs bytes as a distinct Pages artifact
         id: rollback_docs
-        if: steps.rollback.outcome == 'success'
+        if: always() && steps.rollback.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: github-pages-prior
           path: .website-build/prior-site
       - name: Deploy the exact prior docs bytes
         id: rollback_deploy
-        if: steps.rollback_docs.outcome == 'success'
+        if: always() && steps.rollback_docs.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         with:
           artifact_name: github-pages-prior
       - name: Verify restored aliases and public docs bytes/marker
-        if: steps.rollback_deploy.outcome == 'success'
+        if: always() && steps.rollback_deploy.outcome == 'success'
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
           PRIOR_HASH: ${{ steps.preserve_prior.outputs.hash }}
@@ -943,7 +1015,7 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$PRIOR_DIGEST"
       - name: Fail the run when a rollback was required
-        if: steps.rollback.outcome == 'success'
+        if: always() && steps.rollback.outcome == 'success'
         run: |
           echo "::error::channel transaction rolled back to the prior verified receipt; no success reported"
           exit 1
@@ -963,6 +1035,11 @@ jobs:
           path: channel-receipt.json
           if-no-files-found: error
           retention-days: 30
+      - name: Fail when an explicit Nightly transaction was requested but not completed
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.nightly && inputs.recovery == 'off' && steps.final_verify.outcome != 'success' && steps.stage_decision.outputs.action != 'noop' && steps.commit_decision.outputs.action != 'noop'
+        run: |
+          echo "::error::explicit Nightly transaction was requested but did not complete"
+          exit 1
       # The Docker Hub full_description is owned solely by
       # .github/workflows/dockerhub-description.yml. Image/channel publication
       # must never overwrite it with a raw, older README.

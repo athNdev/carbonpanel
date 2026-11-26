@@ -31,9 +31,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 </div>
 
-[![Carbon Panel cluster dashboard with host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[![Full Carbon Panel dashboard in dark mode with navigation, host resources and named Minecraft servers](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
 
-[Open the original full-resolution dashboard PNG ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+[Open the full-resolution dashboard ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png) · [View it in light mode ↗](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
 
 ## Modpack Studio. Modpacks, made simple.
 
@@ -56,6 +56,8 @@ with your players. **Modpack Studio** keeps the workflow in one place.
 Give each server its own Docker container. Keep the console, live logs, files,
 backups and settings within reach. Run on a machine at home, a dedicated host,
 or compatible remote Docker nodes, all through one panel.
+
+[![Server overview in dark mode with the running status, rendered World View, resource telemetry and server tabs](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-worlds-list.png)](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-worlds-list.png)
 
 [![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-server-detail.png)
 
@@ -118,9 +120,9 @@ depend on the server version, host and idle-mode configuration.
 <details>
 <summary><strong>A closer look: dashboard and modpack library</strong></summary>
 
-### Your machines, together
+### Dashboard in light mode
 
-![Cluster dashboard with server state and observed host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
+![Full Carbon Panel dashboard in light mode with navigation, server state and host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
 
 ### A home for your packs
 
@@ -149,10 +151,18 @@ Quiet surfaces, clear states and a shared set of foundations.
 | Access                 | Local accounts, roles and server-scoped permissions, OIDC, API tokens and an audit log.                              |
 | Integrations           | Protocol Buffers, Connect RPC/gRPC, an API reference and Prometheus metrics.                                         |
 
-Carbon Panel is under active development. The website documentation displays its
-exact application commit, labelled as a development snapshot. Check
-[the documentation version](https://carbonpanel.dev/docs/versions/) against
-your installation when following a guide.
+## Release channels
+
+Carbon Panel publishes two image channels from the same source.
+
+- **Stable** — `:latest` follows tested releases. Pin an immutable version tag
+  for an exact release; see the [Stable documentation](https://carbonpanel.dev/docs/)
+  and [releases](https://github.com/athNdev/carbonpanel/releases).
+- **Nightly** — `:nightly` follows qualified main builds as a preview and may
+  contain changes ahead of Stable; see the [Nightly documentation](https://carbonpanel.dev/docs/nightly/).
+
+The Current Stable shown on the Docker Hub page comes from the verified release
+contract.
 
 ## Quick start
 
@@ -164,9 +174,10 @@ provides versioned archives for Linux, macOS and Windows.
 See [release downloads and checksum verification](docs/releases.md) and the
 [release history and tag migration](docs/release-history.md): product releases
 use `carbonpanel-vMAJOR.MINOR.PATCH` tags, while plain `v*` tags remain the
-separate Go/module domain. The verified stable is `1.0.40` (`v1.0.40`), the
-current 1.0 rollback line; see the upgrade notes before moving to the next
-MAJOR release. Prereleases never move `latest` or a minor alias.
+separate Go/module domain. [Releases](https://github.com/athNdev/carbonpanel/releases)
+publishes the current Stable version and upgrade notes; check the
+[documentation version](https://carbonpanel.dev/docs/versions/) before following
+a guide. Prereleases never move `latest` or a minor alias.
 
 ### 1. Download the repository and build or pull the image
 

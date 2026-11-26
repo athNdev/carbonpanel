@@ -6,6 +6,7 @@
 	import CarbonTag from '$lib/components/carbon/CarbonTag.svelte';
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonTabs from '$lib/components/carbon/CarbonTabs.svelte';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import CarbonSearch from '$lib/components/carbon/CarbonSearch.svelte';
 	import {
 		sampleCatalog,
@@ -187,6 +188,7 @@
 			</div>
 		</header>
 		<CarbonTabs {tabs} bind:selectedTab={activeTab} idPrefix="studio-demo" />
+		<CarbonInactiveTabPanels {tabs} selectedTab={activeTab} idPrefix="studio-demo" />
 		<div
 			class="studio-stage"
 			role="tabpanel"

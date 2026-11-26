@@ -25,6 +25,39 @@ func TestGeyserBedrockStaysPublic(t *testing.T) {
 	}
 }
 
+func TestBuiltinResourcePackHostServesOnlyItsReadOnlyBind(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	template, err := store.GetModuleTemplate(context.Background(), "builtin-resource-pack-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expectedImage = "ghcr.io/static-web-server/static-web-server:2.44.0@sha256:2c1a7c3e0feaea5859307403b74e1c575f3ec1499094fc077344173d11abaae2"
+	if template.DockerImage != expectedImage || template.DefaultUID == "" || template.DefaultUID == "0" {
+		t.Fatalf("expect an upstream pinned image running as non-root: %s, uid %q", template.DockerImage, template.DefaultUID)
+	}
+	if docker.ModuleSecurityProfile(template) != docker.ModuleProfileHardened {
+		t.Fatal("resource pack host must use the hardening baseline")
+	}
+	var volumes []docker.ModuleVolumeMount
+	if err := json.Unmarshal([]byte(template.DefaultVolumes), &volumes); err != nil {
+		t.Fatal(err)
+	}
+	if len(volumes) != 1 || !volumes[0].ReadOnly || !volumes[0].CreateDir || volumes[0].Source != "{{server.data_path}}/modules/resource-pack-host/packs" || volumes[0].Target != "/packs" {
+		t.Fatalf("unexpected asset mount: %+v", volumes)
+	}
+	var env map[string]string
+	if err := json.Unmarshal([]byte(template.DefaultEnv), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env["SERVER_ROOT"] != "/packs" || env["SERVER_DISABLE_SYMLINKS"] != "true" || env["SERVER_DIRECTORY_LISTING"] != "false" || env["SERVER_IGNORE_HIDDEN_FILES"] != "true" {
+		t.Fatalf("unsafe resource pack host config: %v", env)
+	}
+}
+
 // The standalone Geyser entrypoint now defaults to a loopback bind. The
 // shipped module keeps its explicit wide bind because the panel's UDP proxy
 // dials the container IP, so legitimate Bedrock clients must keep working.
@@ -150,7 +183,7 @@ func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(tpl.DefaultVolumes), &vols); err != nil {
 		t.Fatalf("DefaultVolumes: %v", err)
 	}
-	foundWorld := false
+	foundWorld, foundResourceCache := false, false
 	for _, v := range vols {
 		if v.Target == "/app/world" {
 			foundWorld = true
@@ -158,9 +191,15 @@ func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
 				t.Fatal("world mount must stay read-only")
 			}
 		}
+		if v.Target == "/app/bluemap" {
+			foundResourceCache = v.Source == "{{server.data_path}}/modules/bluemap/resources" && !v.ReadOnly && v.CreateDir
+		}
 	}
 	if !foundWorld {
 		t.Fatal("missing /app/world read-only mount")
+	}
+	if !foundResourceCache {
+		t.Fatal("missing writable, server-local BlueMap resource cache")
 	}
 	if len(tpl.Ports) != 1 || tpl.Ports[0].ContainerPort != 8100 || tpl.Ports[0].ExposePublic {
 		t.Fatalf("renderer port must stay private container-only 8100: %+v", tpl.Ports)

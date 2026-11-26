@@ -54,5 +54,8 @@ test('node inventory row shows per-node status, servers, and memory', () => {
 test('system health strip extends to node counts', () => {
 	assert.ok(source.includes('data-testid="health-nodes"'), 'Health strip needs a nodes cell');
 	assert.ok(source.includes('nodeStats.online'), 'Health strip must count online nodes');
-	assert.ok(source.includes('lg:grid-cols-4'), 'Health strip must fit the fourth cell');
+	assert.ok(
+		source.includes('auto-fit,minmax(min(100%,15rem),1fr)'),
+		'Health columns must follow the available card width'
+	);
 });

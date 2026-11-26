@@ -180,17 +180,81 @@ func TestBindCancellationBeforeMutationCreatesNothing(t *testing.T) {
 }
 
 func TestBindRemoteWithoutResolverFailsClosed(t *testing.T) {
+	ctx := context.Background()
 	store := newWorldTestStore(t)
 	root := t.TempDir()
 	server := seedWorldServer(t, store, filepath.Join(root, "data"))
+	node := &storage.Node{Name: "Remote daemon", Host: "tcp://remote.example:2376", Enabled: true}
+	if err := store.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	server.NodeID = node.ID
+	if err := store.UpdateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
 	rev := seedRevision(t, store, "wld_3", filepath.Join(root, "rev.zip"), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 	binder := NewBinder(store, logger.New(), nil, nil, &fakeLifecycle{}, root)
-	_, err := binder.Bind(context.Background(), BindRequest{
-		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
-		NodeID: "remote-node", Generation: 1, RequestID: "remote",
-	})
+	request := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: node.ID, Generation: 1, RequestID: "remote"}
+	_, err := binder.Bind(ctx, request)
 	if !errors.Is(err, ErrRemoteUnavailable) {
 		t.Fatalf("want ErrRemoteUnavailable, got %v", err)
+	}
+	request.NodeID = "local"
+	_, err = binder.Bind(ctx, request)
+	if !errors.Is(err, ErrRemoteUnavailable) {
+		t.Fatalf("remote bind must not accept a local node override, got %v", err)
+	}
+}
+
+func TestBindAndRecoverOnRegisteredLocalNode(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, []string{"world"})
+	node := &storage.Node{
+		Name: "Registered local daemon", Host: "unix:///var/run/docker.sock",
+		Enabled: true, IsLocal: true, EndpointGeneration: 3,
+	}
+	if err := store.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	server.NodeID = node.ID
+	if err := store.UpdateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+
+	lifecycle := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, lifecycle, libraryRoot)
+	request := BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, Window: "now",
+		NodeID: node.ID, Generation: 3, RequestID: "registered-local",
+	}
+	result, err := binder.Bind(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Binding == nil || !result.Binding.MatchesOwner(node.ID, 3) ||
+		lifecycle.stops != 1 || lifecycle.starts != 1 {
+		t.Fatalf("bind did not restart and persist the owning node: %+v, lifecycle=%+v", result, lifecycle)
+	}
+	family := filepath.Join(dataRoot, "world")
+	held := filepath.Join(dataRoot, ".world-library", "old-registered-node", "world")
+	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(family, held); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binder.Recover(ctx, server.ID, dataRoot, node.ID, 2); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("recovery should refuse a stale node generation, got %v", err)
+	}
+	summary, err := binder.Recover(ctx, server.ID, dataRoot, node.ID, 3)
+	if err != nil || !strings.Contains(summary, "restored 1") {
+		t.Fatalf("registered-node recovery = %q, %v", summary, err)
+	}
+	got, err := os.ReadFile(filepath.Join(family, "level.dat"))
+	if err != nil || string(got) != "new-world" {
+		t.Fatalf("recovered level.dat = %q, %v; want published world bytes", got, err)
 	}
 }
 

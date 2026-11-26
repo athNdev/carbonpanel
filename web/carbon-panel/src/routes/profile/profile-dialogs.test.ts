@@ -56,7 +56,7 @@ test('preferences dialog delegates storage and attributes to the shared owner', 
 			`dialog must call ${setter} on the owner`
 		);
 	}
-	assert.ok(prefs.includes('data-carbon-theme'), 'shared owner applies data-carbon-theme');
+	assert.ok(prefs.includes('displayPreferences.themeChoice'), 'picker must show the saved choice');
 	assert.ok(prefs.includes('CarbonModal'), 'preferences must open via CarbonModal');
 	assert.ok(prefs.includes('Reset defaults'), 'preferences must offer a reset');
 	assert.doesNotMatch(prefs, /localStorage/, 'storage belongs to the owner, not the dialog');
@@ -76,9 +76,10 @@ test('Done applies the choices and closes the dialog', () => {
 	);
 });
 
-test('shell hydrates shared preferences on boot', () => {
+test('root layout hydrates shared preferences on boot', () => {
+	const layout = readFileSync(new URL('../+layout.svelte', import.meta.url), 'utf8');
 	assert.ok(
-		shell.includes('displayPreferences.hydrate()'),
+		layout.includes('displayPreferences.hydrate()'),
 		'shell must hydrate the shared owner on mount'
 	);
 	assert.doesNotMatch(

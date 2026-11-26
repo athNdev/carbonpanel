@@ -54,6 +54,7 @@ type ProxyDeps struct {
 	Servers    ServerGetter
 	Resolver   *Resolver
 	Sessions   *SessionRegistry
+	Native     *NativeMap
 	Log        Logger
 	Client     HTTPDoer
 }
@@ -165,11 +166,26 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "renderer unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if sess.native.serverID != "" {
+		if h.deps.Native == nil {
+			http.Error(w, "native map is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		h.deps.Native.serveAsset(w, r, server, sess.native, asset)
+		return
+	}
 	renderer, err := h.deps.Resolver.Resolve(r.Context(), server.NodeID, sess.ServerID)
 	if err != nil || renderer == nil || renderer.ProxyBaseURL() == "" {
 		h.logWarn("worldview proxy: renderer unavailable for server %s: %v", sess.ServerID, err)
 		http.Error(w, "renderer unavailable", http.StatusServiceUnavailable)
 		return
+	}
+	if sess.discovered {
+		discovered, ok := renderer.(*discoveredRenderer)
+		if !ok || !discovered.matchesSessionWorld(sess.WorldKey) {
+			http.Error(w, "renderer no longer serves the selected world", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	h.proxyAsset(w, r, renderer.ProxyBaseURL(), upstreamAsset, renderer.Type() == v1.RendererType_RENDERER_TYPE_BLUEMAP)

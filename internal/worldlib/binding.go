@@ -208,10 +208,11 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err != nil {
 		return nil, err
 	}
-	if req.NodeID == "" {
-		req.NodeID = server.NodeID
+	if req.NodeID != "" && req.NodeID != server.NodeID {
+		return nil, fmt.Errorf("%w: requested node %q does not own server %q", ErrRemoteUnavailable, req.NodeID, server.ID)
 	}
-	generation, err := b.resolveGeneration(ctx, server)
+	req.NodeID = server.NodeID
+	_, generation, err := b.resolveNode(ctx, req.NodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -284,9 +285,12 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	}
 	server = current
 
-	node := nodestorage.NodeInfo{
-		ID: req.NodeID, Name: req.NodeID,
-		IsLocal: nodestorage.IsLegacyLocalNodeID(req.NodeID),
+	node, generation, err := b.resolveNode(ctx, server.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	if req.Generation != generation {
+		return nil, fmt.Errorf("%w: node generation changed before world bind acquired admission", ErrStaleGeneration)
 	}
 	if !node.IsLocal && b.resolver == nil {
 		return nil, fmt.Errorf("%w: no storage resolver for node %q", ErrRemoteUnavailable, req.NodeID)
@@ -312,7 +316,11 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 
 	// Compatibility and disk-budget preflight happen before the journal and
 	// before any byte is written. Dry-run never mutates a world.
-	if err := b.preflight(ctx, server, revision, req); err != nil {
+	archivePath, err := ResolveRevisionArchive(b.libraryRoot, revision.StoragePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.preflight(ctx, server, revision, req, node.IsLocal, archivePath); err != nil {
 		return nil, err
 	}
 
@@ -320,7 +328,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	var cleanup []string
 	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID, payloadHash,
 		func(ownedCtx context.Context) (bool, error) {
-			out, roots, err := b.publish(ownedCtx, acc, server, req, revision)
+			out, roots, err := b.publish(ownedCtx, acc, server, req, archivePath)
 			cleanup = roots
 			if out != nil {
 				result = out
@@ -435,32 +443,33 @@ func (b *Binder) replayBind(ctx context.Context, server *storage.Server, req Bin
 	}
 }
 
-// resolveGeneration reads the owning node's endpoint generation from the
-// control-plane database. Legacy single-node deployments with no Node row use
-// generation 1, matching the implicit default in the Node model.
-func (b *Binder) resolveGeneration(ctx context.Context, server *storage.Server) (int64, error) {
-	if server == nil {
-		return 0, fmt.Errorf("%w: no server", ErrStaleGeneration)
-	}
-	node, err := b.store.GetNode(ctx, server.NodeID)
+// resolveNode reads locality and endpoint generation from the same node row.
+// World binding only uses direct local storage for the controller's own daemon.
+// Legacy aliases keep generation 1 when no usable node row exists.
+func (b *Binder) resolveNode(ctx context.Context, nodeID string) (nodestorage.NodeInfo, int64, error) {
+	info := nodestorage.NodeInfo{ID: nodeID, Name: nodeID, IsLocal: nodestorage.IsLegacyLocalNodeID(nodeID)}
+	node, err := b.store.GetNode(ctx, nodeID)
 	if err == nil && node.EndpointGeneration > 0 {
-		return node.EndpointGeneration, nil
+		if node.IsLocal {
+			info = node.StorageInfo()
+		}
+		return info, node.EndpointGeneration, nil
 	}
-	if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
-		return 1, nil
+	if info.IsLocal {
+		return info, 1, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("%w: node %q: %v", ErrStaleGeneration, server.NodeID, err)
+		return info, 0, fmt.Errorf("%w: node %q: %v", ErrStaleGeneration, nodeID, err)
 	}
-	return 0, fmt.Errorf("%w: node %q has no endpoint generation", ErrStaleGeneration, server.NodeID)
+	return info, 0, fmt.Errorf("%w: node %q has no endpoint generation", ErrStaleGeneration, nodeID)
 }
 
 // preflight runs the compatibility dry run and a fail-closed disk budget check
 // before any external mutation. Unknown compatibility findings are surfaced in
 // the report; only blocked or unsupported transforms stop the bind.
-func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision *storage.WorldRevision, req BindRequest) error {
+func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision *storage.WorldRevision, req BindRequest, localStorage bool, archivePath string) error {
 	if b.compat != nil {
-		report, err := b.compat.Check(ctx, revision.StoragePath, Target{
+		report, err := b.compat.Check(ctx, archivePath, Target{
 			ServerID: req.ServerID, MCVersion: server.MCVersion, Edition: "java",
 			ModLoader: string(server.ModLoader), DataVersion: revision.DataVersion, NodeID: req.NodeID,
 		})
@@ -489,7 +498,7 @@ func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision
 	var err error
 	if b.FreeBytes != nil {
 		free, err = b.FreeBytes(ctx, req.NodeID, server.DataPath)
-	} else if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
+	} else if localStorage {
 		free, err = files.GetFreeDiskSpace(server.DataPath)
 	} else {
 		return fmt.Errorf("%w: node %q free bytes are not measurable from the controller; inject a FreeBytes probe", ErrDiskBudget, req.NodeID)
@@ -503,7 +512,7 @@ func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision
 	return nil
 }
 
-func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (out *BindResult, cleanup []string, retErr error) {
+func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, archivePath string) (out *BindResult, cleanup []string, retErr error) {
 	wasRunning := false
 	var err error
 	if b.lifecycle != nil {
@@ -557,7 +566,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		return nil, nil, err
 	}
 	archiveRel := path.Join(stageRoot, "revision.zip")
-	if err := copyLocalArchiveToAccessor(ctx, acc, revision.StoragePath, archiveRel); err != nil {
+	if err := copyLocalArchiveToAccessor(ctx, acc, archivePath, archiveRel); err != nil {
 		_ = acc.RemoveAll(stageRoot)
 		return nil, nil, err
 	}
@@ -819,7 +828,13 @@ func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string,
 	if generation <= 0 {
 		return "", fmt.Errorf("%w: node generation is unknown", ErrStaleGeneration)
 	}
-	node := nodestorage.NodeInfo{ID: nodeID, Name: nodeID, IsLocal: nodestorage.IsLegacyLocalNodeID(nodeID)}
+	node, currentGeneration, err := b.resolveNode(ctx, nodeID)
+	if err != nil {
+		return "", err
+	}
+	if generation != currentGeneration {
+		return "", fmt.Errorf("%w: node generation changed before world recovery", ErrStaleGeneration)
+	}
 	if !node.IsLocal && b.resolver == nil {
 		return "", fmt.Errorf("%w: no storage resolver for node %q", ErrRemoteUnavailable, nodeID)
 	}
