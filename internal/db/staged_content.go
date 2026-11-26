@@ -40,6 +40,17 @@ func ensureStagedModApprovalAdmission(row *StagedContentChange) error {
 	return nil
 }
 
+// ensureReviewedModRuntimeAdmission refuses a reviewed mod row while the same
+// batch already carries a pending runtime configuration change the review was
+// not verified against. It runs after the transaction's first write so the
+// check cannot straddle a concurrent config admission.
+func ensureReviewedModRuntimeAdmission(tx *gorm.DB, row *StagedContentChange, batchID string) error {
+	if row == nil || row.Kind != StagedKindMod || row.ExpectedLiveSha512 == "" {
+		return nil
+	}
+	return requireNoPendingReviewedModRuntimeChanges(tx, row.ServerID, batchID)
+}
+
 // hasStagedReviewedModCandidates reports whether the server has a staged
 // reviewed mod replacement whose live digest precondition identifies a provider
 // candidate.
@@ -56,6 +67,13 @@ func hasStagedReviewedModCandidates(tx *gorm.DB, serverID string) (bool, error) 
 		}
 	}
 	return false, nil
+}
+
+// HasStagedReviewedModCandidates reports whether a reviewed mod replacement is
+// staged for the server. Callers use it before changing the Docker runtime
+// target, which would invalidate the review context.
+func (s *Store) HasStagedReviewedModCandidates(ctx context.Context, serverID string) (bool, error) {
+	return hasStagedReviewedModCandidates(s.db.WithContext(ctx), serverID)
 }
 
 func ensureNoStagedReviewedModCandidatesTx(tx *gorm.DB, serverID string) error {
@@ -143,6 +161,9 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		row.BatchID = batch.ID
 		row.Status = StagedStatusStaged
 		if err := ensureStagedModApprovalAdmission(row); err != nil {
+			return err
+		}
+		if err := ensureReviewedModRuntimeAdmission(tx, row, batch.ID); err != nil {
 			return err
 		}
 		return tx.Create(row).Error
@@ -372,7 +393,10 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 		if batch == nil || batch.ID != batchID || !batchWindowMatches(batch, window, applyAt, idleMinutes) {
 			return fmt.Errorf("%w: chosen batch %s closed or changed window before staging", ErrUpdateBatchConflict, batchID)
 		}
-		return requireNoBatchCronConfig(tx, batchID)
+		if err := requireNoBatchCronConfig(tx, batchID); err != nil {
+			return err
+		}
+		return ensureReviewedModRuntimeAdmission(tx, row, batch.ID)
 	})
 }
 

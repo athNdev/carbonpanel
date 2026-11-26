@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,6 +87,62 @@ func TestReviewedModAdmissionRequiresDurableApprovedDigest(t *testing.T) {
 	uploaded, err := store.AddStagedContent(ctx, upload)
 	require.NoError(t, err)
 	require.Empty(t, uploaded.ApprovedSha512)
+}
+
+// TestReviewedModAdmissionRefusesPendingRuntimeChange proves a reviewed mod row
+// cannot be admitted while the same batch already carries a runtime
+// configuration change the review was not verified against, and that a clean
+// admission still succeeds.
+func TestReviewedModAdmissionRefusesPendingRuntimeChange(t *testing.T) {
+	for name, changes := range map[string]map[string]any{
+		"version":                    {"version": "1.21.4"},
+		"provider version selection": {"versionFromModrinthProjects": true, "modrinthProjects": "fabric-api"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newTestStore(t)
+			t.Cleanup(func() { _ = store.Close() })
+			server := &Server{ID: "runtime-first", Name: "runtime-first", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+			require.NoError(t, store.CreateServer(ctx, server))
+			staged, err := store.StageServerConfigUpdate(ctx, server.ID, changes, UpdateWindowNextRestart, nil, 0)
+			require.NoError(t, err)
+
+			_, err = store.AddStagedContent(ctx, reviewedModCandidateRow(server.ID))
+			require.ErrorIs(t, err, ErrStagedModVersionChange)
+			_, err = store.PrepareReviewedContentBatch(ctx, server.ID, UpdateWindowNextRestart, nil, 0)
+			require.ErrorIs(t, err, ErrStagedModVersionChange)
+			row := reviewedModCandidateRow(server.ID)
+			row.ID = uuid.NewString()
+			require.ErrorIs(t, store.AddStagedContentToBatch(ctx, row, staged.BatchID, UpdateWindowNextRestart, nil, 0), ErrStagedModVersionChange)
+			content, err := store.ListBatchContent(ctx, staged.BatchID)
+			require.NoError(t, err)
+			require.Empty(t, content)
+
+			// The same reviewed row admits normally once no runtime change is
+			// waiting in its batch.
+			clean := &Server{ID: "runtime-clean", Name: "runtime-clean", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+			require.NoError(t, store.CreateServer(ctx, clean))
+			_, err = store.AddStagedContent(ctx, reviewedModCandidateRow(clean.ID))
+			require.NoError(t, err)
+		})
+	}
+}
+
+func reviewedModCandidateRow(serverID string) *StagedContentChange {
+	return &StagedContentChange{
+		ServerID:           serverID,
+		Kind:               StagedKindMod,
+		Action:             StagedActionReplace,
+		TargetPath:         "mods/mod.jar",
+		StagePath:          ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:           "mod.jar",
+		ExpectedLiveSha512: "deadbeef",
+		ApprovedSha512:     strings.Repeat("ab", 64),
+		ApprovedProvider:   "modrinth",
+		ApprovedProjectID:  "project",
+		ApprovedVersionID:  "release",
+		ApprovedFilename:   "mod.jar",
+	}
 }
 
 // TestApprovedDigestColumnIsAdditive proves an existing database keeps its
