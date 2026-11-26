@@ -51,5 +51,9 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   stage a duplicate or an unchecked jar.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
+- Journaled admission recomputes the effective Docker runtime target after its
+  reload and refuses a target that moved during download for re-review. A file
+  already in the open batch is reported `already_staged` before download, spends
+  no budget, and the under-journal recheck still refuses a late duplicate.
 - Due slots and execution claims are in
   [Mod update scheduling and legacy rows](mod-update-scheduling.md).

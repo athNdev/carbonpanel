@@ -306,6 +306,24 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return nil, nil, nil, err
 	}
 
+	// A resubmission must not download a file that is already staged or spend
+	// the cumulative budget on it. The journal rechecks this below so a row
+	// staged after this snapshot still cannot be duplicated.
+	alreadyStagedBeforeFetch := make(map[string]bool)
+	if openBatch, err := s.store.OpenUpdateBatch(ctx, server.ID); err != nil {
+		return nil, nil, nil, err
+	} else if openBatch != nil {
+		rows, err := s.store.ListBatchContent(ctx, openBatch.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, row := range rows {
+			if row.Kind == storage.StagedKindMod {
+				alreadyStagedBeforeFetch[row.FileName] = true
+			}
+		}
+	}
+
 	// Rebuild the server-owned preview for exactly the reviewed files. The
 	// preview owns project, dependency and version-selection policy, so apply
 	// cannot reuse a decision that became stale while the operator reviewed.
@@ -341,6 +359,11 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	var totalBytes int64
 	for _, sel := range selections {
 		result := stagedModUpdate{ModID: sel.GetModId(), FileName: sel.GetFileName()}
+		if alreadyStagedBeforeFetch[sel.GetFileName()] {
+			result.Outcome, result.Reason = "already_staged", "this file already has an update in the open batch"
+			results = append(results, result)
+			continue
+		}
 		if reason, failed := resolutionFailures[sel.GetFileName()]; failed {
 			result.Outcome, result.Reason = "refused_drift", reason
 			results = append(results, result)
@@ -422,20 +445,31 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 
 	var batch *storage.ServerUpdateBatch
 	if err := operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
+		// Re-read the server here, while this call owns the journal and before
+		// the batch or any staged byte is written, so a start during provider
+		// retry/download cannot be missed by the earlier snapshot. The same
+		// reload also decides whether the runtime target the operator reviewed
+		// is still the target the download was verified against.
+		current, err := s.store.GetServer(ctx, server.ID)
+		if err != nil {
+			return fmt.Errorf("reload server before staging: %w", err)
+		}
 		// The scheduler passes an admission check for its running-server
-		// policy. Re-read the server here, while this call owns the journal and
-		// before the batch or any staged byte is written, so a start during
-		// provider retry/download cannot be missed by the earlier snapshot.
+		// policy. Run it against the freshly loaded row.
 		if len(admission) > 0 && admission[0] != nil {
-			current, err := s.store.GetServer(ctx, server.ID)
-			if err != nil {
-				return fmt.Errorf("reload server before staging: %w", err)
-			}
 			if err := admission[0](ctx, current); err != nil {
 				return err
 			}
-			server = current
 		}
+		loaderNow, gameNow, err := s.store.ReviewedModRuntimeTarget(ctx, current)
+		if err != nil {
+			return err
+		}
+		if loaderNow != runtimeServer.ModLoader || gameNow != runtimeServer.MCVersion {
+			return fmt.Errorf("%w: Docker runtime target changed from %s/%s to %s/%s while the update was downloaded; review the update again",
+				errReviewedModRuntimeChanged, runtimeServer.ModLoader, runtimeServer.MCVersion, loaderNow, gameNow)
+		}
+		server = current
 		// Keep publication from taking an open-batch snapshot between preparing
 		// the window, writing the payloads, and recording their rows.
 		releaseWrite, err := beginDataWrite(server.ID)
@@ -569,6 +603,11 @@ func reviewedInstalledModLocation(ctx context.Context, root *os.Root, base, file
 }
 
 var errInvalidModUpdateWindow = errors.New("invalid mod update window")
+
+// errReviewedModRuntimeChanged means the committed Docker runtime target moved
+// between the preview/download snapshot and journal admission. The verified
+// candidate belongs to the old target, so it must be reviewed again.
+var errReviewedModRuntimeChanged = errors.New("reviewed Docker runtime target changed before staging")
 
 func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) (storage.UpdateWindow, *time.Time, int, error) {
 	var applyAt *time.Time

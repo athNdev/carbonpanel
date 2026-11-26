@@ -526,7 +526,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			if errors.Is(err, errInvalidModUpdateWindow) {
 				code = connect.CodeInvalidArgument
 			} else if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) ||
-				errors.Is(err, storage.ErrReviewedModRuntimeUnknown) {
+				errors.Is(err, storage.ErrReviewedModRuntimeUnknown) || errors.Is(err, errReviewedModRuntimeChanged) {
 				code = connect.CodeFailedPrecondition
 			} else if strings.Contains(err.Error(), "server not found") || strings.Contains(err.Error(), "no mod updates") {
 				code = connect.CodeInvalidArgument
@@ -786,6 +786,86 @@ var fabricOptStackDefs = []struct {
 	{ModID: "c2me-fabric", Name: "C2ME", Description: "Concurrent chunk management and multithreaded world generation", PrefixMatch: "c2me"},
 }
 
+const (
+	maxFabricOptimizationJarBytes     int64 = 256 << 20
+	fabricOptimizationDownloadTimeout       = 2 * time.Minute
+)
+
+// installFabricOptimizationJar downloads one optimization mod through a
+// context-bound, bounded request and only replaces the live jar after the
+// complete body has been written to a temporary file in the mods directory. A
+// non-2xx, oversized, truncated or empty response leaves the existing jar in
+// place and removes the partial temporary file.
+func installFabricOptimizationJar(ctx context.Context, modsDir string, target modrinthVersionFile, prefix string) error {
+	targetPath, err := modInstallPath(modsDir, target.Filename)
+	if err != nil {
+		return err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, fabricOptimizationDownloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, target.URL, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: fabricOptimizationDownloadTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxFabricOptimizationJarBytes {
+		return fmt.Errorf("download exceeds the %d-byte limit", maxFabricOptimizationJarBytes)
+	}
+	tmp, err := os.CreateTemp(modsDir, ".fabric-optimization-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	installed := false
+	defer func() {
+		if !installed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, maxFabricOptimizationJarBytes+1))
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return fmt.Errorf("download body: %w", copyErr)
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if written > maxFabricOptimizationJarBytes {
+		return fmt.Errorf("download exceeds the %d-byte limit", maxFabricOptimizationJarBytes)
+	}
+	if written == 0 {
+		return errors.New("download was empty")
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		return err
+	}
+	installed = true
+	// Old versions are removed only after the replacement is committed, so a
+	// failed download cannot strand the server without an installed jar.
+	if entries, err := os.ReadDir(modsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == target.Filename {
+				continue
+			}
+			if strings.Contains(strings.ToLower(entry.Name()), prefix) {
+				_ = os.Remove(filepath.Join(modsDir, entry.Name()))
+			}
+		}
+	}
+	return nil
+}
+
 func fetchModrinthModVersion(ctx context.Context, slug string, mcVersion string) (*modrinthVersionItem, error) {
 	loadersJSON := url.QueryEscape(`["fabric"]`)
 	gameVersionsJSON := url.QueryEscape(fmt.Sprintf(`["%s"]`, mcVersion))
@@ -939,41 +1019,8 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 		}
 
 		targetFile := v.Files[0]
-		targetPath, err := modInstallPath(modsDir, targetFile.Filename)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("invalid filename for %s: %v", def.Name, err))
-			continue
-		}
-
-		// Remove existing older versions of this mod
-		if entries, err := os.ReadDir(modsDir); err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.Contains(strings.ToLower(entry.Name()), def.PrefixMatch) && entry.Name() != targetFile.Filename {
-					_ = os.Remove(filepath.Join(modsDir, entry.Name()))
-				}
-			}
-		}
-
-		// Download latest compatible version
-		resp, err := http.Get(targetFile.URL)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to download %s: %v", def.Name, err))
-			continue
-		}
-
-		out, err := os.Create(targetPath)
-		if err != nil {
-			resp.Body.Close()
-			warnings = append(warnings, fmt.Sprintf("failed to save %s: %v", def.Name, err))
-			continue
-		}
-
-		_, copyErr := io.Copy(out, resp.Body)
-		resp.Body.Close()
-		out.Close()
-
-		if copyErr != nil {
-			warnings = append(warnings, fmt.Sprintf("failed while saving %s: %v", def.Name, copyErr))
+		if err := installFabricOptimizationJar(ctx, modsDir, targetFile, def.PrefixMatch); err != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to install %s: %v", def.Name, err))
 			continue
 		}
 

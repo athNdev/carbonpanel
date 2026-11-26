@@ -1266,6 +1266,92 @@ func TestCumulativeCandidateBudgetIsEnforced(t *testing.T) {
 	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
 }
 
+// A committed runtime target change during download invalidates the reviewed
+// loader/game pair. The journaled admission must refuse before staging rather
+// than write a candidate the new runtime never reviewed.
+func TestReviewedModUpdateRefusesRuntimeChangeDuringDownload(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-runtime-during-download", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	live := filepath.Join(mods, "mod.jar")
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"mod-2.jar": []byte("next")},
+		onFetch: func(string) {
+			cfg, err := store.GetServerConfig(ctx, server.ID)
+			require.NoError(t, err)
+			next := "1.21.4"
+			cfg.Version = &next
+			require.NoError(t, store.SaveServerConfig(ctx, cfg))
+		},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(fetcher)
+
+	_, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "review the update again")
+	require.Equal(t, 1, fetcher.calls)
+	body, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(body), "the live jar must not be replaced")
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, batch, "a refused runtime change must not leave an open batch")
+	require.Empty(t, stagedFiles(t, server.DataPath))
+}
+
+// Resubmitting A alongside B must report A as already staged without spending
+// the cumulative budget, so B still gets its download.
+func TestAlreadyStagedUpdateDoesNotConsumeAnotherCandidateBudget(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-already-staged-budget", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(fetcher)
+	svc.SetModUpdateBatchBudget(int64(len("next-a")))
+
+	first := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(first))
+	require.NoError(t, err)
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Equal(t, 1, fetcher.calls)
+
+	fetcher.calls = 0
+	second := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+	second.UpdateSelections = append(second.UpdateSelections, &v1.ModUpdateSelection{
+		ModId: "mod-b.jar", FileName: "b.jar",
+		InstalledSha512:    installedModDigest("installed-b"),
+		CandidateVersionId: "v2-project-b",
+		CandidateSha512:    installedModDigest("next-b"),
+		CandidateFilename:  "b.jar",
+	})
+	res, err = svc.UpdateMod(ctx, connect.NewRequest(second))
+	require.NoError(t, err)
+	outcomes := map[string]string{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetFileName()] = row.GetOutcome()
+	}
+	require.Equal(t, "already_staged", outcomes["a.jar"])
+	require.Equal(t, "staged", outcomes["b.jar"])
+	require.Equal(t, 1, fetcher.calls, "the already-staged file must not be downloaded again")
+	rows, err := store.ListBatchContent(ctx, res.Msg.GetUpdateBatchId())
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+}
+
 func TestStageReviewedModUpdateRequiresKnownServerAndValidWindow(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-update-window", storage.StatusStopped)
