@@ -59,6 +59,13 @@ writes. A preview does not create a server. Export preparation, preview, and
 archive creation can take longer than ordinary metadata calls. These calls
 have a one-hour controller deadline and respect earlier client cancellation.
 
+Preview is authorized as server creation, not node inventory. The inspection
+response therefore also returns a narrow list of enabled destination IDs and
+display names, while the full node list continues to require nodes/read. A
+caller who can create servers but cannot read nodes can select one of those
+destinations, preview it again for the exact-node storage check and submit the
+same node. The list carries no addresses, credentials or capacity statistics.
+
 Provide a new name, a destination node and a free port when creating the
 server. Keep the same request ID for retries of the same submission. The
 controller validates the caller's upload and the destination again. It stages

@@ -35,6 +35,11 @@ sources:
 - Keep upload ownership, server-create authorization and retry idempotency scoped
   to the submitting principal. Allocate the destination exclusively on the
   chosen node before committing the new server row.
+- Preview is authorized by server-create, not node inventory. It may return only
+  the enabled destination IDs and display names needed to choose a node; never
+  require nodes/read for this path or expose addresses, credentials, capacity
+  statistics or other private inventory. A supplied node still runs the
+  exact-node eligibility and capacity check.
 - The console offers ZIP and tar.gz export with stopped-server consistency only;
   it never stops a live server. It must show the third-party credential
   disclosure before enabling an authorized download and must not claim to detect

@@ -361,6 +361,15 @@ message ServerArchiveFinding {
   string message = 3;
 }
 
+// ServerArchiveDestination is the minimal identity of an enabled node that can
+// receive an archive. It deliberately omits addresses, credentials, capacity
+// statistics and other node inventory so a servers/create caller does not need
+// nodes/read merely to choose a destination.
+message ServerArchiveDestination {
+  string id = 1;
+  string name = 2;
+}
+
 // PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
 message PreviewServerArchiveResponse {
   ServerArchiveFormat format = 1;
@@ -376,4 +385,9 @@ message PreviewServerArchiveResponse {
   int64 required_bytes = 11;
   optional int64 available_bytes = 12;
   repeated ServerArchiveFinding findings = 13;
+  // Enabled destinations for this archive. Populated from the same preflight
+  // used by preview so a create-only caller can pick a concrete node without
+  // node inventory permission. Selecting one and previewing again runs the
+  // exact-node capacity check; this list does not qualify create by itself.
+  repeated ServerArchiveDestination destinations = 14;
 }
