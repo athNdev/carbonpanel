@@ -31,8 +31,11 @@ container and releases its lock; it does not settle this staged phase.
 Automatic compensation is only claimed for a typed Docker preflight failure and
 for the next-restart snapshot path. A timed/idle ambiguous outcome or a crash in
 that config-only window requires operator review; the panel does not report it
-as a safe retry. Closing this gap needs a durable publish-phase marker (or an
-equivalent journal outcome) that both the panel and startup recovery can read.
+as a safe retry. The next-restart admission claim and canonical-identity
+reconciliation described in the parent concept do not cover `ApplyBatch`, so no
+timed/idle acknowledgement or resumption is claimed here. Closing this gap needs
+a durable publish-phase marker (or an equivalent journal outcome) that both the
+panel and startup recovery can read.
 
 The bounded next design is a persisted phase on the open batch:
 `prepared` once files, config, and module rows are on the live tree;
