@@ -35,10 +35,30 @@ export interface ArchiveImportState {
 	uploadId: string;
 	fileName: string;
 	preview: PreviewServerArchiveResponse | null;
+	/** Upload the successful preview belongs to; empty until a preview succeeds. */
+	previewUploadId: string;
+	/** Destination node the successful preview belongs to; empty for automatic placement. */
+	previewNodeId: string;
 	preparing: boolean;
 	error: string | null;
 	/** Stable across retries of this submission; empty until an upload completes. */
 	requestId: string;
+}
+
+/**
+ * Submit may only use a preview that proved this exact upload for this exact
+ * destination. A failed or superseded preview leaves `preview` null or tied to
+ * an older node, so neither case can unblock create.
+ */
+export function isArchivePreviewCurrent(state: ArchiveImportState, nodeId: string): boolean {
+	return Boolean(
+		state.uploadId &&
+		state.preview &&
+		!state.preparing &&
+		!state.error &&
+		state.previewUploadId === state.uploadId &&
+		state.previewNodeId === nodeId
+	);
 }
 
 export function createArchiveImport(
@@ -49,12 +69,23 @@ export function createArchiveImport(
 	let uploadId = '';
 	let fileName = '';
 	let preview: PreviewServerArchiveResponse | null = null;
+	let previewUploadId = '';
+	let previewNodeId = '';
 	let preparing = false;
 	let error: string | null = null;
 	let attempt: { requestId: string; finish: () => void } | null = null;
 
 	function snapshot(): ArchiveImportState {
-		return { uploadId, fileName, preview, preparing, error, requestId: attempt?.requestId ?? '' };
+		return {
+			uploadId,
+			fileName,
+			preview,
+			previewUploadId,
+			previewNodeId,
+			preparing,
+			error,
+			requestId: attempt?.requestId ?? ''
+		};
 	}
 
 	function emit() {
@@ -66,6 +97,8 @@ export function createArchiveImport(
 		uploadId = id;
 		fileName = name;
 		preview = null;
+		previewUploadId = '';
+		previewNodeId = '';
 		preparing = false;
 		error = null;
 		attempt?.finish();
@@ -79,15 +112,24 @@ export function createArchiveImport(
 		const seq = sequence.next();
 		const currentUpload = uploadId;
 		preparing = true;
+		// A retry or destination change must never keep serving the previous
+		// preview while the new validation is in flight.
+		preview = null;
+		previewUploadId = '';
+		previewNodeId = '';
 		error = null;
 		emit();
 		try {
 			const result = await requests.previewServerArchive({ uploadId: currentUpload, nodeId });
 			if (seq !== sequence.current || currentUpload !== uploadId) return;
 			preview = result;
+			previewUploadId = currentUpload;
+			previewNodeId = nodeId;
 		} catch (cause) {
 			if (seq !== sequence.current || currentUpload !== uploadId) return;
 			preview = null;
+			previewUploadId = '';
+			previewNodeId = '';
 			error = cause instanceof Error ? cause.message : 'Archive preview failed';
 		} finally {
 			if (seq === sequence.current && currentUpload === uploadId) {
@@ -95,6 +137,11 @@ export function createArchiveImport(
 				emit();
 			}
 		}
+	}
+
+	/** Retry the same upload against the same destination after a refusal. */
+	function retry(nodeId: string): Promise<void> {
+		return refresh(nodeId);
 	}
 
 	/** Called only after a committed create. A refusal keeps upload and id. */
@@ -109,6 +156,8 @@ export function createArchiveImport(
 		uploadId = '';
 		fileName = '';
 		preview = null;
+		previewUploadId = '';
+		previewNodeId = '';
 		preparing = false;
 		error = null;
 		attempt?.finish();
@@ -122,6 +171,7 @@ export function createArchiveImport(
 		},
 		setUpload,
 		refresh,
+		retry,
 		succeeded,
 		discard
 	};

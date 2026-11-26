@@ -76,6 +76,18 @@ async function uploadFixtureArchive(page) {
   });
 }
 
+async function uploadServerArchive(page) {
+  await page.locator('[data-testid="archive-file-input"]').setInputFiles({
+    name: "fixture-server.zip",
+    mimeType: "application/zip",
+    buffer: Buffer.from("PK\x03\x04fixture-server"),
+  });
+}
+
+async function showWizardStep(page, title) {
+  await page.getByRole("button", { name: new RegExp(title) }).click();
+}
+
 const summaries = [];
 
 try {
@@ -438,13 +450,21 @@ try {
     .getByRole("button", { name: "Retry failed add-ons", exact: true })
     .click();
   await page.getByRole("button", { name: "Retry start", exact: true }).click();
-  await page.getByText("Fixture previous start still holds its lock.").waitFor();
+  await page
+    .getByText("Fixture previous start still holds its lock.")
+    .waitFor();
   assert.equal(
-    await page.evaluate(() => globalThis.__wizardCalls.filter((call) => call.method === "startServer").length),
+    await page.evaluate(
+      () =>
+        globalThis.__wizardCalls.filter((call) => call.method === "startServer")
+          .length,
+    ),
     1,
     "an errored server with an in-flight journal receipt must not start again",
   );
-  await page.evaluate(() => { globalThis.__wizardJournalLocked = false; });
+  await page.evaluate(() => {
+    globalThis.__wizardJournalLocked = false;
+  });
   await page.getByRole("button", { name: "Retry start", exact: true }).click();
   await page.getByRole("link", { name: "Open server", exact: true }).waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
@@ -457,12 +477,16 @@ try {
     1,
   );
   assert.deepEqual(
-    calls.filter((call) => call.method === "getModule").map((call) => call.payload.status),
+    calls
+      .filter((call) => call.method === "getModule")
+      .map((call) => call.payload.status),
     [6, 5, 5, 1],
     "the module must be observed preparing, errored, and finally stopped",
   );
   assert.deepEqual(
-    calls.filter((call) => call.method === "recreateModule").map((call) => call.payload.id),
+    calls
+      .filter((call) => call.method === "recreateModule")
+      .map((call) => call.payload.id),
     ["fixture-module"],
   );
   assert.deepEqual(
@@ -489,21 +513,147 @@ try {
   await waitForFixtureReady(page);
   await goToDatapackStep(page);
   await page.getByRole("button", { name: "Modules", exact: true }).click();
-  await page.getByRole("button", { name: "Add Resource Pack Host", exact: true }).click();
-  await page.evaluate(() => { globalThis.__wizardModuleMode = "lost"; });
-  await page.getByRole("button", { name: "Create Server", exact: true }).click();
-  await page.getByText("Fixture module response lost.", { exact: false }).waitFor();
-  await page.getByRole("button", { name: "Retry failed add-ons", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Add Resource Pack Host", exact: true })
+    .click();
+  await page.evaluate(() => {
+    globalThis.__wizardModuleMode = "lost";
+  });
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page
+    .getByText("Fixture module response lost.", { exact: false })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Retry failed add-ons", exact: true })
+    .click();
   await page.getByRole("link", { name: "Open server", exact: true }).waitFor();
   await page.getByText("Added", { exact: true }).waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
   assert.deepEqual(
-    calls.filter((call) => ["createModule", "listModules", "getModule", "recreateModule"].includes(call.method))
+    calls
+      .filter((call) =>
+        ["createModule", "listModules", "getModule", "recreateModule"].includes(
+          call.method,
+        ),
+      )
       .map((call) => call.method),
     ["createModule", "listModules", "getModule", "recreateModule", "getModule"],
     "retry must inspect and repair the existing error row after a lost create response",
   );
-  summaries.push({ scenario: "lost module response recovers its existing errored record", calls });
+  summaries.push({
+    scenario: "lost module response recovers its existing errored record",
+    calls,
+  });
+
+  // Create-from-archive: a failed preview blocks Create, the same node retry
+  // succeeds, a former blueprint image is not submitted, overrides survive and
+  // a refused create retries with the same archive submission id.
+  await page.reload();
+  await waitForFixtureReady(page);
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "fail-once";
+    globalThis.__wizardReset();
+  });
+  await page.getByPlaceholder("survival-smp-01").fill("archive-retry-fixture");
+  await page.getByRole("button", { name: /Fixture Java Seed/ }).click();
+  await page.getByTestId("create-from-archive-tile").click();
+  await uploadServerArchive(page);
+  await page
+    .getByText(/fixture archive preview refusal/)
+    .waitFor({ timeout: 15_000 });
+  await page.getByTestId("archive-preview-error").waitFor();
+  await showWizardStep(page, "Resources & Network");
+  await page.locator("#memory").fill("4096");
+  await page.locator("#max_players").fill("42");
+  await showWizardStep(page, "Add-ons");
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page
+    .getByText(
+      "Wait for a successful archive preview of this upload and destination before creating.",
+      { exact: true },
+    )
+    .waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.equal(
+    calls.some((call) => call.method === "createServer"),
+    false,
+    "a failed preview must block create",
+  );
+  await page
+    .getByRole("button", { name: "Retry preview", exact: true })
+    .click();
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await page.evaluate(() => {
+    globalThis.__wizardArchiveFailCreateOnce = true;
+  });
+  await showWizardStep(page, "Add-ons");
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page
+    .getByText(/fixture archive create refusal/)
+    .waitFor({ timeout: 15_000 });
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.equal(
+    calls.filter((call) => call.method === "createServer").length,
+    1,
+    "the refused create must not be followed by a hidden retry",
+  );
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Server created" }).waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  const archiveCreates = calls.filter((call) => call.method === "createServer");
+  assert.equal(archiveCreates.length, 2);
+  assert.equal(
+    archiveCreates[0].payload.requestId,
+    archiveCreates[1].payload.requestId,
+    "an archive create refusal must retry with the same submission id",
+  );
+  for (const { payload } of archiveCreates) {
+    assert.deepEqual(
+      {
+        archiveUploadId: payload.archiveUploadId,
+        mcVersion: payload.mcVersion,
+        modLoader: payload.modLoader,
+        loaderVersion: payload.loaderVersion,
+        memory: payload.memory,
+        maxPlayers: payload.maxPlayers,
+        dockerImage: payload.dockerImage,
+        modpackId: payload.modpackId,
+        nodeId: payload.nodeId,
+      },
+      {
+        archiveUploadId: "seeded-session",
+        mcVersion: "1.20.6",
+        modLoader: 3,
+        loaderVersion: "0.16.0",
+        memory: 4096,
+        maxPlayers: 42,
+        dockerImage: "",
+        modpackId: "",
+        nodeId: "",
+      },
+      "archive create must use the verified runtime, keep overrides and drop the former blueprint image",
+    );
+  }
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === "previewServerArchive")
+      .map((call) => call.payload.nodeId),
+    ["", ""],
+    "the retry must validate the same upload for the same destination",
+  );
+  summaries.push({
+    scenario:
+      "archive preview refusal blocks create, same-node retry succeeds, refused create keeps its submission id",
+    calls,
+  });
 
   assert.deepEqual(errors, [], "the fixture page must not throw");
   await page.screenshot({ path: path.join(out, "result.png") });
@@ -521,7 +671,7 @@ try {
     ),
   );
   console.log(
-    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, and partial-install retry",
+    "PASS: Create Server library preset, datapack upload, compatible mods and module selection, partial-install retry, and archive preview/create retry",
   );
 } finally {
   await browser?.close();

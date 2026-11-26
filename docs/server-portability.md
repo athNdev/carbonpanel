@@ -92,12 +92,16 @@ archive through the standard chunked upload service, previews it once after
 upload and again whenever the destination node changes, and shows the archive
 format, schema and exporter version, runtime defaults, file count, expanded
 and required bytes, destination availability, the chosen port and typed
-blockers or warnings. Runtime defaults can be applied to the editable form but
-the controller revalidates the upload and destination on create. A create
-submission keeps one request ID across retries; a refusal retains the
-completed upload so the operator can correct the destination and retry. A
-successful create discards the submission identity. Neither path stops an
-existing server.
+blockers or warnings. Create stays disabled until the current upload has a
+successful preview for the current destination; a failed preview offers a
+same-node retry, and a late response for an older upload or destination is
+ignored. Runtime defaults can be applied to the editable form, while archive
+creation submits the verified version, loader and loader version with the
+operator's memory and max-player values. The controller revalidates the upload
+and destination on create. A create submission keeps one request ID across
+retries; a refusal retains the completed upload so the operator can correct
+the destination and retry. A successful create discards the submission
+identity. Neither path stops an existing server.
 
 Export preparation, preview and create-from-archive validation use an extended
 one-hour client deadline and respect earlier cancellation. The console reports

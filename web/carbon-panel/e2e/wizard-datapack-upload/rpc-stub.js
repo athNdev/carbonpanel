@@ -27,6 +27,16 @@ const resourcePackHost = {
 		'[{"source":"{{server.data_path}}/modules/resource-pack-host/packs","target":"/packs","read_only":true,"create_dir":true}]',
 	defaultHooks: []
 };
+const fixtureBlueprint = {
+	id: 'fixture-blueprint',
+	name: 'Fixture Java Seed',
+	description: 'A qualified Java seed with its own image and memory setting.',
+	modLoader: 'forge',
+	mcVersion: '1.21.1',
+	dockerImage: 'java17',
+	defaultEnv: '{"MEMORY":"4G","TYPE":"FORGE"}',
+	builtin: false
+};
 
 function modVersion(id, fileName, dependencies = []) {
 	return {
@@ -80,6 +90,10 @@ export const rpcClient = {
 		},
 		createServer(payload) {
 			record('createServer', payload);
+			if (globalThis.__wizardArchiveFailCreateOnce) {
+				globalThis.__wizardArchiveFailCreateOnce = false;
+				return Promise.reject(new ConnectError('fixture archive create refusal', Code.Aborted));
+			}
 			const result = { server: { id: 'wizard-server', name: payload.name } };
 			if (globalThis.__wizardHoldCreate) {
 				return new Promise((resolve) => {
@@ -87,6 +101,36 @@ export const rpcClient = {
 				});
 			}
 			return Promise.resolve(result);
+		},
+		previewServerArchive(payload) {
+			record('previewServerArchive', payload);
+			const mode = globalThis.__archivePreviewMode || 'success';
+			if (mode === 'fail-once') {
+				globalThis.__archivePreviewMode = 'success';
+				return Promise.reject(
+					new ConnectError('fixture archive preview refusal', Code.Unavailable)
+				);
+			}
+			if (mode === 'fail') {
+				return Promise.reject(
+					new ConnectError('fixture archive preview refusal', Code.Unavailable)
+				);
+			}
+			return Promise.resolve({
+				format: 1,
+				schemaVersion: 1,
+				exporterVersion: 'fixture-1.0.0',
+				mcVersion: '1.20.6',
+				modLoader: 3,
+				loaderVersion: '0.16.0',
+				memory: 3072,
+				maxPlayers: 8,
+				fileCount: 12,
+				expandedBytes: 1048576n,
+				requiredBytes: 2097152n,
+				availableBytes: payload.nodeId ? 4194304n : undefined,
+				findings: []
+			});
 		},
 		getServer(payload) {
 			record('getServer', payload);
@@ -131,12 +175,14 @@ export const rpcClient = {
 	},
 	node: {
 		listNodes() {
-			return Promise.resolve({ nodes: [{ id: 'node-1', enabled: true, status: 1 }] });
+			return Promise.resolve({
+				nodes: [{ id: 'node-1', name: 'Fixture Node', enabled: true, status: 1 }]
+			});
 		}
 	},
 	blueprint: {
 		listBlueprints() {
-			return Promise.resolve({ blueprints: [] });
+			return Promise.resolve({ blueprints: [fixtureBlueprint] });
 		}
 	},
 	modpack: {

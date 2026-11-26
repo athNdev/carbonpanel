@@ -74,6 +74,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
 	import {
 		createArchiveImport,
+		isArchivePreviewCurrent,
 		type ArchiveImportState
 	} from '$lib/features/servers/archive-import-session';
 	import ArchivePreviewPanel from '$lib/features/servers/ArchivePreviewPanel.svelte';
@@ -218,6 +219,8 @@ one at https://mozilla.org/MPL/2.0/.
 		uploadId: '',
 		fileName: '',
 		preview: null,
+		previewUploadId: '',
+		previewNodeId: '',
 		preparing: false,
 		error: null,
 		requestId: ''
@@ -234,13 +237,15 @@ one at https://mozilla.org/MPL/2.0/.
 	const archivePreviewView = $derived(
 		archiveImportState.preview ? describePreview(archiveImportState.preview) : null
 	);
+	const archiveNodeId = $derived(nodePlacementMode === 'manual' ? selectedNodeId : '');
+	const archivePreviewReady = $derived(isArchivePreviewCurrent(archiveImportState, archiveNodeId));
 
 	// Preview again whenever the destination changes. A plain variable (not
 	// $state) holds the last key so the effect does not retrigger itself.
 	let lastArchivePreviewKey = '';
 	$effect(() => {
 		const uploadId = archiveImportState.uploadId;
-		const nodeKey = nodePlacementMode === 'manual' ? selectedNodeId : '';
+		const nodeKey = archiveNodeId;
 		if (!archiveMode || !uploadId) {
 			lastArchivePreviewKey = '';
 			return;
@@ -251,10 +256,17 @@ one at https://mozilla.org/MPL/2.0/.
 		void archiveImport.refresh(nodeKey);
 	});
 
+	function retryArchivePreview() {
+		if (!archiveImportState.uploadId) return;
+		void archiveImport.retry(archiveNodeId);
+	}
+
 	function chooseArchiveMode() {
 		archiveMode = true;
 		if (selectedModpack || loadingModpackVersions) removeModpack();
-		selectedBlueprintId = '';
+		// A catalog seed belongs to the former create path; its image cannot be
+		// combined with a portable archive even when the preview succeeds.
+		clearBlueprint();
 	}
 
 	function leaveArchiveMode() {
@@ -1089,6 +1101,13 @@ one at https://mozilla.org/MPL/2.0/.
 				currentStep = 0;
 				return;
 			}
+			if (!archivePreviewReady) {
+				toast.error(
+					'Wait for a successful archive preview of this upload and destination before creating.'
+				);
+				currentStep = 0;
+				return;
+			}
 			if (archivePreviewView?.isBlocked) {
 				toast.error('This archive has blocking findings. Resolve them before creating.');
 				currentStep = 0;
@@ -1112,9 +1131,18 @@ one at https://mozilla.org/MPL/2.0/.
 			const tasks = buildSetupTasks();
 			const hasAddons = tasks.length > 0;
 			deferredStart = formData.startImmediately && hasAddons;
+			const archivePreview = archiveMode ? archiveImportState.preview : null;
 			const createRequest = create(CreateServerRequestSchema, {
 				...formData,
-				mcVersion: datapackGameVersion || formData.mcVersion,
+				// The controller requires the verified archive runtime. Operator
+				// memory and max-player values in formData remain their overrides.
+				mcVersion: archivePreview
+					? archivePreview.mcVersion
+					: datapackGameVersion || formData.mcVersion,
+				modLoader: archivePreview ? archivePreview.modLoader : formData.modLoader,
+				loaderVersion: archivePreview ? archivePreview.loaderVersion : formData.loaderVersion,
+				memory: formData.memory,
+				maxPlayers: formData.maxPlayers,
 				startImmediately: formData.startImmediately && !deferredStart,
 				nodeId: nodePlacementMode === 'manual' ? selectedNodeId : '',
 				placementStrategy: nodePlacementMode === 'auto' ? placementStrategy : '',
@@ -1123,6 +1151,9 @@ one at https://mozilla.org/MPL/2.0/.
 				port: useProxyMode ? 0 : formData.port,
 				proxyHostname: useProxyMode && proxyEnabled ? formData.proxyHostname : '',
 				proxyListenerId: useProxyMode && proxyEnabled ? formData.proxyListenerId : '',
+				// An archive is provisioned by its manifest; a former blueprint or
+				// manual image must not leak into the import request.
+				dockerImage: archiveMode ? '' : formData.dockerImage,
 				archiveUploadId: archiveMode ? archiveImportState.uploadId : ''
 			});
 			if (archiveMode) {
@@ -1463,12 +1494,24 @@ one at https://mozilla.org/MPL/2.0/.
 										/>
 									</div>
 								{:else if archiveImportState.error}
-									<p
-										role="alert"
-										class="border-l-4 border-destructive bg-destructive/10 p-3 text-xs text-destructive-text"
+									<div
+										class="flex flex-wrap items-center justify-between gap-3 border-l-4 border-destructive bg-destructive/10 p-3"
+										data-testid="archive-preview-error"
 									>
-										{archiveImportState.error}
-									</p>
+										<p role="alert" class="text-xs text-destructive-text">
+											{archiveImportState.error}
+										</p>
+										{#if archiveImportState.uploadId}
+											<CarbonButton
+												kind="secondary"
+												size="sm"
+												disabled={archiveUploading}
+												onclick={retryArchivePreview}
+											>
+												Retry preview
+											</CarbonButton>
+										{/if}
+									</div>
 								{:else if archivePreviewView}
 									<ArchivePreviewPanel
 										view={archivePreviewView}

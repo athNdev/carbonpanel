@@ -40,6 +40,50 @@ test('the wizard never stops a live server in the archive flow', () => {
 	);
 });
 
+test('archive create needs the current successful preview and keeps source identity separate', () => {
+	assert.ok(
+		wizard.includes('isArchivePreviewCurrent(archiveImportState, archiveNodeId)'),
+		'create must require a successful preview of the current upload and node'
+	);
+	assert.ok(
+		wizard.includes('if (!archivePreviewReady)'),
+		'the failed-preview state must block create before the request is built'
+	);
+	assert.ok(
+		wizard.includes('archiveImport.retry(archiveNodeId)'),
+		'the failed preview must be retryable for the same upload and node'
+	);
+	assert.match(
+		wizard,
+		/mcVersion: archivePreview[\s\S]*archivePreview\.mcVersion/,
+		'archive create must use the verified Minecraft version'
+	);
+	assert.match(
+		wizard,
+		/modLoader: archivePreview \? archivePreview\.modLoader/,
+		'archive create must use the verified loader'
+	);
+	assert.match(
+		wizard,
+		/loaderVersion: archivePreview \? archivePreview\.loaderVersion/,
+		'archive create must use the verified loader version'
+	);
+	assert.match(
+		wizard,
+		/memory: formData\.memory,\s*maxPlayers: formData\.maxPlayers,/,
+		'operator memory and max-player overrides must survive archive create'
+	);
+	assert.ok(
+		wizard.includes("dockerImage: archiveMode ? '' : formData.dockerImage"),
+		'a former blueprint or manual image must not be submitted with an archive'
+	);
+	assert.match(
+		wizard,
+		/function chooseArchiveMode\(\)[\s\S]*clearBlueprint\(\)/,
+		'entering archive mode must clear the former blueprint image'
+	);
+});
+
 test('the operator export control is mounted on server detail', () => {
 	assert.ok(detail.includes('ServerArchiveExport'), 'server detail must expose the export control');
 	assert.ok(

@@ -41,6 +41,11 @@ sources:
   secrets inside opaque plugin or mod files.
 - Create-from-Archive uploads once, previews after upload and again when the
   destination changes, and renders typed findings and node capacity. Fence
-  preview responses by upload and destination. Reuse one create request ID
+  preview responses by upload and destination. Create stays blocked until the
+  current upload has a successful preview for the current destination; a failed
+  preview is retryable for the same upload and node. Reuse one create request ID
   across retries and retain a completed upload after a refusal; release that
-  identity only after a committed create.
+  identity only after a committed create. Submit the verified runtime version,
+  loader and loader version from that preview while keeping operator memory and
+  max-player overrides, and never carry a former blueprint image into the
+  archive request.
