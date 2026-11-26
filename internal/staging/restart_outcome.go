@@ -37,7 +37,27 @@ type RestartPublication struct {
 	RuntimePreflight bool
 }
 
-func (p *RestartPublication) HasChanges() bool { return p.Commit.HasContent() || len(p.Configs) != 0 }
+func (p *RestartPublication) HasChanges() bool {
+	return p != nil && p.Commit != nil && (p.Commit.HasContent() || len(p.Configs) != 0)
+}
+
+// BeginDispatch durably records the exact applied identities and dispatch
+// intent before the first runtime mutation of this lifecycle.
+func (p *RestartPublication) BeginDispatch(ctx context.Context) error {
+	if p == nil || p.Commit == nil || !p.HasChanges() {
+		return nil
+	}
+	return p.Commit.BeginDispatch(ctx, p.Configs)
+}
+
+// RecordReplacement stores the identity Docker returned at creation. A retry
+// may verify exactly this identity; it is never inferred from discovery.
+func (p *RestartPublication) RecordReplacement(ctx context.Context, containerID string) error {
+	if p == nil || p.Commit == nil {
+		return nil
+	}
+	return p.Commit.RecordReplacement(ctx, containerID)
+}
 
 type restartConfigStore interface {
 	RevertStagedConfigApplyToStaged(context.Context, string) (*storage.StagedConfigChange, error)
@@ -51,17 +71,24 @@ type restartConfigStore interface {
 // snapshot (and may be embedded in a prior replacement) stay applied. That
 // evidence comes from the commit's durable rows, not the mutable server status.
 func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigStore, cause error) error {
+	if p == nil || p.Commit == nil {
+		return nil
+	}
 	defer p.Commit.Finish()
 	if cause == nil {
-		if p.Commit == nil {
-			return nil
+		if p.Commit.NeedsIdentityVerification() && !p.RuntimeAccepted {
+			// A durable dispatch exists but this caller did not verify its
+			// exact replacement identity and did not observe a positive
+			// in-process outcome. Success alone is not publication evidence.
+			return errors.Join(p.Commit.sealRetained(ctx),
+				errors.New("recorded runtime dispatch was not verified; retry the lifecycle operation to observe its replacement identity"))
 		}
 		// A successful lifecycle is the positive acknowledgement that the
 		// runtime contains this batch's files and config. Persist that before
 		// finalization so a later retry can finish cleanup without recreating
 		// the container. The batch is sealed at the same time because new
 		// staged work must not join a recovery tree that is being finalized.
-		if p.HasChanges() {
+		if p.HasChanges() || p.Commit.NeedsIdentityVerification() {
 			if ackErr := p.Commit.markPublished(ctx); ackErr != nil {
 				// Do not run cleanup or close the batch over an acknowledgement
 				// that did not persist: the retry must resolve it first.
@@ -77,9 +104,10 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		return nil
 	}
 	if p.RuntimeIdentityUnresolved {
-		// Docker created a replacement but its canonical ID could not be
-		// saved. The runtime may contain this batch, so retain and seal it;
-		// a retry must reconcile the tracked identity before cleanup-only.
+		// Docker created a replacement but its canonical ID could not be saved.
+		// The runtime may contain this batch, so retain and seal it; a retry
+		// must observe the exact replacement identity captured at creation
+		// before finalizing. Container discovery alone is not evidence.
 		return errors.Join(p.Commit.sealRetained(ctx),
 			errors.New("container replacement succeeded but its canonical identity could not be saved; retry the lifecycle operation to reconcile the replacement before finalizing"))
 	}
@@ -105,6 +133,13 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		// container, so rollback would let that replacement outlive the rows.
 		return errors.Join(sealErr, errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation"))
 	}
+	if p.Commit.NeedsIdentityVerification() && !p.RuntimePreflight {
+		// A durable dispatch intent exists but this attempt did not positively
+		// observe its outcome. Never compensate or clean up over it; a retry
+		// must verify the exact recorded replacement identity first.
+		return errors.Join(p.Commit.sealRetained(ctx),
+			errors.New("staged changes retained because a recorded runtime dispatch is unverified; retry the lifecycle operation to verify its outcome"))
+	}
 	// Seal before restoring anything. The caller still owns the data-write
 	// lease; DB config staging does not take it, so the durable seal is what
 	// prevents a new row from joining these rows mid-compensation.
@@ -126,11 +161,22 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		// Compensation restored only this attempt's rows. Durable applied rows
 		// from an earlier attempt and their recovery tree remain; keep the batch
 		// sealed so admission cannot add a new file against that tree.
+		if failed == nil && sealErr == nil && p.Commit.publication != nil {
+			if err := p.Commit.store.AbandonUpdatePublication(recoveryCtx, p.Commit.batchID, p.Commit.publication.attempt()); err != nil {
+				return errors.Join(sealErr, failed, err)
+			}
+		}
 		return errors.Join(sealErr, failed)
 	}
 	if failed == nil && sealErr == nil {
-		// Fully compensated and nothing durable remains: releasing the claim
-		// keeps a no-op or preflight failure from blocking valid later staging.
+		// The attempt never recorded a runtime dispatch and fully compensated.
+		// Abandon its record, then release the claim so a later stage can create
+		// a fresh attempt.
+		if p.Commit.publication != nil {
+			if err := p.Commit.store.AbandonUpdatePublication(recoveryCtx, p.Commit.batchID, p.Commit.publication.attempt()); err != nil {
+				return errors.Join(sealErr, err)
+			}
+		}
 		failed = p.Commit.unsealRetained(ctx)
 	}
 	return errors.Join(sealErr, failed)

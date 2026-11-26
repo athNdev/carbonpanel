@@ -7,6 +7,7 @@ package staging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -278,6 +279,9 @@ func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID 
 // published bytes and releases it. Both methods are idempotent.
 type NextRestartCommit struct {
 	mu             sync.Mutex
+	store          *storage.Store
+	publication    *publicationAttempt
+	batchID        string
 	undo           func() error
 	complete       func() error
 	seal           func(context.Context) error
@@ -306,6 +310,25 @@ type configApplier interface {
 func (c *NextRestartCommit) ApplyConfigs(ctx context.Context, store configApplier) ([]*storage.StagedConfigChange, error) {
 	if c == nil {
 		return nil, nil
+	}
+	if c.publication != nil {
+		switch c.publication.phase() {
+		case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+			// A row staged after the dispatch cannot be covered by that
+			// runtime. The durable seal normally prevents it; legacy mixed data
+			// is refused instead of applied silently.
+			if hasStagedConfig(c.configs) {
+				return nil, fmt.Errorf("batch %s has a retained publication; discard the newly staged config rows and retry", c.batchID)
+			}
+			applied := appliedConfigsOnly(c.configs)
+			for _, cfg := range applied {
+				if c.priorConfigs == nil {
+					c.priorConfigs = make(map[string]bool)
+				}
+				c.priorConfigs[cfg.ID] = true
+			}
+			return applied, nil
+		}
 	}
 	applied := make([]*storage.StagedConfigChange, 0, len(c.configs))
 	for _, cfg := range c.configs {
@@ -338,12 +361,112 @@ func (c *NextRestartCommit) AppliedConfigsThisAttempt() int {
 	return c.appliedConfigs
 }
 
-// RequiresIdentityReconciliation reports that an earlier attempt applied rows
-// without an acknowledgement, so its container identity may not match the
-// tracked one. Resolve the canonical container before starting or recreating;
-// a stale known-removed ID is not a valid base for either operation.
-func (c *NextRestartCommit) RequiresIdentityReconciliation() bool {
-	return c != nil && !c.published && c.HasPriorRuntimeState()
+// NeedsIdentityVerification reports that a durable dispatch intent was recorded
+// but its runtime outcome was not verified. The caller must observe the exact
+// expected replacement identity before treating the batch as published; a
+// different or equal canonical container only repairs the tracked ID and is
+// never publication evidence.
+func (c *NextRestartCommit) NeedsIdentityVerification() bool {
+	return c != nil && c.publication != nil && c.publication.phase() == storage.PublicationDispatched
+}
+
+// ExpectedReplacementID is the replacement identity captured at creation for
+// the current attempt. It is empty when the dispatch did not create a new
+// container or its identity could not be persisted.
+func (c *NextRestartCommit) ExpectedReplacementID() string {
+	if c == nil || c.publication == nil || c.publication.record == nil {
+		return ""
+	}
+	return c.publication.record.ExpectedContainerID
+}
+
+// PublicationPhase reports the durable publication phase for diagnostics and
+// conservative caller decisions. The zero value means no record exists.
+func (c *NextRestartCommit) PublicationPhase() storage.PublicationPhase {
+	if c == nil || c.publication == nil {
+		return ""
+	}
+	return c.publication.phase()
+}
+
+// VerifyExpectedReplacement acknowledges the batch only when the canonical
+// container is exactly the replacement identity captured at creation for this
+// attempt. A replacement that rolled back to the baseline, an empty identity, or
+// an unrelated/same canonical container is not evidence.
+func (c *NextRestartCommit) VerifyExpectedReplacement(ctx context.Context, canonicalID string) (bool, error) {
+	if !c.NeedsIdentityVerification() {
+		return false, nil
+	}
+	expected := c.ExpectedReplacementID()
+	baseline := ""
+	if c.publication.record != nil {
+		baseline = c.publication.record.BaselineContainerID
+	}
+	if canonicalID == "" || expected == "" || expected == baseline || canonicalID != expected {
+		return false, nil
+	}
+	if err := c.store.MarkUpdatePublicationVerified(ctx, c.batchID, c.publication.attempt(), canonicalID); err != nil {
+		return false, err
+	}
+	c.publication.record.Phase = storage.PublicationVerified
+	c.published = true
+	return true, nil
+}
+
+// BeginDispatch durably records the exact applied row identities and the
+// dispatch intent. Callers must invoke it before the first runtime mutation.
+// It is a no-op for a batch with no publication record.
+func (c *NextRestartCommit) BeginDispatch(ctx context.Context, appliedConfigs []*storage.StagedConfigChange) error {
+	if c == nil || c.publication == nil || c.published {
+		return nil
+	}
+	if c.publication.phase() == storage.PublicationDispatched {
+		return nil
+	}
+	configIDs := make([]string, 0, len(appliedConfigs))
+	for _, cfg := range appliedConfigs {
+		if cfg != nil && cfg.ID != "" {
+			configIDs = append(configIDs, cfg.ID)
+		}
+	}
+	rows, err := c.store.ListBatchContentAll(ctx, c.batchID)
+	if err != nil {
+		return err
+	}
+	contentIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.Status == storage.StagedStatusApplied {
+			contentIDs = append(contentIDs, row.ID)
+		}
+	}
+	configBody, err := json.Marshal(configIDs)
+	if err != nil {
+		return err
+	}
+	contentBody, err := json.Marshal(contentIDs)
+	if err != nil {
+		return err
+	}
+	if err := c.store.RecordUpdatePublicationDispatch(ctx, c.batchID, c.publication.attempt(), string(configBody), string(contentBody)); err != nil {
+		return err
+	}
+	c.publication.record.Phase = storage.PublicationDispatched
+	c.publication.record.AppliedConfigIDs = string(configBody)
+	c.publication.record.AppliedContentIDs = string(contentBody)
+	return nil
+}
+
+// RecordReplacement stores the replacement identity Docker returned at
+// creation. The recorded value is what a retry may independently verify; it is
+// never inferred from later container discovery.
+func (c *NextRestartCommit) RecordReplacement(ctx context.Context, containerID string) error {
+	if c == nil || c.publication == nil || containerID == "" || c.published {
+		return nil
+	}
+	if c.publication.phase() != storage.PublicationDispatched {
+		return nil
+	}
+	return c.store.RecordUpdatePublicationReplacement(ctx, c.batchID, c.publication.attempt(), containerID)
 }
 
 // IsPriorConfig reports whether a snapshot config row was already applied
@@ -468,10 +591,52 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 			return nil, err
 		}
 	}
-	if batchID == "" && len(configs) == 0 {
-		return nil, nil
+	if batchID == "" {
+		if len(configs) == 0 {
+			return nil, nil
+		}
+		// Legacy unbatched rows have no batch-bound publication record. They
+		// keep the pre-existing lifecycle behavior and are never auto-restored.
+		commit := &NextRestartCommit{release: write.Release, configs: configs}
+		owned = true
+		return commit, nil
 	}
-	if batchID != "" && !published && appliedContent == 0 && len(content) == 0 && len(configs) == 0 {
+
+	publicationRecord, err := store.GetUpdatePublication(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	if publicationRecord != nil {
+		switch publicationRecord.Phase {
+		case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+			if len(content) > 0 || hasStagedConfig(configs) {
+				// A row joined a batch whose runtime outcome is already
+				// recorded. It cannot be covered by that dispatch.
+				return nil, fmt.Errorf("open batch %s has a retained publication; discard the newly staged rows and retry the lifecycle to resolve the retained publication", batchID)
+			}
+			if err := requirePublicationCoverage(ctx, store, publicationRecord, batchID, configs); err != nil {
+				return nil, err
+			}
+			commit := &NextRestartCommit{
+				store: store, release: write.Release, configs: appliedConfigsOnly(configs),
+				published: publicationRecord.Phase != storage.PublicationDispatched,
+				batchID:   batchID, publication: newPublicationAttempt(store, publicationRecord),
+			}
+			commit.pendingContent = appliedContent > 0
+			commit.setBatchActions(ctx, store, server, batchID, resolver)
+			owned = true
+			return commit, nil
+		}
+	}
+	if !published && (publicationRecord == nil || publicationRecord.Phase == storage.PublicationAbandoned) {
+		// The first preparation attempt owns the batch before any live write.
+		publicationRecord, err = store.BeginUpdatePublication(ctx, batchID, server.ID, server.ContainerID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if appliedContent == 0 && len(content) == 0 && len(configs) == 0 &&
+		(publicationRecord == nil || publicationRecord.Phase == storage.PublicationPreparing || publicationRecord.Phase == storage.PublicationAbandoned) {
 		// Nothing to publish or resolve: do not leave a seal that would block
 		// valid later admission until another lifecycle happens to run. This
 		// also releases a seal left by an interrupted but write-free attempt.
@@ -481,28 +646,24 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		return nil, nil
 	}
 	commit := &NextRestartCommit{
-		release:   write.Release,
-		configs:   configs,
-		published: published,
+		store: store, release: write.Release, configs: configs, published: published,
+		batchID: batchID, publication: newPublicationAttempt(store, publicationRecord),
 	}
-	if batchID != "" {
-		batchForFinish := batchID
-		commit.pendingContent = appliedContent > 0
-		commit.complete = func() error {
-			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-			defer cancel()
-			return finishNextRestartBatch(finishCtx, store, server, batchForFinish, resolver, commit.HasContent())
+	commit.pendingContent = appliedContent > 0
+	if commit.publication != nil && commit.publication.phase() == storage.PublicationPreparing && len(content) == 0 {
+		// A config-only attempt has no file snapshot. Record the empty
+		// snapshot durably so the dispatch transition starts from a complete
+		// prepared phase instead of the no-live-write phase.
+		body, marshalErr := json.Marshal([]undoEntry{})
+		if marshalErr != nil {
+			return nil, marshalErr
 		}
-		commit.seal = func(sealCtx context.Context) error {
-			return store.SealUpdateBatch(sealCtx, batchForFinish)
+		if snapErr := store.RecordUpdatePublicationSnapshot(ctx, batchID, commit.publication.attempt(), string(body)); snapErr != nil {
+			return nil, snapErr
 		}
-		commit.acknowledge = func(ackCtx context.Context) error {
-			return store.MarkUpdateBatchPublished(ackCtx, batchForFinish)
-		}
-		commit.unseal = func(unsealCtx context.Context) error {
-			return store.ReleaseUpdateBatchSeal(unsealCtx, batchForFinish)
-		}
+		commit.publication.record.Phase = storage.PublicationPrepared
 	}
+	commit.setBatchActions(ctx, store, server, batchID, resolver)
 	if len(content) > 0 {
 		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return nil, err
@@ -510,13 +671,16 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		if err := requireReviewedModRuntimeConsistency(ctx, store, server, content); err != nil {
 			return nil, err
 		}
-		// The next-restart path copies files before recording APPLIED and only
-		// mutates the runtime afterwards. A recovery tree left without any
-		// APPLIED row therefore belongs to an attempt that never reached the
-		// runtime: restore it before reusing the tree. The timed path does not
-		// have that ordering and never opts in.
-		commit.undo, err = commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, appliedContent == 0, resolver)
+		// The durable publication phase, not an APPLIED row alone, decides
+		// whether a recovery tree may be restored. A prepared/applying snapshot
+		// is validated against its controller-owned entries.
+		commit.undo, err = commitNextRestartFilesHeld(ctx, store, server, content, recreateModule, commit.publication, resolver)
 		if err != nil {
+			if errors.Is(err, errModuleRecoveryAmbiguous) {
+				// The durable record cannot prove the module runtime was
+				// untouched. Seal rather than restore or clean up.
+				_ = store.SealUpdateBatch(ctx, batchID)
+			}
 			return nil, err
 		}
 	}
@@ -529,6 +693,95 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 // evidence that recovery cleanup may be owed.
 func (c *NextRestartCommit) HasContent() bool { return c != nil && (c.undo != nil || c.pendingContent) }
 
+func (c *NextRestartCommit) setBatchActions(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver) {
+	c.complete = func() error {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		return finishNextRestartBatch(finishCtx, store, server, batchID, resolver, c.HasContent())
+	}
+	c.seal = func(sealCtx context.Context) error {
+		return store.SealUpdateBatch(sealCtx, batchID)
+	}
+	c.acknowledge = func(ackCtx context.Context) error {
+		return store.MarkUpdateBatchPublished(ackCtx, batchID)
+	}
+	c.unseal = func(unsealCtx context.Context) error {
+		return store.ReleaseUpdateBatchSeal(unsealCtx, batchID)
+	}
+}
+
+func hasStagedConfig(configs []*storage.StagedConfigChange) bool {
+	for _, cfg := range configs {
+		if cfg != nil && cfg.Status == storage.StagedStatusStaged {
+			return true
+		}
+	}
+	return false
+}
+
+func appliedConfigsOnly(configs []*storage.StagedConfigChange) []*storage.StagedConfigChange {
+	out := make([]*storage.StagedConfigChange, 0, len(configs))
+	for _, cfg := range configs {
+		if cfg != nil && cfg.Status == storage.StagedStatusApplied {
+			out = append(out, cfg)
+		}
+	}
+	return out
+}
+
+func moduleRowIDs(rows []storage.StagedContentChange) []string {
+	var ids []string
+	for _, row := range rows {
+		if row.Kind == storage.StagedKindModule {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids
+}
+
+// requirePublicationCoverage refuses a resume when a batch-owned row was
+// applied after the recorded dispatch. The older runtime is not evidence for
+// that row, so treating it as covered would hide a real, unexpected effect.
+func requirePublicationCoverage(ctx context.Context, store *storage.Store, record *storage.ServerUpdatePublication, batchID string, configs []*storage.StagedConfigChange) error {
+	var coveredConfigs, coveredContent []string
+	if record.AppliedConfigIDs != "" {
+		if err := json.Unmarshal([]byte(record.AppliedConfigIDs), &coveredConfigs); err != nil {
+			return fmt.Errorf("batch %s has a corrupt covered config identity: %w", batchID, err)
+		}
+	}
+	if record.AppliedContentIDs != "" {
+		if err := json.Unmarshal([]byte(record.AppliedContentIDs), &coveredContent); err != nil {
+			return fmt.Errorf("batch %s has a corrupt covered content identity: %w", batchID, err)
+		}
+	}
+	configSet := make(map[string]bool, len(coveredConfigs))
+	for _, id := range coveredConfigs {
+		configSet[id] = true
+	}
+	for _, cfg := range configs {
+		if cfg == nil || cfg.BatchID != batchID || cfg.Status != storage.StagedStatusApplied {
+			continue
+		}
+		if !configSet[cfg.ID] {
+			return fmt.Errorf("batch %s has config row %s applied after its recorded publication; the older runtime does not cover it, so the lifecycle must be resolved by an operator", batchID, cfg.ID)
+		}
+	}
+	contentSet := make(map[string]bool, len(coveredContent))
+	for _, id := range coveredContent {
+		contentSet[id] = true
+	}
+	rows, err := store.ListBatchContentAll(ctx, batchID)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.Status == storage.StagedStatusApplied && !contentSet[row.ID] {
+			return fmt.Errorf("batch %s has content row %s applied after its recorded publication; the older runtime does not cover it, so the lifecycle must be resolved by an operator", batchID, row.ID)
+		}
+	}
+	return nil
+}
+
 // NeedsRuntimePublication separates work that still owes a container publish
 // from a publication an earlier lifecycle already accepted. Files copied by
 // this attempt always need the publish. Retained applied rows need it only
@@ -538,10 +791,24 @@ func (c *NextRestartCommit) NeedsRuntimePublication() bool {
 	if c == nil {
 		return false
 	}
+	if c.publication != nil {
+		switch c.publication.phase() {
+		case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+			// A dispatch is resolved by identity verification; a verified
+			// publication owes bookkeeping only.
+			return false
+		}
+	}
 	if c.undo != nil {
 		return true
 	}
 	return c.pendingContent && !c.published
+}
+
+// Retain seals the batch and leaves every recorded phase and row in place. It
+// is the caller's fail-closed response to drift or an unverifiable identity.
+func (c *NextRestartCommit) Retain(ctx context.Context) error {
+	return c.sealRetained(ctx)
 }
 
 // sealRetained makes the durable applied rows, and their recovery tree,
@@ -556,14 +823,27 @@ func (c *NextRestartCommit) sealRetained(ctx context.Context) error {
 }
 
 // markPublished records a positively acknowledged runtime publication before
-// finalization. If persisting it fails, the retry conservatively repeats the
-// publication rather than closing over an unproven one.
+// finalization. The publication phase and the batch acknowledgement are written
+// in one transaction. If persisting them fails, the retry conservatively
+// retains the dispatch rather than closing over an unproven one.
 func (c *NextRestartCommit) markPublished(ctx context.Context) error {
 	if c == nil || c.acknowledge == nil || c.published {
 		return nil
 	}
 	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	if c.publication != nil {
+		containerID := c.publication.record.ExpectedContainerID
+		if containerID == "" {
+			containerID = c.publication.record.BaselineContainerID
+		}
+		if err := c.store.MarkUpdatePublicationVerified(ackCtx, c.batchID, c.publication.attempt(), containerID); err != nil {
+			return err
+		}
+		c.publication.record.Phase = storage.PublicationVerified
+		c.published = true
+		return nil
+	}
 	if err := c.acknowledge(ackCtx); err != nil {
 		return err
 	}
@@ -604,15 +884,17 @@ func (c *NextRestartCommit) HasPriorRuntimeState() bool {
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.
 // The caller owns the exclusive data-write gate through the returned undo.
-// recoverUnapplied may restore a recovery tree left by an attempt that wrote
-// files but never recorded an APPLIED row; only the next-restart ordering makes
-// that safe.
-func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, recoverUnapplied bool, resolver *nodestorage.Resolver) (func() error, error) {
+// publication binds recovery to the durable batch snapshot. A batch without a
+// durable snapshot is never restored from the mutable game-data manifest.
+func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, server *storage.Server, content []storage.StagedContentChange, recreateModule func(context.Context, string) error, publication *publicationAttempt, resolver *nodestorage.Resolver) (func() error, error) {
+	if publication != nil && publication.phase() == storage.PublicationApplying && publication.record.ModuleIntent != "" {
+		return nil, errModuleRecoveryAmbiguous
+	}
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}
-	snaps, err := commitFilesRecoveringInterrupted(ctx, acc, content, recoverUnapplied)
+	snaps, err := commitFilesForPublication(ctx, acc, content, publication)
 	_ = acc.Close()
 	restoreFilesNow := func() error {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
@@ -625,11 +907,24 @@ func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, serve
 		return restoreFiles(recoveryCtx, again, snaps)
 	}
 	if err != nil {
-		return nil, errors.Join(err, restoreFilesNow())
+		// The durable snapshot is the recovery evidence. Leave the tree in
+		// place so the retry can restore it instead of destroying evidence.
+		return nil, err
+	}
+	// Module database rows and containers may change before the content row is
+	// marked APPLIED. Record that intent durably first so a resume can tell that
+	// a runtime mutation may already have started.
+	if publication != nil {
+		if err := publication.recordModuleIntent(ctx, moduleRowIDs(content)); err != nil {
+			// No module row or container has changed yet, and the durable
+			// snapshot still describes the live tree. Leave it intact for the
+			// retry to restore; do not remove the recovery evidence.
+			return nil, err
+		}
 	}
 	moduleIDs, undoModules, err := applyStagedModules(ctx, store, server, content, resolver)
 	if err != nil {
-		return nil, errors.Join(err, restoreFilesNow())
+		return nil, err
 	}
 	for _, id := range moduleIDs {
 		if recreateModule == nil {
@@ -642,7 +937,9 @@ func commitNextRestartFilesHeld(ctx context.Context, store *storage.Store, serve
 	applied := make([]string, 0, len(content))
 	for i := range content {
 		if markErr := store.MarkStagedContentApplied(ctx, content[i].ID); markErr != nil {
-			return nil, errors.Join(markErr, undoApply(ctx, store, moduleRestore(undoModules, restoreFilesNow), nil, applied))
+			// Leave the durable snapshot for the retry; removing it here would
+			// hide which files this attempt already wrote.
+			return nil, markErr
 		}
 		applied = append(applied, content[i].ID)
 	}
@@ -672,6 +969,9 @@ func finishNextRestartBatch(ctx context.Context, store *storage.Store, server *s
 		if err := cleanupBatchRecovery(ctx, store, server, batchID, resolver); err != nil {
 			return err
 		}
+	}
+	if err := store.MarkUpdatePublicationCleaned(ctx, batchID); err != nil {
+		return err
 	}
 	return store.CloseUpdateBatch(ctx, batchID, storage.UpdateBatchApplied)
 }
@@ -757,14 +1057,14 @@ func undoApply(ctx context.Context, store *storage.Store, restore func() error, 
 }
 
 func commitFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	return commitStreamingFiles(ctx, acc, rows, false)
+	return commitStreamingFiles(ctx, acc, rows, nil)
 }
 
-// commitFilesRecoveringInterrupted is the next-restart variant. That path
-// records APPLIED before any runtime mutation, so a recovery tree with no
-// APPLIED row can be restored safely before the tree is reused.
-func commitFilesRecoveringInterrupted(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange, recoverUnapplied bool) ([]fileSnap, error) {
-	return commitStreamingFiles(ctx, acc, rows, recoverUnapplied)
+// commitFilesForPublication is the next-restart variant. Its recovery tree is
+// governed by the durable batch publication snapshot instead of the mutable
+// manifest in the game data filesystem.
+func commitFilesForPublication(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange, publication *publicationAttempt) ([]fileSnap, error) {
+	return commitStreamingFiles(ctx, acc, rows, publication)
 }
 
 func openAccessor(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) (nodestorage.Accessor, error) {

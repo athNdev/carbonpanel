@@ -64,10 +64,11 @@ type containerResolver interface {
 
 // ReconcileContainerIdentity makes the tracked container match the canonical
 // live container before a retry may start or recreate it. It returns true when
-// a different canonical container was adopted and persisted: that container was
-// created after the batch's durable APPLIED rows, so the caller may treat the
-// batch as accepted instead of publishing it again. A missing or unresolvable
-// container is an error, never permission to act on the stale tracked ID.
+// a different canonical container was adopted and persisted. Adoption repairs
+// the tracked id only: it is never evidence that the batch was published. A
+// caller must separately verify the identity captured at creation on the
+// durable publication record. A missing or unresolvable container is an error,
+// never permission to act on the stale tracked ID.
 func ReconcileContainerIdentity(ctx context.Context, store recreationStore, client containerResolver, server *db.Server) (bool, error) {
 	resolved, err := client.ResolveContainer(ctx, server.ID)
 	if err != nil {

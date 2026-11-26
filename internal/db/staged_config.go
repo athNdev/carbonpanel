@@ -572,9 +572,14 @@ func (s *Store) ListPendingRestartStagedConfigs(ctx context.Context, serverID st
 		Table("staged_config_changes AS c").
 		Select("c.*").
 		Joins("LEFT JOIN server_update_batches AS b ON b.id = c.batch_id").
+		Joins("LEFT JOIN server_update_publications AS p ON p.batch_id = c.batch_id").
 		Where("c.server_id = ? AND c.apply_mode = ? AND c.status = ? AND c.applied_at IS NOT NULL",
 			serverID, StagedApplyOnRestart, StagedStatusApplied).
-		Where("c.batch_id = '' OR c.batch_id IS NULL OR b.published_at IS NULL OR c.applied_at > b.published_at")
+		Where(`c.batch_id = '' OR c.batch_id IS NULL OR b.published_at IS NULL
+			OR c.applied_at > b.published_at
+			OR (p.phase IN ? AND c.id NOT IN (
+				SELECT value FROM json_each(CASE WHEN p.applied_config_ids = '' THEN '[]' ELSE p.applied_config_ids END)
+			))`, []PublicationPhase{PublicationVerified, PublicationCleaned})
 	if lastStarted != nil {
 		q = q.Where("c.applied_at > ?", *lastStarted)
 	}

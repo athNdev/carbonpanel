@@ -15,6 +15,7 @@ import (
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -212,4 +213,144 @@ func TestStartIdentityPersistenceFailureIsNotAcknowledged(t *testing.T) {
 	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.Nil(t, open)
+}
+
+// TestStartPreDispatchInterruptedNoContainerResumesStandardCreation simulates a
+// crash after the staged files and config are on the live tree but before any
+// Docker dispatch, for a server that has no container yet. The retry must not
+// ask for identity reconciliation; it resumes ordinary creation, records the
+// created identity, starts the server, and acknowledges the batch once.
+func TestStartPreDispatchInterruptedNoContainerResumesStandardCreation(t *testing.T) {
+	ctx := context.Background()
+	var creates, starts atomic.Int32
+	svc, server := newStagedLifecycleTestServer(t, "pre-dispatch-create", time.Now().Add(-time.Hour).Truncate(time.Second))
+	require.NoError(t, svc.store.UpdateServerFields(ctx, server.ID, map[string]any{
+		"container_id": "", "status": string(storage.StatusStopped),
+	}))
+	server.ContainerID = ""
+	server.Status = storage.StatusStopped
+	attachDockerAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			creates.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"Id":"created-container"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/created-container/start"):
+			starts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/wait"):
+			_, _ = w.Write([]byte(`{"StatusCode":0}`))
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	stageMixedNextRestartRows(t, svc, server)
+
+	// The prepared snapshot and live writes exist; no dispatch intent does.
+	commit, err := staging.CommitNextRestartFiles(ctx, svc.store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	_, err = commit.ApplyConfigs(ctx, svc.store)
+	require.NoError(t, err)
+	require.False(t, commit.NeedsIdentityVerification())
+	commit.Finish() // crash before any Docker call
+
+	open, err := svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	record, err := svc.store.GetUpdatePublication(ctx, open.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationApplying, record.Phase)
+	require.Empty(t, record.ExpectedContainerID)
+
+	response, err := svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+	require.NoError(t, err)
+	require.Equal(t, "starting", response.Msg.GetStatus())
+	require.EqualValues(t, 1, creates.Load(), "the retry resumes standard creation")
+	require.EqualValues(t, 1, starts.Load())
+	stored, err := svc.store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, "created-container", stored.ContainerID)
+	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+	record, err = svc.store.GetUpdatePublication(ctx, record.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationCleaned, record.Phase)
+}
+
+// TestStartUnrelatedCanonicalDriftRefusesAcknowledgement simulates a recorded
+// dispatch whose expected replacement is known, while the daemon resolves an
+// unrelated canonical container. Adoption may repair the tracked id, but it is
+// not publication evidence: the batch stays sealed and no cleanup or start runs.
+func TestStartUnrelatedCanonicalDriftRefusesAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	var creates, starts atomic.Int32
+	svc, server := newStagedLifecycleTestServer(t, "drift-refused", time.Now().Add(-time.Hour).Truncate(time.Second))
+	attachDockerAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[{"Id":"drift-container","Names":["/carbon-panel-server-drift-refused"],"State":"running"}]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			creates.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"Id":"unexpected"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/drift-container/start"):
+			starts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	stageMixedNextRestartRows(t, svc, server)
+
+	commit, err := staging.CommitNextRestartFiles(ctx, svc.store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, svc.store)
+	require.NoError(t, err)
+	first := &staging.RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.NoError(t, first.BeginDispatch(ctx))
+	require.NoError(t, first.RecordReplacement(ctx, "expected-replacement"))
+	commit.Finish() // crash before the runtime outcome was verified
+	open, err := svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	recovery := filepath.Join(server.DataPath, ".carbon-panel", "undo", open.ID)
+	require.DirExists(t, recovery)
+
+	_, err = svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+	require.ErrorContains(t, err, "not the recorded replacement")
+	require.EqualValues(t, 0, creates.Load())
+	require.EqualValues(t, 0, starts.Load(), "drift must not start or recreate the runtime")
+	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open.SealedAt)
+	require.Nil(t, open.PublishedAt, "drift is identity repair, not an acknowledgement")
+	require.DirExists(t, recovery, "a refused acknowledgement must retain recovery")
+	require.FileExists(t, filepath.Join(server.DataPath, "mixed.txt"))
+	stored, err := svc.store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, "drift-container", stored.ContainerID, "adoption repairs the tracked id")
 }

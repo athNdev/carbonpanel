@@ -1284,18 +1284,26 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	if appliedNow == 0 && !pending && !needsPublication {
 		return false, nil
 	}
-	if publication.Commit.RequiresIdentityReconciliation() {
-		adopted, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, store, dockerClient, server)
-		if reconcileErr != nil {
-			return true, reconcileErr
+	if publication.Commit.NeedsIdentityVerification() {
+		// A dispatch intent is durable but its outcome was not verified. Repair
+		// the tracked identity if the canonical container differs, then accept
+		// only the exact replacement identity captured at creation. Discovery of
+		// any other container is identity repair, never publication evidence.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, store, dockerClient, server); reconcileErr != nil {
+			return true, errors.Join(publication.Commit.Retain(ctx), reconcileErr)
 		}
-		if adopted {
-			// The canonical container was created after this batch's durable
-			// applied evidence. Record the acknowledgement and let the caller's
-			// normal lifecycle operate on that container.
-			publication.RuntimeAccepted = true
-			return false, nil
+		verified, verifyErr := publication.Commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return true, verifyErr
 		}
+		if !verified {
+			return true, errors.Join(publication.Commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, publication.Commit.ExpectedReplacementID()))
+		}
+		// The runtime is verified. Let the caller's normal lifecycle operate on
+		// that container; this attempt owes cleanup, not another replacement.
+		publication.RuntimeAccepted = true
+		return false, nil
 	}
 
 	serverConfig, err := store.GetServerConfig(ctx, server.ID)
@@ -1307,8 +1315,16 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	}
 	serverruntime.PrepareConfig(ctx, store, server, serverConfig)
 
+	if err := publication.BeginDispatch(ctx); err != nil {
+		return true, fmt.Errorf("failed to record staged publication dispatch: %w", err)
+	}
 	publication.RuntimeAttempted = true
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
+	if result != nil && result.NewContainerID != "" {
+		if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+			return true, errors.Join(recordErr, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+		}
+	}
 	if recreateErr != nil {
 		var outcomeErr *serverruntime.RecreationError
 		if errors.As(recreateErr, &outcomeErr) {
@@ -1330,7 +1346,11 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 			return true, fmt.Errorf("failed to start recreated server: %w", err)
 		}
 	}
-	publication.RuntimeAccepted = startReplacement || result.WasRunning
+	// A reached-and-running replacement was positively observed. A stopped
+	// replacement created for a deep-sleep wake is acknowledged by the wake
+	// completion once its start is observed; a caller with no completion owner
+	// accepts the created replacement directly.
+	publication.RuntimeAccepted = startReplacement || result.WasRunning || transfer == nil
 	if err := store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
 		return true, fmt.Errorf("server restarted but temporary config could not be cleared: %w", err)
 	}
@@ -1354,6 +1374,12 @@ func stagedWakeCompletion(ctx context.Context, store *storage.Store, p *staging.
 	return func(startAttempted bool, wakeErr error) error {
 		if startAttempted {
 			p.RuntimeAttempted = true
+		}
+		if wakeErr == nil {
+			// A nil wake error is a positive runtime observation: the
+			// replacement contains the batch and was started (or was already
+			// running). It may acknowledge the publication.
+			p.RuntimeAccepted = true
 		}
 		return p.Resolve(ctx, store, wakeErr)
 	}

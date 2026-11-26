@@ -45,6 +45,9 @@ func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 				Commit: commit, Configs: applied,
 				RuntimeAttempted: tc.attempted, RuntimeAccepted: tc.accepted, RuntimePreflight: tc.preflight,
 			}
+			if tc.attempted || tc.accepted {
+				require.NoError(t, publication.BeginDispatch(ctx))
+			}
 			cause := errors.New("preflight or runtime failure")
 			if tc.timedOut {
 				cause = context.DeadlineExceeded
@@ -213,7 +216,9 @@ func TestNextRestartWithoutBatchAppliesOnlyLegacyConfig(t *testing.T) {
 	timed, err := store.GetStagedConfigChange(ctx, "legacy-timed")
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusStaged, timed.Status)
-	require.NoError(t, publicationFor(commit, applied).Resolve(ctx, store, nil))
+	pub := publicationFor(commit, applied)
+	require.NoError(t, pub.BeginDispatch(ctx))
+	require.NoError(t, pub.Resolve(ctx, store, nil))
 }
 
 func publicationFor(commit *NextRestartCommit, configs []*storage.StagedConfigChange) *RestartPublication {
@@ -235,7 +240,9 @@ func TestConfigOnlyNextRestartFinalizeDoesNotOpenFileStorage(t *testing.T) {
 	require.False(t, commit.HasContent())
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.NoError(t, (&RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil))
+	pub := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, pub.BeginDispatch(ctx))
+	require.NoError(t, pub.Resolve(ctx, store, nil))
 
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
@@ -255,7 +262,9 @@ func TestNextRestartCleanupFailureLeavesRetryableBatch(t *testing.T) {
 	t.Cleanup(commit.Finish)
 	// Make file recovery storage unreachable so cleanup has a real failure.
 	server.NodeID = "missing-node"
-	err = (&RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil)
+	failed := &RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, failed.BeginDispatch(ctx))
+	err = failed.Resolve(ctx, store, nil)
 	require.Error(t, err)
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
@@ -276,7 +285,9 @@ func TestNextRestartCleanupRetryAfterAppliedRowsClosesWithoutRepublish(t *testin
 	require.NoError(t, err)
 	require.True(t, commit.HasContent())
 	server.NodeID = "missing-node"
-	require.Error(t, (&RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}).Resolve(ctx, store, nil))
+	first := &RestartPublication{Commit: commit, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, first.BeginDispatch(ctx))
+	require.Error(t, first.Resolve(ctx, store, nil))
 	require.DirExists(t, filepath.Join(data, ".carbon-panel", "undo", batch))
 
 	// The applied row proves cleanup is still owed even though the batch has
@@ -377,8 +388,10 @@ func TestRetainedNextRestartSealsAdmissionAndRetryResolvesSnapshot(t *testing.T)
 	// The Docker request may have been accepted but its outcome was not
 	// observed. The applied row and its recovery manifest must be retained.
 	retained := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.NoError(t, retained.BeginDispatch(ctx))
+	require.NoError(t, retained.RecordReplacement(ctx, "replacement-id"))
 	require.ErrorContains(t, retained.Resolve(ctx, store, errors.New("replacement may contain them")), "retained")
-	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
+	require.DirExists(t, recovery)
 	require.FileExists(t, filepath.Join(data, "already.txt"))
 
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
@@ -386,6 +399,9 @@ func TestRetainedNextRestartSealsAdmissionAndRetryResolvesSnapshot(t *testing.T)
 	require.NotNil(t, open)
 	require.NotNil(t, open.SealedAt, "a retained publication seals the batch")
 	require.Nil(t, open.PublishedAt, "an unobserved outcome is not an acknowledgement")
+	rec, err := store.GetUpdatePublication(ctx, cfg.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, rec.Phase)
 
 	// Normal admission must not append a different staged file against the
 	// retained batch recovery tree.
@@ -400,16 +416,20 @@ func TestRetainedNextRestartSealsAdmissionAndRetryResolvesSnapshot(t *testing.T)
 	_, err = store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"difficulty": "hard"},
 		storage.UpdateWindowNextRestart, nil, 0)
 	require.ErrorIs(t, err, storage.ErrUpdateBatchConflict)
-	require.FileExists(t, filepath.Join(recovery, "manifest.json"), "refused admission must not touch retained recovery")
+	require.DirExists(t, recovery, "refused admission must not touch retained recovery")
 	require.NoFileExists(t, filepath.Join(data, "late.txt"))
 
-	// Retry resolves the original snapshot. It still owes the unobserved
-	// runtime publication, then finalizes the retained cleanup and closes.
+	// Retry verifies the exact replacement identity recorded at creation. It
+	// owes the unverified runtime publication, then finalizes the retained
+	// cleanup and closes.
 	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
 	require.NotNil(t, retry)
 	require.True(t, retry.HasPriorRuntimeState())
-	require.True(t, retry.NeedsRuntimePublication(), "an unacknowledged publication still needs the runtime")
+	require.True(t, retry.NeedsIdentityVerification(), "an unverified dispatch is resolved by identity")
+	verified, err := retry.VerifyExpectedReplacement(ctx, "replacement-id")
+	require.NoError(t, err)
+	require.True(t, verified)
 	retryConfigs, err := retry.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
 	require.Len(t, retryConfigs, 1)
@@ -440,9 +460,11 @@ func TestPersistedMixedNextRestartRowsResolveByDiscardThenRetry(t *testing.T) {
 	require.NoError(t, err)
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.ErrorContains(t, (&RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}).
-		Resolve(ctx, store, errors.New("outcome unknown")), "retained")
-	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
+	retained := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.NoError(t, retained.BeginDispatch(ctx))
+	require.NoError(t, retained.RecordReplacement(ctx, "replacement-id"))
+	require.ErrorContains(t, retained.Resolve(ctx, store, errors.New("outcome unknown")), "retained")
+	require.FileExists(t, filepath.Join(recovery, "000000.data"))
 
 	// Simulate a batch persisted before retention sealed admission: a second
 	// staged file is already in the same batch. Clearing the seal through the
@@ -461,7 +483,6 @@ func TestPersistedMixedNextRestartRowsResolveByDiscardThenRetry(t *testing.T) {
 	// A new commit must not overwrite or delete the retained recovery tree.
 	_, err = CommitNextRestartFiles(ctx, store, server, nil)
 	require.ErrorContains(t, err, "discard the newly staged rows")
-	require.FileExists(t, filepath.Join(recovery, "manifest.json"))
 	require.FileExists(t, filepath.Join(recovery, "000000.data"))
 	require.NoFileExists(t, filepath.Join(data, "mixed.txt"))
 
@@ -476,7 +497,10 @@ func TestPersistedMixedNextRestartRowsResolveByDiscardThenRetry(t *testing.T) {
 	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
 	require.NotNil(t, retry)
-	require.True(t, retry.NeedsRuntimePublication())
+	require.True(t, retry.NeedsIdentityVerification())
+	verified, err := retry.VerifyExpectedReplacement(ctx, "replacement-id")
+	require.NoError(t, err)
+	require.True(t, verified)
 	retryConfigs, err := retry.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
 	require.NoError(t, (&RestartPublication{Commit: retry, Configs: retryConfigs}).Resolve(ctx, store, nil))
@@ -522,7 +546,7 @@ func TestNextRestartSelectsWindowAfterDataAdmission(t *testing.T) {
 func TestIdentityUnresolvedReplacementIsSealedNotAcknowledged(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
-	server := &storage.Server{ID: "identity-unresolved", Name: "identity-unresolved", DataPath: data, Status: storage.StatusRunning}
+	server := &storage.Server{ID: "identity-unresolved", Name: "identity-unresolved", DataPath: data, ContainerID: "old-id", Status: storage.StatusRunning}
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "applied"},
@@ -534,23 +558,37 @@ func TestIdentityUnresolvedReplacementIsSealedNotAcknowledged(t *testing.T) {
 	require.NoError(t, err)
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.ErrorContains(t, (&RestartPublication{
-		Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeIdentityUnresolved: true,
-	}).Resolve(ctx, store, errors.New("replacement created but ID was not saved")), "canonical identity")
+	publication := &RestartPublication{Commit: commit, Configs: applied}
+	require.NoError(t, publication.BeginDispatch(ctx))
+	// Docker created the replacement and its identity was returned, but the
+	// server row could not be updated. The returned identity is still recorded
+	// as the only acceptable verification evidence for this attempt.
+	require.NoError(t, publication.RecordReplacement(ctx, "replacement-id"))
+	publication.RuntimeAttempted = true
+	publication.RuntimeIdentityUnresolved = true
+	require.ErrorContains(t, publication.Resolve(ctx, store, errors.New("replacement created but ID was not saved")), "canonical identity")
 
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, open)
 	require.NotNil(t, open.SealedAt)
-	require.Nil(t, open.PublishedAt, "a replacement without a persisted identity is not an acknowledgement")
+	require.Nil(t, open.PublishedAt, "a replacement without a persisted server ID is not an acknowledgement")
 	require.FileExists(t, filepath.Join(data, "file.txt"))
 
-	// The retry knows a prior replacement may own the canonical container and
-	// must reconcile it before deciding to start or recreate.
+	// The retry knows the exact replacement identity captured at creation. It
+	// verifies that identity; discovery alone would not be publication evidence.
 	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
 	require.NotNil(t, retry)
-	require.True(t, retry.RequiresIdentityReconciliation())
+	require.True(t, retry.NeedsIdentityVerification())
+	require.Equal(t, "replacement-id", retry.ExpectedReplacementID())
+	verified, err := retry.VerifyExpectedReplacement(ctx, "replacement-id")
+	require.NoError(t, err)
+	require.True(t, verified)
+	require.NoError(t, publicationFor(retry, nil).Resolve(ctx, store, nil))
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
 }
 
 func TestNextRestartClaimsAdmissionBeforeLiveWritesAndReleasesOnCompensation(t *testing.T) {
@@ -615,36 +653,55 @@ func TestInterruptedNextRestartRecoveryIsRestoredBeforeReuse(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(data, "victim.txt"), []byte("untouched"), 0o644))
 	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
 	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
 	rows, err := store.ListBatchContent(ctx, batch)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
-	// Simulate a crash after the manifest and live copy but before APPLIED:
-	// the rows are still staged and the batch carries the durable claim.
+	// Simulate a crash after the durable snapshot and live copy but before
+	// APPLIED: the row is still staged, the live file is new, and the durable
+	// phase proves live writes began.
+	record, err := store.BeginUpdatePublication(ctx, batch, server.ID, server.ContainerID)
+	require.NoError(t, err)
+	pub := newPublicationAttempt(store, record)
 	acc, err := openAccessor(ctx, store, server, nil)
 	require.NoError(t, err)
-	_, err = commitFiles(ctx, acc, rows)
+	_, err = commitFilesForPublication(ctx, acc, rows, pub)
 	require.NoError(t, err)
 	require.NoError(t, acc.Close())
-	claimed, err := store.ClaimUpdateBatchForPublication(ctx, batch)
+	current, err := store.GetUpdatePublication(ctx, batch)
 	require.NoError(t, err)
-	require.True(t, claimed)
+	require.Equal(t, storage.PublicationApplying, current.Phase)
 	body, err := os.ReadFile(filepath.Join(data, "file.txt"))
 	require.NoError(t, err)
 	require.Equal(t, "new", string(body))
 
-	// The retry restores the interrupted tree, then re-publishes normally.
+	// A game-owned manifest is mutable data. Recovery must ignore it and use
+	// only the controller-owned snapshot: a tampered entry must not be restored.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(data, ".carbon-panel", "undo", batch, "manifest.json"),
+		[]byte(`{"version":1,"batch_id":"`+batch+`","entries":[{"target":"victim.txt","existed":false}]}`),
+		0o644,
+	))
+
+	// The retry restores the recorded snapshot, restages the interrupted row,
+	// then re-publishes normally.
 	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
 	require.NoError(t, err)
 	require.NotNil(t, commit)
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
-	require.NoError(t, (&RestartPublication{Commit: commit, Configs: applied}).Resolve(ctx, store, nil))
+	pub2 := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, pub2.BeginDispatch(ctx))
+	require.NoError(t, pub2.Resolve(ctx, store, nil))
 	body, err = os.ReadFile(filepath.Join(data, "file.txt"))
 	require.NoError(t, err)
 	require.Equal(t, "new", string(body))
+	victim, err := os.ReadFile(filepath.Join(data, "victim.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "untouched", string(victim), "game-owned manifest entries are never recovery evidence")
 	require.NoDirExists(t, filepath.Join(data, ".carbon-panel", "undo", batch))
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
@@ -668,16 +725,21 @@ func TestAcknowledgementPersistenceFailureDoesNotCleanUpOrClose(t *testing.T) {
 	require.NoError(t, err)
 	applied, err := commit.ApplyConfigs(ctx, store)
 	require.NoError(t, err)
+	ack := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, ack.BeginDispatch(ctx))
 	require.NoError(t, store.DB().Exec(
 		`CREATE TRIGGER fail_ack BEFORE UPDATE OF published_at ON server_update_batches
 		 WHEN NEW.published_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'ack unavailable'); END`).Error)
-	err = (&RestartPublication{Commit: commit, Configs: applied}).Resolve(ctx, store, nil)
+	err = ack.Resolve(ctx, store, nil)
 	require.ErrorContains(t, err, "ack unavailable")
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, open, "a failed acknowledgement must not close the batch")
 	require.Nil(t, open.PublishedAt)
 	require.NotNil(t, open.SealedAt)
+	rec, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, rec.Phase, "a failed acknowledgement must leave the dispatch unverified")
 	require.DirExists(t, recovery, "a failed acknowledgement must not run cleanup")
 	require.FileExists(t, filepath.Join(data, "file.txt"))
 }
@@ -699,4 +761,198 @@ func TestNextRestartUndoReportsRestagingFailureAndReleasesGate(t *testing.T) {
 	gate, err := datawrite.TryShared(server.ID)
 	require.NoError(t, err)
 	gate.Release()
+}
+
+func TestPreDispatchInterruptedWithoutContainerResumesStandardCreation(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "pre-dispatch", Name: "pre-dispatch", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	rows, err := store.ListBatchContent(ctx, batch)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	// Crashing after the live copy but before any dispatch with an initially
+	// absent container must not be mistaken for a replacement that needs
+	// identity reconciliation. There is no canonical container to reconcile.
+	record, err := store.BeginUpdatePublication(ctx, batch, server.ID, "")
+	require.NoError(t, err)
+	acc, err := openAccessor(ctx, store, server, nil)
+	require.NoError(t, err)
+	_, err = commitFilesForPublication(ctx, acc, rows, newPublicationAttempt(store, record))
+	require.NoError(t, err)
+	require.NoError(t, acc.Close())
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	require.False(t, commit.NeedsIdentityVerification(), "no dispatch was recorded")
+	require.Empty(t, commit.ExpectedReplacementID())
+	require.True(t, commit.NeedsRuntimePublication(), "the prepare phase still owes a runtime")
+
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	publication := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	// The standard no-container path records dispatch intent, creates the
+	// container, records that exact identity, and resolves the publication.
+	require.NoError(t, publication.BeginDispatch(ctx))
+	require.NoError(t, publication.RecordReplacement(ctx, "created-container"))
+	require.NoError(t, publication.Resolve(ctx, store, nil))
+
+	body, err := os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+	stored, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationCleaned, stored.Phase)
+}
+
+func TestUnrelatedCanonicalDriftRefusesAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "drift", Name: "drift", DataPath: data, ContainerID: "old-id", Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batch)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	first := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.NoError(t, first.BeginDispatch(ctx))
+	require.NoError(t, first.RecordReplacement(ctx, "recorded-replacement"))
+	require.ErrorContains(t, first.Resolve(ctx, store, errors.New("unobserved")), "retained")
+
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.True(t, retry.NeedsIdentityVerification())
+	// A different canonical container is identity repair evidence only. It
+	// must never acknowledge this batch or run its cleanup.
+	verified, err := retry.VerifyExpectedReplacement(ctx, "unrelated-drift")
+	require.NoError(t, err)
+	require.False(t, verified)
+	require.NoError(t, retry.Retain(ctx))
+
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open.SealedAt)
+	require.Nil(t, open.PublishedAt)
+	record, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, record.Phase)
+	require.Equal(t, "recorded-replacement", record.ExpectedContainerID)
+	require.DirExists(t, recovery, "a refused acknowledgement must not run cleanup")
+	require.FileExists(t, filepath.Join(data, "file.txt"))
+}
+
+func TestNewlyAppliedRowIsNotCoveredByOlderPublication(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "coverage", Name: "coverage", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	cfg, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "covered"},
+		storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	batch := cfg.BatchID
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	publication := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, publication.BeginDispatch(ctx))
+	require.NoError(t, publication.Resolve(ctx, store, nil))
+
+	record, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationCleaned, record.Phase)
+	require.Contains(t, record.AppliedConfigIDs, cfg.ID)
+	require.NotContains(t, record.AppliedConfigIDs, "later-row")
+
+	// A row applied after the acknowledged publication is not covered by it.
+	now := time.Now()
+	require.NoError(t, store.DB().Create(&storage.StagedConfigChange{
+		ID: "later-row", ServerID: server.ID, BatchID: batch, Payload: `{"difficulty":"hard"}`,
+		ApplyMode: storage.StagedApplyOnRestart, Status: storage.StagedStatusApplied, AppliedAt: &now,
+	}).Error)
+	pending, err := store.ListPendingRestartStagedConfigs(ctx, server.ID, nil)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, "later-row", pending[0].ID)
+}
+
+func TestInterruptedBackupBeforeSnapshotIsDiscardedAndRetried(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "partial-backup", Name: "partial-backup", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batch)
+
+	// Preparation began but crashed while writing the first backup, before the
+	// durable snapshot existed. The phase proves no live write began.
+	_, err := store.BeginUpdatePublication(ctx, batch, server.ID, server.ContainerID)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(recovery, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(recovery, "000000.data"), []byte("partial"), 0o600))
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	publication := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true}
+	require.NoError(t, publication.BeginDispatch(ctx))
+	require.NoError(t, publication.Resolve(ctx, store, nil))
+	body, err := os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+	require.NoDirExists(t, recovery)
+}
+
+func TestModuleIntentMakesInterruptedRecoveryAmbiguousAndSealed(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "module-intent", Name: "module-intent", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("old"), 0o644))
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	rows, err := store.ListBatchContent(ctx, batch)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	record, err := store.BeginUpdatePublication(ctx, batch, server.ID, server.ContainerID)
+	require.NoError(t, err)
+	acc, err := openAccessor(ctx, store, server, nil)
+	require.NoError(t, err)
+	_, err = commitFilesForPublication(ctx, acc, rows, newPublicationAttempt(store, record))
+	require.NoError(t, err)
+	require.NoError(t, acc.Close())
+	require.NoError(t, store.RecordUpdatePublicationModuleIntent(ctx, batch, record.Attempt, `["module-1"]`))
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batch)
+	before, err := os.ReadFile(filepath.Join(recovery, "000000.data"))
+	require.NoError(t, err)
+
+	_, err = CommitNextRestartFiles(ctx, store, server, nil)
+	require.ErrorContains(t, err, "module runtime mutation")
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open.SealedAt, "an ambiguous module transition must be sealed")
+	after, err := os.ReadFile(filepath.Join(recovery, "000000.data"))
+	require.NoError(t, err)
+	require.Equal(t, before, after, "ambiguous recovery must not restore or clean up")
 }

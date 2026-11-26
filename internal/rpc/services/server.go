@@ -2444,6 +2444,9 @@ func unsafeDataRemoval(path string) bool {
 // A completed request ID may suppress the mutation callback. It cannot
 // acknowledge fresh staged changes that were published by this attempt.
 func (s *ServerService) runPublicationMutation(ctx context.Context, publication *staging.RestartPublication, server *storage.Server, kind, requestID string, mutate func() error) error {
+	if err := publication.BeginDispatch(ctx); err != nil {
+		return err
+	}
 	ran := false
 	err := s.runJournaledMutation(ctx, server, kind, requestID, func() error {
 		ran = true
@@ -2538,22 +2541,26 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
 	}
 	needsStagedRecreate := appliedNow > 0 || pendingRecreate || contentReady
-	identityAdopted := false
-	if commit.RequiresIdentityReconciliation() {
-		// An earlier attempt may have created a replacement whose ID was not
-		// saved. Reconcile the canonical container before any start or
-		// recreate, so neither acts on a stale known-removed ID.
-		identityAdopted, err = serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reconcile server container identity: %w", err))
+	if commit.NeedsIdentityVerification() {
+		// A dispatch intent is durable but unverified. Repair the tracked
+		// identity if needed, then accept only the exact replacement identity
+		// captured at creation. Any other canonical container is drift.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server); reconcileErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx), fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr)))
 		}
-		if identityAdopted {
-			// The replacement already contains this batch's durable applied
-			// evidence; acknowledge it and let the ordinary start below run.
-			publication.RuntimeAccepted = true
-			needsStagedRecreate = false
-			contentReady = false
+		verified, verifyErr := commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to verify the recorded container replacement: %w", verifyErr))
 		}
+		if !verified {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, commit.ExpectedReplacementID())))
+		}
+		// The runtime is verified; this attempt owes cleanup, not another
+		// replacement. The operator's explicit start continues below.
+		publication.RuntimeAccepted = true
+		needsStagedRecreate = false
+		contentReady = false
 	}
 	stagedContainerStarted := false
 
@@ -2566,7 +2573,11 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	// replacement. For staged replacement, keep it frozen until config loading
 	// succeeds and RecreateContainer owns the stop/remove transition.
 	if server.Status == storage.StatusPaused && server.ContainerID != "" && !needsStagedRecreate {
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		}
 		if err := s.runPublicationMutation(ctx, &publication, server, "start_unpause", requestID, func() error {
+			publication.RuntimeAttempted = true
 			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
 		}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server: %w", err))
@@ -2600,8 +2611,16 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
+		if err := publication.BeginDispatch(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", err))
+		}
 		publication.RuntimeAttempted = true
 		result, recreateErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+		if result != nil && result.NewContainerID != "" {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
 		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(recreateErr, &outcomeErr) {
@@ -2634,10 +2653,17 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		}
+		publication.RuntimeAttempted = true
 		containerID, err := dockerCli.CreateContainer(ctx, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to create container: %v", err)
 			return nil, createContainerError(err)
+		}
+		if recordErr := publication.RecordReplacement(ctx, containerID); recordErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 		}
 
 		server.ContainerID = containerID
@@ -2655,6 +2681,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	}
 
 	if !stagedContainerStarted {
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		}
 
 		// Start container
 		if err := s.runPublicationMutation(ctx, &publication, server, "start", requestID, func() error {
@@ -2682,6 +2711,11 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			s.prepareServerConfig(ctx, server, serverConfig)
 			publication.RuntimeAttempted = true
 			result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			if result != nil && result.NewContainerID != "" {
+				if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+				}
+			}
 			if err != nil {
 				var outcomeErr *serverruntime.RecreationError
 				if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
@@ -2986,20 +3020,24 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
 	}
-	if commit.RequiresIdentityReconciliation() {
-		// A previous attempt may have replaced the container after its rows
-		// were applied but before the new ID was saved. Never restart or
-		// recreate on the stale tracked ID: adopt the canonical container and
-		// let the ordinary restart below operate on it.
-		adopted, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server)
-		if reconcileErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr))
+	if commit.NeedsIdentityVerification() {
+		// A previous attempt recorded a dispatch but the canonical outcome was
+		// not verified. Repair the tracked ID if needed, then accept only the
+		// exact captured replacement identity; anything else is drift.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server); reconcileErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx), fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr)))
 		}
-		if adopted {
-			publication.RuntimeAccepted = true
-			stagedApplied = 0
-			pendingRecreate = false
+		verified, verifyErr := commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to verify the recorded container replacement: %w", verifyErr))
 		}
+		if !verified {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, commit.ExpectedReplacementID())))
+		}
+		publication.RuntimeAccepted = true
+		stagedApplied = 0
+		pendingRecreate = false
 	}
 
 	// If staged config changes were applied and container exists, recreate it with new config
@@ -3012,8 +3050,16 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		}
 		publication.RuntimeAttempted = true
 		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+		if result != nil && result.NewContainerID != "" {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
 		if err != nil {
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(err, &outcomeErr) {
@@ -3068,12 +3114,16 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		s.prepareServerConfig(ctx, server, serverConfig)
 		var containerID string
 		if err := s.runPublicationMutation(ctx, &publication, server, "restart_create", requestID, func() error {
+			publication.RuntimeAttempted = true
 			var createErr error
 			containerID, createErr = dockerCli.CreateContainer(ctx, server, serverConfig)
 			return createErr
 		}); err != nil {
 			s.log.Error("Failed to create container: %v", err)
 			return nil, createContainerError(err)
+		}
+		if recordErr := publication.RecordReplacement(ctx, containerID); recordErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 		}
 
 		server.ContainerID = containerID
@@ -3138,6 +3188,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 
 	// If server is paused, unpause it first so Docker can restart it
 	if server.Status == storage.StatusPaused && server.ContainerID != "" {
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		}
 		publication.RuntimeAttempted = true
 		if err := dockerCli.UnpauseContainer(ctx, server.ContainerID); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
@@ -3162,6 +3215,11 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			s.prepareServerConfig(ctx, server, serverConfig)
 			publication.RuntimeAttempted = true
 			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			if recResult != nil && recResult.NewContainerID != "" {
+				if recordErr := publication.RecordReplacement(ctx, recResult.NewContainerID); recordErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+				}
+			}
 			if recErr == nil && !recResult.WasRunning {
 				recErr = serverruntime.Start(ctx, s.store, dockerCli, server)
 			}
