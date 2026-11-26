@@ -51,7 +51,8 @@ destination and available in the filtered export. Tests must assert the exact
 persisted config and the effective Docker environment for both ZIP and TAR.
 
 Writer qualification is separate. A stopped container does not prove that an
-independent host writer died, and module lifecycles are not fenced by the
-export. Export therefore refuses attached modules whose resolved mounts can
-write the archived data directory, while process-death qualification remains
-pending.
+independent host writer died. Export holds the server transition and the module
+lifecycle gate, refuses attached modules whose resolved or live mounts can write
+the archived data directory, and refuses live mounts that do not match the
+stored configuration. Process-death and external-daemon qualification remain
+pending; operators must stop independent writers.

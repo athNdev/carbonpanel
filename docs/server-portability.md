@@ -65,21 +65,30 @@ Precedence is fixed:
    setting that forces an environment value outside this list still wins at
    startup.
 
-The consistency policy requires a stopped server. Export verifies the game
-container and attached module containers on their owning nodes. It also refuses
-an attached module whose resolved bind mounts can write the server data
-directory, even while that module is stopped: module lifecycles are not fenced
-by the export, and a stopped container does not by itself qualify writer process
-death. Detach such a module or make its data-directory bind mounts read-only
-before exporting. Qualification of independent host processes and other
-out-of-band writers is still pending, so stop those writers before exporting.
+The consistency policy requires a stopped server. Export holds the server
+lifecycle transition and the server's module lifecycle gate for the whole read.
+The gate serializes module create, start, stop, update, recreate and delete
+paths, including their asynchronous workers; an export refuses while one of
+those operations is in flight. Export verifies the game container and attached
+module containers on their owning nodes. It refuses an attached module whose
+resolved bind mounts can write the server data directory, whose recorded
+container is missing, or whose live effective data-directory mounts differ from
+the stored configuration. That last check catches an asynchronous recreate that
+failed after the database changed. Make the module's data-directory bind mounts
+read-only and recreate it, or remove the module, before exporting.
+
+A stopped container does not by itself qualify writer process death. The policy
+covers panel-driven lifecycle operations only; it does not prove that an
+independent host process, an external daemon, or a container restart policy
+cannot still write. Stop such writers before exporting.
 
 ## Export and create from an archive
 
 Use the stopped-server consistency option. Export verifies the game container
 and attached module containers on their owning nodes before reading the data,
-and refuses attached modules with writable data-directory mounts. The download
-session has the same server-scoped file authorization as other binary
+and refuses attached modules whose stored or live mounts can write the
+data-directory or whose live mounts do not match the stored configuration. The
+download session has the same server-scoped file authorization as other binary
 downloads.
 
 Upload the archive through the standard chunked upload service. Preview checks
@@ -91,12 +100,25 @@ archive creation can take longer than ordinary metadata calls. These calls
 have a one-hour controller deadline and respect earlier client cancellation.
 
 Provide a new name, a destination node and a free port when creating the
-server. Keep the same request ID for retries of the same submission. The
-controller validates the caller's upload and the destination again. It stages
-the data into a fresh directory on that node, then commits the new server and
-initial config together. If the copy is interrupted, it removes the directory
-allocated by that attempt. Once the row is committed, the verified data is
-retained for recovery if container creation or boot fails.
+server. Keep the same request ID for retries of the same submission; the
+identity excludes the upload id, so a fresh upload can retry after a controller
+restart. The controller validates the caller's upload and the destination
+again. It records the chosen destination durably in the same transaction as
+the request claim, allocates a fresh directory on that node, writes an
+ownership marker and then stages the data. It commits the new server and
+initial config together. If the copy is interrupted, it removes only the
+directory whose marker proves that attempt created it. Once the row is
+committed, the verified data is retained for recovery if container creation or
+boot fails.
+
+After a crash between the request claim and the row commit, a retry reads the
+durable intent. A destination that exists and matches the recorded node, path
+and marker is reclaimed and the import resumes. A missing server row and a
+missing destination lets the import start again. A committed server row always
+wins and its data is never removed. If the marker is missing or does not match,
+the retry fails with a visible destination-ownership error and leaves the
+directory untouched; inspect the node's server storage before retrying, or use
+a new request id.
 
 The initial import path supports the managed runtime and the Minecraft and
 loader versions recorded in the archive. Preview reports a blocker when the

@@ -11,6 +11,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/config"
 	models "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
 func TestWritableModuleDataSources(t *testing.T) {
@@ -78,6 +79,79 @@ func TestWritableModuleDataSourcesFailsClosed(t *testing.T) {
 	} {
 		module := &models.Module{VolumeOverrides: volumes}
 		if _, err := WritableModuleDataSources(module, server, &models.ServerConfig{}, cfg); err == nil {
+			t.Fatalf("volume overrides %q were accepted", volumes)
+		}
+	}
+}
+
+// ModuleDataMounts is the verification-side resolver used before a stopped
+// export: it must report the same data-directory mounts container creation
+// would use, and refuse an unverifiable configuration instead of returning an
+// empty safe-looking set.
+func TestModuleDataMounts(t *testing.T) {
+	root := t.TempDir()
+	client := &Client{log: logger.New()}
+	server := &models.Server{DataPath: root}
+	cfg := &config.Config{Storage: config.StorageConfig{BackupDir: t.TempDir()}}
+	source := filepath.ToSlash(filepath.Join(root, "plugins"))
+
+	tests := []struct {
+		name     string
+		volumes  string
+		want     int
+		readOnly bool
+	}{
+		{
+			name:    "read-only server data",
+			volumes: `[{"source":"` + source + `","target":"/plugins","read_only":true}]`,
+			want:    1, readOnly: true,
+		},
+		{
+			name:    "writable server data",
+			volumes: `[{"source":"` + source + `","target":"/plugins","read_only":false}]`,
+			want:    1, readOnly: false,
+		},
+		{
+			name:    "mount outside server data",
+			volumes: `[{"source":"` + filepath.ToSlash(filepath.Join(cfg.Storage.BackupDir, "exports")) + `","target":"/exports","read_only":false}]`,
+			want:    0,
+		},
+		{
+			name:    "named volume",
+			volumes: `[{"source":"cache","target":"/cache","type":"volume","read_only":false}]`,
+			want:    0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			module := &models.Module{VolumeOverrides: test.volumes}
+			got, err := client.ModuleDataMounts(module, server, &models.ServerConfig{}, cfg, nil)
+			if err != nil {
+				t.Fatalf("ModuleDataMounts: %v", err)
+			}
+			if len(got) != test.want {
+				t.Fatalf("data mounts = %+v, want %d", got, test.want)
+			}
+			if test.want == 1 && got[0].ReadOnly != test.readOnly {
+				t.Fatalf("read-only = %v, want %v", got[0].ReadOnly, test.readOnly)
+			}
+		})
+	}
+}
+
+func TestModuleDataMountsFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	client := &Client{log: logger.New()}
+	server := &models.Server{DataPath: root}
+	cfg := &config.Config{Storage: config.StorageConfig{BackupDir: t.TempDir()}}
+
+	for _, volumes := range []string{
+		`not json`,
+		`[{"source":"{{unknown.value}}/plugins","target":"/plugins","read_only":false}]`,
+		`[{"source":"/etc","target":"/etc","read_only":false}]`,
+	} {
+		module := &models.Module{VolumeOverrides: volumes}
+		if _, err := client.ModuleDataMounts(module, server, &models.ServerConfig{}, cfg, nil); err == nil {
 			t.Fatalf("volume overrides %q were accepted", volumes)
 		}
 	}

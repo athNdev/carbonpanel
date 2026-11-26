@@ -17,6 +17,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/download"
@@ -227,6 +228,126 @@ func TestExportServerArchiveRefusesWritableAttachedModules(t *testing.T) {
 	}))
 	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 	require.Contains(t, err.Error(), "can still write the server data directory")
+}
+
+// A stopped module with a read-only configuration is still unsafe if the
+// daemon's existing container carries an older mount set. Export compares the
+// stored configuration with the live effective mounts, and a concurrent module
+// lifecycle attempt blocks the read for its whole duration.
+func TestExportServerArchiveEffectiveModuleMounts(t *testing.T) {
+	ctx := ctxWithRole("operator")
+	type fixture struct {
+		name          string
+		volume        string
+		containerID   string
+		mounts        func(server *db.Server) []docker.ContainerBindMount
+		holdLifecycle bool
+		wantCode      connect.Code
+		wantMessage   string
+	}
+	fixtures := []fixture{
+		{
+			name:        "matching read-only container exports",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "module-container",
+			mounts: func(server *db.Server) []docker.ContainerBindMount {
+				return []docker.ContainerBindMount{{
+					Source: filepath.Join(server.DataPath, "plugins"), Target: "/java-plugins", ReadOnly: true,
+				}}
+			},
+		},
+		{
+			name:        "live writable mount is refused",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "module-container",
+			mounts: func(server *db.Server) []docker.ContainerBindMount {
+				return []docker.ContainerBindMount{{
+					Source: filepath.Join(server.DataPath, "plugins"), Target: "/java-plugins", ReadOnly: false,
+				}}
+			},
+			wantCode:    connect.CodeFailedPrecondition,
+			wantMessage: "can still write the server data directory",
+		},
+		{
+			name:        "extra live data mount is an uncertain mismatch",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "module-container",
+			mounts: func(server *db.Server) []docker.ContainerBindMount {
+				return []docker.ContainerBindMount{
+					{Source: filepath.Join(server.DataPath, "plugins"), Target: "/java-plugins", ReadOnly: true},
+					{Source: filepath.Join(server.DataPath, "world"), Target: "/world", ReadOnly: true},
+				}
+			},
+			wantCode:    connect.CodeFailedPrecondition,
+			wantMessage: "do not match the stored module configuration",
+		},
+		{
+			name:        "missing recorded container is refused",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "",
+			wantCode:    connect.CodeFailedPrecondition,
+			wantMessage: "no recorded container",
+		},
+		{
+			name:        "concurrent module lifecycle blocks export",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "module-container",
+			mounts: func(server *db.Server) []docker.ContainerBindMount {
+				return []docker.ContainerBindMount{{
+					Source: filepath.Join(server.DataPath, "plugins"), Target: "/java-plugins", ReadOnly: true,
+				}}
+			},
+			holdLifecycle: true,
+			wantCode:      connect.CodeAborted,
+			wantMessage:   "module lifecycle operation is in progress",
+		},
+	}
+
+	for _, test := range fixtures {
+		t.Run(test.name, func(t *testing.T) {
+			svc, _ := newDockerPrivilegeTestService(t)
+			svc.hostPortBound = func(int) bool { return false }
+			downloads := download.NewManager(t.TempDir(), time.Hour, svc.log)
+			t.Cleanup(downloads.Stop)
+			svc.SetServerArchiveDownloads(downloads)
+
+			server := &db.Server{
+				ID: "archive-mount-source", Name: "Mount Source", NodeID: "test-node",
+				Status: db.StatusStopped, ModLoader: db.ModLoaderPaper, MCVersion: "1.21.1",
+				Memory: 1024, MaxPlayers: 10, Port: 25711,
+				DataPath: filepath.Join(svc.config.Storage.DataDir, "servers", "archive-mount-source"),
+			}
+			require.NoError(t, svc.store.CreateServer(ctx, server))
+			writeArchiveFixture(t, filepath.Join(server.DataPath, "world", "level.dat"), "world")
+			require.NoError(t, svc.store.CreateModule(ctx, &db.Module{
+				ID: "archive-mount-module", Name: "Renderer", ServerID: server.ID,
+				TemplateID: "custom", NodeID: server.NodeID, Status: db.ModuleStatusStopped,
+				ContainerID: test.containerID, VolumeOverrides: test.volume,
+			}))
+			if test.mounts != nil {
+				mounts := test.mounts(server)
+				svc.inspectArchiveContainer = func(context.Context, string, string) (archiveContainerObservation, error) {
+					return archiveContainerObservation{Status: db.StatusStopped, Mounts: mounts}, nil
+				}
+			}
+			if test.holdLifecycle {
+				fence, err := module.TryBeginServerModuleArchive(server.ID)
+				require.NoError(t, err)
+				defer fence.Release()
+			}
+
+			_, err := svc.ExportServerArchive(ctx, connect.NewRequest(&v1.ExportServerArchiveRequest{
+				ServerId: server.ID, Format: v1.ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_ZIP,
+				Consistency: v1.ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED,
+			}))
+			if test.wantCode == 0 {
+				require.NoError(t, err)
+				return
+			}
+			require.Equal(t, test.wantCode, connect.CodeOf(err))
+			require.Contains(t, err.Error(), test.wantMessage)
+		})
+	}
 }
 
 func environmentByName(env []string) map[string]string {

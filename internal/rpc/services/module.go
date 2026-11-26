@@ -787,6 +787,23 @@ func (s *ModuleService) createModuleContainer(moduleID string, startImmediately 
 	}
 }
 
+// moduleLifecycleError maps the manager's fail-closed gate refusals onto
+// retryable RPC codes. A mutation during an archive export did not run.
+func moduleLifecycleError(err error) error {
+	var connectErr *connect.Error
+	if errors.As(err, &connectErr) {
+		return connectErr
+	}
+	switch {
+	case errors.Is(err, module.ErrModuleArchiveExport):
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("a server archive export is in progress; retry after it finishes"))
+	case errors.Is(err, module.ErrModuleLifecycleInFlight):
+		return connect.NewError(connect.CodeAborted, errors.New("another module lifecycle operation is in progress; retry"))
+	default:
+		return connect.NewError(connect.CodeInternal, err)
+	}
+}
+
 func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v1.UpdateModuleRequest]) (*connect.Response[v1.UpdateModuleResponse], error) {
 	msg := req.Msg
 	if msg.Id == "" {
@@ -1097,7 +1114,7 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 	}
 
 	if err := s.moduleManager.DeleteModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to delete module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -1125,11 +1142,11 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 	// If no container exists, create one first
 	if module.ContainerID == "" {
 		if err := s.moduleManager.CreateAndStartModule(ctx, msg.Id, true); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create and start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to create and start module: %w", err))
 		}
 	} else {
 		if err := s.moduleManager.StartModule(ctx, msg.Id); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to start module: %w", err))
 		}
 	}
 
@@ -1145,7 +1162,7 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 	}
 
 	if err := s.moduleManager.StopModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to stop module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
@@ -1165,7 +1182,7 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 	}
 	defer transition.Release()
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to restart module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{
@@ -1185,7 +1202,7 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 	}
 	defer transition.Release()
 	if err := s.moduleManager.RecreateModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to recreate module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RecreateModuleResponse{

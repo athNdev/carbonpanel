@@ -21,6 +21,7 @@
 - [Dashboard telemetry coverage](dashboard-telemetry-coverage.md) — Dashboard player and RAM totals describe running servers that reported telemetry.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
+- [Durable server archive import ownership and recovery](server-archive-import-recovery.md) — An archive submission records its chosen destination before placing data, and a retry removes only a directory whose durable marker proves this request created it.
 - [Explicit phase-result gate for every publication write](publication-phase-gate.md) — Every release side-effect phase checks direct results and verification outputs, and a terminal job fails an explicit publish when a required phase was skipped.
 - [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.

@@ -80,6 +80,21 @@ func (s *Store) LookupIdempotencyKey(ctx context.Context, requestID, kind string
 	return existing.ServerID, nil
 }
 
+// GetIdempotencyKey returns the raw durable row so a caller can distinguish
+// the current replay identity from an older stored one.
+func (s *Store) GetIdempotencyKey(ctx context.Context, requestID string) (*IdempotencyKey, error) {
+	requestID = strings.TrimSpace(requestID)
+	var existing IdempotencyKey
+	err := s.db.WithContext(ctx).Where("request_id = ?", requestID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &existing, nil
+}
+
 // ReleaseIdempotencyKey forgets a claim that never became a server row.
 func (s *Store) ReleaseIdempotencyKey(ctx context.Context, requestID string) error {
 	requestID = strings.TrimSpace(requestID)

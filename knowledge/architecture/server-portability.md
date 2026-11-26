@@ -19,10 +19,19 @@ sources:
 
 - Stream server data through the owning node's storage accessor. Export callers
   must hold lifecycle admission and verify the server is stopped.
-- Verify attached module containers on their owning nodes and refuse modules
-  whose resolved bind mounts can write the data directory. Module lifecycles
-  are not fenced by the export, and writer process-death qualification remains
-  pending; independent writers must be stopped by the operator.
+- Hold the server's module lifecycle gate for the whole export. It serializes
+  module create, start, stop, update, recreate and delete paths, including their
+  asynchronous workers, and refuses an export while one is in flight. Verify
+  attached module containers on their owning nodes and refuse modules whose
+  resolved bind mounts can write the data directory or whose live effective
+  data-directory mounts differ from the stored configuration. A stopped
+  container is not writer process-death qualification; independent host and
+  daemon writers remain the operator's responsibility.
+- Record an archive import intent atomically with its idempotency claim, and
+  place data only after exclusive allocation. Reclaim an interrupted
+  destination only when the durable node, path and ownership marker agree;
+  preserve a committed server and fail visibly when ownership cannot be proven.
+  See [import recovery](../decisions/server-archive-import-recovery.md).
 - Serialize only explicitly portable runtime fields. Keep deployment identity,
   host paths, overrides and credentials outside the manifest.
 - Validate the complete archive before allocating a destination. Copy only into

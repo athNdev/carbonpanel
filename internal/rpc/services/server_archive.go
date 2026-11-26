@@ -14,6 +14,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/buildinfo"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/serverarchive"
 	"github.com/athNdev/carbon-panel/pkg/download"
@@ -55,6 +56,17 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 	}
 	defer transition.Release()
 
+	// Module containers are mutated by paths that never take the server
+	// transition (create, start, update, hooks and their async workers). The
+	// module gate is the choke point all of them use. Hold it for the entire
+	// read so no panel-driven module lifecycle can start a writer mid-export.
+	moduleFence, err := module.TryBeginServerModuleArchive(msg.GetServerId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeAborted,
+			errors.New("a module lifecycle operation is in progress; wait for it to finish, then export again"))
+	}
+	defer moduleFence.Release()
+
 	server, err := s.store.GetServer(ctx, msg.GetServerId())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
@@ -78,20 +90,8 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 		}
 	}
 	for _, module := range modules {
-		if module.Detached || module.Status != storage.ModuleStatusStopped {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("stop attached modules before exporting the server"))
-		}
-		if err := s.verifyArchiveContainerStopped(ctx, module.NodeID, module.ContainerID); err != nil {
+		if err := s.verifyArchiveModule(ctx, module, server, serverConfig, archiveSiblingModules(modules, module.ID)); err != nil {
 			return nil, err
-		}
-		writable, err := docker.WritableModuleDataSources(module, server, serverConfig, s.config)
-		if err != nil {
-			s.log.Error("Verify module %s mounts before archive export: %v", module.ID, err)
-			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("could not verify attached module mounts before export"))
-		}
-		if len(writable) > 0 {
-			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("module %q can still write the server data directory; detach it or make its bind mounts read-only before exporting", module.Name))
 		}
 	}
 
@@ -189,22 +189,168 @@ func sameArchiveRoot(a, b string) bool {
 	return b != "" && filepath.Clean(a) == filepath.Clean(b)
 }
 
+// archiveContainerObservation is the live state the export consumes from the
+// owning node: container status plus the daemon's effective bind mounts.
+type archiveContainerObservation struct {
+	Status storage.ServerStatus
+	Mounts []docker.ContainerBindMount
+}
+
+func (s *ServerService) observeArchiveContainer(ctx context.Context, nodeID, containerID string) (archiveContainerObservation, error) {
+	if s.inspectArchiveContainer != nil {
+		return s.inspectArchiveContainer(ctx, nodeID, containerID)
+	}
+	cli, err := s.getDockerClientStrict(nodeID)
+	if err != nil || cli == nil {
+		if err == nil {
+			err = errors.New("no Docker client available")
+		}
+		return archiveContainerObservation{}, err
+	}
+	status, err := cli.GetContainerStatus(ctx, containerID)
+	if err != nil {
+		return archiveContainerObservation{}, err
+	}
+	mounts, err := cli.ContainerBindMounts(ctx, containerID)
+	if err != nil {
+		return archiveContainerObservation{}, err
+	}
+	return archiveContainerObservation{Status: status, Mounts: mounts}, nil
+}
+
 func (s *ServerService) verifyArchiveContainerStopped(ctx context.Context, nodeID, containerID string) error {
 	if containerID == "" {
 		return nil
 	}
-	cli, err := s.getDockerClientStrict(nodeID)
-	if err != nil || cli == nil {
-		return connect.NewError(connect.CodeUnavailable, errors.New("owning node is unavailable"))
-	}
-	status, err := cli.GetContainerStatus(ctx, containerID)
+	observation, err := s.observeArchiveContainer(ctx, nodeID, containerID)
 	if err != nil {
 		return connect.NewError(connect.CodeUnavailable, errors.New("could not verify container state on the owning node"))
 	}
-	if status != storage.StatusStopped {
+	if observation.Status != storage.StatusStopped {
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("the owning node reports that a container is still active"))
 	}
 	return nil
+}
+
+func archiveSiblingModules(modules []*storage.Module, currentID string) map[string]*storage.Module {
+	siblings := make(map[string]*storage.Module, len(modules))
+	for _, module := range modules {
+		if module == nil || module.ID == currentID {
+			continue
+		}
+		siblings[module.Name] = module
+	}
+	return siblings
+}
+
+// verifyArchiveModule proves the module cannot write the server data directory
+// and that the live container agrees with the stored mount configuration. A
+// stopped status alone is not enough: an asynchronous recreate may have left
+// an older, writable mount set on the daemon.
+func (s *ServerService) verifyArchiveModule(ctx context.Context, module *storage.Module, server *storage.Server, serverConfig *storage.ServerConfig, siblings map[string]*storage.Module) error {
+	if module == nil {
+		return nil
+	}
+	if module.Detached || module.Status != storage.ModuleStatusStopped {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("stop attached modules before exporting the server"))
+	}
+
+	writable, err := docker.WritableModuleDataSources(module, server, serverConfig, s.config)
+	if err != nil {
+		s.log.Error("Verify module %s mounts before archive export: %v", module.ID, err)
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("could not verify attached module mounts before export"))
+	}
+	if len(writable) > 0 {
+		return archiveModuleWritableError(module.Name)
+	}
+	if module.ContainerID == "" {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("module %q has no recorded container, so its effective mounts cannot be verified; recreate or remove it before exporting", module.Name))
+	}
+
+	cli, err := s.getDockerClientStrict(module.NodeID)
+	if err != nil || cli == nil {
+		return connect.NewError(connect.CodeUnavailable, errors.New("owning node is unavailable"))
+	}
+	expected, err := cli.ModuleDataMounts(module, server, serverConfig, s.config, siblings)
+	if err != nil {
+		s.log.Error("Resolve module %s effective mounts before archive export: %v", module.ID, err)
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("could not verify attached module mounts before export"))
+	}
+	for _, mount := range expected {
+		if !mount.ReadOnly {
+			return archiveModuleWritableError(module.Name)
+		}
+	}
+
+	observation, err := s.observeArchiveContainer(ctx, module.NodeID, module.ContainerID)
+	if err != nil {
+		return connect.NewError(connect.CodeUnavailable, errors.New("could not verify the module container on the owning node"))
+	}
+	if observation.Status != storage.StatusStopped {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("the owning node reports that a container is still active"))
+	}
+	dataRoot, ok := cli.ServerDataHostPath(server.DataPath)
+	if !ok {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("could not resolve the server data directory on the module node"))
+	}
+	var actual []docker.ContainerBindMount
+	for _, mount := range observation.Mounts {
+		if files.Within(dataRoot, mount.Source) {
+			actual = append(actual, mount)
+		}
+	}
+	for _, mount := range actual {
+		if !mount.ReadOnly {
+			return archiveModuleWritableError(module.Name)
+		}
+	}
+	if err := compareArchiveModuleMounts(expected, actual); err != nil {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("module %q: %w", module.Name, err))
+	}
+	return nil
+}
+
+func archiveModuleWritableError(name string) error {
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Errorf("module %q can still write the server data directory; make its bind mounts read-only and recreate it, or remove it, before exporting", name))
+}
+
+// compareArchiveModuleMounts compares the daemon's effective data-directory
+// mounts with the mounts the stored configuration would create. Any extra,
+// missing or read-only-flipped mount is an uncertain attachment state.
+func compareArchiveModuleMounts(expected []docker.ModuleBindMount, actual []docker.ContainerBindMount) error {
+	want := make(map[string]struct{}, len(expected))
+	for _, mount := range expected {
+		want[archiveMountKey(mount.Source, mount.Target, mount.ReadOnly)] = struct{}{}
+	}
+	got := make(map[string]struct{}, len(actual))
+	for _, mount := range actual {
+		got[archiveMountKey(mount.Source, mount.Target, mount.ReadOnly)] = struct{}{}
+	}
+	if len(want) != len(got) {
+		return errors.New("the container's effective data-directory mounts do not match the stored module configuration; recreate the module so the configuration is applied, then export")
+	}
+	for key := range want {
+		if _, ok := got[key]; !ok {
+			return errors.New("the container's effective data-directory mounts do not match the stored module configuration; recreate the module so the configuration is applied, then export")
+		}
+	}
+	for key := range got {
+		if _, ok := want[key]; !ok {
+			return errors.New("the container's effective data-directory mounts do not match the stored module configuration; recreate the module so the configuration is applied, then export")
+		}
+	}
+	return nil
+}
+
+func archiveMountKey(source, target string, readOnly bool) string {
+	mode := "rw"
+	if readOnly {
+		mode = "ro"
+	}
+	return filepath.ToSlash(filepath.Clean(source)) + "\x00" + filepath.ToSlash(filepath.Clean(target)) + "\x00" + mode
 }
 
 type archiveDeadlineContextKey struct{}

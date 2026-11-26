@@ -19,6 +19,10 @@ describe a server's desired configuration.
 
 # Rules
 
+- Every module container mutation goes through the manager's per-server gate.
+  A stopped server archive export holds that gate exclusively for the read;
+  module create, start, stop, update, recreate and delete paths, including
+  their asynchronous workers, fail closed while it is held.
 - Every module operation must use the Docker client resolved for the target
   server. Do not use the manager's client directly.
 - Surface indexer and delivery failures; do not turn a partial download into a

@@ -53,6 +53,7 @@ func allModels() []any {
 		&ServerOperation{},
 		&ServerDisposition{},
 		&IdempotencyKey{},
+		&ArchiveImport{},
 		&PlayerIdentity{},
 		&PlayerAlias{},
 		&PlayerSession{},

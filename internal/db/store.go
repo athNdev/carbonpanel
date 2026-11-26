@@ -212,6 +212,17 @@ func (s *Store) GetServerByContainerID(ctx context.Context, containerID string) 
 	return &server, nil
 }
 
+// ServerExists reports whether a server row exists. Unlike GetServer it keeps a
+// database failure distinct from absence, so recovery never treats an
+// unreadable database as permission to remove data.
+func (s *Store) ServerExists(ctx context.Context, id string) (bool, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&Server{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {
 	var servers []*Server
 	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&servers).Error

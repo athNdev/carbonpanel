@@ -269,8 +269,23 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// CreateAndStartModule creates a container and optionally starts the module
+// CreateAndStartModule creates a container and optionally starts the module.
+// It serializes against every other module mutation for the owning server and
+// refuses while a stopped archive export owns that server.
 func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, startImmediately bool) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	return m.createAndStartModule(ctx, moduleID, startImmediately)
+}
+
+func (m *Manager) createAndStartModule(ctx context.Context, moduleID string, startImmediately bool) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -342,21 +357,35 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	m.logger.Info("Created module container %s for module %s", containerID[:12], module.Name)
 
 	if startImmediately {
-		return m.StartModule(ctx, moduleID)
+		return m.startModule(ctx, moduleID)
 	}
 
 	return nil
 }
 
-// StartModule starts an existing module container
+// StartModule starts an existing module container. It holds the server's
+// module lifecycle gate for its whole duration.
 func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	return m.startModule(ctx, moduleID)
+}
+
+func (m *Manager) startModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
 	}
 
 	if module.ContainerID == "" {
-		return m.CreateAndStartModule(ctx, moduleID, true)
+		return m.createAndStartModule(ctx, moduleID, true)
 	}
 
 	// Resolve before inspecting: an unresolvable node must not be mistaken for a
@@ -378,7 +407,7 @@ func (m *Manager) StartModule(ctx context.Context, moduleID string) error {
 		if err := m.store.UpdateModule(ctx, module); err != nil {
 			return fmt.Errorf("failed to clear module container ID: %w", err)
 		}
-		return m.CreateAndStartModule(ctx, moduleID, true)
+		return m.createAndStartModule(ctx, moduleID, true)
 	}
 
 	// Start dependencies first
@@ -495,17 +524,26 @@ func (m *Manager) startDependencies(ctx context.Context, module *storage.Module)
 			return fmt.Errorf("dependency module %s not found: %w", dep.ModuleId, err)
 		}
 
-		// Start dependency if not running
+		// Start dependency if not running. The caller already owns this
+		// module's server gate. A dependency on the same server runs under that
+		// gate; one that belongs to another server takes its own gate so an
+		// export of that server cannot race the container change.
 		if depModule.Status != storage.ModuleStatusRunning {
 			m.logger.Info("Starting dependency %s for module %s", depModule.Name, module.Name)
-
-			// Create container if needed
-			if depModule.ContainerID == "" {
-				if err := m.CreateAndStartModule(ctx, dep.ModuleId, true); err != nil {
-					return fmt.Errorf("failed to create and start dependency %s: %w", depModule.Name, err)
+			if depModule.ServerID == module.ServerID {
+				if depModule.ContainerID == "" {
+					if err := m.createAndStartModule(ctx, dep.ModuleId, true); err != nil {
+						return fmt.Errorf("failed to create and start dependency %s: %w", depModule.Name, err)
+					}
+				} else if err := m.startModule(ctx, dep.ModuleId); err != nil {
+					return fmt.Errorf("failed to start dependency %s: %w", depModule.Name, err)
 				}
 			} else {
-				if err := m.StartModule(ctx, dep.ModuleId); err != nil {
+				if depModule.ContainerID == "" {
+					if err := m.CreateAndStartModule(ctx, dep.ModuleId, true); err != nil {
+						return fmt.Errorf("failed to create and start dependency %s: %w", depModule.Name, err)
+					}
+				} else if err := m.StartModule(ctx, dep.ModuleId); err != nil {
 					return fmt.Errorf("failed to start dependency %s: %w", depModule.Name, err)
 				}
 			}
@@ -636,8 +674,21 @@ func (m *Manager) checkHealth(url string, timeoutSeconds int) bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 400
 }
 
-// StopModule stops a running module
+// StopModule stops a running module under the server's module lifecycle gate.
 func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	return m.stopModule(ctx, moduleID)
+}
+
+func (m *Manager) stopModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -689,19 +740,41 @@ func (m *Manager) StopModule(ctx context.Context, moduleID string) error {
 	return nil
 }
 
-// RestartModule restarts a module
+// RestartModule restarts a module under one server module lifecycle gate.
 func (m *Manager) RestartModule(ctx context.Context, moduleID string) error {
-	if err := m.StopModule(ctx, moduleID); err != nil {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	if err := m.stopModule(ctx, moduleID); err != nil {
 		return fmt.Errorf("failed to stop module: %w", err)
 	}
 
 	time.Sleep(1 * time.Second)
 
-	return m.StartModule(ctx, moduleID)
+	return m.startModule(ctx, moduleID)
 }
 
-// RecreateModule recreates a module container
+// RecreateModule recreates a module container under the server gate.
 func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	return m.recreateModule(ctx, moduleID)
+}
+
+func (m *Manager) recreateModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -716,7 +789,7 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 
 	// Stop if running
 	if wasRunning {
-		if err := m.StopModule(ctx, moduleID); err != nil {
+		if err := m.stopModule(ctx, moduleID); err != nil {
 			m.logger.Error("Failed to stop module for recreation: %v", err)
 		}
 	}
@@ -731,15 +804,28 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 	}
 
 	// Create new container
-	if err := m.CreateAndStartModule(ctx, moduleID, wasRunning); err != nil {
+	if err := m.createAndStartModule(ctx, moduleID, wasRunning); err != nil {
 		return fmt.Errorf("failed to recreate module: %w", err)
 	}
 
 	return nil
 }
 
-// DeleteModule stops and removes a module and its container
+// DeleteModule stops and removes a module and its container under the gate.
 func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+	return m.deleteModule(ctx, moduleID)
+}
+
+func (m *Manager) deleteModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -754,7 +840,7 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 
 	// Stop if running
 	if module.Status == storage.ModuleStatusRunning {
-		if err := m.StopModule(ctx, moduleID); err != nil {
+		if err := m.stopModule(ctx, moduleID); err != nil {
 			m.logger.Error("Failed to stop module for deletion: %v", err)
 		}
 	}
@@ -775,12 +861,19 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 
 // ForgetModule drops the panel record and API token without stopping or
 // removing the container. Parent keep_data uses this so sidecar volumes are
-// not purged by RemoveContainer (which always sets RemoveVolumes).
+// not purged by RemoveContainer (which always sets RemoveVolumes). It still
+// takes the server gate: forgetting an attachment while an export reads the
+// data would leave an untracked writer.
 func (m *Manager) ForgetModule(ctx context.Context, moduleID string) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
 	}
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
 	if err := m.dropModuleRecord(ctx, module); err != nil {
 		return err
 	}

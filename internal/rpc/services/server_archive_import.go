@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -17,10 +19,48 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/serverarchive"
+	"github.com/athNdev/carbon-panel/pkg/files"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
 	"google.golang.org/protobuf/proto"
 )
+
+// keyedMutex serializes operations that share a key without blocking other
+// keys. Entries are dropped when the last holder releases them.
+type keyedMutex struct {
+	mu      sync.Mutex
+	entries map[string]*keyedMutexEntry
+}
+
+type keyedMutexEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (k *keyedMutex) Lock(key string) func() {
+	k.mu.Lock()
+	if k.entries == nil {
+		k.entries = make(map[string]*keyedMutexEntry)
+	}
+	entry := k.entries[key]
+	if entry == nil {
+		entry = &keyedMutexEntry{}
+		k.entries[key] = entry
+	}
+	entry.refs++
+	k.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		k.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(k.entries, key)
+		}
+		k.mu.Unlock()
+	}
+}
 
 func (s *ServerService) SetServerArchiveUploads(uploads *upload.Manager) {
 	s.archiveUploads = uploads
@@ -31,6 +71,9 @@ type archiveImport struct {
 	verified   serverarchive.Archive
 	replayKey  string
 	replayKind string
+	// claim is set when a prior submission left a durable destination. The
+	// caller must recover it (or prove it absent) before placing fresh data.
+	claim *storage.ArchiveImport
 }
 
 func (s *ServerService) PreviewServerArchive(ctx context.Context, req *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error) {
@@ -183,8 +226,10 @@ func (s *ServerService) archiveNode(ctx context.Context, nodeID string) (nodesto
 	return node.StorageInfo(), nil
 }
 
-// prepareArchiveImport is read-only. It resolves a prior submission before
-// touching the upload so retries work after upload expiry.
+// prepareArchiveImport is read-only with respect to the destination. It
+// resolves a committed prior submission before touching the upload so retries
+// work after upload expiry, and returns the durable intent of an interrupted
+// submission so the caller can prove and reclaim only its own destination.
 func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.CreateServerRequest) (*archiveImport, *storage.Server, error) {
 	requestID := strings.TrimSpace(req.GetRequestId())
 	if requestID == "" {
@@ -193,19 +238,62 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 	if err := operation.ValidateRequestID(requestID); err != nil {
 		return nil, nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	body, err := proto.MarshalOptions{Deterministic: true}.Marshal(req)
+	// The upload session is not durable across a controller restart. Bind the
+	// replay identity to everything except the upload id so the same
+	// submission id can be retried with a freshly uploaded copy of the archive.
+	hashed := proto.CloneOf(req)
+	hashed.ArchiveUploadId = ""
+	body, err := proto.MarshalOptions{Deterministic: true}.Marshal(hashed)
+	if err != nil {
+		return nil, nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid server creation request"))
+	}
+	legacyBody, err := proto.MarshalOptions{Deterministic: true}.Marshal(req)
 	if err != nil {
 		return nil, nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid server creation request"))
 	}
 	replayKey := fmt.Sprintf("%x", sha256.Sum256([]byte("server-archive-create\x00"+uploadOwnerID(ctx)+"\x00"+requestID)))
 	replayKind := fmt.Sprintf("server-archive-create:%x", sha256.Sum256(body))
+	legacyKind := fmt.Sprintf("server-archive-create:%x", sha256.Sum256(legacyBody))
 	existingID, err := s.store.LookupIdempotencyKey(ctx, replayKey, replayKind)
 	if err != nil {
-		return nil, nil, archiveReplayError(err)
+		if !errors.Is(err, storage.ErrRequestIDReused) {
+			return nil, nil, archiveReplayError(err)
+		}
+		// Before durable archive intents, the replay identity included the
+		// upload id. Keep a committed server replayable across that upgrade
+		// without accepting a genuinely different submission.
+		record, recordErr := s.store.GetIdempotencyKey(ctx, replayKey)
+		if recordErr != nil || record == nil || record.Kind != legacyKind {
+			return nil, nil, archiveReplayError(err)
+		}
+		existingID = record.ServerID
 	}
 	if existingID != "" {
-		prior, err := s.archiveReplay(ctx, existingID)
-		return nil, prior, err
+		exists, existsErr := s.store.ServerExists(ctx, existingID)
+		if existsErr != nil {
+			return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the previous server archive submission"))
+		}
+		if exists {
+			prior, getErr := s.store.GetServer(ctx, existingID)
+			if getErr != nil {
+				return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not read the previous server archive submission"))
+			}
+			s.settleCommittedArchiveImport(ctx, replayKey)
+			return nil, prior, nil
+		}
+		intent, intentErr := s.store.GetArchiveImport(ctx, replayKey)
+		if intentErr != nil {
+			if errors.Is(intentErr, storage.ErrArchiveImportUnproven) {
+				return nil, nil, connect.NewError(connect.CodeFailedPrecondition,
+					errors.New("an earlier submission was interrupted before its destination was recorded, so the controller cannot prove which files it created; use a new request id and inspect the destination node's server storage"))
+			}
+			return nil, nil, connect.NewError(connect.CodeInternal, errors.New("could not look up the interrupted server archive submission"))
+		}
+		if intent.ServerID != existingID || intent.Kind != replayKind {
+			return nil, nil, connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("an interrupted server archive submission does not match this request; use a new request id"))
+		}
+		return &archiveImport{replayKey: replayKey, replayKind: replayKind, claim: intent}, nil, nil
 	}
 
 	imported, err := s.openServerArchive(ctx, req.GetArchiveUploadId())
@@ -219,6 +307,40 @@ func (s *ServerService) prepareArchiveImport(ctx context.Context, req *v1.Create
 	imported.replayKey = replayKey
 	imported.replayKind = replayKind
 	return imported, nil, nil
+}
+
+// committedArchiveServer distinguishes a committed row from a database
+// failure. Recovery must never proceed on an unreadable database.
+func (s *ServerService) committedArchiveServer(ctx context.Context, id string) (*storage.Server, bool, error) {
+	exists, err := s.store.ServerExists(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists {
+		return nil, false, nil
+	}
+	server, err := s.store.GetServer(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	return server, true, nil
+}
+
+// settleCommittedArchiveImport clears a marker left by a crash between the
+// server row commit and the download handoff. A committed server's data is
+// never removed, even when its marker survives.
+func (s *ServerService) settleCommittedArchiveImport(ctx context.Context, replayKey string) {
+	intent, err := s.store.GetArchiveImport(ctx, replayKey)
+	if err != nil {
+		return
+	}
+	exists, err := s.store.ServerExists(ctx, intent.ServerID)
+	if err != nil || !exists {
+		return
+	}
+	if err := s.clearArchiveMarker(ctx, intent); err == nil {
+		_ = s.store.DeleteArchiveImport(ctx, replayKey)
+	}
 }
 
 func applyArchiveDefaults(req *v1.CreateServerRequest, runtime serverarchive.Runtime) error {
@@ -281,15 +403,11 @@ func archiveReplayError(err error) error {
 	return connect.NewError(connect.CodeInternal, errors.New("could not look up the server archive submission"))
 }
 
-func (s *ServerService) archiveReplay(ctx context.Context, id string) (*storage.Server, error) {
-	prior, err := s.store.GetServer(ctx, id)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeAborted, errors.New("server archive creation is already in progress or the original server was removed"))
+func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImport, server *storage.Server) (func() error, error) {
+	if imported == nil || imported.claim == nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("archive import has no durable destination"))
 	}
-	return prior, nil
-}
-
-func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImport, server *storage.Server) (func(), error) {
+	intent := imported.claim
 	info, err := s.archiveNode(ctx, server.NodeID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
@@ -319,29 +437,196 @@ func (s *ServerService) placeArchive(ctx context.Context, imported *archiveImpor
 		}
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("could not allocate a fresh destination directory"))
 	}
-
-	remove := func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		cleanup, err := s.storageResolver.ForAllocation(ctx, info, parent)
-		if err == nil {
-			defer func() { _ = cleanup.Close() }()
-			err = cleanup.RemoveAll(child)
+	// The marker is the durable proof that this submission, not another
+	// process, created the directory. It is written before any archive bytes
+	// and is excluded from the archive format.
+	cleanup := func() error {
+		return s.removeArchiveDestination(ctx, intent, true)
+	}
+	if err := root.WriteFile(path.Join(child, archiveOwnershipMarker), []byte(intent.ClaimToken+"\n")); err != nil {
+		s.log.Error("Write archive ownership marker for server %s: %v", server.ID, err)
+		if removeErr := cleanup(); removeErr != nil {
+			return cleanup, connect.NewError(connect.CodeInternal, errors.New("could not prepare the destination directory; retry the submission"))
 		}
-		if err != nil {
-			s.log.Error("Cleanup for incomplete archive server %s: %v", server.ID, err)
-		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("could not prepare the destination directory"))
+	}
+	if err := s.store.SetArchiveImportPhase(ctx, intent.RequestKey, storage.ArchiveImportStaged); err != nil {
+		s.log.Error("Record archive destination for server %s: %v", server.ID, err)
+		return cleanup, connect.NewError(connect.CodeInternal, errors.New("could not record the archive destination"))
 	}
 	if err := serverarchive.CopyTo(ctx, imported.file, imported.verified, root, child); err != nil {
-		_ = root.Close()
-		remove()
 		s.log.Error("Import archive into newly allocated server %s: %v", server.ID, err)
 		if ctx.Err() != nil {
-			return nil, connect.NewError(connect.CodeCanceled, ctx.Err())
+			return cleanup, connect.NewError(connect.CodeCanceled, ctx.Err())
 		}
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("could not restore verified data to the destination node; check storage and try again"))
+		return cleanup, connect.NewError(connect.CodeFailedPrecondition, errors.New("could not restore verified data to the destination node; check storage and try again"))
 	}
-	return remove, nil
+	return cleanup, nil
+}
+
+const archiveOwnershipMarker = ".carbon-archive-import"
+
+// errArchiveDestinationUnproven means a directory exists at the claimed
+// destination but its marker does not prove this submission created it.
+var errArchiveDestinationUnproven = errors.New("archive destination ownership cannot be proven")
+
+// archiveDataPath is the canonical destination for a new server. Keeping the
+// formula in one place lets a retry resume the exact path recorded durably.
+func (s *ServerService) archiveDataPath(name, serverID string) string {
+	return filepath.Join(s.config.Storage.DataDir, "servers", fmt.Sprintf("%s_%s", files.SanitizePathName(name), serverID))
+}
+
+// recoverArchiveImport reclaims a destination allocated by an interrupted
+// submission. It removes files only when the durable intent, the exact path
+// and the ownership marker all agree. A committed server row always wins:
+// recovery never removes data of a server that already exists.
+func (s *ServerService) recoverArchiveImport(ctx context.Context, intent *storage.ArchiveImport) error {
+	if intent == nil {
+		return nil
+	}
+	exists, err := s.store.ServerExists(ctx, intent.ServerID)
+	if err != nil {
+		return connect.NewError(connect.CodeUnavailable, errors.New("could not verify whether the archive destination was already committed"))
+	}
+	if exists {
+		return nil
+	}
+	if intent.NodeID == "" {
+		// No node was recorded, so placeArchive could not have allocated a
+		// destination for this intent.
+		return nil
+	}
+	if err := s.removeArchiveDestination(ctx, intent, false); err != nil {
+		if errors.Is(err, errArchiveDestinationUnproven) {
+			return connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("an interrupted archive import left a destination that this controller cannot prove it created; inspect the destination node's server storage before retrying"))
+		}
+		s.log.Error("Reclaim interrupted archive destination for server %s: %v", intent.ServerID, err)
+		return connect.NewError(connect.CodeUnavailable, errors.New("could not reclaim the interrupted archive destination"))
+	}
+	return nil
+}
+
+// removeArchiveDestination removes the destination only when justCreated is
+// true (this call allocated it) or the durable marker proves ownership.
+func (s *ServerService) removeArchiveDestination(ctx context.Context, intent *storage.ArchiveImport, justCreated bool) error {
+	if intent == nil || intent.NodeID == "" || intent.DataPath == "" {
+		return errArchiveDestinationUnproven
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	info, err := s.archiveNode(cleanupCtx, intent.NodeID)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(intent.DataPath)
+	if info.IsLocal {
+		if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+	}
+	root, err := s.storageResolver.ForAllocation(cleanupCtx, info, parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	child := filepath.Base(intent.DataPath)
+	if !justCreated {
+		exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return nil
+		}
+		if !proven {
+			return errArchiveDestinationUnproven
+		}
+	}
+	return root.RemoveAll(child)
+}
+
+// archiveDestinationProof reports whether the directory exists and whether its
+// marker matches the durable claim token.
+func archiveDestinationProof(root nodestorage.AllocationRoot, child, token string) (bool, bool, error) {
+	info, err := root.Stat(child)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if !info.IsDir() {
+		return true, false, nil
+	}
+	data, err := root.ReadFile(path.Join(child, archiveOwnershipMarker))
+	if errors.Is(err, os.ErrNotExist) {
+		return true, false, nil
+	}
+	if err != nil {
+		return true, false, err
+	}
+	return true, strings.TrimSpace(string(data)) == token, nil
+}
+
+// clearArchiveMarker removes only the marker from a committed server. It never
+// removes server data and does nothing when the marker is absent or unproven.
+func (s *ServerService) clearArchiveMarker(ctx context.Context, intent *storage.ArchiveImport) error {
+	if intent == nil || intent.NodeID == "" || intent.DataPath == "" {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	info, err := s.archiveNode(cleanupCtx, intent.NodeID)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(intent.DataPath)
+	if info.IsLocal {
+		if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+	}
+	root, err := s.storageResolver.ForAllocation(cleanupCtx, info, parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	child := filepath.Base(intent.DataPath)
+	exists, proven, err := archiveDestinationProof(root, child, intent.ClaimToken)
+	if err != nil {
+		return err
+	}
+	if !exists || !proven {
+		return nil
+	}
+	return root.Remove(path.Join(child, archiveOwnershipMarker))
+}
+
+// finishArchiveImport advances a committed intent and clears its marker. The
+// intent is retained if marker cleanup fails so a replay can retry it.
+func (s *ServerService) finishArchiveImport(ctx context.Context, intent *storage.ArchiveImport) {
+	if intent == nil {
+		return
+	}
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := s.store.SetArchiveImportPhase(bgCtx, intent.RequestKey, storage.ArchiveImportCommitted); err != nil {
+		s.log.Error("Record committed archive import %s: %v", intent.ServerID, err)
+	}
+	if err := s.clearArchiveMarker(bgCtx, intent); err != nil {
+		s.log.Error("Clear archive ownership marker for committed server %s: %v", intent.ServerID, err)
+		return
+	}
+	if err := s.store.DeleteArchiveImport(bgCtx, intent.RequestKey); err != nil {
+		s.log.Error("Delete committed archive import %s: %v", intent.ServerID, err)
+	}
 }
 
 func archiveNameError(err error) error {
