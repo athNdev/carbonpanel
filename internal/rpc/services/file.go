@@ -31,6 +31,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/download"
@@ -408,6 +409,23 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	}), nil
 }
 
+// beginServerDataWrite admits a direct panel write to the server data path.
+// While it is held a stopped archive export cannot claim consistency; when an
+// export already owns the path the write is refused instead of racing it.
+func (s *FileService) beginServerDataWrite(serverID string) (func(), error) {
+	write, err := module.TryBeginServerDataWrite(serverID)
+	if err == nil {
+		return write.Release, nil
+	}
+	switch {
+	case errors.Is(err, module.ErrModuleArchiveExport):
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("a server archive export is in progress; retry after it finishes"))
+	default:
+		return nil, connect.NewError(connect.CodeAborted, err)
+	}
+}
+
 // SaveUploadedFile saves a file from a completed chunked upload session
 func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request[v1.SaveUploadedFileRequest]) (*connect.Response[v1.SaveUploadedFileResponse], error) {
 	msg := req.Msg
@@ -422,6 +440,12 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	// Get temp file path and original filename from upload manager. The
 	// session owner must match the caller: a session ID is not a capability.
@@ -535,6 +559,12 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		}), nil
 	}
 
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	if err := acc.WriteFile(msg.Path, msg.Content); err != nil {
 		if nodestorage.IsSymlink(err) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -595,6 +625,12 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 	}
 
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	for _, p := range paths {
 		info, err := acc.Stat(p)
 		if err != nil {
@@ -637,6 +673,12 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
@@ -718,6 +760,17 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, storageError(err)
 	}
 
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	writeTransferred := false
+	defer func() {
+		if !writeTransferred {
+			releaseWrite()
+		}
+	}()
+
 	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
@@ -770,8 +823,10 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 	s.extractions.Store(opID, op)
 
 	detachedCtx, release := s.beginDetached()
+	writeTransferred = true
 	go func() {
 		defer release()
+		defer releaseWrite()
 		_, err := files.ExtractArchive(detachedCtx, fullArchivePath, destPath, &op.FilesExtracted)
 		if err != nil {
 			op.fail(err.Error())
@@ -798,6 +853,16 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 	if err != nil {
 		return nil, storageError(err)
 	}
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	writeTransferred := false
+	defer func() {
+		if !writeTransferred {
+			releaseWrite()
+		}
+	}()
 	// The accessor is handed to a detached job: open it with the service-owned
 	// context so a client disconnect cannot kill the worker mid-extraction.
 	detachedCtx, release := s.beginDetached()
@@ -834,8 +899,10 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 	op := &extractionOp{State: "extracting", ServerID: server.ID, UserID: userID}
 	s.extractions.Store(opID, op)
 
+	writeTransferred = true
 	go func() {
 		defer release()
+		defer releaseWrite()
 		defer func() { _ = acc.Close() }()
 		_, err := nodestorage.ExtractZip(detachedCtx, acc, msg.Path, destRel, &op.FilesExtracted)
 		if err != nil {
@@ -1336,6 +1403,12 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	if err := acc.MkdirAll(msg.Path); err != nil {
 		s.log.Error("Failed to create folder: %v", err)
 		return nil, storageError(err)
@@ -1354,6 +1427,12 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
@@ -1410,6 +1489,12 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
@@ -1473,6 +1558,12 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	if len(msg.Paths) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
+
+	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {

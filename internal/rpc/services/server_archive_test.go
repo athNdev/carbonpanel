@@ -269,6 +269,19 @@ func TestExportServerArchiveEffectiveModuleMounts(t *testing.T) {
 			wantMessage: "can still write the server data directory",
 		},
 		{
+			name:        "writable ancestor of the data directory is refused",
+			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
+			containerID: "module-container",
+			mounts: func(server *db.Server) []docker.ContainerBindMount {
+				return []docker.ContainerBindMount{
+					{Source: filepath.Dir(server.DataPath), Target: "/servers", ReadOnly: false},
+					{Source: filepath.Join(server.DataPath, "plugins"), Target: "/java-plugins", ReadOnly: true},
+				}
+			},
+			wantCode:    connect.CodeFailedPrecondition,
+			wantMessage: "can still write the server data directory",
+		},
+		{
 			name:        "extra live data mount is an uncertain mismatch",
 			volume:      `[{"source":"{{server.data_path}}/plugins","target":"/java-plugins","read_only":true}]`,
 			containerID: "module-container",

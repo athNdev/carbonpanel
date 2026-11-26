@@ -62,8 +62,11 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 	// read so no panel-driven module lifecycle can start a writer mid-export.
 	moduleFence, err := module.TryBeginServerModuleArchive(msg.GetServerId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeAborted,
-			errors.New("a module lifecycle operation is in progress; wait for it to finish, then export again"))
+		message := "a module lifecycle operation is in progress; wait for it to finish, then export again"
+		if errors.Is(err, module.ErrServerDataWrite) {
+			message = "a panel file write is in progress; wait for it to finish, then export again"
+		}
+		return nil, connect.NewError(connect.CodeAborted, errors.New(message))
 	}
 	defer moduleFence.Release()
 
@@ -296,7 +299,10 @@ func (s *ServerService) verifyArchiveModule(ctx context.Context, module *storage
 	}
 	var actual []docker.ContainerBindMount
 	for _, mount := range observation.Mounts {
-		if files.Within(dataRoot, mount.Source) {
+		// A mount whose source is an ancestor of the data directory can write
+		// it just as effectively as a nested mount. Include both directions in
+		// the proven overlap so a writable ancestor is refused.
+		if archiveMountOverlapsDataRoot(dataRoot, mount.Source) {
 			actual = append(actual, mount)
 		}
 	}
@@ -343,6 +349,10 @@ func compareArchiveModuleMounts(expected []docker.ModuleBindMount, actual []dock
 		}
 	}
 	return nil
+}
+
+func archiveMountOverlapsDataRoot(dataRoot, source string) bool {
+	return files.Within(dataRoot, source) || files.Within(source, dataRoot)
 }
 
 func archiveMountKey(source, target string, readOnly bool) string {

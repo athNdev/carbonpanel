@@ -285,6 +285,32 @@ func (m *Manager) CreateAndStartModule(ctx context.Context, moduleID string, sta
 	return m.createAndStartModule(ctx, moduleID, startImmediately)
 }
 
+// ReserveModuleLifecycle claims the server's module lifecycle gate for an RPC
+// that will hand it to its asynchronous worker, so an export cannot start
+// between the successful acknowledgement and the container mutation.
+func (m *Manager) ReserveModuleLifecycle(ctx context.Context, serverID string) (*ModuleTransition, error) {
+	return ReserveServerModuleMutation(ctx, serverID)
+}
+
+// CreateAndStartModuleReserved runs a create under a gate the RPC reserved
+// before acknowledging the request. The reservation must belong to the
+// module's server; a mismatched handle is refused rather than silently
+// releasing the wrong server's gate.
+func (m *Manager) CreateAndStartModuleReserved(ctx context.Context, moduleID string, startImmediately bool, reservation *ModuleTransition) error {
+	if reservation == nil {
+		return m.CreateAndStartModule(ctx, moduleID, startImmediately)
+	}
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	if owner := reservation.ServerID(); owner != "" && owner != module.ServerID {
+		return fmt.Errorf("module lifecycle reservation belongs to another server")
+	}
+	defer reservation.Release()
+	return m.createAndStartModule(ctx, moduleID, startImmediately)
+}
+
 func (m *Manager) createAndStartModule(ctx context.Context, moduleID string, startImmediately bool) error {
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
@@ -478,6 +504,17 @@ func (m *Manager) runInitCommand(moduleID string) {
 		time.Sleep(time.Duration(module.InitCommandDelay) * time.Second)
 	}
 
+	// The delayed init command and its optional restart mutate the container
+	// after the start call returned. Take the server's module lifecycle gate so
+	// they cannot run during a stopped archive read, and hold it through the
+	// restart so the fence covers the whole writer action.
+	transition, err := beginServerModuleMutation(ctx, module.ServerID)
+	if err != nil {
+		m.logger.Warn("Init command: module %s lifecycle gate unavailable: %v", module.Name, err)
+		return
+	}
+	defer transition.Release()
+
 	// Verify container is still running
 	status, err := m.GetModuleStatus(ctx, moduleID)
 	if err != nil || status != storage.ModuleStatusRunning {
@@ -538,14 +575,8 @@ func (m *Manager) startDependencies(ctx context.Context, module *storage.Module)
 				} else if err := m.startModule(ctx, dep.ModuleId); err != nil {
 					return fmt.Errorf("failed to start dependency %s: %w", depModule.Name, err)
 				}
-			} else {
-				if depModule.ContainerID == "" {
-					if err := m.CreateAndStartModule(ctx, dep.ModuleId, true); err != nil {
-						return fmt.Errorf("failed to create and start dependency %s: %w", depModule.Name, err)
-					}
-				} else if err := m.StartModule(ctx, dep.ModuleId); err != nil {
-					return fmt.Errorf("failed to start dependency %s: %w", depModule.Name, err)
-				}
+			} else if err := m.startCrossServerDependency(ctx, depModule); err != nil {
+				return fmt.Errorf("failed to start dependency %s: %w", depModule.Name, err)
 			}
 		}
 
@@ -562,6 +593,22 @@ func (m *Manager) startDependencies(ctx context.Context, module *storage.Module)
 	}
 
 	return nil
+}
+
+// startCrossServerDependency takes the dependency server's gate without
+// waiting. Two servers whose modules depend on each other would otherwise each
+// hold their own gate and wait forever for the other. A busy dependency is a
+// retryable failure; a same-server dependency runs under the caller's gate.
+func (m *Manager) startCrossServerDependency(ctx context.Context, depModule *storage.Module) error {
+	transition, err := TryServerModuleMutation(depModule.ServerID)
+	if err != nil {
+		return fmt.Errorf("dependency server %s lifecycle is busy: %w", depModule.ServerID, err)
+	}
+	defer transition.Release()
+	if depModule.ContainerID == "" {
+		return m.createAndStartModule(ctx, depModule.ID, true)
+	}
+	return m.startModule(ctx, depModule.ID)
 }
 
 // waitForHealthy waits for a module to pass its health check
@@ -771,6 +818,23 @@ func (m *Manager) RecreateModule(ctx context.Context, moduleID string) error {
 		return err
 	}
 	defer transition.Release()
+	return m.recreateModule(ctx, moduleID)
+}
+
+// RecreateModuleReserved runs a recreate under a gate the update RPC reserved
+// before acknowledging the request.
+func (m *Manager) RecreateModuleReserved(ctx context.Context, moduleID string, reservation *ModuleTransition) error {
+	if reservation == nil {
+		return m.RecreateModule(ctx, moduleID)
+	}
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	if owner := reservation.ServerID(); owner != "" && owner != module.ServerID {
+		return fmt.Errorf("module lifecycle reservation belongs to another server")
+	}
+	defer reservation.Release()
 	return m.recreateModule(ctx, moduleID)
 }
 

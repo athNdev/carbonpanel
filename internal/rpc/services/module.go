@@ -33,6 +33,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// moduleLifecycleReservation aliases the module package type so local
+// variables named "module" do not shadow it.
+type moduleLifecycleReservation = module.ModuleTransition
+
 // Compile-time check that ModuleService implements the interface
 var _ carbonpanelv1connect.ModuleServiceHandler = (*ModuleService)(nil)
 
@@ -640,6 +644,22 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		defer func() { _ = finalizeBlueMap(false, "") }()
 	}
 
+	// Reserve the module lifecycle before acknowledging a create whose
+	// container is provisioned asynchronously. An export that starts after the
+	// response must observe this claim instead of racing the new writer.
+	var moduleReservation *moduleLifecycleReservation
+	if finalizeBlueMap == nil {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, server.ID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	// Use ports from request, or fall back to template defaults
 	ports := msg.Ports
 	if len(ports) == 0 {
@@ -772,7 +792,9 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 			return nil, blueMapConfigPrecondition(commitErr)
 		}
 	} else {
-		go s.createModuleContainer(module.ID, msg.StartImmediately)
+		reservation := moduleReservation
+		moduleReservation = nil
+		go s.createModuleContainer(module.ID, msg.StartImmediately, reservation)
 	}
 
 	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
@@ -781,8 +803,8 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	}), nil
 }
 
-func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool) {
-	if err := s.moduleManager.CreateAndStartModule(context.Background(), moduleID, startImmediately); err != nil {
+func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool, reservation *moduleLifecycleReservation) {
+	if err := s.moduleManager.CreateAndStartModuleReserved(context.Background(), moduleID, startImmediately, reservation); err != nil {
 		s.log.Error("Failed to create module container: %v", err)
 	}
 }
@@ -982,6 +1004,23 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		}), nil
 	}
 
+	// Reserve the module lifecycle before the update is acknowledged when its
+	// asynchronous recreate will mutate the container. The reservation is
+	// handed to that worker, so an export cannot slip into the window between
+	// the response and the recreate.
+	var moduleReservation *moduleLifecycleReservation
+	if needsRecreate {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, module.ServerID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	if err := s.store.UpdateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update module: %w", err))
 	}
@@ -993,6 +1032,8 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		// node that changed after the update's eligibility check.
 		workerTransition := transition
 		transition = nil
+		reservation := moduleReservation
+		moduleReservation = nil
 		go func(moduleID string) {
 			defer workerTransition.Release()
 			bgCtx := context.Background()
@@ -1001,7 +1042,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 				bgCtx, cancel = context.WithTimeout(bgCtx, s.managedBlueMapTimeout())
 				defer cancel()
 			}
-			if err := s.moduleManager.RecreateModule(bgCtx, moduleID); err != nil {
+			if err := s.moduleManager.RecreateModuleReserved(bgCtx, moduleID, reservation); err != nil {
 				s.log.Error("Failed to recreate module container: %v", err)
 			}
 		}(module.ID)

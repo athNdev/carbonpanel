@@ -16,14 +16,21 @@ var ErrModuleLifecycleInFlight = errors.New("module lifecycle operation is in pr
 // lifecycle. Mutations must not start a writer while the archive is read.
 var ErrModuleArchiveExport = errors.New("a server archive export is in progress")
 
+// ErrServerDataWrite reports that a direct panel file write holds the server's
+// data path. An export must not claim stopped consistency while such a write
+// is in flight.
+var ErrServerDataWrite = errors.New("a panel file write is in progress")
+
 // moduleGate serializes panel-driven module lifecycle operations for one
-// server. An archive fence is exclusive with every mutation; mutations
-// serialize with each other but fail fast when an archive is being read.
+// server. An archive fence is exclusive with every mutation and with direct
+// panel file writes; mutations serialize with each other but fail fast when an
+// archive is being read.
 type moduleGate struct {
-	mu       sync.Mutex
-	mutation bool
-	export   bool
-	changed  chan struct{}
+	mu         sync.Mutex
+	mutation   bool
+	export     bool
+	dataWrites int
+	changed    chan struct{}
 }
 
 var moduleGates = struct {
@@ -45,9 +52,18 @@ func moduleGateFor(serverID string) *moduleGate {
 // ModuleTransition is one claim on a server's module lifecycle. Only the
 // handle that acquired it can release it; Release is idempotent.
 type ModuleTransition struct {
-	gate   *moduleGate
-	export bool
-	once   sync.Once
+	gate     *moduleGate
+	serverID string
+	export   bool
+	once     sync.Once
+}
+
+// ServerID is the server whose module lifecycle this handle owns.
+func (t *ModuleTransition) ServerID() string {
+	if t == nil {
+		return ""
+	}
+	return t.serverID
 }
 
 // Release ends the claim and wakes waiters.
@@ -87,7 +103,7 @@ func beginServerModuleMutation(ctx context.Context, serverID string) (*ModuleTra
 		if !gate.mutation {
 			gate.mutation = true
 			gate.mu.Unlock()
-			return &ModuleTransition{gate: gate}, nil
+			return &ModuleTransition{gate: gate, serverID: serverID}, nil
 		}
 		wait := gate.changed
 		gate.mu.Unlock()
@@ -113,6 +129,80 @@ func TryBeginServerModuleArchive(serverID string) (*ModuleTransition, error) {
 	if gate.mutation || gate.export {
 		return nil, ErrModuleLifecycleInFlight
 	}
+	if gate.dataWrites > 0 {
+		return nil, ErrServerDataWrite
+	}
 	gate.export = true
-	return &ModuleTransition{gate: gate, export: true}, nil
+	return &ModuleTransition{gate: gate, serverID: serverID, export: true}, nil
+}
+
+// ReserveServerModuleMutation claims the server's module lifecycle gate before
+// an RPC acknowledges an asynchronous module worker. Handing this reservation
+// to the worker closes the window in which an export could start between the
+// acknowledgement and the container mutation.
+func ReserveServerModuleMutation(ctx context.Context, serverID string) (*ModuleTransition, error) {
+	return beginServerModuleMutation(ctx, serverID)
+}
+
+// TryServerModuleMutation is the non-waiting acquisition used for nested
+// cross-server dependency starts. Waiting there could deadlock two servers
+// that depend on each other, so a busy dependency is reported and retried
+// later instead of blocking while another server's gate is held.
+func TryServerModuleMutation(serverID string) (*ModuleTransition, error) {
+	if serverID == "" {
+		return nil, errors.New("module lifecycle transition requires a server ID")
+	}
+	gate := moduleGateFor(serverID)
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.export {
+		return nil, ErrModuleArchiveExport
+	}
+	if gate.mutation {
+		return nil, ErrModuleLifecycleInFlight
+	}
+	gate.mutation = true
+	return &ModuleTransition{gate: gate, serverID: serverID}, nil
+}
+
+// DataWrite is one direct panel file mutation on a server's data path. While it
+// is held an export cannot claim stopped consistency; if an export already owns
+// the data path the write is refused.
+type DataWrite struct {
+	gate *moduleGate
+	once sync.Once
+}
+
+// Release ends the data-write claim.
+func (w *DataWrite) Release() {
+	if w == nil {
+		return
+	}
+	w.once.Do(func() {
+		gate := w.gate
+		gate.mu.Lock()
+		if gate.dataWrites > 0 {
+			gate.dataWrites--
+		}
+		close(gate.changed)
+		gate.changed = make(chan struct{})
+		gate.mu.Unlock()
+	})
+}
+
+// TryBeginServerDataWrite admits a direct panel file write unless an archive
+// export is already reading the server data. It does not wait: the caller can
+// report a retryable refusal instead of queueing a writer behind a long export.
+func TryBeginServerDataWrite(serverID string) (*DataWrite, error) {
+	if serverID == "" {
+		return nil, errors.New("server data write requires a server ID")
+	}
+	gate := moduleGateFor(serverID)
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.export {
+		return nil, ErrModuleArchiveExport
+	}
+	gate.dataWrites++
+	return &DataWrite{gate: gate}, nil
 }
