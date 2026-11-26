@@ -173,7 +173,7 @@ export function inspectModrinthManifest(data: ManifestJson): ManifestInspectionR
 		const clientEnv = jsonStr(env.client, 'required');
 		const serverEnv = jsonStr(env.server, 'required');
 
-		let resolvedEnv: ModEnvironment = 'both';
+		let resolvedEnv: ModEnvironment;
 		if (serverEnv === 'unsupported') {
 			resolvedEnv = 'client';
 			clientOnlyCount++;
@@ -246,7 +246,7 @@ export function inspectCurseForgeManifest(data: ManifestJson): ManifestInspectio
 		const req = file.required !== false;
 
 		// Fallback environment classification based on name/hints if available
-		let resolvedEnv: ModEnvironment = 'unknown';
+		let resolvedEnv: ModEnvironment;
 
 		// If filename or name exists in file object
 		const displayName = jsonStr(file.name) || `Mod #${projId}`;
@@ -296,7 +296,8 @@ export function inspectManifest(input: string | object): ManifestInspectionResul
 			data = JSON.parse(input);
 		} catch (err) {
 			throw new Error(
-				`Failed to parse manifest JSON: ${err instanceof Error ? err.message : String(err)}`
+				`Failed to parse manifest JSON: ${err instanceof Error ? err.message : String(err)}`,
+				{ cause: err }
 			);
 		}
 	}
