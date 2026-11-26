@@ -49,6 +49,7 @@ world download and never deletes inventory. Recreate has no backend request ID
 field, so the frontend deduplicates its in-flight call. Notifications and the
 actual download stay in the view. ERROR is red and UNHEALTHY is yellow in the
 shared presentation policy.
+The detail page separates runtime status from player freshness. Only a playable reading confirms the player count, including zero. The runtime card animates its background once per status change and stays static under either reduced-motion preference.
 
 # Verification
 

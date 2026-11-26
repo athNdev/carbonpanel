@@ -156,8 +156,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/SearchMods"},
 		Sources: []string{
 			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
-			"internal/rpc/handlers/mod_search.go:120:legacy JSON adapter and the generated ModBrowseService",
-			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
+			"internal/rpc/handlers/mod_search.go:285:func (m *ModOnlineManager) Search(",
+			"internal/rpc/handlers/mod_search.go:210:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},
 	{
@@ -168,7 +168,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/GetModVersions"},
 		Sources: []string{
 			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
-			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
+			"internal/rpc/handlers/mod_search.go:210:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},
 	{
@@ -179,7 +179,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/InstallMods"},
 		Sources: []string{
 			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
-			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
+			"internal/rpc/handlers/mod_search.go:210:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},
 	{

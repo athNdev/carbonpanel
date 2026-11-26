@@ -33,11 +33,10 @@ sources:
   registry digests and the deployed public docs marker, and GitHub release
   creation is gated on that synchronized transaction. A failed stable alias
   write is compensated by restoring aliases and docs to the prior receipt.
-- The active receipt requires the docs commit and digest to match the observed
-  multi-architecture image in each registry. Stable renders its canonical and
-  immutable routes with the release version before deployment. Nightly retains
-  its verified live identity. Both channels' rendered OpenAPI versions are
-  checked, and an off-path HTTPS probe precedes the canonical deployment.
+- The active receipt requires docs commit and digest to match each registry's
+  observed multi-architecture image. Stable renders canonical and immutable
+  routes with the release version; Nightly retains its verified live identity.
+  Both rendered OpenAPI versions are checked, and an off-path HTTPS probe precedes deployment.
 - When a Stable alias is absent, establish it at the already-public release
   verified against its GitHub manifest, both latest tags and the live docs.
   Re-read both registries before filling each absent alias. An interrupted
@@ -46,13 +45,14 @@ sources:
 - Release downloads are staged and checksum-verified on a private draft before
   channel changes. A trusted interrupted-run journal binds the private release
   ID, prior deployment and retained Pages archives. Recovery requires the same
-  private draft. The minor alias advances only after public download verification.
-- Stable requires observed dual-registry digests and trusted gate commands.
-- All channel and docs moves share ONE non-cancelling `pages-deploy` lock; no
-  nested group and no dispatched workflow takes the same lock. A manual/site-only
-  dispatch publishes only an already-active source from the receipt. A partial
-  move converges, a stale/out-of-order candidate is refused, and an idempotent
-  alias at the target is a no-op. No immutable tag is overwritten or deleted.
+  private draft; Stable also needs observed dual-registry digests and trusted gate commands.
+- All channel and docs moves share ONE non-cancelling `pages-deploy` lock with
+  `queue: max`; no nested group. Nightly keeps its deployed Pages bytes and
+  binds alias moves to the verified prior receipt; site-only dispatches keep
+  their active receipt, and a trusted `nightly=true` dispatch can advance Nightly.
+  Publishers revalidate live source and artifacts under the lock; partial or stale
+  work converges or is refused, idempotent aliases are no-ops, and immutable tags
+  are never overwritten or deleted.
 
 # Read next
 

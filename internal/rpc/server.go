@@ -396,6 +396,8 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 		serverService.SetAdmissionCoordinator(s.admission)
 	}
 	serverService.SetStorageResolver(s.storageResolver)
+	serverService.SetServerArchiveDownloads(s.downloadManager)
+	serverService.SetServerArchiveUploads(s.uploadManager)
 	if finished, err := serverService.ResumeUnsettledDispositions(context.Background()); err != nil {
 		s.log.Error("Failed to list unfinished deletions: %v", err)
 	} else if finished > 0 {
@@ -467,13 +469,14 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 		docker.NewLocator(s.clientPool, s.docker, s.store),
 		bluemapDiscovery,
 	)
+	nativeMap := worldview.NewNativeMap(s.store, s.storageResolver)
 	worldViewService := worldview.NewService(worldview.ServiceDeps{
-		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,
+		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver, Native: nativeMap,
 		Auditor: worldview.NewAuditLogger(s.store.DB()), Log: s.log,
 	})
 	s.worldViewProxy = worldview.NewProxyHandler(worldview.ProxyDeps{
 		Auth: s.authManager, Authorizer: s.enforcer, Subusers: s.store, Servers: s.store,
-		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Log: s.log,
+		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Native: nativeMap, Log: s.log,
 	})
 
 	// World Library (OSS-347). Its binder takes explicit lifecycle, resolver
@@ -520,7 +523,16 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 	mux.Handle(proxyPath, proxyHandler)
 
 	serverPath, serverHandler := carbonpanelv1connect.NewServerServiceHandler(serverService, opts...)
-	mux.Handle(serverPath, serverHandler)
+	mux.Handle(serverPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case carbonpanelv1connect.ServerServiceCreateServerProcedure,
+			carbonpanelv1connect.ServerServiceExportServerArchiveProcedure,
+			carbonpanelv1connect.ServerServicePreviewServerArchiveProcedure:
+			extend := http.NewResponseController(w).SetWriteDeadline
+			r = r.WithContext(services.WithArchiveResponseDeadline(r.Context(), extend))
+		}
+		serverHandler.ServeHTTP(w, r)
+	}))
 
 	nodePath, nodeHandler := carbonpanelv1connect.NewNodeServiceHandler(nodeService, opts...)
 	mux.Handle(nodePath, nodeHandler)

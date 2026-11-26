@@ -28,6 +28,8 @@ socket and its generation, clears timers/subscriptions/pending log batches and
 enters `signed-out` while clearing the local session like an RPC 401. It never
 schedules a reconnect, and views must not render a reconnect spinner in that
 state.
+AuthStore refreshes the browser session cookie before each browser socket opens.
+An unauthenticated app opening on another port leaves the shared host cookie intact.
 
 # Consequences
 

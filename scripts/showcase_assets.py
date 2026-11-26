@@ -319,7 +319,7 @@ def build(args: argparse.Namespace) -> None:
             "installation": "isolated disposable seeded review stack (scripts/review/devstack.sh)",
             "dataOrigin": "seeded fixture account, node, server and modpacks; no production data",
             "seedScript": {"path": args.seed_script, "sha256": seed_hash},
-            "capture": "unretouched Chromium crops of the packaged application",
+            "capture": "unretouched Chromium captures of the packaged application",
             "credentials": "isolated review credentials, never published",
             "mockups": False,
         },

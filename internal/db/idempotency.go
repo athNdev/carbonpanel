@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const maxRequestIDLen = 128
@@ -27,7 +29,15 @@ type IdempotencyKey struct {
 	RequestID string `gorm:"primaryKey;size:128"`
 	ServerID  string `gorm:"not null"`
 	Kind      string `gorm:"not null"`
-	CreatedAt time.Time
+	// These archive fields are the replay receipt for a
+	// committed server archive import. They are written in the same transaction
+	// as the server row and independently of ownership-marker cleanup. The
+	// digest binds replays to the verified archive content. Retaining the
+	// original and completing upload IDs permits exact replay after expiry.
+	ArchiveDigest             string
+	ArchiveUploadID           string
+	ArchiveCompletionUploadID string
+	CreatedAt                 time.Time
 }
 
 // ClaimIdempotencyKey records requestID for serverID. The first caller is
@@ -60,6 +70,37 @@ func (s *Store) ClaimIdempotencyKey(ctx context.Context, requestID, serverID, ki
 		return "", false, fmt.Errorf("%w: %s", ErrRequestIDReused, existing.Kind)
 	}
 	return existing.ServerID, false, nil
+}
+
+// LookupIdempotencyKey finds a prior result without claiming a new request.
+func (s *Store) LookupIdempotencyKey(ctx context.Context, requestID, kind string) (string, error) {
+	var existing IdempotencyKey
+	err := s.db.WithContext(ctx).Where("request_id = ?", requestID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if existing.Kind != kind {
+		return "", ErrRequestIDReused
+	}
+	return existing.ServerID, nil
+}
+
+// GetIdempotencyKey returns the raw durable row so a caller can distinguish
+// the current replay identity from an older stored one.
+func (s *Store) GetIdempotencyKey(ctx context.Context, requestID string) (*IdempotencyKey, error) {
+	requestID = strings.TrimSpace(requestID)
+	var existing IdempotencyKey
+	err := s.db.WithContext(ctx).Where("request_id = ?", requestID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &existing, nil
 }
 
 // ReleaseIdempotencyKey forgets a claim that never became a server row.

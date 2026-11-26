@@ -7,10 +7,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { CarbonButton, CarbonErrorState, CarbonTag } from '$lib/components/carbon';
+	import { CarbonButton, CarbonErrorState } from '$lib/components/carbon';
+	import { UserPlus } from '@lucide/svelte';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
 	import AddAllowlistEntry from '$lib/features/players/AddAllowlistEntry.svelte';
+	import { allowlistDialogShouldClose } from '$lib/features/players/allowlist-dialog-state';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
@@ -24,6 +26,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// still owns the distinction between an empty result and a failed request.
 	let loadError = $state<string | null>(null);
 	let rosterGeneration = $state(0);
+	let allowlistOpen = $state(false);
+	// Telemetry polling republishes the Server object every few seconds. Track
+	// the last identity, not the object, so a refresh of the same server does
+	// not close an allowlist dialog the operator is using.
+	let previousAllowlistServerId: string | null = null;
+
+	$effect(() => {
+		if (allowlistDialogShouldClose(previousAllowlistServerId, server.id, active)) {
+			allowlistOpen = false;
+		}
+		previousAllowlistServerId = server.id;
+	});
 
 	function loadPlayers() {
 		loadError = null;
@@ -33,11 +47,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <ServerTabPanel
 	title="Players"
-	description="Server-scoped roster with typed moderation actions and an audit trail"
+	description="Manage players and access for {server.name || 'this server'}."
 >
-	{#snippet chip()}
-		<CarbonTag type="blue" size="sm">SERVER · {server.name || server.id}</CarbonTag>
-	{/snippet}
 	{#snippet actions()}
 		<CarbonButton
 			kind="tertiary"
@@ -47,17 +58,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		>
 			All players
 		</CarbonButton>
-	{/snippet}
-	{#snippet toolbar()}
-		<p class="px-4 py-2 text-xs text-muted-foreground">
-			Select players to kick, ban or manage access. Actions are recorded in the audit history.
-		</p>
+		{#if mounted}
+			<CarbonButton kind="secondary" size="sm" onclick={() => (allowlistOpen = true)}>
+				<UserPlus class="mr-1.5 size-4" aria-hidden="true" />
+				Add player to allowlist
+			</CarbonButton>
+		{/if}
 	{/snippet}
 
-	<div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
-		{#if mounted}
-			<AddAllowlistEntry serverId={server.id} onDone={loadPlayers} />
-		{/if}
+	<div class="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
 		{#if loadError}
 			<CarbonErrorState title="Could not load players" message={loadError} onretry={loadPlayers} />
 		{:else if mounted}
@@ -70,4 +79,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/key}
 		{/if}
 	</div>
+	{#key server.id}
+		<AddAllowlistEntry
+			serverId={server.id}
+			serverName={server.name}
+			onDone={loadPlayers}
+			bind:dialogOpen={allowlistOpen}
+		/>
+	{/key}
 </ServerTabPanel>

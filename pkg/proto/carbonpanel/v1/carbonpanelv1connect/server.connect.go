@@ -59,6 +59,12 @@ const (
 	// ServerServiceCreateServerProcedure is the fully-qualified name of the ServerService's
 	// CreateServer RPC.
 	ServerServiceCreateServerProcedure = "/carbonpanel.v1.ServerService/CreateServer"
+	// ServerServiceExportServerArchiveProcedure is the fully-qualified name of the ServerService's
+	// ExportServerArchive RPC.
+	ServerServiceExportServerArchiveProcedure = "/carbonpanel.v1.ServerService/ExportServerArchive"
+	// ServerServicePreviewServerArchiveProcedure is the fully-qualified name of the ServerService's
+	// PreviewServerArchive RPC.
+	ServerServicePreviewServerArchiveProcedure = "/carbonpanel.v1.ServerService/PreviewServerArchive"
 	// ServerServiceUpdateServerProcedure is the fully-qualified name of the ServerService's
 	// UpdateServer RPC.
 	ServerServiceUpdateServerProcedure = "/carbonpanel.v1.ServerService/UpdateServer"
@@ -105,6 +111,10 @@ type ServerServiceClient interface {
 	GetNextAvailablePort(context.Context, *connect.Request[v1.GetNextAvailablePortRequest]) (*connect.Response[v1.GetNextAvailablePortResponse], error)
 	// Create new server instance
 	CreateServer(context.Context, *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error)
+	// Export a stopped server using its owning node storage.
+	ExportServerArchive(context.Context, *connect.Request[v1.ExportServerArchiveRequest]) (*connect.Response[v1.ExportServerArchiveResponse], error)
+	// Validate a completed caller-owned upload without creating a server.
+	PreviewServerArchive(context.Context, *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error)
 	// Modify server settings
 	UpdateServer(context.Context, *connect.Request[v1.UpdateServerRequest]) (*connect.Response[v1.UpdateServerResponse], error)
 	// Remove server and data
@@ -172,6 +182,18 @@ func NewServerServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+ServerServiceCreateServerProcedure,
 			connect.WithSchema(serverServiceMethods.ByName("CreateServer")),
+			connect.WithClientOptions(opts...),
+		),
+		exportServerArchive: connect.NewClient[v1.ExportServerArchiveRequest, v1.ExportServerArchiveResponse](
+			httpClient,
+			baseURL+ServerServiceExportServerArchiveProcedure,
+			connect.WithSchema(serverServiceMethods.ByName("ExportServerArchive")),
+			connect.WithClientOptions(opts...),
+		),
+		previewServerArchive: connect.NewClient[v1.PreviewServerArchiveRequest, v1.PreviewServerArchiveResponse](
+			httpClient,
+			baseURL+ServerServicePreviewServerArchiveProcedure,
+			connect.WithSchema(serverServiceMethods.ByName("PreviewServerArchive")),
 			connect.WithClientOptions(opts...),
 		),
 		updateServer: connect.NewClient[v1.UpdateServerRequest, v1.UpdateServerResponse](
@@ -245,6 +267,8 @@ type serverServiceClient struct {
 	clearServerLogs      *connect.Client[v1.ClearServerLogsRequest, v1.ClearServerLogsResponse]
 	getNextAvailablePort *connect.Client[v1.GetNextAvailablePortRequest, v1.GetNextAvailablePortResponse]
 	createServer         *connect.Client[v1.CreateServerRequest, v1.CreateServerResponse]
+	exportServerArchive  *connect.Client[v1.ExportServerArchiveRequest, v1.ExportServerArchiveResponse]
+	previewServerArchive *connect.Client[v1.PreviewServerArchiveRequest, v1.PreviewServerArchiveResponse]
 	updateServer         *connect.Client[v1.UpdateServerRequest, v1.UpdateServerResponse]
 	deleteServer         *connect.Client[v1.DeleteServerRequest, v1.DeleteServerResponse]
 	startServer          *connect.Client[v1.StartServerRequest, v1.StartServerResponse]
@@ -285,6 +309,16 @@ func (c *serverServiceClient) GetNextAvailablePort(ctx context.Context, req *con
 // CreateServer calls carbonpanel.v1.ServerService.CreateServer.
 func (c *serverServiceClient) CreateServer(ctx context.Context, req *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
 	return c.createServer.CallUnary(ctx, req)
+}
+
+// ExportServerArchive calls carbonpanel.v1.ServerService.ExportServerArchive.
+func (c *serverServiceClient) ExportServerArchive(ctx context.Context, req *connect.Request[v1.ExportServerArchiveRequest]) (*connect.Response[v1.ExportServerArchiveResponse], error) {
+	return c.exportServerArchive.CallUnary(ctx, req)
+}
+
+// PreviewServerArchive calls carbonpanel.v1.ServerService.PreviewServerArchive.
+func (c *serverServiceClient) PreviewServerArchive(ctx context.Context, req *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error) {
+	return c.previewServerArchive.CallUnary(ctx, req)
 }
 
 // UpdateServer calls carbonpanel.v1.ServerService.UpdateServer.
@@ -351,6 +385,10 @@ type ServerServiceHandler interface {
 	GetNextAvailablePort(context.Context, *connect.Request[v1.GetNextAvailablePortRequest]) (*connect.Response[v1.GetNextAvailablePortResponse], error)
 	// Create new server instance
 	CreateServer(context.Context, *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error)
+	// Export a stopped server using its owning node storage.
+	ExportServerArchive(context.Context, *connect.Request[v1.ExportServerArchiveRequest]) (*connect.Response[v1.ExportServerArchiveResponse], error)
+	// Validate a completed caller-owned upload without creating a server.
+	PreviewServerArchive(context.Context, *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error)
 	// Modify server settings
 	UpdateServer(context.Context, *connect.Request[v1.UpdateServerRequest]) (*connect.Response[v1.UpdateServerResponse], error)
 	// Remove server and data
@@ -414,6 +452,18 @@ func NewServerServiceHandler(svc ServerServiceHandler, opts ...connect.HandlerOp
 		ServerServiceCreateServerProcedure,
 		svc.CreateServer,
 		connect.WithSchema(serverServiceMethods.ByName("CreateServer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	serverServiceExportServerArchiveHandler := connect.NewUnaryHandler(
+		ServerServiceExportServerArchiveProcedure,
+		svc.ExportServerArchive,
+		connect.WithSchema(serverServiceMethods.ByName("ExportServerArchive")),
+		connect.WithHandlerOptions(opts...),
+	)
+	serverServicePreviewServerArchiveHandler := connect.NewUnaryHandler(
+		ServerServicePreviewServerArchiveProcedure,
+		svc.PreviewServerArchive,
+		connect.WithSchema(serverServiceMethods.ByName("PreviewServerArchive")),
 		connect.WithHandlerOptions(opts...),
 	)
 	serverServiceUpdateServerHandler := connect.NewUnaryHandler(
@@ -490,6 +540,10 @@ func NewServerServiceHandler(svc ServerServiceHandler, opts ...connect.HandlerOp
 			serverServiceGetNextAvailablePortHandler.ServeHTTP(w, r)
 		case ServerServiceCreateServerProcedure:
 			serverServiceCreateServerHandler.ServeHTTP(w, r)
+		case ServerServiceExportServerArchiveProcedure:
+			serverServiceExportServerArchiveHandler.ServeHTTP(w, r)
+		case ServerServicePreviewServerArchiveProcedure:
+			serverServicePreviewServerArchiveHandler.ServeHTTP(w, r)
 		case ServerServiceUpdateServerProcedure:
 			serverServiceUpdateServerHandler.ServeHTTP(w, r)
 		case ServerServiceDeleteServerProcedure:
@@ -541,6 +595,14 @@ func (UnimplementedServerServiceHandler) GetNextAvailablePort(context.Context, *
 
 func (UnimplementedServerServiceHandler) CreateServer(context.Context, *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.CreateServer is not implemented"))
+}
+
+func (UnimplementedServerServiceHandler) ExportServerArchive(context.Context, *connect.Request[v1.ExportServerArchiveRequest]) (*connect.Response[v1.ExportServerArchiveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.ExportServerArchive is not implemented"))
+}
+
+func (UnimplementedServerServiceHandler) PreviewServerArchive(context.Context, *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.PreviewServerArchive is not implemented"))
 }
 
 func (UnimplementedServerServiceHandler) UpdateServer(context.Context, *connect.Request[v1.UpdateServerRequest]) (*connect.Response[v1.UpdateServerResponse], error) {

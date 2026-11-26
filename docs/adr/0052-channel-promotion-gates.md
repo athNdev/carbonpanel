@@ -101,7 +101,9 @@ paraphrased below rather than duplicated:
    parity and matching docs marker are re-verified; the normal path promotes the
    first qualified current-main revision. No code path supplies `--bootstrap`.
 5. **One lock, retry and rollback.** All channel and docs moves share ONE fixed
-   non-cancelling publication lock (`pages-deploy`, `cancel-in-progress: false`).
+   non-cancelling publication lock (`pages-deploy`, `cancel-in-progress: false`,
+   `queue: max`). Pending publication work can wait in the same queue.
+   Revalidate the pinned source and live receipts when the run holds the lock.
    No job nests a second group and no workflow dispatches another publisher that
    takes the same lock, so there is no deadlock. A manual/site-only
    `landing.yml deploy=true` dispatch may publish ONLY an already-active exact

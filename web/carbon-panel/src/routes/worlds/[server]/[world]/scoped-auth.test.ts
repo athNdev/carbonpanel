@@ -6,7 +6,10 @@ import { readFileSync } from 'node:fs';
 // The world detail route separates read access (world_view/read) from action
 // scopes (update, observe_players, servers/command). Read-only users must keep a
 // usable map view, while action failures and denials stay local to that action.
-const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+const source = readFileSync(
+	new URL('../../../../lib/components/worldview/WorldViewWorkspace.svelte', import.meta.url),
+	'utf8'
+);
 
 function blockFor(marker: string): string {
 	const start = source.indexOf(marker);
@@ -88,7 +91,7 @@ test('map admin actions stay separated, confirmed, and user-scoped', () => {
 	);
 	const confirm = blockFor('async function confirmAdmin');
 	assert.ok(
-		confirm.includes('if (!action || !canCommand) return;'),
+		confirm.includes('if (!pendingAdmin || !canCommand || !current?.()) return;'),
 		'admin execution requires command permission'
 	);
 	assert.ok(
@@ -112,4 +115,17 @@ test('map admin actions stay separated, confirmed, and user-scoped', () => {
 		source.includes('{matrix.overlayEditing(canUpdate).reason}'),
 		'overlay edit boundary is explained when unavailable'
 	);
+});
+
+test('map actions preserve world and position scope', () => {
+	const request = blockFor('function requestAdmin');
+	assert.match(request, /x === null \|\| z === null \? null : \{ x, z \}/);
+	assert.match(request, /adminScope = scopeGuard\(\)/);
+	const overlay = blockFor('async function saveOverlay');
+	assert.match(overlay, /parseNumber\(formX\)/);
+	assert.match(overlay, /dimension: overlayDraftDimension/);
+	assert.match(overlay, /if \(!current\(\)\) return/);
+	const players = blockFor('async function togglePlayers');
+	assert.match(players, /next && !matrix\.players/);
+	assert.match(players, /if \(!current\(\)\) return/);
 });

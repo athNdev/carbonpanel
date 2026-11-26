@@ -9,7 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -24,6 +26,7 @@ import (
 // integration owner decides how to merge the two and regenerate the catalog.
 type FamilyServerClients struct {
 	Server    carbonpanelv1connect.ServerServiceClient
+	Archive   carbonpanelv1connect.ServerServiceClient
 	Config    carbonpanelv1connect.ConfigServiceClient
 	Task      carbonpanelv1connect.TaskServiceClient
 	Activity  carbonpanelv1connect.ActivityServiceClient
@@ -45,7 +48,14 @@ func NewFamilyServerClients(httpClient connect.HTTPClient, baseURL, token string
 		return nil, fmt.Errorf("API token is required")
 	}
 	opts := []connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}
+	archiveClient := httpClient
+	if client, ok := httpClient.(*http.Client); ok && client.Timeout == DefaultRequestTimeout {
+		longCallClient := *client
+		longCallClient.Timeout = time.Hour
+		archiveClient = &longCallClient
+	}
 	return &FamilyServerClients{
+		Archive:   carbonpanelv1connect.NewServerServiceClient(archiveClient, baseURL, opts...),
 		Server:    carbonpanelv1connect.NewServerServiceClient(httpClient, baseURL, opts...),
 		Config:    carbonpanelv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
 		Task:      carbonpanelv1connect.NewTaskServiceClient(httpClient, baseURL, opts...),
@@ -334,7 +344,18 @@ type famLogsArgs struct {
 	Tail int32  `json:"tail,omitempty" jsonschema:"last N log lines, 1 to 1000, default 100"`
 }
 
+type famExportArchiveArgs struct {
+	ServerID string `json:"server_id" jsonschema:"exact stopped server id"`
+	Format   string `json:"format" jsonschema:"archive format zip or tar.gz"`
+}
+
+type famPreviewArchiveArgs struct {
+	UploadID string `json:"upload_id" jsonschema:"caller-owned completed archive upload id"`
+	NodeID   string `json:"node_id,omitempty" jsonschema:"known destination node id"`
+}
+
 type famCreateServerArgs struct {
+	ArchiveUploadID  string `json:"archive_upload_id,omitempty" jsonschema:"caller-owned completed server archive upload id"`
 	Name             string `json:"name" jsonschema:"exact server name, 1 to 128 characters"`
 	McVersion        string `json:"mc_version,omitempty" jsonschema:"Minecraft version, at most 32 characters"`
 	ModLoader        string `json:"mod_loader,omitempty" jsonschema:"mod loader name"`
@@ -601,6 +622,34 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 	addFamilyTool(s, "get_next_available_port", c, func(ctx context.Context, cl *FamilyServerClients, _ emptyArgs) (any, error) {
 		return invoke(ctx, cl.Server.GetNextAvailablePort, v1.GetNextAvailablePortRequest{})
 	})
+	addFamilyTool(s, "export_server_archive", c, func(ctx context.Context, cl *FamilyServerClients, in famExportArchiveArgs) (any, error) {
+		if err := famID("export_server_archive", "server_id", in.ServerID); err != nil {
+			return nil, err
+		}
+		var format v1.ServerArchiveFormat
+		switch in.Format {
+		case "zip":
+			format = v1.ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_ZIP
+		case "tar.gz":
+			format = v1.ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_TAR_GZ
+		default:
+			return nil, famErr("export_server_archive", "format", "must be zip or tar.gz")
+		}
+		return invoke(ctx, cl.Archive.ExportServerArchive, v1.ExportServerArchiveRequest{
+			ServerId:    in.ServerID,
+			Format:      format,
+			Consistency: v1.ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED,
+		})
+	})
+	addFamilyTool(s, "preview_server_archive", c, func(ctx context.Context, cl *FamilyServerClients, in famPreviewArchiveArgs) (any, error) {
+		if err := famID("preview_server_archive", "upload_id", in.UploadID); err != nil {
+			return nil, err
+		}
+		if err := famOptID("preview_server_archive", "node_id", in.NodeID); err != nil {
+			return nil, err
+		}
+		return invoke(ctx, cl.Archive.PreviewServerArchive, v1.PreviewServerArchiveRequest{UploadId: in.UploadID, NodeId: in.NodeID})
+	})
 	addFamilyTool(s, "create_server", c, func(ctx context.Context, cl *FamilyServerClients, in famCreateServerArgs) (any, error) {
 		if err := famText("create_server", "name", in.Name, maxIDLen, true); err != nil {
 			return nil, err
@@ -630,14 +679,33 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 		if err := famOptID("create_server", "node_id", in.NodeID); err != nil {
 			return nil, err
 		}
+		if err := famOptID("create_server", "archive_upload_id", in.ArchiveUploadID); err != nil {
+			return nil, err
+		}
+		if in.ArchiveUploadID != "" && in.RequestID == "" {
+			return nil, famErr("create_server", "request_id", "required when importing an archive")
+		}
 		if err := famOptID("create_server", "request_id", in.RequestID); err != nil {
 			return nil, err
 		}
-		return invoke(ctx, cl.Server.CreateServer, v1.CreateServerRequest{
+		client := cl.Server
+		if in.ArchiveUploadID != "" {
+			client = cl.Archive
+			preview, err := cl.Archive.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{UploadId: in.ArchiveUploadID, NodeId: in.NodeID}))
+			if err != nil {
+				return nil, err
+			}
+			for _, finding := range preview.Msg.GetFindings() {
+				if finding.GetSeverity() == v1.ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER {
+					return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("archive preview: %s", finding.GetMessage()))
+				}
+			}
+		}
+		return invoke(ctx, client.CreateServer, v1.CreateServerRequest{
 			Name: in.Name, McVersion: in.McVersion, ModLoader: v1.ModLoader(loader),
 			Port: famIntValue(in.Port), MaxPlayers: famIntValue(in.MaxPlayers),
 			Memory: famIntValue(in.Memory), NodeId: in.NodeID, RequestId: in.RequestID,
-			StartImmediately: in.StartImmediately,
+			StartImmediately: in.StartImmediately, ArchiveUploadId: in.ArchiveUploadID,
 		})
 	})
 	addFamilyTool(s, "update_server", c, func(ctx context.Context, cl *FamilyServerClients, in famUpdateServerArgs) (any, error) {

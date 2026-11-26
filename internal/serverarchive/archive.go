@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -67,10 +68,32 @@ type Manifest struct {
 	Files           []File  `json:"files"`
 }
 
+// Gameplay is the validated subset of the root server.properties that the
+// controller materializes as startup environment on a restored server. Without
+// it, the destination's default environment would rewrite archived gameplay
+// properties at the first itzg boot. Destination RCON, ports, routing, auth,
+// image and ownership never come from the archive.
+type Gameplay struct {
+	LevelName             string
+	Difficulty            string
+	GameMode              string
+	SyncChunkWrites       *bool
+	PauseWhenEmptySeconds *int
+}
+
+// Equal compares optional values by content, not pointer identity, so a second
+// inspection of the same bytes reports the same settings.
+func (g Gameplay) Equal(other Gameplay) bool {
+	return g.LevelName == other.LevelName && g.Difficulty == other.Difficulty && g.GameMode == other.GameMode &&
+		equalOptionalBool(g.SyncChunkWrites, other.SyncChunkWrites) &&
+		equalOptionalInt(g.PauseWhenEmptySeconds, other.PauseWhenEmptySeconds)
+}
+
 type Archive struct {
 	Format        Format
 	Manifest      Manifest
 	ExpandedBytes int64
+	Gameplay      Gameplay
 }
 
 // Write streams from the owning node. The caller must hold server lifecycle
@@ -242,7 +265,7 @@ func CopyTo(ctx context.Context, f *os.File, verified Archive, destination nodes
 	if err != nil {
 		return err
 	}
-	if observed.Format != verified.Format || observed.Manifest.Runtime != verified.Manifest.Runtime ||
+	if observed.Format != verified.Format || !observed.Gameplay.Equal(verified.Gameplay) || observed.Manifest.Runtime != verified.Manifest.Runtime ||
 		observed.Manifest.ExporterVersion != verified.Manifest.ExporterVersion ||
 		len(observed.Manifest.Files) != len(expected) {
 		return fmt.Errorf("server archive changed after inspection")
@@ -312,6 +335,9 @@ func scan(ctx context.Context, f *os.File, consume func(File, io.Reader) error) 
 			}
 			if !bytes.Equal(body.Bytes(), safe) {
 				return fmt.Errorf("archive contains nonportable or credential-bearing settings")
+			}
+			if strings.EqualFold(rel, "server.properties") {
+				result.Gameplay = parseGameplay(body.Bytes())
 			}
 			r = bytes.NewReader(body.Bytes())
 		}
@@ -706,4 +732,84 @@ func withoutPaperForwarding(data []byte, section, key string) ([]byte, error) {
 	}
 	delete(config, key)
 	return yaml.Marshal(root)
+}
+
+// parseGameplay reads the already filtered root server.properties. It accepts
+// only the keys the panel forces as startup environment and validates each
+// value. An absent, empty or unsupported value keeps the destination default
+// rather than persisting a value the game would reject. Duplicate keys follow
+// Java property semantics: the last record wins.
+func parseGameplay(data []byte) Gameplay {
+	var settings Gameplay
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.TrimLeft(bytes.TrimRight(line, "\r"), " \t\f")
+		key, value, ok := bytes.Cut(line, []byte("="))
+		if !ok {
+			continue
+		}
+		value = bytes.TrimSpace(value)
+		switch string(key) {
+		case "level-name":
+			// portableProperties already refuses an unportable world folder.
+			settings.LevelName = string(value)
+		case "difficulty":
+			settings.Difficulty = oneOf(value, "peaceful", "easy", "normal", "hard")
+		case "gamemode":
+			settings.GameMode = oneOf(value, "survival", "creative", "adventure", "spectator")
+		case "sync-chunk-writes":
+			settings.SyncChunkWrites = nil
+			if parsed, ok := parsePropertyBool(value); ok {
+				settings.SyncChunkWrites = &parsed
+			}
+		case "pause-when-empty-seconds":
+			settings.PauseWhenEmptySeconds = nil
+			if parsed, ok := parsePropertySeconds(value); ok {
+				settings.PauseWhenEmptySeconds = &parsed
+			}
+		}
+	}
+	return settings
+}
+
+func oneOf(value []byte, options ...string) string {
+	candidate := strings.ToLower(string(value))
+	for _, option := range options {
+		if candidate == option {
+			return option
+		}
+	}
+	return ""
+}
+
+func parsePropertyBool(value []byte) (bool, bool) {
+	switch strings.ToLower(string(value)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func parsePropertySeconds(value []byte) (int, bool) {
+	seconds, err := strconv.Atoi(string(value))
+	if err != nil || seconds < 0 || seconds > 2_147_483_647 {
+		return 0, false
+	}
+	return seconds, true
+}
+
+func equalOptionalBool(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func equalOptionalInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }

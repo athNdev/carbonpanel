@@ -33,6 +33,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// moduleLifecycleReservation aliases the module package type so local
+// variables named "module" do not shadow it.
+type moduleLifecycleReservation = module.ModuleTransition
+
 // Compile-time check that ModuleService implements the interface
 var _ carbonpanelv1connect.ModuleServiceHandler = (*ModuleService)(nil)
 
@@ -53,7 +57,9 @@ type ModuleService struct {
 	// create path per controller process. It makes retries/concurrent tabs
 	// converge on one module per server; it is explicitly NOT a cross-process
 	// atomic reservation (ADR 0011/0015).
-	blueMapInstallMu sync.Mutex
+	blueMapInstallMu      sync.Mutex
+	blueMapStarting       map[string]string // server ID to committed module ID, under blueMapInstallMu
+	blueMapStartupTimeout time.Duration     // when zero, use the managed startup default
 }
 
 // ModuleAuthorizer is the mapped RBAC seam used for managed-install create and
@@ -638,6 +644,22 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		defer func() { _ = finalizeBlueMap(false, "") }()
 	}
 
+	// Reserve the module lifecycle before acknowledging a create whose
+	// container is provisioned asynchronously. An export that starts after the
+	// response must observe this claim instead of racing the new writer.
+	var moduleReservation *moduleLifecycleReservation
+	if finalizeBlueMap == nil {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, server.ID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	// Use ports from request, or fall back to template defaults
 	ports := msg.Ports
 	if len(ports) == 0 {
@@ -707,7 +729,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		HealthCheckTimeout:    int(msg.HealthCheckTimeout),
 		HealthCheckRetries:    int(msg.HealthCheckRetries),
 		EventHooks:            msg.EventHooks,
-		Metadata:              msg.Metadata,
+		Metadata:              blueMapModuleMetadata(msg.Metadata, finalizeBlueMap != nil),
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
 		UID:                   msg.Uid,
@@ -767,22 +789,41 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		if commitErr := finalizeBlueMap(true, module.ID); commitErr != nil {
 			// finalize performed staged-file cleanup AND deleted the module row
 			// while still holding the singleton lock with a bounded context.
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("managed BlueMap config was rolled back: %w", commitErr))
+			return nil, blueMapConfigPrecondition(commitErr)
 		}
+	} else {
+		reservation := moduleReservation
+		moduleReservation = nil
+		go s.createModuleContainer(module.ID, msg.StartImmediately, reservation)
 	}
-
-	// Create container in background
-	go func() {
-		bgCtx := context.Background()
-		if err := s.moduleManager.CreateAndStartModule(bgCtx, module.ID, msg.StartImmediately); err != nil {
-			s.log.Error("Failed to create module container: %v", err)
-		}
-	}()
 
 	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.CreateModuleResponse{
 		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname, createdByUsername),
 	}), nil
+}
+
+func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool, reservation *moduleLifecycleReservation) {
+	if err := s.moduleManager.CreateAndStartModuleReserved(context.Background(), moduleID, startImmediately, reservation); err != nil {
+		s.log.Error("Failed to create module container: %v", err)
+	}
+}
+
+// moduleLifecycleError maps the manager's fail-closed gate refusals onto
+// retryable RPC codes. A mutation during an archive export did not run.
+func moduleLifecycleError(err error) error {
+	var connectErr *connect.Error
+	if errors.As(err, &connectErr) {
+		return connectErr
+	}
+	switch {
+	case errors.Is(err, module.ErrModuleArchiveExport):
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("a server archive export is in progress; retry after it finishes"))
+	case errors.Is(err, module.ErrModuleLifecycleInFlight):
+		return connect.NewError(connect.CodeAborted, errors.New("another module lifecycle operation is in progress; retry"))
+	default:
+		return connect.NewError(connect.CodeInternal, err)
+	}
 }
 
 func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v1.UpdateModuleRequest]) (*connect.Response[v1.UpdateModuleResponse], error) {
@@ -795,6 +836,12 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
+
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { transition.Release() }()
 
 	needsRecreate := false
 	before := moduleScalars{
@@ -896,7 +943,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.EventHooks = msg.EventHooks
 	}
 	if len(msg.Metadata) > 0 {
-		module.Metadata = msg.Metadata
+		module.Metadata = blueMapModuleMetadata(msg.Metadata, isManagedBlueMapModule(module))
 	}
 	if msg.CmdOverride != nil {
 		if *msg.CmdOverride != module.CmdOverride {
@@ -957,18 +1004,48 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		}), nil
 	}
 
+	// Reserve the module lifecycle before the update is acknowledged when its
+	// asynchronous recreate will mutate the container. The reservation is
+	// handed to that worker, so an export cannot slip into the window between
+	// the response and the recreate.
+	var moduleReservation *moduleLifecycleReservation
+	if needsRecreate {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, module.ServerID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	if err := s.store.UpdateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update module: %w", err))
 	}
 
 	// Recreate container if needed
 	if needsRecreate && module.ContainerID != "" {
-		go func() {
+		// The managed update already owns the assignment. Hand the same
+		// transition to recreation, so the async worker cannot start on a
+		// node that changed after the update's eligibility check.
+		workerTransition := transition
+		transition = nil
+		reservation := moduleReservation
+		moduleReservation = nil
+		go func(moduleID string) {
+			defer workerTransition.Release()
 			bgCtx := context.Background()
-			if err := s.moduleManager.RecreateModule(bgCtx, module.ID); err != nil {
+			if workerTransition != nil {
+				var cancel context.CancelFunc
+				bgCtx, cancel = context.WithTimeout(bgCtx, s.managedBlueMapTimeout())
+				defer cancel()
+			}
+			if err := s.moduleManager.RecreateModuleReserved(bgCtx, moduleID, reservation); err != nil {
 				s.log.Error("Failed to recreate module container: %v", err)
 			}
-		}()
+		}(module.ID)
 	}
 
 	// Get enrichment data
@@ -1078,7 +1155,7 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 	}
 
 	if err := s.moduleManager.DeleteModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to delete module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -1097,14 +1174,20 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
 
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
+
 	// If no container exists, create one first
 	if module.ContainerID == "" {
 		if err := s.moduleManager.CreateAndStartModule(ctx, msg.Id, true); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create and start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to create and start module: %w", err))
 		}
 	} else {
 		if err := s.moduleManager.StartModule(ctx, msg.Id); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to start module: %w", err))
 		}
 	}
 
@@ -1120,7 +1203,7 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 	}
 
 	if err := s.moduleManager.StopModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to stop module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
@@ -1134,8 +1217,13 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to restart module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{
@@ -1149,8 +1237,13 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("module ID is required"))
 	}
 
+	transition, err := s.guardManagedBlueMapStart(ctx, msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	defer transition.Release()
 	if err := s.moduleManager.RecreateModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to recreate module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RecreateModuleResponse{

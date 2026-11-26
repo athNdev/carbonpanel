@@ -48,6 +48,7 @@ const (
 // Store is the narrow persisted-data seam used by discovery. *storage.Store
 // satisfies it; no new global state is introduced.
 type Store interface {
+	nodeStore
 	ListModulesByTemplate(ctx context.Context, templateID string) ([]*storage.Module, error)
 	GetServer(ctx context.Context, id string) (*storage.Server, error)
 	GetServerConfig(ctx context.Context, id string) (*storage.ServerConfig, error)
@@ -97,7 +98,7 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	}
 	var chosen *storage.Module
 	for _, m := range modules {
-		if m == nil || m.ServerID != serverID || canonicalNode(m.NodeID) != nodeID {
+		if m == nil || m.ServerID != serverID || !SameRendererNode(m.NodeID, nodeID) {
 			continue
 		}
 		// Idempotent installs mean one module per server; if an operator has
@@ -114,6 +115,13 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	if err != nil || server == nil || server.DataPath == "" {
 		return nil, fmt.Errorf("renderer server has no data path: %w", err)
 	}
+	if !SameRendererNode(server.NodeID, nodeID) {
+		return nil, nil
+	}
+	node, err := PrivateRendererNode(ctx, d.store, server.NodeID)
+	if err != nil {
+		return nil, err
+	}
 	levelName := ""
 	if cfg, cfgErr := d.store.GetServerConfig(ctx, serverID); cfgErr == nil {
 		levelName = worldview.ActualLevelName(cfg)
@@ -128,10 +136,12 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 
 	// Runtime truth first: labels, image, state, owned-network membership and
 	// the EFFECTIVE world bind. No HTTP is issued unless every gate passes.
-	runtime, inspectErr := d.pool.GetClientStrictContext(ctx, nodeID)
-	if inspectErr != nil {
+	// This is a controller-local feature. Never dial a registered endpoint on
+	// the strength of its stored locality marker alone.
+	runtime := d.pool.GetDefaultClient()
+	if runtime == nil {
 		if d.log != nil {
-			d.log.Warn("bluemap discovery: node %s client unavailable: %v", nodeID, inspectErr)
+			d.log.Warn("bluemap discovery: no controller Docker client for node %s", nodeID)
 		}
 		facts.Lifecycle = worldview.ModuleFailed
 		return facts, nil
@@ -139,6 +149,9 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	identity, inspectErr := runtime.InspectModuleRuntime(ctx, chosen.ID, chosen.ContainerID, d.networkName)
 	if inspectErr != nil || identity == nil {
 		facts.Lifecycle = worldview.ModuleFailed
+		if chosen.ContainerID == "" && (chosen.Status == storage.ModuleStatusCreating || chosen.Status == storage.ModuleStatusStarting) {
+			facts.Lifecycle = worldview.ModulePending
+		}
 		return facts, nil
 	}
 	facts.Lifecycle = lifecycleFromState(identity.State)
@@ -166,7 +179,7 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 		return facts, nil
 	}
 
-	accessor, err := d.resolver.ForNode(ctx, nodestorage.LocalNode(), server.DataPath)
+	accessor, err := d.resolver.ForNode(ctx, node, server.DataPath)
 	if err != nil {
 		if d.log != nil {
 			d.log.Warn("bluemap discovery: confined accessor for %s failed: %v", serverID, err)
@@ -211,6 +224,13 @@ func rendererBaseURL(identity *docker.ModuleRuntimeIdentity) string {
 	return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(bluemapWebPort))
 }
 
+// SameRendererNode compares recorded renderer owners. The legacy aliases
+// designate the same default controller daemon.
+func SameRendererNode(a, b string) bool {
+	a, b = canonicalNode(a), canonicalNode(b)
+	return a == b || (nodestorage.IsLegacyLocalNodeID(a) && nodestorage.IsLegacyLocalNodeID(b))
+}
+
 func canonicalNode(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {
 		return "default"
@@ -220,9 +240,9 @@ func canonicalNode(nodeID string) string {
 
 func lifecycleFromState(state string) worldview.ModuleLifecycle {
 	switch strings.ToLower(state) {
-	case "running", "restarting":
+	case "running":
 		return worldview.ModuleRunning
-	case "created", "paused":
+	case "created", "paused", "restarting":
 		return worldview.ModulePending
 	case "":
 		return worldview.ModuleFailed
@@ -238,7 +258,7 @@ func identityMatchesRuntime(module *storage.Module, serverID, nodeID string, run
 	return imageOK &&
 		runtime.ModuleID == module.ID &&
 		runtime.ServerID == serverID &&
-		canonicalNode(runtime.NodeID) == nodeID &&
+		SameRendererNode(runtime.NodeID, nodeID) &&
 		runtime.TemplateID == worldview.BuiltinBlueMapTemplateID &&
 		!runtime.Privileged
 }
@@ -296,6 +316,7 @@ func readAcceptDownload(accessor configAccessor) bool {
 	if err != nil {
 		return false
 	}
+	var seen, accepted bool
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
@@ -305,12 +326,16 @@ func readAcceptDownload(accessor configAccessor) bool {
 		if !ok {
 			key, value, ok = strings.Cut(line, "=")
 		}
-		if ok && strings.EqualFold(strings.Trim(key, `"' `), "accept-download") &&
-			strings.EqualFold(strings.Trim(strings.TrimSpace(value), `"' `), "true") {
-			return true
+		if !ok || !strings.EqualFold(strings.Trim(key, `"' `), "accept-download") {
+			continue
 		}
+		if seen {
+			return false
+		}
+		seen = true
+		accepted = strings.EqualFold(strings.Trim(strings.TrimSpace(value), `"' `), "true")
 	}
-	return false
+	return accepted
 }
 
 // readMapConfig finds a map whose `world` points at the container's /app/world
@@ -324,15 +349,16 @@ func readMapConfig(accessor configAccessor) (string, bool) {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".conf") || !plainComponent(name) {
+		id, valid := strings.CutSuffix(name, ".conf")
+		if entry.IsDir() || !valid || !plainComponent(id) {
 			continue
 		}
 		raw, err := accessor.ReadFile("modules/bluemap/config/maps/" + name)
 		if err != nil {
 			continue
 		}
-		id, world, ok := parseMapConfig(string(raw))
-		if !ok || !isAppWorld(world) || !plainComponent(id) {
+		world, dimension := parseMapConfig(string(raw))
+		if !isAppWorld(world) || (dimension != "" && dimension != "minecraft:overworld") {
 			continue
 		}
 		ids = append(ids, id)
@@ -341,10 +367,15 @@ func readMapConfig(accessor configAccessor) (string, bool) {
 		return "", false
 	}
 	sort.Strings(ids)
+	for _, id := range ids {
+		if tilesExist(accessor, id) {
+			return id, true
+		}
+	}
 	return ids[0], true
 }
 
-func parseMapConfig(raw string) (id, world string, ok bool) {
+func parseMapConfig(raw string) (world, dimension string) {
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
@@ -360,13 +391,13 @@ func parseMapConfig(raw string) (id, world string, ok bool) {
 		key = strings.Trim(strings.TrimSpace(key), `"' `)
 		value = strings.Trim(strings.TrimSpace(value), `"' `)
 		switch strings.ToLower(key) {
-		case "id":
-			id = value
 		case "world":
 			world = value
+		case "dimension":
+			dimension = value
 		}
 	}
-	return id, world, id != ""
+	return world, dimension
 }
 
 func plainComponent(name string) bool {
@@ -389,11 +420,35 @@ func tilesExist(accessor configAccessor, mapID string) bool {
 	if !plainComponent(mapID) {
 		return false
 	}
-	entries, err := accessor.ReadDir("modules/bluemap/web/maps/" + mapID + "/tiles")
-	if err != nil {
-		return false
+	root := path.Join("modules/bluemap/web/maps", mapID, "tiles")
+	lods, _ := accessor.ReadDir(root)
+	remaining := 32
+	for _, lod := range lods {
+		if !lod.IsDir() {
+			continue
+		}
+		columns, _ := accessor.ReadDir(path.Join(root, lod.Name()))
+		for _, column := range columns {
+			if !column.IsDir() {
+				continue
+			}
+			if remaining == 0 {
+				return false
+			}
+			remaining--
+			tiles, _ := accessor.ReadDir(path.Join(root, lod.Name(), column.Name()))
+			for _, tile := range tiles {
+				name := strings.TrimSuffix(tile.Name(), ".gz")
+				if tile.Type().IsRegular() && (strings.HasSuffix(name, ".png") || strings.HasSuffix(name, ".prbm")) {
+					info, err := tile.Info()
+					if err == nil && info.Size() > 0 {
+						return true
+					}
+				}
+			}
+		}
 	}
-	return len(entries) > 0
+	return false
 }
 
 // webUp only answers "is the private listener up". It is called only after all

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -215,10 +216,15 @@ func (c *Client) bindSource(serverDataPath, source string) (string, bool) {
 	if c.nodeStorage.IsLocal || c.nodeStorage.StorageRoot == "" {
 		return TranslateToHostPath(source), true
 	}
-	if mapped := nodestorage.NodePath(c.nodeStorage, serverDataPath, source); mapped != source {
-		return mapped, true
+	if _, ok := relativeBindSource(serverDataPath, source); !ok {
+		return source, false
 	}
-	return source, false
+	return nodestorage.NodePath(c.nodeStorage, serverDataPath, source), true
+}
+
+func relativeBindSource(serverDataPath, source string) (string, bool) {
+	rel, err := filepath.Rel(serverDataPath, source)
+	return rel, serverDataPath != "" && source != "" && err == nil && filepath.IsLocal(rel)
 }
 
 // Fetches the docker images manifest from itzg
@@ -2309,6 +2315,12 @@ func loaderVersionEnv(server *models.Server) []string {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s=%s", key, version)}
+}
+
+// BuildEnvFromConfig exposes the environment handed to the managed image so
+// restore tests can assert effective startup values without starting Docker.
+func BuildEnvFromConfig(config *models.ServerConfig) []string {
+	return buildEnvFromConfig(config)
 }
 
 func buildEnvFromConfig(config *models.ServerConfig) []string {

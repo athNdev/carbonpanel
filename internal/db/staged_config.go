@@ -425,6 +425,35 @@ func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedC
 	return rows, err
 }
 
+// The staged row is claimed with a write before this check. SQLite therefore
+// serializes this config write with the world's durable operation admission.
+func guardStagedWorldLevel(tx *gorm.DB, serverID string, diff map[string]any) error {
+	for field := range diff {
+		if !worldLevelConfigField(field) {
+			continue
+		}
+		active, err := hasActiveWorldBind(tx, serverID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrActiveOperation
+		}
+		break
+	}
+	return nil
+}
+
+func worldLevelConfigField(field string) bool {
+	return strings.EqualFold(field, "level") || strings.EqualFold(field, "customServerProperties")
+}
+
+func hasActiveWorldBind(tx *gorm.DB, serverID string) (bool, error) {
+	var active int64
+	err := tx.Model(&ServerOperation{}).Where("active_server = ? AND kind = ?", serverID, "world-bind").Count(&active).Error
+	return active != 0, err
+}
+
 // ApplyStagedConfigChange merges a staged diff into the live ServerConfig and
 // flips the record to applied. Callers decide when to invoke it (restart hook
 // or cron tick); container recreation stays the caller's responsibility.
@@ -452,6 +481,9 @@ func (s *Store) ApplyStagedConfigChange(ctx context.Context, id string) (*Staged
 		}
 		if diff == nil {
 			return fmt.Errorf("staged payload must be a JSON object")
+		}
+		if err := guardStagedWorldLevel(tx, staged.ServerID, diff); err != nil {
+			return err
 		}
 
 		live := &ServerConfig{}
@@ -573,6 +605,9 @@ func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChan
 	}
 	if prevDiff == nil {
 		return fmt.Errorf("previous staged payload must be a JSON object")
+	}
+	if err := guardStagedWorldLevel(tx, staged.ServerID, prevDiff); err != nil {
+		return err
 	}
 
 	live := &ServerConfig{}

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
+	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -54,10 +54,24 @@ func TestOSS388LiveDiscoveredRendererThroughRealProxy(t *testing.T) {
 	srv, ts := buildHarness(t, false, false, nil, false)
 	defer ts.Close()
 
+	// The optional registered UUID exercises the same fixture with an actual
+	// persisted controller-local node and matching container owner label.
+	nodeID := os.Getenv("CARBON_OSS388_LIVE_NODE")
+	if nodeID == "" {
+		nodeID = "default"
+	}
+	if !nodestorage.IsLegacyLocalNodeID(nodeID) {
+		if err := srv.store.CreateNode(ctx, &storage.Node{
+			ID: nodeID, Name: "Controller Docker", Host: relay, IsLocal: true, Enabled: true,
+		}); err != nil {
+			t.Fatalf("CreateNode: %v", err)
+		}
+	}
+
 	level := "world"
 	if err := srv.store.CreateServer(ctx, &storage.Server{
 		ID: serverID, Name: "OSS388 live integration", ModLoader: storage.ModLoaderVanilla,
-		MCVersion: "1.20.4", Status: storage.StatusRunning, NodeID: "default",
+		MCVersion: "1.20.4", Status: storage.StatusRunning, NodeID: nodeID,
 		DataPath: dataPath,
 	}); err != nil {
 		t.Fatalf("CreateServer: %v", err)
@@ -69,7 +83,7 @@ func TestOSS388LiveDiscoveredRendererThroughRealProxy(t *testing.T) {
 	}
 	if err := srv.store.CreateModule(ctx, &storage.Module{
 		ID: moduleID, Name: "OSS388 Integration BlueMap", ServerID: serverID,
-		NodeID: "default", TemplateID: worldview.BuiltinBlueMapTemplateID,
+		NodeID: nodeID, TemplateID: worldview.BuiltinBlueMapTemplateID,
 		ContainerID: containerID, Status: storage.ModuleStatusRunning,
 		Metadata: map[string]string{"bluemap_version": "5.29"},
 	}); err != nil {
@@ -87,7 +101,7 @@ func TestOSS388LiveDiscoveredRendererThroughRealProxy(t *testing.T) {
 	// No explicit endpoint: discovery must locate the installed module from
 	// panel state + inspected container metadata alone.
 	discovery := bluemapdiscovery.New(srv.store, pool, nodestorage.NewResolver(nil), netName, srv.log)
-	facts, err := discovery.FindRenderer(ctx, "default", serverID)
+	facts, err := discovery.FindRenderer(ctx, nodeID, serverID)
 	if err != nil || facts == nil {
 		t.Fatalf("FindRenderer: facts=%+v err=%v", facts, err)
 	}
@@ -96,7 +110,7 @@ func TestOSS388LiveDiscoveredRendererThroughRealProxy(t *testing.T) {
 		"identity": facts.IdentityVerified, "network": facts.NetworkVerified,
 		"mount": facts.MountVerified, "readonly": facts.ReadOnlyWorldMount,
 		"web": facts.WebUp, "rendered": facts.Rendered,
-		"accept-download": facts.AcceptDownload,
+		"accept-download":      facts.AcceptDownload,
 		"world-matches-server": facts.WorldMatchesServer,
 	} {
 		if !ok {

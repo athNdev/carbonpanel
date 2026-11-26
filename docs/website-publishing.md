@@ -2,14 +2,11 @@
 
 # Website and pinned documentation
 
-The Pages deployment contains the marketing homepage at `/` and
-Starlight documentation at `/docs/`, and the shared
-design system at `/design-system/`. Two workflows publish Pages, never in
-parallel: `.github/workflows/landing.yml` for an explicit site-only dispatch and
-`.github/workflows/docs-only-publish.yml` for the automatic docs-only lane. Both
-join the same non-cancelling `pages-deploy` lock; the channel transaction in
-`cd.yml` shares it too. Every other workflow only builds and validates; it
-cannot replace the homepage or the canonical docs.
+The Pages deployment contains the homepage at `/`, documentation at `/docs/`
+and the shared design system at `/design-system/`. Explicit site-only deploys,
+automatic docs-only deploys, channel promotions and recovery all use the
+non-cancelling `pages-deploy` queue. Each publisher qualifies the live source
+under the shared lock before replacing the canonical site.
 
 ## Source contract
 
@@ -104,18 +101,20 @@ check, an unresolved or mismatched live Stable/Nightly product/image receipt, a
 main tip that moved after pinning, or an unverified rollback baseline is a
 blocked qualification: the job stops with zero Page, alias, tag, release or
 tracked-file writes and reports the failing reason. No failed or PR event may
-occupy the shared `pages-deploy` slot.
+occupy the shared `pages-deploy` queue. Eligible jobs use `queue: max` with
+cancellation disabled and verify the current source after acquiring the lock.
 
 Before any deploy the shared `docs_publication_gate` resolves the live
 Stable/Nightly receipt, rebuilds the **full** two-channel site from that exact
 state plus the tested guide bytes, and proves it preserves the same commit,
 digest, selector and rendered canonical pages. Rollback bytes come from the
-**last successful github-pages deployment**: its success status resolves the
-exact workflow run and the named archived artifact, and that artifact is
+**last successful GitHub Pages deploy step**. Follow the deployment status
+to its exact Actions job, skip jobs whose Pages steps were all skipped, and
+select the archived artifact named by the final deploy step. That artifact is
 accepted only when its index, receipts, manifests and every declared page are
 byte-equal to the live site. An equal `version-index.json` alone is never
 enough — a docs-only rebuild can share it while serving different guide bytes.
-Only when that artifact has expired may the gate reconstruct a baseline from
+Only when that artifact is no longer retained may the gate reconstruct a baseline from
 the exact deployment SHA confirmed on `origin/main`, in a separate worktree;
 live state is re-qualified and all live bytes compared, and the result is
 reported as `reconstructed`, never as the original artifact. A missing or
@@ -199,7 +198,18 @@ python3 scripts/version_bump.py prepare --check
 python3 scripts/build_website.py
 python3 scripts/check_website.py
 python3 scripts/version_bump.py prepare --check --site .website-build/site
+cd scripts/manual-review/e2e && bun install --frozen-lockfile && bunx playwright install chromium && cd ../../..
+python3 scripts/changelog_browser_check.py
 ```
+
+`scripts/changelog_browser_check.py` drives the exact built site with the
+repository-pinned Playwright helper (`scripts/manual-review/e2e/changelog-switcher-dom.mjs`).
+It fails if a changelog route has other than one H1, omits the actual
+release/version banner label or canonical release-note link, shows a retired
+heading, or if the deep-path channel switcher cannot be clicked from the Stable
+archive and Nightly routes at both desktop and mobile widths. This is the same
+gate run in `.github/workflows/docs.yml`; no network, registry or deploy write
+is performed by the checker.
 
 `scripts/version_bump.py prepare` regenerates the shared index; `prepare
 --check` fails on a stale index. `bump <tag> --check` derives a candidate from

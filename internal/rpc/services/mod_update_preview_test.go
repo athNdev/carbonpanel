@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/db"
@@ -20,17 +21,29 @@ type modPreviewFixture struct {
 	loader, game  string
 	current, next modrinth.Version
 	project       modrinth.ProjectDetails
+	versionErr    error
+	compatErr     error
+	projectErr    error
 }
 
 func (f *modPreviewFixture) VersionsByFileHash(_ context.Context, hashes []string) (map[string]modrinth.Version, error) {
 	f.identified = append(f.identified, hashes...)
+	if f.versionErr != nil {
+		return nil, f.versionErr
+	}
 	return map[string]modrinth.Version{f.current.Files[0].Hashes.SHA512: f.current}, nil
 }
 func (f *modPreviewFixture) CompatibleUpdatesByFileHash(_ context.Context, _ []string, loader, game string) (map[string]modrinth.Version, error) {
 	f.loader, f.game = loader, game
+	if f.compatErr != nil {
+		return nil, f.compatErr
+	}
 	return map[string]modrinth.Version{f.current.Files[0].Hashes.SHA512: f.next}, nil
 }
 func (f *modPreviewFixture) GetProjects(context.Context, []string) ([]modrinth.ProjectDetails, error) {
+	if f.projectErr != nil {
+		return nil, f.projectErr
+	}
 	return []modrinth.ProjectDetails{f.project}, nil
 }
 func newPreviewFixture() *modPreviewFixture {
@@ -74,6 +87,43 @@ func TestModUpdatePreviewUsesEnabledAndDisabledFileBytes(t *testing.T) {
 		t.Fatalf("canceled preview: %v", err)
 	}
 }
+func TestModUpdatePreviewReportsProviderLookupFailure(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "mods"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mods", "mod.jar"), []byte("installed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := &db.Server{ModLoader: db.ModLoaderFabric, MCVersion: "1.21.1"}
+	const privateDiagnostic = `GET https://indexer.example.invalid/v2/version_file: 500 response body {"detail":"internal policy detail"}`
+	cases := []struct {
+		name  string
+		setup func(*modPreviewFixture)
+	}{
+		{"file lookup", func(f *modPreviewFixture) { f.versionErr = errors.New(privateDiagnostic) }},
+		{"compatible release lookup", func(f *modPreviewFixture) { f.compatErr = errors.New(privateDiagnostic) }},
+		{"project lookup", func(f *modPreviewFixture) { f.projectErr = errors.New(privateDiagnostic) }},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			mods := []*v1.Mod{{FileName: "mod.jar", Enabled: true}}
+			fixture := newPreviewFixture()
+			test.setup(fixture)
+			if err := previewServerModUpdates(context.Background(), root, filepath.Join(root, "mods"), server, mods, fixture); err != nil {
+				t.Fatal(err)
+			}
+			preview := mods[0].UpdatePreview
+			if preview.State != "unavailable" || preview.Reason != providerLookupReason {
+				t.Fatalf("preview %+v", preview)
+			}
+			if strings.Contains(preview.Reason, "indexer.example.invalid") || strings.Contains(preview.Reason, "internal policy detail") {
+				t.Fatalf("preview leaks provider diagnostic: %q", preview.Reason)
+			}
+		})
+	}
+}
+
 func TestModUpdatePreviewClassifications(t *testing.T) {
 	cases := []struct {
 		name, want string

@@ -5,6 +5,22 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
+<script module lang="ts">
+	let scrollLocks = 0;
+	let previousOverflow = '';
+	let activeDialogs: HTMLDivElement[] = [];
+
+	function lockBackgroundScroll() {
+		if (scrollLocks++ === 0) {
+			previousOverflow = document.body.style.overflow;
+			document.body.style.overflow = 'hidden';
+		}
+		return () => {
+			if (--scrollLocks === 0) document.body.style.overflow = previousOverflow;
+		};
+	}
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
@@ -93,7 +109,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
-		if (!open) return;
+		if (!open || !isTopDialog()) return;
 
 		if (event.key === 'Escape') {
 			event.preventDefault();
@@ -138,14 +154,29 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	function isTopDialog() {
+		return modalElement === activeDialogs.at(-1);
+	}
+
+	$effect(() => {
+		if (!open || !modalElement) return;
+		const dialog = modalElement;
+		const overlay = dialog.parentElement;
+		// Svelte can reopen the same portal while its closing transition is running.
+		// Keep paint order and keyboard ownership aligned on each open.
+		if (overlay?.parentElement === document.body && overlay !== document.body.lastElementChild) {
+			document.body.append(overlay);
+		}
+		activeDialogs = [...activeDialogs, dialog];
+		return () => {
+			activeDialogs = activeDialogs.filter((entry) => entry !== dialog);
+		};
+	});
+
 	$effect(() => {
 		// Lock background scrolling while the dialog owns the viewport.
 		if (!open || typeof document === 'undefined') return;
-		const previous = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = previous;
-		};
+		return lockBackgroundScroll();
 	});
 
 	$effect(() => {
@@ -154,7 +185,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				previousActiveElement = document.activeElement as HTMLElement | null;
 				// Focus the modal or its first actionable element on open
 				const focusTimer = setTimeout(() => {
-					if (!modalElement) return;
+					if (!modalElement || !isTopDialog() || modalElement.contains(document.activeElement))
+						return;
 					const focusableSelectors = [
 						'input:not([disabled])',
 						'button:not([disabled])',
@@ -173,9 +205,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				return () => clearTimeout(focusTimer);
 			}
 		} else {
-			if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-				previousActiveElement.focus();
-				previousActiveElement = null;
+			const restore = previousActiveElement;
+			previousActiveElement = null;
+			const top = activeDialogs.at(-1);
+			if (restore?.isConnected && (!top || top === modalElement || top.contains(restore))) {
+				restore.focus();
 			}
 		}
 	});

@@ -97,6 +97,12 @@ func (l *local) sub(rel string) (string, error) {
 		return "", fmt.Errorf("%w: %q", ErrEscape, rel)
 	}
 	clean := filepath.ToSlash(filepath.Clean(filepath.Join(l.dir, filepath.FromSlash(rel))))
+	if l.dir == "." {
+		if !filepath.IsLocal(clean) {
+			return "", fmt.Errorf("%w: %q", ErrEscape, rel)
+		}
+		return clean, nil
+	}
 	if clean != l.dir && (len(clean) <= len(l.dir)+1 || clean[:len(l.dir)+1] != l.dir+"/") {
 		return "", fmt.Errorf("%w: %q", ErrEscape, rel)
 	}
@@ -228,6 +234,10 @@ type NodeInfo struct {
 	IsLocal               bool
 	StorageRoot           string
 	ControllerStorageRoot string
+	// Endpoint is the Docker daemon endpoint for this node. It may contain
+	// deployment credentials, so callers that persist an allocation identity
+	// must sanitise it first; it is never part of a storage path.
+	Endpoint string
 }
 
 // LocalNode returns the storage view of the controller's own daemon.

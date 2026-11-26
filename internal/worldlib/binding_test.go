@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
@@ -82,6 +85,253 @@ func seedRevision(t *testing.T, store *storage.Store, entryID, archivePath, sha 
 		t.Fatal(err)
 	}
 	return rev
+}
+
+// levelBarrierLifecycle changes the configured level exactly once, inside the
+// shared server transition, to simulate a config update racing the bind after
+// Binder-private admission has already chosen a level.
+type levelBarrierLifecycle struct {
+	fakeLifecycle
+	store    *storage.Store
+	serverID string
+	newLevel string
+	fired    bool
+}
+
+func (l *levelBarrierLifecycle) BeginTransition(serverID string) (func(), error) {
+	if !l.fired {
+		l.fired = true
+		ctx := context.Background()
+		cfg, err := l.store.GetServerConfig(ctx, l.serverID)
+		if err != nil {
+			return nil, err
+		}
+		level := l.newLevel
+		cfg.Level = &level
+		if err := l.store.SaveServerConfig(ctx, cfg); err != nil {
+			return nil, err
+		}
+	}
+	return func() {}, nil
+}
+
+func TestCompletedReplaySurvivesLevelChangeButNewWorkUsesConfiguredLevel(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	level := "world"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+		ID: server.ID, ServerID: server.ID, Level: &level,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rev := seedRevision(t, store, "wld_replay", archivePath, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	first, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "replay-original", Window: "now",
+	})
+	if err != nil || first.Binding == nil {
+		t.Fatalf("original bind = %+v, %v", first, err)
+	}
+
+	changed := "other"
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Level = &changed
+	if err := store.SaveServerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "replay-original", Window: "now",
+	})
+	if err != nil || replay.Binding == nil || replay.Binding.ID != first.Binding.ID {
+		t.Fatalf("completed replay after level change = %+v, %v", replay, err)
+	}
+
+	_, err = binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "fresh-after-change", Window: "now",
+	})
+	if err == nil || !strings.Contains(err.Error(), `configured level "other"`) {
+		t.Fatalf("fresh bind after level change = %v, want configured level enforced", err)
+	}
+}
+
+func TestLevelChangeAtSharedTransitionBarrierRefusesBeforeStop(t *testing.T) {
+	for _, tc := range []struct {
+		name, newLevel, wantErr string
+	}{
+		{"level changes", "other", "level changed before world bind acquired the shared transition"},
+		{"same level", "world", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newWorldTestStore(t)
+			root := t.TempDir()
+			dataRoot := filepath.Join(root, "data")
+			libraryRoot := filepath.Join(root, "library")
+			if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			archivePath := filepath.Join(libraryRoot, "rev.zip")
+			if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			server := seedWorldServer(t, store, dataRoot)
+			level := "world"
+			if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+				ID: server.ID, ServerID: server.ID, Level: &level,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			rev := seedRevision(t, store, "wld_barrier", archivePath, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+			barrier := &levelBarrierLifecycle{
+				fakeLifecycle: fakeLifecycle{running: true},
+				store:         store, serverID: server.ID, newLevel: tc.newLevel,
+			}
+			binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, barrier, libraryRoot)
+			result, err := binder.Bind(ctx, BindRequest{
+				ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+				NodeID: "local", Generation: 1, RequestID: "barrier-bind", Window: "now",
+			})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("barrier bind = %+v, %v; want %q", result, err, tc.wantErr)
+				}
+				if barrier.stops != 0 || barrier.starts != 0 {
+					t.Fatalf("refused bind mutated lifecycle: %+v", barrier)
+				}
+				if _, err := store.GetWorldBinding(ctx, server.ID, "world"); err == nil {
+					t.Fatal("refused bind created a binding")
+				}
+				return
+			}
+			if err != nil || result == nil || result.Outcome != "success" {
+				t.Fatalf("same-level bind = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+func TestBindRechecksLevelAfterScheduledBatchWinsPreflight(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(dataRoot, "world", "level.dat")
+	if err := os.MkdirAll(filepath.Dir(original), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(original, []byte("existing world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archive, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	rev := seedRevision(t, store, "wld_scheduled", archive, strings.Repeat("a", 64))
+	when := time.Now().Add(-time.Minute)
+	if _, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"level": "next"}, storage.UpdateWindowAtTime, &when, 0); err != nil {
+		t.Fatal(err)
+	}
+	life := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, life, libraryRoot)
+	applied := false
+	binder.FreeBytes = func(ctx context.Context, _, _ string) (int64, error) {
+		// The batch runs after bind captures the level and before it acquires
+		// the durable journal. The owned reread must catch the new level.
+		err := staging.Sweep(ctx, store, nil, time.Now(), nil, func(_ context.Context, _ *storage.Server, _ staging.Plan) error {
+			return nil
+		})
+		applied = err == nil
+		return 1 << 30, err
+	}
+	if _, err := binder.Bind(ctx, BindRequest{ServerID: server.ID, RevisionID: rev.ID, RequestID: "bind-after-batch"}); err == nil ||
+		!strings.Contains(err.Error(), "level changed before world bind owned the operation") {
+		t.Fatalf("bind after batch = %v", err)
+	}
+	if !applied || life.stops != 0 || life.starts != 0 {
+		t.Fatalf("batch ran = %t, lifecycle = %+v", applied, life)
+	}
+	if got, err := os.ReadFile(original); err != nil || string(got) != "existing world" {
+		t.Fatalf("old world = %q, %v", got, err)
+	}
+	ops, err := store.ListServerOperations(ctx)
+	if err != nil || len(ops) != 2 || ops[0].Kind != "apply-batch" || ops[0].Phase != storage.ServerOperationComplete ||
+		ops[1].Kind != "world-bind" || ops[1].Phase != storage.ServerOperationFailed || ops[1].ActiveServer != nil {
+		t.Fatalf("journal = %+v, %v", ops, err)
+	}
+}
+
+// TestBinderRevalidatesConfiguredLevelUnderAdmission proves a stale or padded
+// request level cannot address a different binding key or publish into another
+// folder (OSS-432).
+func TestBinderRevalidatesConfiguredLevelUnderAdmission(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	level := "world"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+		ID: server.ID, ServerID: server.ID, Level: &level,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rev := seedRevision(t, store, "wld_level", archivePath, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	lifecycle := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, lifecycle, libraryRoot)
+
+	_, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "other", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "stale-level", Window: "now",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match configured level") {
+		t.Fatalf("stale level bind = %v", err)
+	}
+	if lifecycle.stops != 0 || lifecycle.starts != 0 {
+		t.Fatalf("refused bind mutated lifecycle: %+v", lifecycle)
+	}
+	if _, err := store.GetWorldBinding(ctx, server.ID, "world"); err == nil {
+		t.Fatal("refused bind created a binding")
+	}
 }
 
 func TestBindStagesPublishesAndRestarts(t *testing.T) {
@@ -180,17 +430,81 @@ func TestBindCancellationBeforeMutationCreatesNothing(t *testing.T) {
 }
 
 func TestBindRemoteWithoutResolverFailsClosed(t *testing.T) {
+	ctx := context.Background()
 	store := newWorldTestStore(t)
 	root := t.TempDir()
 	server := seedWorldServer(t, store, filepath.Join(root, "data"))
+	node := &storage.Node{Name: "Remote daemon", Host: "tcp://remote.example:2376", Enabled: true}
+	if err := store.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	server.NodeID = node.ID
+	if err := store.UpdateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
 	rev := seedRevision(t, store, "wld_3", filepath.Join(root, "rev.zip"), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 	binder := NewBinder(store, logger.New(), nil, nil, &fakeLifecycle{}, root)
-	_, err := binder.Bind(context.Background(), BindRequest{
-		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
-		NodeID: "remote-node", Generation: 1, RequestID: "remote",
-	})
+	request := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: node.ID, Generation: 1, RequestID: "remote"}
+	_, err := binder.Bind(ctx, request)
 	if !errors.Is(err, ErrRemoteUnavailable) {
 		t.Fatalf("want ErrRemoteUnavailable, got %v", err)
+	}
+	request.NodeID = "local"
+	_, err = binder.Bind(ctx, request)
+	if !errors.Is(err, ErrRemoteUnavailable) {
+		t.Fatalf("remote bind must not accept a local node override, got %v", err)
+	}
+}
+
+func TestBindAndRecoverOnRegisteredLocalNode(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, []string{"world"})
+	node := &storage.Node{
+		Name: "Registered local daemon", Host: "unix:///var/run/docker.sock",
+		Enabled: true, IsLocal: true, EndpointGeneration: 3,
+	}
+	if err := store.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	server.NodeID = node.ID
+	if err := store.UpdateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+
+	lifecycle := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, lifecycle, libraryRoot)
+	request := BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, Window: "now",
+		NodeID: node.ID, Generation: 3, RequestID: "registered-local",
+	}
+	result, err := binder.Bind(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Binding == nil || !result.Binding.MatchesOwner(node.ID, 3) ||
+		lifecycle.stops != 1 || lifecycle.starts != 1 {
+		t.Fatalf("bind did not restart and persist the owning node: %+v, lifecycle=%+v", result, lifecycle)
+	}
+	family := filepath.Join(dataRoot, "world")
+	held := filepath.Join(dataRoot, ".world-library", "old-registered-node", "world")
+	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(family, held); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binder.Recover(ctx, server.ID, dataRoot, node.ID, 2); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("recovery should refuse a stale node generation, got %v", err)
+	}
+	summary, err := binder.Recover(ctx, server.ID, dataRoot, node.ID, 3)
+	if err != nil || !strings.Contains(summary, "restored 1") {
+		t.Fatalf("registered-node recovery = %q, %v", summary, err)
+	}
+	got, err := os.ReadFile(filepath.Join(family, "level.dat"))
+	if err != nil || string(got) != "new-world" {
+		t.Fatalf("recovered level.dat = %q, %v; want published world bytes", got, err)
 	}
 }
 
@@ -454,6 +768,129 @@ func (f *faultyAccessor) Rename(oldRel, newRel string) error {
 		return errors.New("injected lost rename reply")
 	}
 	return nil
+}
+
+// stagedMarkerStorage is a read-only mocked node accessor for the staged-family
+// scan. It never reads or writes a real world tree: ReadDir and Stat answer
+// from the supplied entries and per-path faults.
+type stagedMarkerStorage struct {
+	nodestorage.Accessor
+	entries []os.DirEntry
+	markers map[string]fakeMarkerInfo
+	faults  map[string]error
+}
+
+type fakeMarkerInfo struct {
+	name string
+	size int64
+	mode fs.FileMode
+}
+
+func (f fakeMarkerInfo) Name() string       { return f.name }
+func (f fakeMarkerInfo) Size() int64        { return f.size }
+func (f fakeMarkerInfo) Mode() fs.FileMode  { return f.mode }
+func (f fakeMarkerInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeMarkerInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeMarkerInfo) Sys() any           { return nil }
+
+func (s *stagedMarkerStorage) ReadDir(string) ([]os.DirEntry, error) {
+	return s.entries, nil
+}
+
+func (s *stagedMarkerStorage) Stat(rel string) (os.FileInfo, error) {
+	if err, ok := s.faults[rel]; ok {
+		return nil, err
+	}
+	if info, ok := s.markers[rel]; ok {
+		return info, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func TestStageFamiliesDistinguishesMissingMarkerFromStorageFault(t *testing.T) {
+	const stageRoot = ".world-library/stage-test/extracted"
+	valid := fakeMarkerInfo{name: "level.dat", size: 1, mode: 0o644}
+	entries := []os.DirEntry{
+		fs.FileInfoToDirEntry(fakeMarkerInfo{name: "world", mode: fs.ModeDir | 0o755}),
+		fs.FileInfoToDirEntry(fakeMarkerInfo{name: "world_nether", mode: fs.ModeDir | 0o755}),
+	}
+	fault := errors.New("injected benign stat fault")
+
+	t.Run("missing marker is skipped", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			entries: entries,
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if err != nil {
+			t.Fatalf("missing sibling marker must not fail the scan: %v", err)
+		}
+		if len(families) != 1 || families[0] != "world" {
+			t.Fatalf("families = %v; want [world] with the markerless sibling skipped", families)
+		}
+	})
+
+	t.Run("storage fault in normal iteration is returned", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			entries: entries,
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+			faults: map[string]error{
+				path.Join(stageRoot, "world_nether", "level.dat"): fault,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, fault) {
+			t.Fatalf("storage fault = %v, want the injected error rather than a silent skip", err)
+		}
+		if families != nil {
+			t.Fatalf("families on storage fault = %v; want none", families)
+		}
+	})
+
+	t.Run("storage fault in fallback is returned", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			faults: map[string]error{
+				path.Join(stageRoot, "world", "level.dat"): fault,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, fault) {
+			t.Fatalf("fallback storage fault = %v, want the injected error", err)
+		}
+		if families != nil {
+			t.Fatalf("families on fallback storage fault = %v; want none", families)
+		}
+	})
+
+	t.Run("missing marker in fallback stays an actionable layout rejection", func(t *testing.T) {
+		acc := &stagedMarkerStorage{}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if !errors.Is(err, ErrUnsupportedWorldLayout) {
+			t.Fatalf("missing fallback marker = %v, want ErrUnsupportedWorldLayout", err)
+		}
+		if families != nil {
+			t.Fatalf("families for missing fallback marker = %v; want none", families)
+		}
+	})
+
+	t.Run("fallback still publishes the configured level marker", func(t *testing.T) {
+		acc := &stagedMarkerStorage{
+			markers: map[string]fakeMarkerInfo{
+				path.Join(stageRoot, "world", "level.dat"): valid,
+			},
+		}
+		families, err := stageFamilies(acc, stageRoot, "world")
+		if err != nil {
+			t.Fatalf("valid fallback marker: %v", err)
+		}
+		if len(families) != 1 || families[0] != "world" {
+			t.Fatalf("fallback families = %v; want [world]", families)
+		}
+	})
 }
 
 func multiFamilyTestArchive(t *testing.T, families []string) []byte {

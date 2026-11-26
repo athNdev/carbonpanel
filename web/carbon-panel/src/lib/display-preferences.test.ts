@@ -36,7 +36,7 @@ test('mono eyebrow labels share one tracking/color contract', () => {
 	for (const utility of ['.mono-label ', '.mono-label-strong', '.mono-label-accent']) {
 		assert.ok(css.includes(utility), `app.css must define ${utility.trim()}`);
 	}
-	assert.match(css, /letter-spacing: 0\.04em/);
+	assert.match(css, /letter-spacing: 0\.015em/);
 });
 
 function fixture(seed: Record<string, string> = {}, failing = false) {
@@ -62,10 +62,11 @@ function fixture(seed: Record<string, string> = {}, failing = false) {
 	return { storage, documentStub, attributes, values };
 }
 
-test('fresh defaults are dark/full/comfortable and apply the same document attributes', () => {
+test('fresh preferences follow System with a dark fallback when no device preference is available', () => {
 	const { storage, documentStub, attributes } = fixture();
 	const prefs = createDisplayPreferences(storage, documentStub);
 	prefs.hydrate();
+	assert.equal(get(prefs.themeChoice), 'system');
 	assert.equal(get(prefs.theme), 'dark');
 	assert.equal(get(prefs.motion), 'full');
 	assert.equal(get(prefs.density), 'comfortable');
@@ -135,7 +136,7 @@ test('live switches and reset update state, storage and attributes together', ()
 	assert.equal(get(prefs.theme), 'dark');
 	assert.equal(get(prefs.motion), 'full');
 	assert.equal(get(prefs.density), 'comfortable');
-	assert.equal(values.get(THEME_KEY), 'dark');
+	assert.equal(values.get(THEME_KEY), 'system');
 	assert.equal(values.get(MOTION_KEY), 'full');
 	assert.equal(values.get(DENSITY_KEY), 'comfortable');
 	assert.equal(attributes.get('data-carbon-theme'), 'dark');
@@ -289,13 +290,8 @@ test('editor theme effects never bootstrap Monaco and clear active runtimes', ()
 	assert.match(dialog, /activeRuntime = null/, 'disposal must release the active runtime');
 });
 
-test('login hydrates preferences outside the shell and switches the brand mark', () => {
+test('login follows the root palette and switches the brand mark', () => {
 	const login = readFileSync(new URL('../routes/login/+page.svelte', import.meta.url), 'utf8');
-	assert.match(
-		login,
-		/displayPreferences\.hydrate\(\)/,
-		'login renders without CarbonShell and must hydrate the shared owner itself'
-	);
 	assert.match(
 		login,
 		/\$theme === 'dark' \? 'brand-mark-light\.svg' : 'brand-mark-dark\.svg'/,

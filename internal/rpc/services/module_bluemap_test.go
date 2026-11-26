@@ -9,11 +9,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -24,9 +28,11 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
 
 func strPtrFixture(s string) *string { return &s }
@@ -317,6 +323,22 @@ func TestBuiltinBlueMapManagedActionIsolatedFromGenericCreate(t *testing.T) {
 	if _, ok := modules[0].Metadata[blueMapManagedSignalKey]; ok {
 		t.Fatal("generic module must not be marked managed")
 	}
+
+	if err := store.CreateModuleTemplate(ctx, &storage.ModuleTemplate{
+		ID: "generic", Name: "Generic", Type: storage.ModuleTemplateTypeCustom, DockerImage: "generic:fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generic, err := svc.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+		Name: "Generic", ServerId: "srv-parity", TemplateId: "generic",
+		Metadata: map[string]string{blueMapManagedSignalKey: "true", "operator-note": "kept"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta := generic.Msg.Module.GetMetadata(); len(meta) != 1 || meta["operator-note"] != "kept" {
+		t.Fatalf("generic create forged managed identity or lost operator metadata: %v", meta)
+	}
 }
 
 // An injected config-commit failure must delete the just-persisted module row
@@ -411,6 +433,89 @@ func TestBuiltinBlueMapRefusalsHaveZeroConfigSideEffects(t *testing.T) {
 	}
 }
 
+func TestBuiltinBlueMapRecoversRetainedConfiguration(t *testing.T) {
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "admin-1", Roles: []string{"admin"}})
+	const serverID = "srv-retained"
+	store, dataRoot := blueMapFixtureStore(t, ctx, serverID, "default", "actual_world")
+	defer func() { _ = store.Close() }()
+	log := logger.New()
+	svc := &ModuleService{
+		store: store, enforcer: mustEnforcer(t, store), storageResolver: nodestorage.NewResolver(nil),
+		moduleManager: module.NewManager(store, nil, nil, &config.Config{}, nil, log), log: log,
+	}
+
+	configDir := filepath.Join(dataRoot, "modules", "bluemap", "config")
+	if err := os.MkdirAll(filepath.Join(configDir, "maps"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, value string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(configDir, rel), []byte(value), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	coreFile := "core.conf"
+	mapFile := filepath.Join("maps", "overworld.conf")
+	core := "# My settings\nrender-thread-count: 4\naccept-download: true\n"
+	mapConfig := "# Map left behind by the old module\nworld: \"world\"\ndimension: \"minecraft:overworld\"\nstorage: \"file\"\n"
+	write(coreFile, "accept-download: false\n")
+	write(mapFile, mapConfig)
+
+	call := func(reuse bool) (*connect.Response[v1.CreateModuleResponse], error) {
+		metadata := map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}
+		if reuse {
+			metadata[blueMapReuseSignalKey] = "true"
+		}
+		return svc.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+			Name: "BlueMap", ServerId: serverID, TemplateId: blueMapTemplateID,
+			StartImmediately: true, Metadata: metadata,
+		}))
+	}
+	refused := func(reuse bool, reason string) {
+		t.Helper()
+		_, err := call(reuse)
+		var rpcErr *connect.Error
+		if !errors.As(err, &rpcErr) || rpcErr.Code() != connect.CodeFailedPrecondition || rpcErr.Meta().Get(blueMapSetupHeader) != reason {
+			t.Fatalf("reuse %v, expected %q, got %v", reuse, reason, err)
+		}
+		modules, err := store.ListModulesByTemplate(ctx, blueMapTemplateID)
+		if err != nil || len(modules) != 0 {
+			t.Fatalf("failed recovery created a module: %v, %v", modules, err)
+		}
+	}
+	refused(false, "retained-config")
+	refused(true, "download-consent")
+	write(coreFile, core+"accept-download: false\n")
+	refused(true, "download-consent")
+	write(coreFile, core)
+	write(mapFile, "world: \"/other/world\"\n")
+	refused(true, "world-config")
+	write(mapFile, mapConfig)
+
+	response, err := call(true)
+	if err != nil || response.Msg.GetModule().GetId() == "" {
+		t.Fatalf("reuse retained setup: %v, %v", response, err)
+	}
+	record, err := store.GetModule(ctx, response.Msg.GetModule().GetId())
+	if err != nil || !isManagedBlueMapModule(record) || record.Metadata[blueMapReuseSignalKey] != "" {
+		t.Fatalf("incorrect recovered renderer: %v, %v", record, err)
+	}
+	for path, want := range map[string]string{coreFile: core, mapFile: mapConfig} {
+		if raw, err := os.ReadFile(filepath.Join(configDir, path)); err != nil || string(raw) != want {
+			t.Fatalf("recovery rewrote %s: %q, %v", path, raw, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "maps", "actual_world.conf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovery generated a second Overworld map: %v", err)
+	}
+	// A second request must adopt the recovered module while the worker holds
+	// the lifecycle transition or after its Docker failure in this fixture.
+	again, err := call(true)
+	if err != nil || again.Msg.GetModule().GetId() != record.ID {
+		t.Fatalf("second recovery did not reuse the same module: %v, %v", again, err)
+	}
+}
+
 type fakeModuleAuthorizer struct {
 	allowCreate bool
 	allowStart  bool
@@ -458,7 +563,7 @@ func TestBuiltinBlueMapBackendEligibilityFixture(t *testing.T) {
 		wantReason string
 	}{
 		{"no consent", "default", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true"}, connect.CodeInvalidArgument, "explicit acceptance"},
-		{"remote node", "node-2", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "remote node"},
+		{"unknown node", "node-2", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "ownership could not be verified"},
 		{"invalid level", "default", "../etc", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "level name is invalid"},
 		{"unpinned image", "default", "actual_world", true, &storage.ModuleTemplate{ID: blueMapTemplateID, DockerImage: "ghcr.io/bluemap-minecraft/bluemap:latest"}, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "not the pinned"},
 		{"missing world", "default", "actual_world", false, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "readable Minecraft Java Edition world"},
@@ -533,4 +638,309 @@ func TestBuiltinBlueMapStartImmediatelyRequiresModulesStartFixture(t *testing.T)
 		t.Fatalf("admin create+start must succeed, got %v", err)
 	}
 	_ = tpl
+}
+
+func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		startStatus      int
+		stallStart       bool
+		wantModuleStatus storage.ModuleStatus
+	}{
+		{name: "successful start", startStatus: http.StatusNoContent, wantModuleStatus: storage.ModuleStatusRunning},
+		{name: "failed daemon start", startStatus: http.StatusInternalServerError, wantModuleStatus: storage.ModuleStatusError},
+		{name: "stalled daemon start", stallStart: true, wantModuleStatus: storage.ModuleStatusError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			const serverID = "srv-managed-lease"
+			const containerID = "abcdef0123456789"
+			store, _ := blueMapFixtureStore(t, ctx, serverID, "default", "actual_world")
+			t.Cleanup(func() { _ = store.Close() })
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"proxy_hostname": "world.test"}); err != nil {
+				t.Fatal(err)
+			}
+			creating, starting := make(chan struct{}, 1), make(chan struct{}, 1)
+			createDone, startDone := make(chan struct{}), make(chan struct{})
+			recreating, recreateDone := make(chan struct{}, 1), make(chan struct{})
+			startCanceled := make(chan struct{})
+			var creates, inspects, starts atomic.Int32
+			var allowCreate, allowStart sync.Once
+			var allowRecreate sync.Once
+			unblockCreate := func() { allowCreate.Do(func() { close(createDone) }) }
+			unblockStart := func() { allowStart.Do(func() { close(startDone) }) }
+			unblockRecreate := func() { allowRecreate.Do(func() { close(recreateDone) }) }
+			dockerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/_ping":
+					w.Header().Set("Api-Version", "1.45")
+				case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+					_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/create"):
+					switch creates.Add(1) {
+					case 1:
+						creating <- struct{}{}
+						<-createDone
+					case 2:
+						recreating <- struct{}{}
+						<-recreateDone
+					}
+					_, _ = w.Write([]byte(`{"Id":"` + containerID + `"}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/json"):
+					inspects.Add(1)
+					_, _ = w.Write([]byte(`{"State":{"Status":"created"}}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/stop"),
+					r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/"+containerID):
+					w.WriteHeader(http.StatusNoContent)
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/start"):
+					if starts.Add(1) > 1 {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					starting <- struct{}{}
+					select {
+					case <-r.Context().Done():
+						close(startCanceled)
+						return
+					case <-startDone:
+					}
+					if tc.stallStart {
+						return // test cleanup
+					}
+					w.WriteHeader(tc.startStatus)
+					if tc.startStatus != http.StatusNoContent {
+						_, _ = w.Write([]byte(`{"message":"fixture daemon refused startup"}`))
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(dockerAPI.Close)
+			t.Cleanup(unblockRecreate)
+			log := logger.New()
+			dockerClient, err := docker.NewClient(strings.Replace(dockerAPI.URL, "http://", "tcp://", 1), log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = dockerClient.Close() })
+			t.Cleanup(func() {
+				unblockCreate()
+				unblockStart()
+				waitCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = docker.WaitForServerTransition(waitCtx, serverID)
+			})
+			cfg := &config.Config{Proxy: config.ProxyConfig{Enabled: true}}
+			proxyManager := proxy.NewManager(store, cfg, log, dockerClient.GetDockerClient())
+			svc := &ModuleService{
+				store: store, enforcer: mustEnforcer(t, store), storageResolver: nodestorage.NewResolver(nil),
+				docker: dockerClient, moduleManager: module.NewManager(store, dockerClient, nil, cfg, proxyManager, log), log: log,
+			}
+			if tc.stallStart {
+				svc.blueMapStartupTimeout = 2 * time.Second
+			}
+			_, handler := carbonpanelv1connect.NewModuleServiceHandler(svc, connect.WithInterceptors(
+				connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+					return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+						return next(auth.WithUser(ctx, &auth.AuthenticatedUser{ID: "admin-1", Roles: []string{"admin"}}), req)
+					}
+				}),
+			))
+			panel := httptest.NewServer(handler)
+			defer panel.Close()
+			client := carbonpanelv1connect.NewModuleServiceClient(panel.Client(), panel.URL)
+			install := func() (*connect.Response[v1.CreateModuleResponse], error) {
+				return client.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+					Name: "BlueMap", ServerId: serverID, TemplateId: blueMapTemplateID, StartImmediately: true,
+					Dependencies: []*v1.ModuleDependency{{ModuleId: "unrelated-module"}},
+					Metadata:     map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"},
+				}))
+			}
+			waitFor := func(signal <-chan struct{}, phase string) {
+				t.Helper()
+				select {
+				case <-signal:
+				case <-ctx.Done():
+					t.Fatalf("daemon did not reach %s: %v", phase, ctx.Err())
+				}
+			}
+			assertHeld := func(phase string) {
+				t.Helper()
+				lease, err := docker.TryBeginServerTransition(serverID)
+				lease.Release()
+				if !errors.Is(err, docker.ErrTransitionInFlight) {
+					t.Fatalf("migration could claim the transition during %s: %v", phase, err)
+				}
+			}
+			result, err := install()
+			if err != nil {
+				t.Fatal(err)
+			}
+			moduleID := result.Msg.GetModule().GetId()
+			if moduleID == "" {
+				t.Fatal("install returned no renderer")
+			}
+			waitFor(creating, "container create")
+			assertHeld("container create")
+			start := func() error {
+				_, err := client.StartModule(ctx, connect.NewRequest(&v1.StartModuleRequest{Id: moduleID}))
+				return err
+			}
+			if err := start(); connect.CodeOf(err) != connect.CodeAborted || creates.Load() != 1 {
+				t.Fatalf("manual Start raced container creation: %v; creates=%d", err, creates.Load())
+			}
+			unblockCreate()
+			waitFor(starting, "container start")
+			assertHeld("container start")
+			if err := start(); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Start raced background startup: %v", err)
+			}
+			if _, err := client.RestartModule(ctx, connect.NewRequest(&v1.RestartModuleRequest{Id: moduleID})); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Restart raced background startup: %v", err)
+			}
+			if _, err := client.RecreateModule(ctx, connect.NewRequest(&v1.RecreateModuleRequest{Id: moduleID})); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("manual Recreate raced background startup: %v", err)
+			}
+			if starts.Load() != 1 {
+				t.Fatalf("unexpected daemon starts during managed startup: %d", starts.Load())
+			}
+			retry, err := install()
+			if err != nil || retry.Msg.GetModule().GetId() != moduleID {
+				t.Fatalf("same-assignment install did not adopt the committed renderer: %v %v", retry, err)
+			}
+			if tc.stallStart {
+				waitFor(startCanceled, "startup request cancellation")
+			} else {
+				unblockStart()
+			}
+			if err := docker.WaitForServerTransition(ctx, serverID); err != nil {
+				t.Fatalf("startup did not release the transition: %v", err)
+			}
+			lease, err := docker.TryBeginServerTransition(serverID)
+			if err != nil {
+				t.Fatalf("migration still blocked after daemon completed: %v", err)
+			}
+			defer lease.Release()
+			row, err := store.GetModule(ctx, moduleID)
+			if err != nil || row.Status != tc.wantModuleStatus || row.ContainerID != containerID {
+				t.Fatalf("module after transition release: %v %v", row, err)
+			}
+			if _, err := install(); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("install bypassed another owner's transition: %v", err)
+			}
+			lease.Release()
+			if tc.stallStart {
+				if _, err := client.StartModule(ctx, connect.NewRequest(&v1.StartModuleRequest{Id: moduleID})); err != nil {
+					t.Fatalf("retry start after timeout: %v", err)
+				}
+				row, err := store.GetModule(ctx, moduleID)
+				if err != nil || row.Status != storage.ModuleStatusRunning || row.ContainerID != containerID {
+					t.Fatalf("retry did not start the same module container: %v %v", row, err)
+				}
+				if creates.Load() != 1 || starts.Load() != 2 {
+					t.Fatalf("expected one create and two starts, got %d creates and %d starts", creates.Load(), starts.Load())
+				}
+			}
+			if err := proxyManager.UpdateModuleRoute(row, &storage.Server{ProxyHostname: "world.test"}); err != nil {
+				t.Fatalf("private renderer route refresh: %v", err)
+			}
+			if inspects.Load() != starts.Load() || len(proxyManager.GetModuleRoutes()) != 0 {
+				t.Fatalf("private renderer reached host route setup: %d inspects for %d starts", inspects.Load(), starts.Load())
+			}
+			updateMemory := func(memory int32) error {
+				_, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: moduleID, Memory: &memory}))
+				return err
+			}
+			if tc.wantModuleStatus == storage.ModuleStatusRunning {
+				if err := updateMemory(768); err != nil {
+					t.Fatal(err)
+				}
+				waitFor(recreating, "update recreation")
+				assertHeld("update recreation")
+				if err := start(); connect.CodeOf(err) != connect.CodeAborted {
+					t.Fatalf("manual Start raced update recreation: %v", err)
+				}
+				unblockRecreate()
+				if err := docker.WaitForServerTransition(ctx, serverID); err != nil {
+					t.Fatalf("update did not release the transition: %v", err)
+				}
+				updated, err := store.GetModule(ctx, moduleID)
+				if err != nil || updated.Status != storage.ModuleStatusRunning || updated.Memory != 768 || creates.Load() != 2 {
+					t.Fatalf("update did not recreate the managed renderer: %v %v; creates=%d", updated, err, creates.Load())
+				}
+			}
+			for _, supplied := range []map[string]string{
+				{"operator-note": "kept"}, {"operator-note": "kept", blueMapManagedSignalKey: "false"},
+			} {
+				updated, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{
+					Id: moduleID, Metadata: supplied,
+				}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				meta := updated.Msg.Module.GetMetadata()
+				if meta[blueMapManagedSignalKey] != "true" || meta["operator-note"] != "kept" {
+					t.Fatalf("metadata replacement changed the managed identity: %v", meta)
+				}
+			}
+			generic := &storage.Module{
+				ID: "manual-bluemap", ServerID: serverID, NodeID: "default",
+				Name: "Manual BlueMap", TemplateID: blueMapTemplateID, Status: storage.ModuleStatusStopped,
+			}
+			if err := store.CreateModule(ctx, generic); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{
+				Id: generic.ID, Metadata: map[string]string{blueMapManagedSignalKey: "true", "operator-note": "kept"},
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta := updated.Msg.Module.GetMetadata(); len(meta) != 1 || meta["operator-note"] != "kept" {
+				t.Fatalf("generic update forged managed identity or lost operator metadata: %v", meta)
+			}
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"node_id": "different-node"}); err != nil {
+				t.Fatal(err)
+			}
+			before := starts.Load()
+			if err := start(); connect.CodeOf(err) != connect.CodeFailedPrecondition || starts.Load() != before {
+				t.Fatalf("manual Start reached the previous assignment: %v", err)
+			}
+			node := &storage.Node{ID: "51dc7b26-d4a7-4b90-8d5a-d6874f63d406", Name: "Registered local",
+				Host: "unix:///var/run/docker.sock", Enabled: true, IsLocal: true}
+			if err := store.CreateNode(ctx, node); err != nil {
+				t.Fatal(err)
+			}
+			node.Enabled = false
+			if err := store.UpdateNode(ctx, node); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"node_id": node.ID}); err != nil {
+				t.Fatal(err)
+			}
+			row, err = store.GetModule(ctx, moduleID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.NodeID = node.ID
+			if err := store.UpdateModule(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+			if err := start(); connect.CodeOf(err) != connect.CodeFailedPrecondition ||
+				!strings.Contains(err.Error(), "disabled") || starts.Load() != before {
+				t.Fatalf("manual Start allowed an ineligible current node: %v", err)
+			}
+			createsBefore := creates.Load()
+			if err := updateMemory(1024); connect.CodeOf(err) != connect.CodeFailedPrecondition ||
+				!strings.Contains(err.Error(), "disabled") {
+				t.Fatalf("update allowed an ineligible current node: %v", err)
+			}
+			persisted, err := store.GetModule(ctx, moduleID)
+			if err != nil || persisted.Memory != row.Memory || creates.Load() != createsBefore {
+				t.Fatalf("refused update changed the renderer: %v %v; creates=%d", persisted, err, creates.Load())
+			}
+		})
+	}
 }

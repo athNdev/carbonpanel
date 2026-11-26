@@ -16,6 +16,40 @@ early testing and never move a stable alias.
 - **Major:** incompatible operator or API changes that require migration.
 - **Prerelease:** append `-alpha.N`, `-beta.N` or `-rc.N`; increment N for each published build.
 
+## Release model
+
+Use [Stable](https://carbonpanel.dev/docs/) for regular installations and
+[Nightly](https://carbonpanel.dev/docs/nightly/) to try qualified builds from
+`main`. Use `latest` for Stable, including the legacy `1.0.40` publication.
+The product release workflow also publishes `stable` at the same tested image
+digest. Use a full version tag to select a release or a digest to pin its exact
+image. Nightly can advance between Stable releases. Its docs follow the exact
+commit and digest that passed promotion.
+
+Maintain the current Stable minor line. Keep earlier releases available for
+pinned installs and documented rollback. A previous line gets a maintenance
+branch when there is a specific support need and a maintainer can own its
+backports, validation and end date. An older-line exception must preserve the
+newer Stable aliases. The current publisher requires an ancestor of `main`
+with exact-commit main CI. A divergent branch needs an approved qualification
+path before it can publish.
+
+Review release readiness each month. Ship compatible fixes when they are
+qualified and prioritize urgent security or regression patches through the
+same gate. Group compatible features in a minor release. Use an optional
+version-specific `-rc.N` prerelease for changes that benefit from wider
+testing, especially an upgrade with data or configuration changes. An RC that
+embeds its version has different bytes from the final release. Qualify the
+final-version candidate before moving Stable.
+
+Record the exact stage run, commit, OCI digest, download checksums and
+qualification results before promotion. Use supported install paths and
+disposable copies of representative existing installations for upgrade
+and rollback evidence. Check GitHub Releases, both registries and the
+deployed docs before announcing the release. Recover a partial publication
+using the prior receipt and the pinned stage. See the [release model
+research](research/release-models.md) for the comparison behind this policy.
+
 ## UPGRADE NOTES (from v1.0.40)
 
 **2.0.1 is a MAJOR release.** An unchanged v1.0.40 configuration does not
@@ -28,11 +62,13 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
 runs two fail-closed cases on seeded disposable DB/world copies: the explicit
-`v1.0.40` legacy baseline (35 → 45 → 35 tables) and the current published
+`v1.0.40` legacy baseline (pinned 35-table stable baseline and rollback; the
+candidate count is derived from the real binary) and the current published
 stable derived from the authoritative release record by the product version
 contract, so the weekly check follows new stables without a hardcoded version.
-Both use real `carbon-panel` binaries and assert integrity, additive table
-growth, row/world preservation, forced-failure refusal and both restore paths.
+Both use real `carbon-panel` binaries, require the historical model and
+archive-import schema surfaces, and assert integrity, additive table growth,
+row/world preservation, forced-failure refusal and both restore paths.
 Exact artifact versions and SHA-256 digests are emitted in the job's evidence
 report. This check is not a release approval gate: it grants no write scope,
 touches no live world, host, tag, release or registry, and does not replace the
@@ -53,13 +89,35 @@ OIDC/PROXY migration go/no-go steps above. See
    `proxy.trusted_proxy_cidrs` (default `[]` trusts nobody). Add every load
    balancer source CIDR and confirm real client IPs are preserved after upgrade.
 
-The 1.0 line stays at `1.0.40` as the current rollback path (not a permanent ban
-on future 1.0.x maintenance). The next planned stable is
-**`carbonpanel-v2.0.1` (MAJOR)**: the wire/Connect API and schema are additive,
-but three intentional operator/upgrade changes break an unchanged v1.0.40
-config, so a compatible MINOR would be dishonest. See
-[UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading. Before changing a
-version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
+The verified 1.0 rollback version is `1.0.40`. Version `2.0.1` introduced
+the 2.x migration. See
+[UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading from v1.0.40.
+
+## Upgrade from 2.0.1 to 2.1.0
+
+Before upgrading a 2.0.1 installation, pause server activity and make a
+consistent backup of the panel database, configuration, server worlds and
+backup directories. Use a SQLite backup or stop the panel before copying
+database files. Keep the previous 2.0.1 image or archive available for rollback.
+
+- **Retained BlueMap config:** An existing BlueMap module keeps its retained
+  configuration. Recovery reuses retained configuration without rewriting it;
+  review BlueMap's resource-download terms before changing
+  `accept-download` in `modules/bluemap/config/core.conf`.
+- **Map bounds and coverage:** World View opens saved Overworld terrain with
+  adjustable coverage. Map bounds follow the selected map span and visible
+  viewport; use Jump or coordinates to move outside the current view. Shared
+  coordinate links open the same location for users with map access.
+- **Backup and restore:** Take backups before upgrade and before world restore
+  operations. Restoring a world invalidates old terrain sessions; reopen World
+  View after restore to confirm the expected world revision and map bounds.
+- **Rollback:** If 2.1.0 is not acceptable, stop the panel, restore the 2.0.1
+  image/archive, and restore the pre-upgrade database/config backup on
+  disposable copies first when data compatibility is uncertain. Preserve world
+  and backup directories during rollback unless you intentionally restore them
+  from backup.
+
+Before changing a version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
 compatibility surface, CLI flags, the configuration schema and documented
 operator behavior — against SemVer. `1.0.0` already defines that API; existing
 published versions and Go module endpoints are never renumbered, retargeted or
@@ -78,13 +136,13 @@ them in `scripts/test_release.py`.
 
 | Domain | Tag/naming | Immutable identity | Moving aliases |
 | --- | --- | --- | --- |
-| Panel release | `carbonpanel-vMAJOR.MINOR.PATCH` | Full SemVer, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest` |
+| Panel release | `carbonpanel-vMAJOR.MINOR.PATCH` | Full SemVer, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest`, `stable` |
 | Panel prerelease | `carbonpanel-vMAJOR.MINOR.PATCH-<alpha\|beta\|rc>.N` | Full prerelease version | None |
 | Plain Go version / inherited panel tag | `vMAJOR.MINOR.PATCH`, `origin`, `rm` | Existing Git/Go proxy history; never a new publication | None |
 | Module image | `mod-vMAJOR.MINOR.PATCH` | `mod-` version tag | `latest` |
 | Documentation version | `docsMAJOR.MINOR.PATCH` | Historical docs tag; no trigger | None |
 | Managed node runtime (reserved) | `runtime-vMAJOR.MINOR.PATCH` | Full version and digest; no workflow yet | `MAJOR.MINOR` only on explicit promotion |
-| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge`, `nightly` (Hub only) |
+| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge` (Docker Hub), `nightly` (both registries) |
 
 Prereleases keep their full immutable version and never move `latest` or a
 stable minor tag. A stable release publishes its immutable full version first,
@@ -99,15 +157,13 @@ alias promotion. This is the SAME shared lock used by the CD channel transaction
 and the docs-only publisher: every Pages write and every moving-alias write is
 serialized through it, so a stable alias cannot move while a docs/CD writer holds
 the Pages slot. The lock is not released between phases, so two versions cannot
-interleave phases or strand a run after immutable publication. `cancel-in-progress:
-false` protects the **running** run; with GitHub's default `queue: single` only
-one pending run is retained, and a later request **replaces** that pending run —
-this lane uses **single-operator dispatch**. Do not assume every queued publisher
-waits: after a replacement, the operator must verify the resulting run before
-retrying. Alias decisions are recomputed with live preflight inside the same
-locked run. Build-only rehearsals, tag pushes, pull requests and ordinary main
-CI get a distinct per-run key (`carbonpanel-stage-<run_id>`) and are not
-serialized.
+interleave phases. `queue: max` preserves up to 100 waiting jobs or runs, with
+one running publisher. When the queue is full, GitHub cancels additional
+requests. GitHub orders waiting work by lock arrival. Alias decisions still
+require live preflight inside the lock, including the checks for older or
+out-of-order candidates. Inspect the existing run before retrying a dispatch.
+Build-only rehearsals, tag pushes and pull requests use per-run staging keys.
+[GitHub Actions concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
 Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
 reproducible references. Consumers that need reproducible rollbacks pin the full
@@ -121,18 +177,16 @@ future artifact; no workflow or registry destination exists for it today.
 
 Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpanel/releases).
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
-amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
-archive set and digests are recorded in [release history](release-history.md).
-A future, not-yet-published product release tagged `carbonpanel-v2.0.1` keeps
-the same archive naming convention, derived from its SemVer field (`v2.0.1`
-internally for archive names). For example:
+amd64. The [Stable documentation](https://carbonpanel.dev/docs/) shows the
+published channel version. Archive names follow the SemVer field (for example
+`v2.1.0` for `carbonpanel-v2.1.0`):
 
 ```text
-carbon-panel_v2.0.1_linux_amd64.tar.gz
-carbon-panel_v2.0.1_linux_arm64.tar.gz
-carbon-panel_v2.0.1_darwin_amd64.tar.gz
-carbon-panel_v2.0.1_darwin_arm64.tar.gz
-carbon-panel_v2.0.1_windows_amd64.zip
+carbon-panel_v2.1.0_linux_amd64.tar.gz
+carbon-panel_v2.1.0_linux_arm64.tar.gz
+carbon-panel_v2.1.0_darwin_amd64.tar.gz
+carbon-panel_v2.1.0_darwin_arm64.tar.gz
+carbon-panel_v2.1.0_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
@@ -195,9 +249,10 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0.1-alpha.1` | An exact future prerelease; never moves a stable alias |
 | `2.0.1` | An exact stable release, immutable |
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
-| `latest` | Moving stable channel, promoted only with a stable release |
+| `latest` | Moving alias for the qualified Stable release, including legacy `1.0.40` |
+| `stable` | Additional moving alias published by the product release workflow |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
-| `nightly` | Development channel promoted on every successful trusted main CI on BOTH registries at one verified multiarch digest; never a GitHub Release or a stable version |
+| `nightly` | Development channel for qualified main builds on both registries at one verified multi-architecture digest |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
@@ -264,7 +319,24 @@ fixed, non-cancellable channel concurrency group; verification builds stay
 per-SHA and cancellable.
 
 Two publication paths exist, and both require exact-commit CI. The manual path
-is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`.
+is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`
+and not recovery. After the immutable Docker Hub `sha-<commit>` image is
+verified, an authorized Nightly path ensures the GHCR immutable sha counterpart
+exists by a digest-preserving copy of the verified Hub index (including
+platforms and attestations) with scoped `packages: write` and existing registry
+credentials. Before any copy, the Hub index, labels and both platform config
+revisions are proven with the existing digest-addressed helpers; an unknown or
+conflicting GHCR sha is never overwritten, and an identical verified GHCR sha
+is reused idempotently. The remote GHCR index and full revision are observed
+again after the copy. Unauthorized or default verification writes nothing.
+
+The explicit trusted Nightly manual dispatch then runs the same qualified
+channel transaction used by automatic/scheduled Nightly: same `pages-deploy`
+lock, same exact-CI/source/marker gates, same candidate probe, and same
+dual-registry alias move with canonical docs reconciliation. It is never
+reported as schedule, and a requested manual Nightly transaction that cannot
+qualify fails the run instead of reporting green.
+
 The unattended path is a native Actions `schedule` (`cd.yml`, 18:00 UTC daily,
 ahead of the 06:30 Australia/Sydney local updater). A schedule **verifies by
 default**: it resolves the CURRENT `main` tip read-only twice (a moving or
@@ -274,14 +346,14 @@ exact-commit CI again immediately before the buildx push, and a THIRD time
 (fresh result, not the pre-push one) immediately before moving the alias. A
 tip that moved after pinning, or a CI run that stopped being green between the
 push and the alias move, blocks the affected write; verification-only runs
-still build locally without pushing. It may
-move only the `nightly` alias, reusing the verified
-`sha-<commit>` image; a present-but-unverified or unknown sha tag is skipped
-with zero writes. The unattended path alone derives the previous alias binding
-from the alias's own digest-addressed platform configs rather than an operator
-string; manual dispatch keeps its original explicit-binding rule and still
-refuses an absent binding. Both paths refuse an unbound, non-ancestor or
-same-commit-digest move.
+still build locally without pushing. It may move only the `nightly` alias,
+reusing the verified `sha-<commit>` image; a present-but-unverified or unknown
+sha tag is skipped with zero writes. The unattended path alone derives the
+previous alias binding from the alias's own digest-addressed platform configs
+rather than an operator string; manual dispatch keeps its original
+explicit-binding rule and still refuses an absent binding. Both paths refuse an
+unbound, non-ancestor or same-commit-digest move. A main advance refuses a stale
+promotion.
 
 A scheduled run writes to the registry only when the separately reviewed,
 **default-off** repository variable `NIGHTLY_SCHEDULE_PUBLISH` is exactly
@@ -294,10 +366,11 @@ only one writer can touch the shared sha identity and aliases at a time.
 
 Nightly never writes `latest`, a stable minor tag, `edge`, a GitHub release, a
 release record or any MCP/runtime/module image; those lanes have no schedule
-trigger. Its GHCR write is the verified dual-registry alias move described
-under the OSS-413 gates below, not a separate release lane. Seeding a live
-`nightly` tag is a distinct, separately authorized operation; the existing
-`edge` image predates current main and is never relabelled as a fresh nightly.
+trigger. Its GHCR write is the verified dual-registry immutable sha mirror
+and/or alias move described by the OSS-413 gates below, not a separate release
+lane. Seeding a live `nightly` tag is a distinct, separately authorized
+operation; the existing `edge` image predates current main and is never
+relabelled as a fresh nightly.
 
 ## OSS-413 verified channel promotion
 
@@ -531,8 +604,11 @@ byte-bounded Docker-focused view generated from `README.md` sections and the
 published Stable identity in `docs/version-index.json`; the generator
 (`scripts/dockerhub_description.py`) fails rather than emit a body over Docker
 Hub's 25,000 UTF-8 byte limit. The workflow reconciles on affected main merges,
-once daily and on manual `workflow_dispatch` recovery, then verifies the public
-body by reading it back from the unauthenticated Docker Hub API.
+once daily, after a successful Stable release run and on manual
+`workflow_dispatch` recovery, then verifies the public body by reading it back
+from the unauthenticated Docker Hub API. It joins the same non-cancelling
+`pages-deploy` concurrency group as Stable/CD publication, so a description
+PATCH cannot interleave with a docs or moving-alias write.
 
 A Stable promotion only has to update the version contract
 (`docs/website-source.json`, regenerated `docs/version-index.json`). Do not add
@@ -540,10 +616,17 @@ a second Stable version to `docs/dockerhub-description.json`. Production
 generation reads the **live published** version index and fails closed if it is
 unavailable or older than the checked-in baseline: a temporary docs outage or a
 pre-promotion identity can never put an obsolete Stable on the public page.
-Offline fixtures may opt into the baseline explicitly. A main-head guard
+Offline fixtures may opt into the baseline explicitly. Before advertising a
+Stable, the generator also requires a non-draft Stable release manifest and the
+verified `:latest` digest/revision in both registries; a partial promotion or an
+unavailable provider leaves the last published body untouched. A main-head guard
 prevents an in-flight scheduled run from reverting a newly promoted Stable, and
-CD/release no longer write the description. There is no `:stable` image tag;
-use the exact published version tag or the moving `:latest` alias.
+CD/release no longer write the description. Both the README and the derived Hub
+body describe the two channels: `:latest` follows controlled, tested Stable
+releases and an immutable version tag pins one exactly, while `:nightly` follows
+qualified main builds as a preview that may contain changes ahead of Stable. The
+Stable and [Nightly](https://carbonpanel.dev/docs/nightly/) documentation routes
+are published in the version index.
 The immutable product tag, image and exact draft downloads remain available
 after recovery. Use the verified digest and original artifacts for subsequent
 qualification and promotion.

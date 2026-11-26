@@ -46,6 +46,7 @@ var exposedTools = []ToolSpec{
 	{Name: "download_init_file", Procedure: "/carbonpanel.v1.FileService/InitFileDownload", Class: Class("safe"), Confirm: false, Description: "Stage one server-relative file via typed InitFileDownload, then transfer its bytes as bounded controller frames. Returns session id, filename, size, SHA-256 and bytes. Read-only.", Source: "download"},
 	{Name: "download_remote_archive", Procedure: "/carbonpanel.v1.FileService/DownloadRemoteArchive", Class: Class("review"), Confirm: true, Description: "Start a checksum-verified remote archive download. Requires confirm=true; the controller applies its own redirect/host policy.", Source: "content"},
 	{Name: "download_stream", Procedure: "/carbonpanel.v1.FileService/GetFile", Class: Class("safe"), Confirm: false, Description: "Composed byte path for an existing download session (rest_download_stream). Reads bounded controller frames via OpenStream/ReadStreamFrame/CloseStream and returns bytes, exact size and cumulative SHA-256. No gateway file storage. Read-only.", Source: "download"},
+	{Name: "export_server_archive", Procedure: "/carbonpanel.v1.ServerService/ExportServerArchive", Class: Class("review"), Confirm: false, Description: "Prepare a verified ZIP or tar.gz export of one stopped server. Returns a scoped download session.", Source: "server"},
 	{Name: "export_world", Procedure: "/carbonpanel.v1.FileService/ExportWorld", Class: Class("review"), Confirm: false, Description: "Prepare a world export session; the world directory stays in place.", Source: "content"},
 	{Name: "extract_archive", Procedure: "/carbonpanel.v1.FileService/ExtractArchive", Class: Class("review"), Confirm: true, Description: "Start a bounded archive extraction. Requires confirm=true; poll with get_extraction_status.", Source: "content"},
 	{Name: "file_service_save_uploaded_file", Procedure: "/carbonpanel.v1.FileService/SaveUploadedFile", Class: Class("review"), Confirm: true, Description: "Commit one owned, completed upload session into one server-relative destination. Requires confirm=true; authorization is re-evaluated by the controller at commit (fresh files:create[server_id]). No byte data is carried by this tool.", Source: "upload"},
@@ -72,7 +73,7 @@ var exposedTools = []ToolSpec{
 	{Name: "get_modpack_by_url", Procedure: "/carbonpanel.v1.ModpackService/GetModpackByURL", Class: Class("safe"), Confirm: false, Description: "Look up one modpack by website URL. The URL is validated as https without embedded credentials; the controller applies its own redirect and host policy.", Source: "content"},
 	{Name: "get_modpack_config", Procedure: "/carbonpanel.v1.ModpackService/GetModpackConfig", Class: Class("safe"), Confirm: false, Description: "Get a modpack's configuration map. Read-only.", Source: "content"},
 	{Name: "get_modpack_files", Procedure: "/carbonpanel.v1.ModpackService/GetModpackFiles", Class: Class("safe"), Confirm: false, Description: "List a modpack's version files. Read-only.", Source: "content"},
-	{Name: "get_modpack_versions", Procedure: "/carbonpanel.v1.ModpackService/GetModpackVersions", Class: Class("safe"), Confirm: false, Description: "List available versions for one modpack. Read-only.", Source: "content"},
+	{Name: "get_modpack_versions", Procedure: "/carbonpanel.v1.ModpackService/GetModpackVersions", Class: Class("safe"), Confirm: false, Description: "List available releases for one modpack, including Minecraft versions reported for each release. Read-only.", Source: "content"},
 	{Name: "get_module", Procedure: "/carbonpanel.v1.ModuleService/GetModule", Class: Class("safe"), Confirm: false, Description: "Get one module instance by exact id. Read-only.", Source: "content"},
 	{Name: "get_module_logs", Procedure: "/carbonpanel.v1.ModuleService/GetModuleLogs", Class: Class("safe"), Confirm: false, Description: "Get bounded recent log lines for one module. Read-only.", Source: "content"},
 	{Name: "get_module_template", Procedure: "/carbonpanel.v1.ModuleService/GetModuleTemplate", Class: Class("safe"), Confirm: false, Description: "Get one module template by exact id. Read-only.", Source: "content"},
@@ -138,7 +139,7 @@ var exposedTools = []ToolSpec{
 	{Name: "list_task_executions", Procedure: "/carbonpanel.v1.TaskService/ListTaskExecutions", Class: Class("safe"), Confirm: false, Description: "List recent executions of one task with a bounded limit.", Source: "server"},
 	{Name: "list_tasks", Procedure: "/carbonpanel.v1.TaskService/ListTasks", Class: Class("safe"), Confirm: false, Description: "List scheduled tasks for one server. Task config is redacted.", Source: "server"},
 	{Name: "list_users", Procedure: "/carbonpanel.v1.UserService/ListUsers", Class: Class("safe"), Confirm: false, Description: "List system users visible to this token. Read-only.", Source: "admin"},
-	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: Class("safe"), Confirm: false, Description: "List active world bindings for one server.", Source: "first_slice"},
+	{Name: "list_world_bindings", Procedure: "/carbonpanel.v1.WorldService/ListBindings", Class: Class("safe"), Confirm: false, Description: "List active world bindings and the configured save folder for one server, when known.", Source: "first_slice"},
 	{Name: "list_world_entries", Procedure: "/carbonpanel.v1.WorldService/ListWorldEntries", Class: Class("safe"), Confirm: false, Description: "Browse world library metadata with a bounded limit.", Source: "first_slice"},
 	{Name: "list_world_revisions", Procedure: "/carbonpanel.v1.WorldService/ListRevisions", Class: Class("safe"), Confirm: false, Description: "List immutable revisions for one world entry.", Source: "first_slice"},
 	{Name: "list_world_view_capabilities", Procedure: "/carbonpanel.v1.WorldViewService/ListCapabilities", Class: Class("safe"), Confirm: false, Description: "List verified renderer capabilities for one server.", Source: "first_slice"},
@@ -161,6 +162,7 @@ var exposedTools = []ToolSpec{
 	{Name: "player_service_set_operator", Procedure: "/carbonpanel.v1.PlayerService/SetOperator", Class: Class("review"), Confirm: true, Description: "Grant or remove operator level for one exact player identity. Requires confirm=true; level is 0 to 4.", Source: "integration"},
 	{Name: "player_service_set_whitelist_entry", Procedure: "/carbonpanel.v1.PlayerService/SetWhitelistEntry", Class: Class("review"), Confirm: true, Description: "Add or remove one whitelist entry by exact identity key. Requires confirm=true.", Source: "integration"},
 	{Name: "player_service_undo_player_action", Procedure: "/carbonpanel.v1.PlayerService/UndoPlayerAction", Class: Class("review"), Confirm: true, Description: "Undo one prior typed player action by exact undo token. Requires confirm=true.", Source: "integration"},
+	{Name: "preview_server_archive", Procedure: "/carbonpanel.v1.ServerService/PreviewServerArchive", Class: Class("safe"), Confirm: false, Description: "Validate one caller-owned server archive and report destination requirements.", Source: "server"},
 	{Name: "preview_world_config", Procedure: "/carbonpanel.v1.WorldService/PreviewWorldConfig", Class: Class("safe"), Confirm: false, Description: "Validate draft world configuration without applying it.", Source: "first_slice"},
 	{Name: "recreate_module", Procedure: "/carbonpanel.v1.ModuleService/RecreateModule", Class: Class("review"), Confirm: true, Description: "Destroy and recreate one module's container. Destructive; requires confirm=true.", Source: "content"},
 	{Name: "recreate_server", Procedure: "/carbonpanel.v1.ServerService/RecreateServer", Class: Class("review"), Confirm: true, Description: "Destroy and recreate one server container from its retained data. Requires confirm=true.", Source: "server"},
@@ -222,9 +224,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 251
-	IntegrationMountedRPCs = 241
+	IntegrationDeclaredRPCs = 253
+	IntegrationMountedRPCs = 243
 	IntegrationExcludedOps = 76
-	IntegrationSupportedOps = 203
-	IntegrationCombinedTools = 214
+	IntegrationSupportedOps = 205
+	IntegrationCombinedTools = 216
 )

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -62,7 +63,8 @@ func exerciseWorldBindLifecycle(t *testing.T, daemon func(*testing.T, string) (*
 			ctx := ctxWithRole("admin")
 			store := newWorldRPCStore(t)
 			root := t.TempDir()
-			libraryRoot := filepath.Join(root, "library")
+			cfg := &config.Config{Storage: config.StorageConfig{DataDir: filepath.Join(root, "controller")}}
+			libraryRoot := WorldLibraryRoot(cfg)
 			server, revision := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
 			seedLiveWorldFamilies(t, server.DataPath, revision.StoragePath)
 			client, containerID := daemon(t, server.DataPath)
@@ -90,9 +92,9 @@ func exerciseWorldBindLifecycle(t *testing.T, daemon func(*testing.T, string) (*
 				t.Fatal(err)
 			}
 			resolver := nodestorage.NewResolver(nil)
-			world := NewWorldService(store, nil, log, resolver, nil, libraryRoot)
+			world := NewWorldService(store, cfg, log, resolver, nil, libraryRoot)
 			adapter := newWorldLifecycleAdapter(serverService, store, enforcer)
-			world.binder = NewWorldBinder(store, nil, log, resolver, nil, serverService, enforcer)
+			world.binder = NewWorldBinder(store, cfg, log, resolver, nil, serverService, enforcer)
 
 			// Neither grants nor an existing journal operation lets a caller
 			// invoke the internal power path without the mutation capability.

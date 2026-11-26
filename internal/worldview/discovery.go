@@ -117,6 +117,5 @@ func identityMatches(facts *InstalledRenderer, nodeID, serverID string) bool {
 		facts.ServerID == serverID &&
 		canonicalNodeID(facts.NodeID) == canonicalNodeID(nodeID) &&
 		facts.TemplateID == BuiltinBlueMapTemplateID &&
-		facts.ModuleID != "" &&
-		facts.BaseURL != ""
+		facts.ModuleID != ""
 }
