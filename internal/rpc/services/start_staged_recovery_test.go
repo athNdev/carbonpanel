@@ -354,3 +354,82 @@ func TestStartUnrelatedCanonicalDriftRefusesAcknowledgement(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "drift-container", stored.ContainerID, "adoption repairs the tracked id")
 }
+
+// TestStartAcknowledgementPersistenceFailureRetainsRecoveryThenFinalizes
+// exercises the normal StartServer entry twice. The runtime accepts the
+// replacement but the acknowledgement cannot persist; the batch must stay
+// sealed with its recovery tree and must not close. Once persistence recovers,
+// the retry verifies the recorded replacement, finalizes and still starts.
+func TestStartAcknowledgementPersistenceFailureRetainsRecoveryThenFinalizes(t *testing.T) {
+	ctx := context.Background()
+	var creates, starts atomic.Int32
+	created := atomic.Bool{}
+	svc, server := newStagedLifecycleTestServer(t, "ack-persist-retry", time.Now().Add(-time.Hour).Truncate(time.Second))
+	attachDockerAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			if created.Load() {
+				_, _ = w.Write([]byte(`[{"Id":"replacement","Names":["/carbon-panel-server-ack-persist-retry"],"State":"running"}]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
+			_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			creates.Add(1)
+			created.Store(true)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"Id":"replacement"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/replacement/start"):
+			starts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/wait"):
+			_, _ = w.Write([]byte(`{"StatusCode":0}`))
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	stageMixedNextRestartRows(t, svc, server)
+	open, err := svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	recovery := filepath.Join(server.DataPath, ".carbon-panel", "undo", open.ID)
+
+	require.NoError(t, svc.store.DB().Exec(
+		`CREATE TRIGGER fail_published_at BEFORE UPDATE OF published_at ON server_update_batches
+		 WHEN NEW.published_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'publication ack unavailable'); END`).Error)
+	_, err = svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+	require.ErrorContains(t, err, "publication ack unavailable")
+	require.EqualValues(t, 1, creates.Load())
+	require.EqualValues(t, 1, starts.Load())
+	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open, "a failed acknowledgement must not close the batch")
+	require.NotNil(t, open.SealedAt)
+	require.Nil(t, open.PublishedAt)
+	record, err := svc.store.GetUpdatePublication(ctx, open.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, record.Phase)
+	require.DirExists(t, recovery, "a failed acknowledgement must retain recovery")
+
+	require.NoError(t, svc.store.DB().Exec(`DROP TRIGGER fail_published_at`).Error)
+	response, err := svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+	require.NoError(t, err)
+	require.Equal(t, "starting", response.Msg.GetStatus())
+	require.EqualValues(t, 1, creates.Load(), "the verified replacement must not be recreated")
+	require.EqualValues(t, 2, starts.Load(), "the user-requested start still runs")
+	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+	require.NoDirExists(t, recovery)
+}
