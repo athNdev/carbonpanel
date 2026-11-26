@@ -300,6 +300,10 @@ func (m *Manager) CreateAndStartModuleReserved(ctx context.Context, moduleID str
 	if reservation == nil {
 		return m.CreateAndStartModule(ctx, moduleID, startImmediately)
 	}
+	// The caller handed us its admission handle. Own and release it even when
+	// the early module lookup or ownership check fails, or the server's gate
+	// stays held after a rejected request.
+	defer reservation.Release()
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -307,7 +311,6 @@ func (m *Manager) CreateAndStartModuleReserved(ctx context.Context, moduleID str
 	if owner := reservation.ServerID(); owner != "" && owner != module.ServerID {
 		return fmt.Errorf("module lifecycle reservation belongs to another server")
 	}
-	defer reservation.Release()
 	return m.createAndStartModule(ctx, moduleID, startImmediately)
 }
 
@@ -827,6 +830,9 @@ func (m *Manager) RecreateModuleReserved(ctx context.Context, moduleID string, r
 	if reservation == nil {
 		return m.RecreateModule(ctx, moduleID)
 	}
+	// As in CreateAndStartModuleReserved, consume and release the caller's
+	// handle even when the early lookup or ownership check rejects the work.
+	defer reservation.Release()
 	module, err := m.store.GetModule(ctx, moduleID)
 	if err != nil {
 		return fmt.Errorf("failed to get module: %w", err)
@@ -834,7 +840,6 @@ func (m *Manager) RecreateModuleReserved(ctx context.Context, moduleID string, r
 	if owner := reservation.ServerID(); owner != "" && owner != module.ServerID {
 		return fmt.Errorf("module lifecycle reservation belongs to another server")
 	}
-	defer reservation.Release()
 	return m.recreateModule(ctx, moduleID)
 }
 
