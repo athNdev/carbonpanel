@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -94,6 +95,9 @@ func (o *StagedConfigOperations) Apply(ctx context.Context, stagedID string) (*s
 		return nil, stagedError(http.StatusInternalServerError, "store not initialized")
 	}
 	applied, err := o.store.ApplyStagedConfigChange(ctx, stagedID)
+	if errors.Is(err, storage.ErrActiveOperation) {
+		return nil, stagedError(http.StatusConflict, err.Error())
+	}
 	if err != nil {
 		return nil, stagedError(http.StatusBadRequest, fmt.Sprintf("failed to apply staged change: %v", err))
 	}
@@ -106,6 +110,9 @@ func (o *StagedConfigOperations) Rollback(ctx context.Context, stagedID string) 
 		return nil, stagedError(http.StatusInternalServerError, "store not initialized")
 	}
 	rolledBack, err := o.store.RollbackStagedConfigChange(ctx, stagedID)
+	if errors.Is(err, storage.ErrActiveOperation) {
+		return nil, stagedError(http.StatusConflict, err.Error())
+	}
 	if err != nil {
 		return nil, stagedError(http.StatusBadRequest, fmt.Sprintf("failed to rollback staged change: %v", err))
 	}
