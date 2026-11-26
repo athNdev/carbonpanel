@@ -123,6 +123,110 @@ func (s *Store) CreateServer(ctx context.Context, server *Server) error {
 	return s.SyncServerConfigWithServer(ctx, server)
 }
 
+// ErrServerNameInUse is returned when creation from an archive would obscure an
+// existing server that has the same display name.
+var ErrServerNameInUse = errors.New("a server already uses that name")
+
+// CheckArchiveServerName is read-only. CreateArchiveServer repeats the check
+// inside its database transaction before publishing the new server.
+func (s *Store) CheckArchiveServerName(ctx context.Context, name string) error {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&Server{}).
+		Where("lower(trim(name)) = lower(trim(?))", name).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 {
+		return ErrServerNameInUse
+	}
+	return nil
+}
+
+// ArchiveGameplay is the validated gameplay seed read from an archive's root
+// server.properties. Empty or nil fields keep the destination defaults.
+type ArchiveGameplay struct {
+	LevelName             string
+	Difficulty            string
+	GameMode              string
+	SyncChunkWrites       *bool
+	PauseWhenEmptySeconds *int
+}
+
+// CreateArchiveServer commits the server, its initial config and the archive
+// intent's committed phase together after its data has been verified and
+// placed. Marking the intent committed in the same transaction as publication
+// means recovery can never mistake published data for an interrupted
+// destination. An error leaves no server row and no committed intent.
+func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, gameplay ArchiveGameplay, archiveRequestKey, archiveDigest, archiveUploadID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scoped := &Store{db: tx, cfg: s.cfg}
+		if err := scoped.CheckArchiveServerName(ctx, server.Name); err != nil {
+			return err
+		}
+		if err := scoped.CreateServer(ctx, server); err != nil {
+			return err
+		}
+		if archiveRequestKey != "" {
+			key := strings.TrimSpace(archiveRequestKey)
+			var intent ArchiveImport
+			if err := tx.Where("request_key = ?", key).First(&intent).Error; err != nil {
+				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence: %w", archiveRequestKey, err)
+			}
+			if intent.ServerID != server.ID || archiveDigest == "" || archiveDigest != intent.ArchiveDigest || archiveUploadID == "" {
+				return fmt.Errorf("archive import intent %q does not match the verified archive being published", key)
+			}
+			result := tx.Model(&ArchiveImport{}).
+				Where("request_key = ?", key).
+				Update("phase", ArchiveImportCommitted)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("archive import intent %q is missing; refusing to publish without durable commit evidence", archiveRequestKey)
+			}
+			// Persist the replay receipt in the same transaction as the server
+			// row. Marker cleanup may fail or run later; a committed replay must
+			// still be bound to the archive that was verified.
+			completionUploadID := archiveUploadID
+			if completionUploadID == intent.ArchiveUploadID {
+				completionUploadID = ""
+			}
+			receipt := tx.Model(&IdempotencyKey{}).
+				Where("request_id = ? AND server_id = ?", key, server.ID).
+				Updates(map[string]any{
+					"archive_digest":               archiveDigest,
+					"archive_upload_id":            intent.ArchiveUploadID,
+					"archive_completion_upload_id": completionUploadID,
+				})
+			if receipt.Error != nil {
+				return receipt.Error
+			}
+			if receipt.RowsAffected != 1 {
+				return fmt.Errorf("archive replay receipt %q is missing; refusing to publish without durable replay evidence", archiveRequestKey)
+			}
+		}
+		updates := make(map[string]any, 5)
+		if gameplay.LevelName != "" {
+			updates["level"] = gameplay.LevelName
+		}
+		if gameplay.Difficulty != "" {
+			updates["difficulty"] = gameplay.Difficulty
+		}
+		if gameplay.GameMode != "" {
+			updates["mode"] = gameplay.GameMode
+		}
+		if gameplay.SyncChunkWrites != nil {
+			updates["sync_chunk_writes"] = *gameplay.SyncChunkWrites
+		}
+		if gameplay.PauseWhenEmptySeconds != nil {
+			updates["pause_when_empty_seconds"] = *gameplay.PauseWhenEmptySeconds
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		return tx.Model(&ServerConfig{}).Where("server_id = ?", server.ID).Updates(updates).Error
+	})
+}
+
 // ErrServerNotFound indicates that no server exists with the requested ID.
 var ErrServerNotFound = errors.New("server not found")
 
@@ -151,6 +255,17 @@ func (s *Store) GetServerByContainerID(ctx context.Context, containerID string) 
 		return nil, err
 	}
 	return &server, nil
+}
+
+// ServerExists reports whether a server row exists. Unlike GetServer it keeps a
+// database failure distinct from absence, so recovery never treats an
+// unreadable database as permission to remove data.
+func (s *Store) ServerExists(ctx context.Context, id string) (bool, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&Server{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (s *Store) ListServers(ctx context.Context) ([]*Server, error) {

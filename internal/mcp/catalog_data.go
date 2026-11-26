@@ -4,7 +4,7 @@
 
 package mcp
 
-const descriptorFingerprint = "b71e442741a13d78a460be58eafe8bda86c25c9236be615227a17baa7e41a750"
+const descriptorFingerprint = "7e2a786a6f228596390df96966c7e5efce96609bcd13fcf2c1992ca14beb9358"
 
 var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ActivityService/ListActivityLogs", Service: "carbonpanel.v1.ActivityService", Method: "ListActivityLogs", Client: "NewActivityServiceClient", Scope: "activity/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
@@ -176,12 +176,14 @@ var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ServerService/ClearServerLogs", Service: "carbonpanel.v1.ServerService", Method: "ClearServerLogs", Client: "NewServerServiceClient", Scope: "servers/update[id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/CreateServer", Service: "carbonpanel.v1.ServerService", Method: "CreateServer", Client: "NewServerServiceClient", Scope: "servers/create", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/DeleteServer", Service: "carbonpanel.v1.ServerService", Method: "DeleteServer", Client: "NewServerServiceClient", Scope: "servers/delete[id]", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.ServerService/ExportServerArchive", Service: "carbonpanel.v1.ServerService", Method: "ExportServerArchive", Client: "NewServerServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildServerPortability},
 	{Procedure: "/carbonpanel.v1.ServerService/GetNextAvailablePort", Service: "carbonpanel.v1.ServerService", Method: "GetNextAvailablePort", Client: "NewServerServiceClient", Scope: "servers/read", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/GetServer", Service: "carbonpanel.v1.ServerService", Method: "GetServer", Client: "NewServerServiceClient", Scope: "servers/read[id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/GetServerLogs", Service: "carbonpanel.v1.ServerService", Method: "GetServerLogs", Client: "NewServerServiceClient", Scope: "servers/read[id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/ListServerPlayers", Service: "carbonpanel.v1.ServerService", Method: "ListServerPlayers", Client: "NewServerServiceClient", Scope: "servers/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/ListServers", Service: "carbonpanel.v1.ServerService", Method: "ListServers", Client: "NewServerServiceClient", Scope: "servers/read", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/MigrateServer", Service: "carbonpanel.v1.ServerService", Method: "MigrateServer", Client: "NewServerServiceClient", Scope: "servers/update[id]", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.ServerService/PreviewServerArchive", Service: "carbonpanel.v1.ServerService", Method: "PreviewServerArchive", Client: "NewServerServiceClient", Scope: "servers/create", Class: ClassExclude, Build: PanelBuildServerPortability},
 	{Procedure: "/carbonpanel.v1.ServerService/RecreateServer", Service: "carbonpanel.v1.ServerService", Method: "RecreateServer", Client: "NewServerServiceClient", Scope: "servers/restart[id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/RestartServer", Service: "carbonpanel.v1.ServerService", Method: "RestartServer", Client: "NewServerServiceClient", Scope: "servers/restart[id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.ServerService/SendCommand", Service: "carbonpanel.v1.ServerService", Method: "SendCommand", Client: "NewServerServiceClient", Scope: "servers/command[id]", Class: ClassExclude, Build: PanelBuildStableV140},

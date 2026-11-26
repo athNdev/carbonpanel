@@ -33,6 +33,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// moduleLifecycleReservation aliases the module package type so local
+// variables named "module" do not shadow it.
+type moduleLifecycleReservation = module.ModuleTransition
+
 // Compile-time check that ModuleService implements the interface
 var _ carbonpanelv1connect.ModuleServiceHandler = (*ModuleService)(nil)
 
@@ -640,6 +644,22 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		defer func() { _ = finalizeBlueMap(false, "") }()
 	}
 
+	// Reserve the module lifecycle before acknowledging a create whose
+	// container is provisioned asynchronously. An export that starts after the
+	// response must observe this claim instead of racing the new writer.
+	var moduleReservation *moduleLifecycleReservation
+	if finalizeBlueMap == nil {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, server.ID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	// Use ports from request, or fall back to template defaults
 	ports := msg.Ports
 	if len(ports) == 0 {
@@ -772,7 +792,9 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 			return nil, blueMapConfigPrecondition(commitErr)
 		}
 	} else {
-		go s.createModuleContainer(module.ID, msg.StartImmediately)
+		reservation := moduleReservation
+		moduleReservation = nil
+		go s.createModuleContainer(module.ID, msg.StartImmediately, reservation)
 	}
 
 	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
@@ -781,9 +803,26 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	}), nil
 }
 
-func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool) {
-	if err := s.moduleManager.CreateAndStartModule(context.Background(), moduleID, startImmediately); err != nil {
+func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool, reservation *moduleLifecycleReservation) {
+	if err := s.moduleManager.CreateAndStartModuleReserved(context.Background(), moduleID, startImmediately, reservation); err != nil {
 		s.log.Error("Failed to create module container: %v", err)
+	}
+}
+
+// moduleLifecycleError maps the manager's fail-closed gate refusals onto
+// retryable RPC codes. A mutation during an archive export did not run.
+func moduleLifecycleError(err error) error {
+	var connectErr *connect.Error
+	if errors.As(err, &connectErr) {
+		return connectErr
+	}
+	switch {
+	case errors.Is(err, module.ErrModuleArchiveExport):
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("a server archive export is in progress; retry after it finishes"))
+	case errors.Is(err, module.ErrModuleLifecycleInFlight):
+		return connect.NewError(connect.CodeAborted, errors.New("another module lifecycle operation is in progress; retry"))
+	default:
+		return connect.NewError(connect.CodeInternal, err)
 	}
 }
 
@@ -965,6 +1004,23 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		}), nil
 	}
 
+	// Reserve the module lifecycle before the update is acknowledged when its
+	// asynchronous recreate will mutate the container. The reservation is
+	// handed to that worker, so an export cannot slip into the window between
+	// the response and the recreate.
+	var moduleReservation *moduleLifecycleReservation
+	if needsRecreate {
+		moduleReservation, err = s.moduleManager.ReserveModuleLifecycle(ctx, module.ServerID)
+		if err != nil {
+			return nil, moduleLifecycleError(err)
+		}
+		defer func() {
+			if moduleReservation != nil {
+				moduleReservation.Release()
+			}
+		}()
+	}
+
 	if err := s.store.UpdateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update module: %w", err))
 	}
@@ -976,6 +1032,8 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		// node that changed after the update's eligibility check.
 		workerTransition := transition
 		transition = nil
+		reservation := moduleReservation
+		moduleReservation = nil
 		go func(moduleID string) {
 			defer workerTransition.Release()
 			bgCtx := context.Background()
@@ -984,7 +1042,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 				bgCtx, cancel = context.WithTimeout(bgCtx, s.managedBlueMapTimeout())
 				defer cancel()
 			}
-			if err := s.moduleManager.RecreateModule(bgCtx, moduleID); err != nil {
+			if err := s.moduleManager.RecreateModuleReserved(bgCtx, moduleID, reservation); err != nil {
 				s.log.Error("Failed to recreate module container: %v", err)
 			}
 		}(module.ID)
@@ -1097,7 +1155,7 @@ func (s *ModuleService) DeleteModule(ctx context.Context, req *connect.Request[v
 	}
 
 	if err := s.moduleManager.DeleteModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to delete module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.DeleteModuleResponse{}), nil
@@ -1125,11 +1183,11 @@ func (s *ModuleService) StartModule(ctx context.Context, req *connect.Request[v1
 	// If no container exists, create one first
 	if module.ContainerID == "" {
 		if err := s.moduleManager.CreateAndStartModule(ctx, msg.Id, true); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create and start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to create and start module: %w", err))
 		}
 	} else {
 		if err := s.moduleManager.StartModule(ctx, msg.Id); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start module: %w", err))
+			return nil, moduleLifecycleError(fmt.Errorf("failed to start module: %w", err))
 		}
 	}
 
@@ -1145,7 +1203,7 @@ func (s *ModuleService) StopModule(ctx context.Context, req *connect.Request[v1.
 	}
 
 	if err := s.moduleManager.StopModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to stop module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.StopModuleResponse{
@@ -1165,7 +1223,7 @@ func (s *ModuleService) RestartModule(ctx context.Context, req *connect.Request[
 	}
 	defer transition.Release()
 	if err := s.moduleManager.RestartModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to restart module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RestartModuleResponse{
@@ -1185,7 +1243,7 @@ func (s *ModuleService) RecreateModule(ctx context.Context, req *connect.Request
 	}
 	defer transition.Release()
 	if err := s.moduleManager.RecreateModule(ctx, msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate module: %w", err))
+		return nil, moduleLifecycleError(fmt.Errorf("failed to recreate module: %w", err))
 	}
 
 	return connect.NewResponse(&v1.RecreateModuleResponse{

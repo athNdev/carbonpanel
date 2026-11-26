@@ -204,6 +204,13 @@ func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
 // GetClientStrictContext resolves and constructs a node client within the
 // operation lifetime. Cancellation never substitutes the controller client.
 func (p *ClientPool) GetClientStrictContext(ctx context.Context, nodeID string) (*Client, error) {
+	return p.getClientStrictContext(ctx, nodeID, "")
+}
+
+// An allocation supplies the host from its node snapshot. Refuse a newer
+// endpoint before constructing a client, since construction can set up the
+// Docker network. The allocation caller also checks the returned client.
+func (p *ClientPool) getClientStrictContext(ctx context.Context, nodeID, allocationHost string) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -238,6 +245,9 @@ func (p *ClientPool) GetClientStrictContext(ctx context.Context, nodeID string) 
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if allocationHost != "" && nodeDockerHost(node.Host, node.IsLocal) != allocationHost {
+		return nil, errStorageAllocationEndpointChanged
 	}
 
 	if node.IsLocal && p.defaultClient != nil {
@@ -635,6 +645,20 @@ func NewClientForNode(node *models.Node, log *logger.Logger, baseConfig ClientCo
 	return NewClientForNodeContext(context.Background(), node, log, baseConfig)
 }
 
+func nodeDockerHost(endpoint string, local bool) string {
+	host := strings.TrimSpace(endpoint)
+	if host == "" && local {
+		return "unix:///var/run/docker.sock"
+	}
+	if host == "" || strings.Contains(host, "://") {
+		return host
+	}
+	if strings.HasPrefix(host, "/") {
+		return "unix://" + host
+	}
+	return "tcp://" + host
+}
+
 // NewClientForNodeContext cancels node construction and owned network setup
 // with the initiating operation, while keeping the legacy bounded wrappers.
 func NewClientForNodeContext(ctx context.Context, node *models.Node, log *logger.Logger, baseConfig ClientConfig) (*Client, error) {
@@ -652,19 +676,8 @@ func NewClientForNodeContext(ctx context.Context, node *models.Node, log *logger
 		baseConfig.NetworkName = "carbon-panel-network"
 	}
 
-	host := strings.TrimSpace(node.Host)
-	if host == "" && node.IsLocal {
-		host = "unix:///var/run/docker.sock"
-	}
-
+	host := nodeDockerHost(node.Host, node.IsLocal)
 	if host != "" {
-		if !strings.Contains(host, "://") {
-			if strings.HasPrefix(host, "/") {
-				host = "unix://" + host
-			} else {
-				host = "tcp://" + host
-			}
-		}
 		opts = append(opts, client.WithHost(host))
 	}
 

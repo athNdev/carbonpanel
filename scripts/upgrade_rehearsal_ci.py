@@ -4,13 +4,18 @@
 
 One job runs TWO fail-closed cases on caller-owned disposable paths:
 
-* LEGACY baseline: the explicit v1.0.40 stable -> candidate migration
-  (35 -> 45 -> 35 tables), using the verified release archive.
+* LEGACY baseline: the explicit v1.0.40 stable -> candidate migration (pinned
+  35-table stable baseline -> 35 after rollback), using the verified release
+  archive. The candidate count is DERIVED from the real candidate binary, so
+  branch additions such as `archive_imports` do not require a new literal.
 * CURRENT stable: the highest published product stable derived from the
   authoritative GitHub release record via the product version contract
   (`scripts/release.py`), -> candidate. No hardcoded table count: the candidate
   schema must be an additive superset of whatever the current stable binary
   produces. When a new stable is published, this case follows it.
+
+Both cases require the historical 10-model candidate surface and the archive
+import ownership table plus its durable replay receipt columns.
 
 Both cases run the REAL stable and candidate `carbon-panel` binaries against
 seeded disposable DB/world copies and assert integrity, additive table growth,
@@ -52,17 +57,25 @@ ROOT = Path(__file__).resolve().parent.parent
 RELEASE_BASE = "https://github.com/athNdev/carbonpanel/releases/download/{tag}"
 
 # Legacy table counts use the project's historical convention (every table,
-# including sqlite_sequence and casbin_rule): v1.0.40 seeds 35 and the candidate
-# adds 10 model tables for 45 (including managed-node enrollment state). The
-# CURRENT case derives counts from the binaries.
+# including sqlite_sequence and casbin_rule): v1.0.40 seeds exactly 35 tables.
+# The real candidate count is DERIVED from the built candidate in BOTH cases;
+# only the checked-in synthetic model rehearsal below remains pinned at 45.
 LEGACY_TABLE_COUNT = 35
-CANDIDATE_TABLE_COUNT = 45
+MODEL_CANDIDATE_TABLE_COUNT = 45
 # These historical models must be present in the candidate; Stable may already have them.
 EXPECTED_CANDIDATE_MODEL_TABLES = {
     "player_identities", "player_aliases", "player_sessions",
     "player_access_states", "player_moderation_actions", "world_entries",
     "world_revisions", "world_bindings", "world_import_jobs",
     "node_enrollment_authority_state",
+}
+# The archive-import surface must ship with the candidate: the durable
+# destination/ownership record table plus the replay receipt columns stored on
+# the idempotency row (see internal/db/archive_import.go and idempotency.go).
+EXPECTED_CANDIDATE_ARCHIVE_TABLES = {"archive_imports"}
+ARCHIVE_RECEIPT_TABLE = "idempotency_keys"
+ARCHIVE_RECEIPT_COLUMNS = {
+    "archive_digest", "archive_upload_id", "archive_completion_upload_id",
 }
 CORE_TABLES = (
     "servers", "server_configs", "users", "nodes", "roles", "user_roles",
@@ -153,6 +166,16 @@ def tables(db_path):
     try:
         return {row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        connection.close()
+
+
+def columns(db_path, table):
+    """Column names for one table; an absent table yields an empty set."""
+    connection = sqlite3.connect(str(db_path))
+    try:
+        return {row[1] for row in connection.execute(
+            'PRAGMA table_info("%s")' % table)}
     finally:
         connection.close()
 
@@ -487,6 +510,8 @@ def run_case(workspace, label, stable_binary, candidate_binary,
     copy_seeded_worlds(backup_dir, candidate_ws)
     explicit_candidate_count = expected_candidate_tables is not None
     if not explicit_candidate_count:
+        # BOTH real-binary cases derive the candidate count from the built
+        # candidate, so branch additions never invalidate a pinned literal.
         candidate_db = run_service_any(candidate_binary, candidate_ws)
         expected_candidate_tables = len(tables(candidate_db))
     else:
@@ -494,8 +519,14 @@ def run_case(workspace, label, stable_binary, candidate_binary,
     upgraded_tables = tables(candidate_db)
     candidate_only_tables = upgraded_tables - stable_tables
     upgraded_counts = row_counts(candidate_db, CORE_TABLES)
+    archive_tables = EXPECTED_CANDIDATE_ARCHIVE_TABLES & upgraded_tables
+    receipt_columns = ARCHIVE_RECEIPT_COLUMNS & columns(candidate_db, ARCHIVE_RECEIPT_TABLE)
     check("upgrade_is_additive_superset", stable_tables.issubset(upgraded_tables))
     check("upgrade_adds_expected_models", EXPECTED_CANDIDATE_MODEL_TABLES.issubset(upgraded_tables))
+    check("upgrade_adds_archive_import_tables",
+          EXPECTED_CANDIDATE_ARCHIVE_TABLES.issubset(upgraded_tables))
+    check("upgrade_has_archive_receipt_schema",
+          ARCHIVE_RECEIPT_COLUMNS.issubset(receipt_columns))
     check("upgrade_schema_grows_or_matches", len(upgraded_tables) >= len(stable_tables))
     if explicit_candidate_count:
         check("upgrade_table_count_expected", len(upgraded_tables) == expected_candidate_tables)
@@ -544,6 +575,8 @@ def run_case(workspace, label, stable_binary, candidate_binary,
         "stable_tables": len(stable_tables),
         "candidate_tables": len(upgraded_tables),
         "candidate_only_tables": sorted(candidate_only_tables),
+        "archive_import_tables": sorted(archive_tables),
+        "archive_receipt_columns": sorted(receipt_columns),
         "expected_stable_tables": expected_stable_tables,
         "expected_candidate_tables": expected_candidate_tables,
         "core_rows_before": stable_counts,
@@ -569,7 +602,7 @@ def run_model_and_planner_checks(workspace):
     checks = {
         "model_rehearsal_pass": model["pass"],
         "model_before_tables": details["before_tables"] == LEGACY_TABLE_COUNT,
-        "model_after_tables": details["after_tables"] == CANDIDATE_TABLE_COUNT,
+        "model_after_tables": details["after_tables"] == MODEL_CANDIDATE_TABLE_COUNT,
         "model_rollback_tables": details["rollback_tables"] == LEGACY_TABLE_COUNT,
         "undo_manifest_written_before_promotion": (
             plan["steps"].index("undo: write and verify " + plan["undo_dir"] +
@@ -630,7 +663,7 @@ def execute(workspace, args):
 
     legacy_checks, legacy_detail = run_case(
         workspace, "legacy", legacy_binary, candidate_binary,
-        LEGACY_TABLE_COUNT, CANDIDATE_TABLE_COUNT,
+        LEGACY_TABLE_COUNT, None,
         args.stable_port, args.candidate_port, args.copyback_port)
     current_checks, current_detail = run_case(
         workspace, "current", current_binary, candidate_binary,
@@ -651,7 +684,7 @@ def execute(workspace, args):
         "Disposable fixtures only; no live world, database, host, registry, tag or release is touched.",
         "Both stable DBs are seeded by real stable binaries and candidate DBs by the real candidate binary.",
         "No Docker daemon, gameplay, browser, IdP or load balancer is exercised by this job.",
-        "The legacy case pins the 35 -> 45 baseline; the current case derives its baseline from the authoritative release record and asserts additive growth without a hardcoded count.",
+        "The legacy case pins the 35-table v1.0.40 stable baseline; both cases derive the candidate table count from the real candidate binary, require the historical model and archive-import surfaces, and assert additive growth without a hardcoded candidate count.",
         "Operator-breaking OIDC/PROXY config changes remain documented go/no-go gates.",
     ]
     (workspace / "rehearsal-ci-report.json").write_text(

@@ -32,7 +32,8 @@ func TestNativeRoundTrip(t *testing.T) {
 		"config/paper-global.yml":   "fixture: retained\nproxies: {}\n",
 		"config/fixture.toml":       "setting = true\n",
 		"plugins/fixture/empty.txt": "",
-		"server.properties":         "motd=Portable world\r\nlevel-name=world\r\n",
+		"server.properties": "motd=Portable world\r\nlevel-name=world\r\ndifficulty=hard\r\n" +
+			"gamemode=creative\r\nsync-chunk-writes=true\r\npause-when-empty-seconds=0\r\n",
 		"plugins/fixture/" + strings.Repeat("x", 105) + ".txt": "long name",
 	}
 	for _, format := range []Format{ZIP, TarGzip} {
@@ -76,6 +77,13 @@ func TestNativeRoundTrip(t *testing.T) {
 			}
 			if verified.Format != format || verified.Manifest.Runtime != fixtureRuntime || len(verified.Manifest.Files) != len(want) {
 				t.Fatalf("unexpected archive report: %+v", verified)
+			}
+			wantGameplay := Gameplay{
+				LevelName: "world", Difficulty: "hard", GameMode: "creative",
+				SyncChunkWrites: boolPointer(true), PauseWhenEmptySeconds: intPointer(0),
+			}
+			if !verified.Gameplay.Equal(wantGameplay) {
+				t.Fatalf("gameplay = %+v, want %+v", verified.Gameplay, wantGameplay)
 			}
 			if err := CopyTo(ctx, f, verified, target, "."); err != nil {
 				t.Fatal(err)
@@ -123,6 +131,58 @@ func TestInspectRequiresMatchingManifest(t *testing.T) {
 		t.Fatalf("expected checksum mismatch, got %v", err)
 	}
 }
+
+func TestParseGameplaySettings(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want Gameplay
+	}{
+		{
+			name: "valid nondefault values",
+			data: "level-name=custom_world\ndifficulty=hard\ngamemode=creative\n" +
+				"sync-chunk-writes=true\npause-when-empty-seconds=0\n",
+			want: Gameplay{
+				LevelName: "custom_world", Difficulty: "hard", GameMode: "creative",
+				SyncChunkWrites: boolPointer(true), PauseWhenEmptySeconds: intPointer(0),
+			},
+		},
+		{
+			name: "absent and empty values keep defaults",
+			data: "level-seed=\ndifficulty=\ngamemode=\nsync-chunk-writes=\npause-when-empty-seconds=\n",
+			want: Gameplay{},
+		},
+		{
+			name: "unsupported values are not persisted",
+			data: "difficulty=nightmare\ngamemode=hard\nsync-chunk-writes=yes\npause-when-empty-seconds=-1\n",
+			want: Gameplay{},
+		},
+		{
+			name: "values are case insensitive and trimmed",
+			data: "difficulty=HARD\ngamemode= Creative \nsync-chunk-writes=TRUE\npause-when-empty-seconds=120\n",
+			want: Gameplay{
+				Difficulty: "hard", GameMode: "creative",
+				SyncChunkWrites: boolPointer(true), PauseWhenEmptySeconds: intPointer(120),
+			},
+		},
+		{
+			name: "last duplicate wins",
+			data: "difficulty=hard\ndifficulty=peaceful\nsync-chunk-writes=true\nsync-chunk-writes=no\n",
+			want: Gameplay{Difficulty: "peaceful"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := parseGameplay([]byte(test.data)); !got.Equal(test.want) {
+				t.Fatalf("parseGameplay = %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
+
+func boolPointer(value bool) *bool { return &value }
+
+func intPointer(value int) *int { return &value }
 
 func TestPortablePathIndex(t *testing.T) {
 	for _, invalid := range []string{".", "", "/absolute", "a/../b", "a//b", "a\\b", "a./b", "a/NUL.txt", "a/COM9.txt"} {
