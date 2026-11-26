@@ -30,7 +30,7 @@ type undoEntry struct {
 	SHA256  string `json:"sha256,omitempty"`
 }
 
-func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, expectedSHA512 string, limit int64) (int64, string, error) {
+func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, expectedSHA512 string, stageStream bool, limit int64) (int64, string, error) {
 	r, err := acc.OpenRead(ctx, src)
 	if err != nil {
 		return 0, "", err
@@ -57,6 +57,9 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	if expectedSHA512 != "" && !strings.EqualFold(hex.EncodeToString(reviewed.Sum(nil)), expectedSHA512) {
+		if stageStream {
+			return n, sum, fmt.Errorf("staged bytes no longer match the durable approved SHA-512; re-review and re-stage the update")
+		}
 		return n, sum, fmt.Errorf("live target %q changed since review; staged bytes preserved", src)
 	}
 	if want != nil && (n != want.Size || sum != want.SHA256) {
@@ -68,8 +71,18 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	return n, sum, nil
 }
 
+// validSHA512Hex reports whether value is a complete SHA-512 in hex.
+func validSHA512Hex(value string) bool {
+	raw, err := hex.DecodeString(value)
+	return err == nil && len(raw) == sha512.Size
+}
+
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	type pending struct{ source, target, action, expectedSHA512 string }
+	type pending struct {
+		source, target, action string
+		expectedSHA512         string
+		expectedStageSha512    string
+	}
 	var files []pending
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -88,10 +101,25 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				files = append(files, pending{source: e.stage, target: e.live, action: storage.StagedActionReplace})
 			}
 		} else {
-			files = append(files, pending{
+			item := pending{
 				source: row.StagePath, target: row.TargetPath,
 				action: row.Action, expectedSHA512: row.ExpectedLiveSha512,
-			})
+			}
+			// A provider-reviewed mod publication precondition was verified
+			// against the provider release and the staged bytes at admission.
+			// Require the durable approved digest; a row without it predates
+			// durable approval and must be re-reviewed rather than deriving
+			// approval from a mutable sidecar.
+			if row.Kind == storage.StagedKindMod && row.ExpectedLiveSha512 != "" {
+				if row.ApprovedSha512 == "" {
+					return nil, fmt.Errorf("staged mod candidate %s was recorded before durable approved digests; re-review and re-stage the update: %w", row.FileName, storage.ErrStagedModApprovalMissing)
+				}
+				if !validSHA512Hex(row.ApprovedSha512) {
+					return nil, fmt.Errorf("staged mod candidate %s has an invalid durable approved SHA-512; re-review and re-stage the update: %w", row.FileName, storage.ErrStagedModApprovalInvalid)
+				}
+				item.expectedStageSha512 = row.ApprovedSha512
+			}
+			files = append(files, item)
 		}
 	}
 	if len(files) == 0 {
@@ -137,7 +165,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			item.backup = path.Join(recovery, fmt.Sprintf("%06d.data", i))
 			record.Existed = true
 			record.Backup = item.backup
-			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, file.expectedSHA512, storageworker.MaxStreamBytes-total)
+			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, file.expectedSHA512, false, storageworker.MaxStreamBytes-total)
 			if err != nil {
 				return abortPreparation(err)
 			}
@@ -175,7 +203,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				return snaps, err
 			}
 		} else {
-			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, "", storageworker.MaxStreamBytes-published)
+			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, file.expectedStageSha512, true, storageworker.MaxStreamBytes-published)
 			if err != nil {
 				return snaps, err
 			}
@@ -190,7 +218,7 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 	for i := len(snaps) - 1; i >= 0; i-- {
 		item := snaps[i]
 		if item.existed {
-			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, "", item.size)
+			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, "", false, item.size)
 			if err != nil {
 				failed = errors.Join(failed, fmt.Errorf("staged rollback incomplete; recovery %q: %w", item.recoveryRoot, err))
 			}

@@ -374,7 +374,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			}
 			row, err := stageModContentToBatch(ctx, s.store, server, s.storageResolver,
 				batch.ID, windowName, applyAt, idle,
-				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash)
+				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash, sel.GetCandidateSha512())
 			if errors.Is(err, storage.ErrUpdateBatchConflict) {
 				return err
 			}

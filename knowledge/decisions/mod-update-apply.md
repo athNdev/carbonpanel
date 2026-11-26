@@ -41,8 +41,13 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
-- Apply revalidates the preview. Publish verifies the reviewed SHA-512 on the
-  same stream used for undo, preserving staged bytes on drift.
+- Admission records the operator-approved provider SHA-512 in the staged row
+  only after the staged bytes are verified against it. A reviewed row from
+  before durable approval is refused with re-review and re-stage guidance
+  instead of trusting a mutable sidecar. Unreviewed uploads keep their path.
+- Apply revalidates the preview. Publish verifies the reviewed live SHA-512 on
+  the undo stream and requires the durable approved digest on the publication
+  stream, preserving staged bytes on drift.
 - Reviewed content checks the complete window before work, at batch
   preparation, and at row insertion. Config targeting an open batch with
   content or an independent cron row must match its complete window. A

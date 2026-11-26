@@ -7,7 +7,9 @@ package staging
 
 import (
 	"context"
+	"crypto/sha512"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -536,6 +538,206 @@ func stageFile(t *testing.T, store *storage.Store, dataRoot, batchID, serverID, 
 		Kind:       storage.StagedKindFile,
 		Action:     storage.StagedActionInstall,
 		TargetPath: name,
+		StagePath:  stageRel,
+		FileName:   name,
+		Status:     storage.StagedStatusStaged,
+	}).Error)
+}
+
+func stageReviewedModRow(t *testing.T, store *storage.Store, dataRoot, batchID string, server *storage.Server, candidateBody string) string {
+	t.Helper()
+	id := server.ID + "-reviewed"
+	stageRel := ".carbon-panel/staged/" + id + "/mod.jar"
+	require.NoError(t, os.MkdirAll(filepath.Join(dataRoot, ".carbon-panel", "staged", id), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataRoot, filepath.FromSlash(stageRel)), []byte(candidateBody), 0o644))
+	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
+		ID:                 id,
+		ServerID:           server.ID,
+		BatchID:            batchID,
+		Kind:               storage.StagedKindMod,
+		Action:             storage.StagedActionReplace,
+		TargetPath:         "mods/mod.jar",
+		StagePath:          stageRel,
+		FileName:           "mod.jar",
+		ExpectedLiveSha512: modDigest("installed"),
+		ApprovedSha512:     modDigest(candidateBody),
+		Status:             storage.StagedStatusStaged,
+	}).Error)
+	return stageRel
+}
+
+func modDigest(body string) string {
+	return fmt.Sprintf("%x", sha512.Sum512([]byte(body)))
+}
+
+func TestPublicationRefusesLegacyReviewedRowWithoutDurableApproval(t *testing.T) {
+	for _, publication := range []struct {
+		name   string
+		window storage.UpdateWindow
+		status storage.ServerStatus
+		apply  func(context.Context, *testing.T, *storage.Store, *storage.Server) error
+	}{
+		{
+			name:   "timed batch",
+			window: storage.UpdateWindowAtTime,
+			status: storage.StatusDeepSleep,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				batch, err := store.OpenUpdateBatch(ctx, server.ID)
+				require.NoError(t, err)
+				require.NotNil(t, batch)
+				return ApplyBatch(ctx, store, nil, server, *batch, nil)
+			},
+		},
+		{
+			name:   "next-restart batch",
+			window: storage.UpdateWindowNextRestart,
+			status: storage.StatusRunning,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				_, err := CommitNextRestartFiles(ctx, store, server, nil)
+				return err
+			},
+		},
+	} {
+		t.Run(publication.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, data := newStageStore(t)
+			server := &storage.Server{
+				ID: "legacy-approval", Name: "legacy-approval", DataPath: data,
+				MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: publication.status,
+			}
+			require.NoError(t, store.CreateServer(ctx, server))
+			live := filepath.Join(data, "mods", "mod.jar")
+			require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+			require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+			var at *time.Time
+			if publication.window == storage.UpdateWindowAtTime {
+				when := time.Now().Add(-time.Minute).UTC()
+				at = &when
+			}
+			batchID := openBatch(t, store, server.ID, publication.window, at, 0)
+			stageReviewedModRow(t, store, data, batchID, server, "candidate")
+			// Simulate a row recorded before durable approval admission. Its
+			// metadata still looks valid, which must not be used as approval.
+			require.NoError(t, store.DB().Model(&storage.StagedContentChange{}).
+				Where("server_id = ?", server.ID).Update("approved_sha512", "").Error)
+
+			err := publication.apply(ctx, t, store, server)
+			require.ErrorIs(t, err, storage.ErrStagedModApprovalMissing)
+			require.Contains(t, err.Error(), "re-review and re-stage")
+
+			got, readErr := os.ReadFile(live)
+			require.NoError(t, readErr)
+			require.Equal(t, "installed", string(got), "a legacy row must not publish without durable approval")
+			rows, err := store.ListStagedContent(ctx, server.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+			open, err := store.OpenUpdateBatch(ctx, server.ID)
+			require.NoError(t, err)
+			require.NotNil(t, open, "the refused row stays staged for explicit re-review")
+		})
+	}
+}
+
+func TestPublicationRefusesStagedPayloadDivergence(t *testing.T) {
+	for _, publication := range []struct {
+		name   string
+		window storage.UpdateWindow
+		status storage.ServerStatus
+		apply  func(context.Context, *testing.T, *storage.Store, *storage.Server) error
+	}{
+		{
+			name:   "timed batch",
+			window: storage.UpdateWindowAtTime,
+			status: storage.StatusDeepSleep,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				batch, err := store.OpenUpdateBatch(ctx, server.ID)
+				require.NoError(t, err)
+				require.NotNil(t, batch)
+				return ApplyBatch(ctx, store, nil, server, *batch, nil)
+			},
+		},
+		{
+			name:   "next-restart batch",
+			window: storage.UpdateWindowNextRestart,
+			status: storage.StatusRunning,
+			apply: func(ctx context.Context, t *testing.T, store *storage.Store, server *storage.Server) error {
+				_, err := CommitNextRestartFiles(ctx, store, server, nil)
+				return err
+			},
+		},
+	} {
+		t.Run(publication.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, data := newStageStore(t)
+			server := &storage.Server{
+				ID: "divergence-" + publication.name, Name: "divergence", DataPath: data,
+				MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: publication.status,
+			}
+			require.NoError(t, store.CreateServer(ctx, server))
+			live := filepath.Join(data, "mods", "mod.jar")
+			require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+			require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+			var at *time.Time
+			if publication.window == storage.UpdateWindowAtTime {
+				when := time.Now().Add(-time.Minute).UTC()
+				at = &when
+			}
+			batchID := openBatch(t, store, server.ID, publication.window, at, 0)
+			stageRel := stageReviewedModRow(t, store, data, batchID, server, "candidate")
+			require.NoError(t, os.WriteFile(filepath.Join(data, filepath.FromSlash(stageRel)), []byte("rewritten-payload"), 0o644))
+
+			err := publication.apply(ctx, t, store, server)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "durable approved SHA-512")
+			got, readErr := os.ReadFile(live)
+			require.NoError(t, readErr)
+			require.Equal(t, "installed", string(got), "divergent staged bytes must not reach the live tree")
+			rows, listErr := store.ListStagedContent(ctx, server.ID)
+			require.NoError(t, listErr)
+			require.Len(t, rows, 1)
+			require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+		})
+	}
+}
+
+func TestApplyBatchPublishesUnreviewedModUpload(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "upload-mod", Name: "upload-mod", DataPath: data, Status: storage.StatusDeepSleep}
+	require.NoError(t, store.CreateServer(ctx, server))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	stageFileInBatch(t, store, data, batchID, server.ID, storage.StagedKindMod, storage.StagedActionInstall, "mods/upload.jar", "upload.jar", []byte("uploaded-bytes"))
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NoError(t, ApplyBatch(ctx, store, nil, server, *batch, nil))
+
+	got, err := os.ReadFile(filepath.Join(data, "mods", "upload.jar"))
+	require.NoError(t, err)
+	require.Equal(t, "uploaded-bytes", string(got))
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}
+
+func stageFileInBatch(t *testing.T, store *storage.Store, dataRoot, batchID, serverID, kind, action, target, name string, body []byte) {
+	t.Helper()
+	id := serverID + "-" + name
+	stageRel := ".carbon-panel/staged/" + id + "/" + name
+	require.NoError(t, os.MkdirAll(filepath.Join(dataRoot, ".carbon-panel", "staged", id), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataRoot, ".carbon-panel", "staged", id, name), body, 0o644))
+	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
+		ID:         id,
+		ServerID:   serverID,
+		BatchID:    batchID,
+		Kind:       kind,
+		Action:     action,
+		TargetPath: target,
 		StagePath:  stageRel,
 		FileName:   name,
 		Status:     storage.StagedStatusStaged,

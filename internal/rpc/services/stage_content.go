@@ -8,6 +8,8 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -121,7 +123,7 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 // closes the window between choosing the batch and writing its payload.
 func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
 	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
-	targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
+	targetRel, fileName string, data []byte, expectedLiveSha512 string, approvedSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -129,6 +131,17 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 	base, err := stagedFileBase(fileName)
 	if err != nil {
 		return nil, err
+	}
+	// The row records the release digest the operator approved only after the
+	// exact bytes written below have been verified against it. This is the
+	// durable approval publication later requires; it is not re-derived from a
+	// mutable sidecar.
+	if approvedSha512 != "" {
+		sum := sha512.Sum512(data)
+		if !strings.EqualFold(hex.EncodeToString(sum[:]), approvedSha512) {
+			return nil, errors.New("candidate bytes do not match the approved SHA-512")
+		}
+		approvedSha512 = strings.ToLower(approvedSha512)
 	}
 	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
@@ -149,6 +162,7 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 		StagePath:          stagePath,
 		FileName:           base,
 		ExpectedLiveSha512: expectedLiveSha512,
+		ApprovedSha512:     approvedSha512,
 	}
 	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
 		_ = acc.RemoveAll(stagedContentRoot + "/" + id)

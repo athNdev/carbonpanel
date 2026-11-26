@@ -42,6 +42,7 @@ func TestPublishRefusesDelayedLiveDriftAndPreservesStagedBytes(t *testing.T) {
 		StagePath:          ".carbon-panel/staged/candidate/mod.jar",
 		FileName:           "mod.jar",
 		ExpectedLiveSha512: expected,
+		ApprovedSha512:     digest512("candidate"),
 	})
 	require.NoError(t, err)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
@@ -96,6 +97,7 @@ func TestReviewedHashCoversTheActualUndoSnapshot(t *testing.T) {
 	rows := []storage.StagedContentChange{{
 		BatchID: uuid.NewString(), Kind: storage.StagedKindMod, Action: storage.StagedActionReplace,
 		TargetPath: live, StagePath: staged, ExpectedLiveSha512: digest512("installed"),
+		ApprovedSha512: digest512("candidate"),
 	}}
 	wrapped := editOnBackupAccessor{Accessor: acc, edit: func() error {
 		// Modify the already-open inode while the undo write is beginning.
@@ -137,6 +139,7 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
 		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
 		ExpectedLiveSha512: digest512("installed"),
+		ApprovedSha512:     digest512("candidate"),
 	}).Error
 	require.NoError(t, err)
 	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
@@ -225,6 +228,7 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
 		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
 		ExpectedLiveSha512: digest512("installed"),
+		ApprovedSha512:     digest512("candidate"),
 	}).Error
 	require.NoError(t, err)
 	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
@@ -272,6 +276,7 @@ func TestPublishAcceptsUnchangedLiveFile(t *testing.T) {
 		StagePath:          ".carbon-panel/staged/candidate/mod.jar",
 		FileName:           "mod.jar",
 		ExpectedLiveSha512: digest512("installed"),
+		ApprovedSha512:     digest512("candidate"),
 	})
 	require.NoError(t, err)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)

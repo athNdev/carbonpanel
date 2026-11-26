@@ -7,14 +7,40 @@ package db
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// ensureStagedModApprovalAdmission enforces durable operator approval on
+// reviewed mod replacements. A reviewed row must carry the SHA-512 its staged
+// bytes were verified against when it was admitted; a legacy row without that
+// durable proof is refused instead of deriving approval from a mutable sidecar.
+func ensureStagedModApprovalAdmission(row *StagedContentChange) error {
+	if row == nil || row.Kind != StagedKindMod || row.ExpectedLiveSha512 == "" {
+		return nil
+	}
+	if !validSHA512Hex(row.ApprovedSha512) {
+		if row.ApprovedSha512 == "" {
+			return ErrStagedModApprovalMissing
+		}
+		return ErrStagedModApprovalInvalid
+	}
+	row.ApprovedSha512 = strings.ToLower(row.ApprovedSha512)
+	return nil
+}
+
+func validSHA512Hex(value string) bool {
+	raw, err := hex.DecodeString(value)
+	return err == nil && len(raw) == sha512.Size
+}
 
 // AddStagedContent joins the server's one open batch and records a content
 // edit. It does not copy bytes or touch the live tree; the caller writes the
@@ -61,6 +87,9 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		}
 		row.BatchID = batch.ID
 		row.Status = StagedStatusStaged
+		if err := ensureStagedModApprovalAdmission(row); err != nil {
+			return err
+		}
 		return tx.Create(row).Error
 	})
 	if err != nil {
@@ -264,6 +293,9 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 		row.BatchID = batchID
 		if row.Status == "" {
 			row.Status = StagedStatusStaged
+		}
+		if err := ensureStagedModApprovalAdmission(row); err != nil {
+			return err
 		}
 		if err := tx.Create(row).Error; err != nil {
 			return err

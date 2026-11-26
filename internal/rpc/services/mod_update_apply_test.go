@@ -676,6 +676,8 @@ func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.
 	require.Equal(t, storage.StagedKindMod, rows[0].Kind)
 	require.Equal(t, storage.StagedActionReplace, rows[0].Action)
 	require.Equal(t, filepath.ToSlash(filepath.Join("mods", "mod.jar")), rows[0].TargetPath)
+	require.Equal(t, installedModDigest("next"), rows[0].ApprovedSha512,
+		"the admitted row records the release digest verified against the staged bytes")
 }
 
 func TestStageReviewedModUpdateRefusesInstalledDrift(t *testing.T) {
@@ -1021,8 +1023,8 @@ func TestCumulativeCandidateBudgetIsEnforced(t *testing.T) {
 
 	svc := NewModService(store, nil, um, logger.New())
 	svc.SetModUpdateLookup(newPreviewFixture())
-	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("candidate")})
-	svc.SetModUpdateBatchBudget(4)
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+	svc.SetModUpdateBatchBudget(3)
 
 	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
 	require.NoError(t, err)

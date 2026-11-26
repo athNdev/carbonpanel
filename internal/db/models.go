@@ -632,11 +632,17 @@ type StagedContentChange struct {
 	// ExpectedLiveSha512 is the installed digest observed when a reviewed
 	// update was staged. Publish must recheck it so a later local edit cannot
 	// be silently overwritten by a delayed apply. Empty means no precondition.
-	ExpectedLiveSha512 string       `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
-	Status             StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt          time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt          *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server             *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	ExpectedLiveSha512 string `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
+	// ApprovedSha512 is the provider release digest the operator reviewed and
+	// the staged payload bytes were verified against at admission. Publication
+	// requires this durable value to match the payload and provider
+	// revalidation; a row without it predates durable approval and must be
+	// re-reviewed instead of deriving approval from a mutable sidecar.
+	ApprovedSha512 string       `json:"approved_sha512,omitempty" gorm:"column:approved_sha512"`
+	Status         StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt      time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt      *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server         *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // TaskType defines the type of scheduled task
