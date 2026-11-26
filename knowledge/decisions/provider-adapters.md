@@ -30,7 +30,7 @@ retain provider ordering, game/loader compatibility, primary-file choice and
 SHA-512 preference over SHA-1. An operation context reaches update-check requests.
 
 Installed-file previews identify active and disabled files by SHA-512. Modrinth filters listed releases by game, loader and server support.
-Unknown files, ambiguous artifacts and unresolved dependencies remain visible. Checking writes no server state.
+Unknown files, ambiguous artifacts and unresolved dependencies remain visible. Checking writes no server state; provider lookup failures are unavailable, never unidentified uploads.
 
 # Consequences
 
