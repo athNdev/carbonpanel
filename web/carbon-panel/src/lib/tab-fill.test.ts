@@ -73,6 +73,13 @@ test('the server detail page passes min-h-0 through the tab panel', () => {
 	assert.match(serverPage, /flex min-h-0 flex-1 flex-col overflow-hidden/);
 });
 
+test('the mods tab raises its floor so the update controls cannot squeeze the list', () => {
+	// The checked state adds an honest summary line and the apply-window bar
+	// above the list. With the generic 28rem floor the list collapsed to a
+	// few pixels at 390x844, so the page scrolls instead of squeezing it.
+	assert.match(serverPage, /max-sm:min-h-\[44rem\] sm:min-h-\[34rem\]/);
+});
+
 test('every server-detail tab uses ServerTabPanel', () => {
 	const panes = [
 		['overview', serverPage],

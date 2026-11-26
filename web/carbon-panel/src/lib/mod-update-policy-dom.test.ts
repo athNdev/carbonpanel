@@ -32,7 +32,7 @@ mock.module('$app/paths', () => ({
 mock.module('$app/state', () => ({ page: {} }));
 mock.module('$app/env', () => ({ browser: false, dev: false }));
 
-const { mount, unmount, tick } = await import('svelte');
+const { mount, unmount, tick, flushSync } = await import('svelte');
 const { fromStore, writable } = await import('svelte/store');
 const { rpcClient } = await import('./api/rpc-client');
 const originalTaskClient = { ...rpcClient.task };
@@ -87,20 +87,41 @@ function renderPolicy(id: string) {
 			active: true
 		}
 	});
+	// The policy editor is a portaled dialog; open it the way a user would and
+	// reopen it after a server change (which closes it and reloads the policy).
+	function policyDialog(): HTMLElement {
+		let dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+		if (!dialog) {
+			const trigger = target.querySelector<HTMLButtonElement>(
+				'button[aria-label="Automatic update policy"]'
+			);
+			assert.ok(trigger);
+			flushSync(() => trigger.click());
+			dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+		}
+		assert.ok(dialog, 'policy dialog is not open');
+		return dialog;
+	}
 	return {
 		target,
+		text() {
+			return document.body.textContent ?? '';
+		},
 		navigate(id: string) {
 			selection.set(server(id));
 		},
+		open() {
+			policyDialog();
+		},
 		save() {
-			const button = Array.from(target.querySelectorAll('button')).find(
+			const button = Array.from(policyDialog().querySelectorAll('button')).find(
 				(button) => button.textContent?.trim() === 'Save policy'
 			);
 			assert.ok(button);
 			return button;
 		},
 		optIn() {
-			const checkbox = target.querySelector<HTMLInputElement>('details input[type="checkbox"]');
+			const checkbox = policyDialog().querySelector<HTMLInputElement>('input[type="checkbox"]');
 			assert.ok(checkbox);
 			return checkbox;
 		},
@@ -115,6 +136,33 @@ async function settle() {
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	await tick();
 }
+
+test('the policy editor renders in a dialog, not inside the mods pane', async () => {
+	const ui = renderPolicy('a');
+	try {
+		await settle();
+		// Inline, the 555 px form consumed the fixed-height pane and collapsed
+		// the installed-mod list to 0 px. The editor must stay out of the pane
+		// until the dialog is opened.
+		assert.equal(ui.target.querySelector('#mod-policy-cron'), null);
+		ui.open();
+		const dialog = document.querySelector('[role="dialog"]');
+		assert.ok(dialog);
+		for (const field of [
+			'mod-policy-cron',
+			'mod-policy-tz',
+			'mod-policy-excluded',
+			'mod-policy-max',
+			'mod-policy-window'
+		]) {
+			assert.ok(dialog.querySelector(`#${field}`), `${field} is not in the policy dialog`);
+		}
+		assert.match(dialog.textContent ?? '', /Opt in to automatic updates/);
+		assert.match(dialog.textContent ?? '', /Schedule:\s*Not scheduled/);
+	} finally {
+		await ui.destroy();
+	}
+});
 
 test('mounted policy cannot create while loading and config saves preserve paused and disabled schedules', async () => {
 	for (const status of [TaskStatus.PAUSED, TaskStatus.DISABLED]) {
@@ -149,10 +197,7 @@ test('mounted policy cannot create while loading and config saves preserve pause
 			await settle();
 			assert.equal(ui.save().disabled, false);
 			assert.equal(ui.optIn().checked, true);
-			assert.match(
-				ui.target.textContent ?? '',
-				status === TaskStatus.PAUSED ? /Paused/ : /Disabled/
-			);
+			assert.match(ui.text(), status === TaskStatus.PAUSED ? /Paused/ : /Disabled/);
 
 			ui.save().click();
 			await settle();
@@ -185,7 +230,7 @@ test('mounted policy ignores an old response after navigating away and back', as
 		oldA.resolve({ tasks: [policy('stale', 'a', TaskStatus.DISABLED, false)] });
 		await settle();
 		assert.equal(ui.optIn().checked, true);
-		assert.match(ui.target.textContent ?? '', /Schedule:\s*Enabled/);
+		assert.match(ui.text(), /Schedule:\s*Enabled/);
 	} finally {
 		await ui.destroy();
 	}
@@ -219,7 +264,7 @@ test('a save finishes the captured schedule change without altering the new view
 		await settle();
 		assert.deepEqual(toggles, [{ id: old.id, status: TaskStatus.ENABLED }]);
 		assert.equal(ui.save().disabled, false);
-		assert.match(ui.target.textContent ?? '', /Schedule:\s*Not scheduled/);
+		assert.match(ui.text(), /Schedule:\s*Not scheduled/);
 	} finally {
 		await ui.destroy();
 	}
@@ -253,7 +298,7 @@ test('mounted first opt-out saves disabled and explicit opt-in enables the sched
 		ui.save().click();
 		await settle();
 		assert.equal(ui.optIn().checked, false);
-		assert.match(ui.target.textContent ?? '', /Schedule:\s*Disabled/);
+		assert.match(ui.text(), /Schedule:\s*Disabled/);
 		assert.deepEqual(toggled, []);
 
 		ui.optIn().click();
@@ -261,7 +306,7 @@ test('mounted first opt-out saves disabled and explicit opt-in enables the sched
 		await settle();
 		assert.equal(updates, 1);
 		assert.deepEqual(toggled, [TaskStatus.ENABLED]);
-		assert.match(ui.target.textContent ?? '', /Schedule:\s*Enabled/);
+		assert.match(ui.text(), /Schedule:\s*Enabled/);
 	} finally {
 		await ui.destroy();
 	}

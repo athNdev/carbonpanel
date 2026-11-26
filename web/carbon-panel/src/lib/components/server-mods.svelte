@@ -22,7 +22,8 @@ one at https://mozilla.org/MPL/2.0/.
 		Search,
 		Check,
 		Ban,
-		RefreshCw
+		RefreshCw,
+		CalendarClock
 	} from '@lucide/svelte';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
@@ -53,7 +54,8 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonTag,
 		CarbonInlineLoading,
 		CarbonButton,
-		CarbonConfirm
+		CarbonConfirm,
+		CarbonModal
 	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
@@ -106,6 +108,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let policyLastOutcome = $state('No runs yet');
 	let policySaving = $state(false);
 	let policyLoading = $state(false);
+	// The policy form is 555 px tall on a phone. Inline it consumed the whole
+	// mods pane and left the list at 0 px, so it opens in a dialog instead.
+	let policyOpen = $state(false);
 	let policyLoadedServer = $state<string | null>(null);
 	let policyReady = $derived(policyLoadedServer === server.id);
 	let loadedPolicyOptIn = false;
@@ -287,6 +292,7 @@ one at https://mozilla.org/MPL/2.0/.
 			policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
 			policyLastOutcome = 'No runs yet';
 			policySaving = false;
+			policyOpen = false;
 		}
 		if (active && !hasLoaded) {
 			hasLoaded = true;
@@ -365,6 +371,18 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	// Sonner anchors toasts to the bottom-right of the viewport, which is where
+	// the apply bar sits on a phone. A refusal toast then covered the Stage
+	// button. The Stage-path notices go to the top on narrow screens; desktop
+	// keeps the app default position.
+	function toastStageOutcome(message: string) {
+		const narrow =
+			typeof window !== 'undefined' &&
+			typeof window.matchMedia === 'function' &&
+			window.matchMedia('(max-width: 639px)').matches;
+		toast.error(message, narrow ? { position: 'top-center' } : undefined);
+	}
+
 	async function stageSelectedUpdates() {
 		const selections = buildUpdateSelections(mods, selectedUpdates);
 		if (selections.length === 0) return;
@@ -373,13 +391,13 @@ one at https://mozilla.org/MPL/2.0/.
 		if (updateWindow === 'time') {
 			const parsed = new Date(applyAtLocal).getTime();
 			if (!applyAtLocal || !Number.isFinite(parsed)) {
-				toast.error('Choose a valid apply time');
+				toastStageOutcome('Choose a valid apply time');
 				return;
 			}
 			applyAtUnix = Math.floor(parsed / 1000);
 		}
 		if (updateWindow === 'idle' && (!Number.isInteger(idleMinutes) || idleMinutes <= 0)) {
-			toast.error('Idle minutes must be a positive whole number');
+			toastStageOutcome('Idle minutes must be a positive whole number');
 			return;
 		}
 
@@ -400,10 +418,10 @@ one at https://mozilla.org/MPL/2.0/.
 				toast.success(`${staged} mod update(s) staged`);
 				await loadMods(true);
 			} else {
-				toast.error('No update was staged. Recheck the installed files and try again.');
+				toastStageOutcome('No update was staged. Recheck the installed files and try again.');
 			}
 		} catch (error) {
-			if (!wasRpcErrorToasted(error)) toast.error('Failed to stage mod updates');
+			if (!wasRpcErrorToasted(error)) toastStageOutcome('Failed to stage mod updates');
 		} finally {
 			stagingUpdates = false;
 		}
@@ -583,7 +601,12 @@ one at https://mozilla.org/MPL/2.0/.
 			</CarbonButton>
 			<CarbonButton kind="primary" size="sm" onclick={() => (browserDialogOpen = true)}>
 				<Boxes class="h-4 w-4" />
-				<span>Browse Mods</span>
+				<!--
+					Short labels below sm keep all four action buttons on one
+					row; a wrapped policy trigger cost the list another 40 px.
+				-->
+				<span class="sm:hidden">Browse</span>
+				<span class="hidden sm:inline">Browse Mods</span>
 			</CarbonButton>
 			<CarbonButton
 				kind="secondary"
@@ -596,7 +619,25 @@ one at https://mozilla.org/MPL/2.0/.
 				{:else}
 					<Upload class="h-4 w-4" />
 				{/if}
-				<span>Upload .jar</span>
+				<span class="sm:hidden">Upload</span>
+				<span class="hidden sm:inline">Upload .jar</span>
+			</CarbonButton>
+			<!--
+				The policy used to be an inline disclosure. Its form is taller than
+				the pane on a phone, which collapsed the list to 0 px and clipped
+				the fields. It now opens in a dialog; the narrow trigger is
+				icon-only with a stable accessible name, like Check.
+			-->
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				class="max-sm:px-2!"
+				aria-label="Automatic update policy"
+				title="Automatic update policy"
+				onclick={() => (policyOpen = true)}
+			>
+				<CalendarClock class="h-4 w-4 sm:hidden" />
+				<span class="hidden sm:inline">Automatic update policy</span>
 			</CarbonButton>
 			<input
 				bind:this={fileInput}
@@ -610,18 +651,26 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	<p role="status" class="px-3 text-sm text-muted-foreground">{updateStatus}</p>
 	{#if availableUpdates.length > 0}
-		<div class="flex flex-col gap-3 border border-border bg-card p-3 sm:flex-row sm:items-end">
-			<div class="min-w-0">
+		<!--
+			One compact control per row on a phone: an inline label beside the
+			input keeps the three window choices and their inputs, while the
+			Stage action gets its own full-width row. The stacked desktop form
+			(sm+) keeps the labels above their inputs.
+		-->
+		<div
+			class="flex flex-col gap-2 border border-border bg-card p-2 sm:flex-row sm:items-end sm:gap-3 sm:p-3"
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2 sm:block sm:flex-none">
 				<label
 					for="mod-update-window"
-					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+					class="shrink-0 font-mono text-xs text-muted-foreground uppercase sm:mb-1 sm:block"
 				>
 					Apply window
 				</label>
 				<select
 					id="mod-update-window"
 					bind:value={updateWindow}
-					class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+					class="h-8 min-w-0 flex-1 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none sm:flex-none"
 				>
 					<option value="next">Next restart</option>
 					<option value="time">At a chosen time (browser local)</option>
@@ -629,10 +678,10 @@ one at https://mozilla.org/MPL/2.0/.
 				</select>
 			</div>
 			{#if updateWindow === 'time'}
-				<div class="min-w-0">
+				<div class="flex min-w-0 flex-1 items-center gap-2 sm:block sm:flex-none">
 					<label
 						for="mod-update-apply-at"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						class="shrink-0 font-mono text-xs text-muted-foreground uppercase sm:mb-1 sm:block"
 					>
 						Apply at
 					</label>
@@ -640,15 +689,15 @@ one at https://mozilla.org/MPL/2.0/.
 						id="mod-update-apply-at"
 						type="datetime-local"
 						bind:value={applyAtLocal}
-						class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+						class="h-8 min-w-0 flex-1 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none sm:flex-none"
 					/>
 				</div>
 			{/if}
 			{#if updateWindow === 'idle'}
-				<div class="min-w-0">
+				<div class="flex min-w-0 flex-1 items-center gap-2 sm:block sm:flex-none">
 					<label
 						for="mod-update-idle"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+						class="shrink-0 font-mono text-xs text-muted-foreground uppercase sm:mb-1 sm:block"
 					>
 						Idle minutes
 					</label>
@@ -664,160 +713,13 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="primary"
 				size="sm"
+				class="w-full justify-center sm:w-auto"
 				disabled={stagingUpdates || selectedUpdates.length === 0}
 				onclick={stageSelectedUpdates}
 			>
 				Stage {selectedUpdates.length} selected update{selectedUpdates.length === 1 ? '' : 's'}
 			</CarbonButton>
 		</div>
-	{/if}
-	{#if canHaveMods()}
-		<details class="border border-border bg-card">
-			<summary class="cursor-pointer px-3 py-2 font-mono text-xs text-foreground uppercase">
-				Automatic update policy
-			</summary>
-			<div
-				class="flex flex-col gap-3 border-t border-border p-3 sm:flex-row sm:flex-wrap sm:items-end"
-			>
-				<label class="flex items-center gap-2 text-xs text-foreground">
-					<input type="checkbox" bind:checked={policyEnabled} class="h-3.5 w-3.5 accent-primary" />
-					Opt in to automatic updates
-				</label>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-cron"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Schedule (cron)
-					</label>
-					<input
-						id="mod-policy-cron"
-						bind:value={policyCron}
-						class="h-8 w-40 rounded-none border border-border bg-background px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-tz"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Timezone
-					</label>
-					<input
-						id="mod-policy-tz"
-						bind:value={policyTimezone}
-						class="h-8 w-32 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-excluded"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Excluded project IDs
-					</label>
-					<input
-						id="mod-policy-excluded"
-						bind:value={policyExcluded}
-						placeholder="project-a, project-b"
-						class="h-8 w-48 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-max"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Max per run
-					</label>
-					<input
-						id="mod-policy-max"
-						type="number"
-						min="1"
-						max="50"
-						bind:value={policyMax}
-						class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-				<div class="min-w-0">
-					<label
-						for="mod-policy-window"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Apply window
-					</label>
-					<select
-						id="mod-policy-window"
-						bind:value={policyWindow}
-						class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					>
-						<option value="next_restart">Next restart</option>
-						<option value="idle">When empty</option>
-					</select>
-				</div>
-				{#if policyWindow === 'idle'}
-					<div class="min-w-0">
-						<label
-							for="mod-policy-idle"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Idle minutes
-						</label>
-						<input
-							id="mod-policy-idle"
-							type="number"
-							min="1"
-							max="10080"
-							bind:value={policyIdleMinutes}
-							class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-						/>
-					</div>
-				{/if}
-				<label class="flex items-center gap-2 text-xs text-foreground">
-					<input
-						type="checkbox"
-						bind:checked={policySkipRunning}
-						class="h-3.5 w-3.5 accent-primary"
-					/>
-					Skip while running
-				</label>
-				<CarbonButton
-					kind="secondary"
-					size="sm"
-					disabled={!policyReady || policyLoading || policySaving}
-					onclick={savePolicy}
-				>
-					Save policy
-				</CarbonButton>
-				{#if policyLoading && !policyReady}
-					<CarbonInlineLoading description="Loading policy" />
-				{:else if !policyReady}
-					<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}
-						>Retry loading policy</CarbonButton
-					>
-				{/if}
-				<dl
-					class="grid w-full grid-cols-1 gap-1 font-mono text-xs text-muted-foreground sm:grid-cols-4"
-				>
-					<div>
-						<dt class="inline">Schedule:</dt>
-						<dd class="inline">{policyScheduleStatus}</dd>
-					</div>
-					<div>
-						<dt class="inline">Next run:</dt>
-						<dd class="inline">{policyNextRun}</dd>
-					</div>
-					<div>
-						<dt class="inline">Last run:</dt>
-						<dd class="inline">{policyLastRun}</dd>
-					</div>
-					<div>
-						<dt class="inline">Outcome:</dt>
-						<dd class="inline break-words">{policyLastOutcome}</dd>
-					</div>
-				</dl>
-			</div>
-		</details>
 	{/if}
 	{#snippet toolbar()}
 		{#if canHaveMods()}
@@ -1054,6 +956,174 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</div>
 </ServerTabPanel>
+
+<!--
+	The policy editor is a dialog at every width. Inline, the form (555 px on a
+	phone) consumed the fixed-height pane, set the installed-mod list to 0 px and
+	was clipped by the pane's overflow, so pointer users could not reach Save.
+	Fields, opt-in semantics and the schedule/run status are unchanged.
+-->
+{#if canHaveMods()}
+	<CarbonModal
+		bind:open={policyOpen}
+		title="Automatic update policy"
+		description="Stage compatible updates on a schedule for this server"
+		size="lg"
+		onclose={() => (policyOpen = false)}
+	>
+		<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+			<label class="flex w-full items-center gap-2 text-xs text-foreground">
+				<input type="checkbox" bind:checked={policyEnabled} class="h-3.5 w-3.5 accent-primary" />
+				Opt in to automatic updates
+			</label>
+			<div class="min-w-0">
+				<label
+					for="mod-policy-cron"
+					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+				>
+					Schedule (cron)
+				</label>
+				<input
+					id="mod-policy-cron"
+					bind:value={policyCron}
+					class="h-8 w-40 rounded-none border border-border bg-background px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
+				/>
+			</div>
+			<div class="min-w-0">
+				<label
+					for="mod-policy-tz"
+					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+				>
+					Timezone
+				</label>
+				<input
+					id="mod-policy-tz"
+					bind:value={policyTimezone}
+					class="h-8 w-32 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+				/>
+			</div>
+			<div class="min-w-0">
+				<label
+					for="mod-policy-excluded"
+					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+				>
+					Excluded project IDs
+				</label>
+				<input
+					id="mod-policy-excluded"
+					bind:value={policyExcluded}
+					placeholder="project-a, project-b"
+					class="h-8 w-48 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+				/>
+			</div>
+			<div class="min-w-0">
+				<label
+					for="mod-policy-max"
+					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+				>
+					Max per run
+				</label>
+				<input
+					id="mod-policy-max"
+					type="number"
+					min="1"
+					max="50"
+					bind:value={policyMax}
+					class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+				/>
+			</div>
+			<div class="min-w-0">
+				<label
+					for="mod-policy-window"
+					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+				>
+					Apply window
+				</label>
+				<select
+					id="mod-policy-window"
+					bind:value={policyWindow}
+					class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+				>
+					<option value="next_restart">Next restart</option>
+					<option value="idle">When empty</option>
+				</select>
+			</div>
+			{#if policyWindow === 'idle'}
+				<div class="min-w-0">
+					<label
+						for="mod-policy-idle"
+						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
+					>
+						Idle minutes
+					</label>
+					<input
+						id="mod-policy-idle"
+						type="number"
+						min="1"
+						max="10080"
+						bind:value={policyIdleMinutes}
+						class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
+					/>
+				</div>
+			{/if}
+			<label class="flex items-center gap-2 text-xs text-foreground">
+				<input
+					type="checkbox"
+					bind:checked={policySkipRunning}
+					class="h-3.5 w-3.5 accent-primary"
+				/>
+				Skip while running
+			</label>
+		</div>
+		{#if policyLoading && !policyReady}
+			<CarbonInlineLoading description="Loading policy" />
+		{:else if !policyReady}
+			<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}>Retry loading policy</CarbonButton>
+		{/if}
+		<dl
+			class="grid grid-cols-1 gap-1 border-t border-border pt-3 font-mono text-xs text-muted-foreground sm:grid-cols-2"
+		>
+			<div>
+				<dt class="inline">Schedule:</dt>
+				<dd class="inline">{policyScheduleStatus}</dd>
+			</div>
+			<div>
+				<dt class="inline">Next run:</dt>
+				<dd class="inline">{policyNextRun}</dd>
+			</div>
+			<div>
+				<dt class="inline">Last run:</dt>
+				<dd class="inline">{policyLastRun}</dd>
+			</div>
+			<div>
+				<dt class="inline">Outcome:</dt>
+				<dd class="inline break-words">{policyLastOutcome}</dd>
+			</div>
+		</dl>
+
+		{#snippet footer()}
+			<div class="flex w-full">
+				<CarbonButton
+					kind="secondary"
+					size="lg"
+					class="w-1/2 justify-center rounded-none"
+					onclick={() => (policyOpen = false)}
+				>
+					Close
+				</CarbonButton>
+				<CarbonButton
+					kind="primary"
+					size="lg"
+					class="w-1/2 justify-center rounded-none"
+					disabled={!policyReady || policyLoading || policySaving}
+					onclick={savePolicy}
+				>
+					Save policy
+				</CarbonButton>
+			</div>
+		{/snippet}
+	</CarbonModal>
+{/if}
 
 <ModBrowserDialog bind:open={browserDialogOpen} {server} onInstalled={loadMods} />
 <CarbonConfirm
