@@ -6,8 +6,9 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/serverarchive
-  - internal/nodestorage/allocation.go
   - internal/rpc/services
+  - internal/nodestorage/allocation.go
+  - proto/carbonpanel/v1
 sources:
   - title: Server portability archive format
     resource: ../../docs/server-portability.md
@@ -52,3 +53,8 @@ sources:
 - Keep upload ownership, server-create authorization and retry idempotency scoped
   to the submitting principal. Allocate the destination exclusively on the
   chosen node before committing the new server row.
+- Base archive preview authorization on server-create rather than node
+  inventory: return only enabled destination IDs and names, never addresses or
+  private inventory. See [destination preflight](../decisions/archive-destination-preflight.md).
+- Export and create-from-archive console identity and preflight fencing: see
+  [server archive console](server-archive-console.md).
