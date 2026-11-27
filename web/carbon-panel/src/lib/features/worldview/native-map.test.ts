@@ -70,20 +70,23 @@ test('the manifest dimension list is sanitized and always offers the overworld',
 		);
 	const originalFetch = globalThis.fetch;
 	for (const [dimensions, expected] of [
-		[['overworld', 'end'], ['overworld', 'end']],
+		[
+			['overworld', 'end'],
+			['overworld', 'end']
+		],
 		[['end'], ['overworld']],
 		[['overworld', 'nether'], ['overworld']],
-		[['overworld', 'end', 'nether'], ['overworld', 'end']],
+		[
+			['overworld', 'end', 'nether'],
+			['overworld', 'end']
+		],
 		[null, ['overworld']],
 		['end', ['overworld']]
 	] as const) {
 		globalThis.fetch = (async () => payload(dimensions)) as typeof fetch;
 		try {
 			const result = await loadNativeManifest(session, new AbortController().signal);
-			assert.deepEqual(
-				result.status === 'ready' ? result.manifest.dimensions : null,
-				expected
-			);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : null, expected);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

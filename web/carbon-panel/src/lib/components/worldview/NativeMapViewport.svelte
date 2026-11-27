@@ -138,9 +138,7 @@
 	let activeDimension = $derived(resolveNativeDimension(localDimension, dimensions));
 	let spawn = $derived(activeDimension === 'overworld' ? (manifest?.spawn ?? null) : null);
 	let dimensionMarkers = $derived(markers.filter((marker) => marker.dimension === activeDimension));
-	let selectedMarker = $derived(
-		dimensionMarkers.find((marker) => marker.id === selectedMarkerId)
-	);
+	let selectedMarker = $derived(dimensionMarkers.find((marker) => marker.id === selectedMarkerId));
 	let tiles = $derived(
 		tileState?.path === proxyPath &&
 			tileState.revision === revision &&
@@ -248,9 +246,7 @@
 	$effect(() => {
 		if (!manifest) return;
 		const nextLocation =
-			requestedDimension === undefined || requestedDimension === activeDimension
-				? location
-				: null;
+			requestedDimension === undefined || requestedDimension === activeDimension ? location : null;
 		const path = proxyPath;
 		if (
 			!positionedPath ||
