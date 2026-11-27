@@ -195,23 +195,40 @@ stops an existing server.
 Export preparation, preview and create-from-archive validation use an extended
 one-hour client deadline and respect earlier cancellation. The console reports
 a preparation state rather than presenting these as ordinary metadata calls.
-## Acceptance rehearsal
+## Acceptance rehearsals
 
-`.github/workflows/server-archive-rehearsal.yml` is a CI-only backend RPC round
-trip at the exact candidate head. It builds the controller with an empty
-frontend embed, starts an isolated local engine and a second registered Docker
-engine on its own bridge with separate storage, and runs
-`scripts/server_archive_rehearsal_ci.py`. The rehearsal creates a managed
-Vanilla source without Docker overrides, requires the specific running-export
-refusal, saves a deterministic fixture, exports both native formats, verifies
-every archive and destination file hash, previews and creates both imports
-stopped, and then confirms Minecraft readiness on both. Source and destination
-bytes are hashed through the server-scoped FileService on the verified data
-mounts, streaming files above the editor limit. The runner checks entry types
-and sizes through mount metadata and leaves file ownership and contents alone. See
+`.github/workflows/server-archive-rehearsal.yml` runs two CI-only jobs at the
+exact candidate head. Both create an isolated controller container and a second
+registered Docker engine on its own bridge with separate storage, and share
+`scripts/qualify-server-archive-hosted.sh` and
+`scripts/server_archive_rehearsal_ci.py`.
+
+- **RPC round trip** builds the controller with an empty frontend embed, creates
+  a managed Vanilla source without Docker overrides, requires the specific
+  running-export refusal, saves a deterministic fixture, exports both native
+  formats over RPC, verifies every archive and destination file hash, previews
+  and creates both imports stopped, and then confirms Minecraft readiness on
+  both.
+- **Production UI** builds the exact SvelteKit frontend into the controller and
+  drives it in Chromium through `scripts/qualify-archive-ui-hosted.mjs`: the
+  real `/servers/[id]` route refuses an export while the source is running,
+  prepares and downloads ZIP and tar.gz through the export panel, then uploads
+  each downloaded file through the real `/servers/new` create-from-archive
+  wizard onto the remote node. The wizard's upload, preview, placement and
+  create requests are the production routes; no RPC is stubbed.
+
+In both jobs, source and destination bytes are hashed through the
+server-scoped FileService on the verified data mounts, streaming files above the
+editor limit. The runner checks entry types and sizes through mount metadata and
+leaves file ownership and contents alone. The UI job verifies both imports
+stopped with their saved bytes on the engine and leaves boot/join continuity to
+the RPC job; it does not start them. See
 [ADR 0057](adr/0057-disposable-server-archive-acceptance.md).
 
-The create-from-archive browser workflow (OSS-428) is not exercised by this job
-and is tracked separately in #686. This rehearsal uses RPC with an empty
-frontend embed; it is not a UI, production-host or release-publication
-qualification, and its report records those limits.
+The browser driver records the exact head, browser binary, phase plan, download
+hashes and preflight status, rendered preview facts and screenshots at
+desktop/narrow widths in light and dark themes. It never receives a credential
+on its command line, and the Python harness independently verifies the
+downloaded archive, the destination bytes and the engine container state before
+recording success. Neither job is a production-host, ingress, OIDC, release or
+live-deployment qualification, and their reports record those limits.
