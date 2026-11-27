@@ -101,7 +101,9 @@ concurrency:
 jobs:
   capture:
     name: Capture (read-only)
-    runs-on: ubuntu-latest
+    # Playwright install-deps uses the Microsoft apt repo, which returns HTTP
+    # 403 for Ubuntu 26.04 (ubuntu-latest); the noble repo is still published.
+    runs-on: ubuntu-24.04
     outputs:
       features: ${{ steps.features.outputs.names }}
       canonical: ${{ steps.features.outputs.canonical }}

@@ -300,6 +300,61 @@ test('backend lint gate compares against a git base instead of the PR diff API',
   assert.match(report, /golangci-lint run/);
 });
 
+// Slice one job body so a test cannot match a key from a sibling job (for
+// example a non-browser job on the same workflow that legitimately stays on
+// ubuntu-latest).
+function jobBlock(source, id) {
+  const lines = source.split('\n');
+  const jobsIndex = lines.indexOf('jobs:');
+  const start = lines.findIndex((line, index) => index > jobsIndex && line === `  ${id}:`);
+  if (start < 0) return null;
+  const end = lines.findIndex(
+    (line, index) => index > start && /^  [A-Za-z0-9_-]+:\s*(?:#.*)?$/.test(line)
+  );
+  return lines.slice(start, end < 0 ? lines.length : end).join('\n');
+}
+
+// Playwright install-deps runs apt-get update against the Microsoft Ubuntu
+// repo. ubuntu-latest moved to 26.04, where that repo returns HTTP 403, so the
+// browser jobs use the newest release whose repo is published (noble/24.04).
+test('browser review jobs install apt deps on an Ubuntu release the Microsoft repo publishes', () => {
+  const jobs = [
+    {
+      workflow: 'modpacks-review.yml',
+      job: 'journeys',
+      install: /node scripts\/review\/setup-browser\.mjs --with-deps/,
+    },
+    {
+      workflow: 'review-ownership.yml',
+      job: 'driver',
+      install: /node scripts\/review\/setup-browser\.mjs --with-deps/,
+    },
+    {
+      workflow: 'showcase.yml',
+      job: 'capture',
+      install: /node scripts\/review\/setup-browser\.mjs --with-deps/,
+    },
+    {
+      workflow: 'editor-dialog.yml',
+      job: 'editor-dialog',
+      install: /bunx playwright install --with-deps chromium/,
+    },
+  ];
+  for (const { workflow, job, install } of jobs) {
+    const block = jobBlock(read(workflow), job);
+    assert.ok(block, `${workflow}: job ${job} is missing`);
+    if (workflow === 'review-ownership.yml') {
+      // The matrix still crosses OSes; only its Ubuntu leg is pinned.
+      assert.match(block, /^        os: \[ubuntu-24\.04, windows-latest\]$/m);
+      assert.match(block, /^    runs-on: \$\{\{ matrix\.os \}\}$/m);
+    } else {
+      assert.match(block, /^    runs-on: ubuntu-24\.04$/m);
+    }
+    assert.doesNotMatch(block, /runs-on: ubuntu-latest/);
+    assert.match(block, install);
+  }
+});
+
 test('server archive UI path filters cover the frontend surfaces the job builds', () => {
   const source = read('server-archive-rehearsal.yml');
   const filterStart = source.indexOf('    paths:\n');
