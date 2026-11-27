@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -360,4 +361,102 @@ func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestLegacyConfigRetargetsEmptyIdleBatchAndResetsIdleClock(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-empty-idle"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "first"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	since := time.Now().Add(-time.Hour)
+	require.NoError(t, store.SetBatchIdleSince(ctx, first.BatchID, &since))
+	_, err = store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.ErrorIs(t, err, ErrUpdateBatchConflict, "a pending timed row keeps its window")
+	require.NoError(t, store.DiscardStagedConfigChange(ctx, first.ID))
+	restarted, err := store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, restarted.BatchID)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, string(UpdateWindowNextRestart), batch.Window)
+	require.Nil(t, batch.IdleSince)
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "second"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	batch, err = store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Nil(t, batch.IdleSince)
+}
+
+func TestContentAfterApplyingCronUsesNextRestartBatch(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-content-after-cron"
+	store := newStagedTestStore(t, serverID)
+	cron, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "cron"}, StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	content, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete, TargetPath: "mods/a.jar",
+	})
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, cron.BatchID, content.BatchID)
+	require.Equal(t, string(UpdateWindowNextRestart), batch.Window)
+}
+
+func TestStageConfigRetargetRollsBackOnInsertFailure(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-config-retarget"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "soon"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	rows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+
+	require.NoError(t, store.DB().Exec(`CREATE TRIGGER fail_second_config BEFORE INSERT ON staged_config_changes
+		BEGIN SELECT RAISE(ABORT, 'fixture rejected config insert'); END`).Error)
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"difficulty": "hard"}, UpdateWindowIdle, nil, 10)
+	require.ErrorContains(t, err, "fixture rejected config insert")
+	after, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, batch, after)
+	afterRows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, rows, afterRows)
+}
+
+func TestConcurrentCronAdmissionCannotJoinTimedModBatch(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-cron-race"
+	store := newStagedTestStore(t, serverID)
+	_, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete, TargetPath: "mods/a.jar",
+	})
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+
+	const attempts = 6
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = store.StageConfigChange(ctx, serverID,
+				map[string]any{"motd": "nightly"}, StagedApplyScheduled, "0 3 * * *")
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.ErrorIs(t, err, ErrUpdateBatchConflict, "every concurrent cron admission must be refused")
+	}
+	configs, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Empty(t, configs, "no cron row may be committed into the timed mod batch")
 }
