@@ -17,9 +17,14 @@ call Docker, change server status, write the live `ServerConfig` row, or write
 the mods directory, the datapacks directory, or the world.
 
 One batch may hold at most one staged content row per normalized live target
-(case, separator and trailing-separator aliases name the same file). A second
-row is refused with an actionable conflict and is rolled back, because a single
-live post-image cannot verify two recorded entries during recovery.
+after expansion (case, separator and trailing-separator aliases name the same
+file). A modpack row stores the literal target `modpack` but expands to its pack
+files, so a modpack and a separate file or reviewed-mod row cannot share a batch;
+admission refuses that mix and publication expands the full pending set and
+refuses overlap before recording APPLYING. A second edit to one module in the
+same batch is refused with an actionable conflict: discard the earlier module
+item before staging another. Every such refusal rolls back the new row, because
+a single live post-image cannot verify two recorded entries during recovery.
 
 File bytes for a staged install or replace go through node storage at
 `.carbon-panel/staged/<id>/` inside the server data root. A delete records the
