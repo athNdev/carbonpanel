@@ -70,9 +70,10 @@ request.
 7. Downloads use the connection-guarded HTTP client shared with World Library
    imports. The fetcher and staging loop enforce per-file and total byte
    limits. Scheduled provider failures remain retryable after partial staging.
-   Directory scan and entry metadata errors other than missing paths also fail
-   the run. All retry attempts share the execution's update budget. Files
-   that already have a staged row do not count as refusals.
+   Directory scan and entry metadata errors other than missing paths fail the
+   run, while a per-file content read failure during the preview stays a
+   per-item refusal. All retry attempts share the execution's update budget.
+   Files that already have a staged row do not count as refusals.
 8. The complete window tuple (mode, timestamp, idle interval) is compared
    before any provider work or persistent write; a differing window on a batch
    with reviewed changes is refused. Selections are deduplicated by live target
