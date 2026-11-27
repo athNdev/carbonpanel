@@ -233,7 +233,7 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("failed to read current server config: %w", err)
 			}
-			live = s.CreateDefaultServerConfig(serverID)
+			live = createDefaultServerConfig(tx, serverID)
 		}
 		current, err := ServerConfigToMap(live)
 		if err != nil {
@@ -272,13 +272,26 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 			if content {
 				return fmt.Errorf("%w: open batch %s has staged content; apply or discard that content before staging cron config", ErrUpdateBatchConflict, batch.ID)
 			}
+			pending, err := hasBatchConfig(tx, batch.ID)
+			if err != nil {
+				return err
+			}
+			if pending {
+				return fmt.Errorf("%w: open batch %s already has staged config waiting on window %q; apply or discard that config before staging cron config", ErrUpdateBatchConflict, batch.ID, batch.Window)
+			}
+			if UpdateWindow(batch.Window) != UpdateWindow(StagedApplyScheduled) {
+				return fmt.Errorf("%w: open batch %s uses window %q and cannot isolate a cron config; apply or discard its changes before staging cron config", ErrUpdateBatchConflict, batch.ID, batch.Window)
+			}
 		} else {
 			cron, err := hasBatchCronConfig(tx, batch.ID)
 			if err != nil {
 				return err
 			}
+			if cron {
+				return fmt.Errorf("%w: open batch %s has an independently scheduled config row; apply or discard that config before staging another change", ErrUpdateBatchConflict, batch.ID)
+			}
 			if !batchWindowMatches(batch, window, opts.ApplyAt, opts.IdleMinutes) {
-				if content || cron {
+				if content {
 					return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
 				}
 				if !opts.SetBatchWindow {
@@ -447,7 +460,7 @@ func (s *Store) ApplyStagedConfigChange(ctx context.Context, id string) (*Staged
 		live := &ServerConfig{}
 		err := tx.Where("server_id = ?", staged.ServerID).First(live).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			live = s.CreateDefaultServerConfig(staged.ServerID)
+			live = createDefaultServerConfig(tx, staged.ServerID)
 		} else if err != nil {
 			return fmt.Errorf("failed to read live server config: %w", err)
 		}
@@ -533,7 +546,7 @@ func (s *Store) RollbackStagedConfigChange(ctx context.Context, id string) (*Sta
 			return fmt.Errorf("staged config change has no recorded previous state to roll back to")
 		}
 
-		if err := restoreStagedConfigPrevious(tx, s, &staged); err != nil {
+		if err := restoreStagedConfigPrevious(tx, &staged); err != nil {
 			return err
 		}
 
@@ -552,7 +565,7 @@ func (s *Store) RollbackStagedConfigChange(ctx context.Context, id string) (*Sta
 	return rolledBack, nil
 }
 
-func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChange) error {
+func restoreStagedConfigPrevious(tx *gorm.DB, staged *StagedConfigChange) error {
 	if staged.PreviousPayload == "" {
 		return fmt.Errorf("staged config change has no recorded previous state to roll back to")
 	}
@@ -571,7 +584,7 @@ func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChan
 	live := &ServerConfig{}
 	err := tx.Where("server_id = ?", staged.ServerID).First(live).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		live = s.CreateDefaultServerConfig(staged.ServerID)
+		live = createDefaultServerConfig(tx, staged.ServerID)
 	} else if err != nil {
 		return fmt.Errorf("failed to read live server config: %w", err)
 	}
@@ -617,7 +630,7 @@ func (s *Store) RevertStagedConfigApplyToStaged(ctx context.Context, id string) 
 		if err := tx.Where("id = ?", id).First(&staged).Error; err != nil {
 			return fmt.Errorf("staged config change not found: %w", err)
 		}
-		if err := restoreStagedConfigPrevious(tx, s, &staged); err != nil {
+		if err := restoreStagedConfigPrevious(tx, &staged); err != nil {
 			return err
 		}
 

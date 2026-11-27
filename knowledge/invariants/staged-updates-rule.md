@@ -48,12 +48,12 @@ keep rows staged and reconcile rolled-back batch configs; retries after
 completed publication only finish bookkeeping. A live config field that moved
 after it was staged stops the publish before anything is written.
 
-A modpack task can join that batch. The fetched tree is copied into the
-staging directory and the live pack stays as it is until the window. The same
-window commits the pack with any staged config, mods, and datapacks. A module
-config or container-spec change can join the same batch. The live module row
-stays as it is until the window, which recreates that module container when
-the spec changed and still does not start a deep-sleeping server.
+A modpack task, module config, or container-spec change can join the batch.
+Staged pack bytes live under staging; the live pack stays as it is until the
+window, which commits the pack with any staged config, mods, and datapacks
+and recreates a changed module container without starting a deep-sleeping
+server. A legacy cron row stays alone, refusing shared content, config, or
+timed windows; ordinary changes wait until it clears.
 
 The server configuration screen reads that open batch. From there an admin
 chooses next restart, a UTC timestamp, or idle minutes, and can discard one

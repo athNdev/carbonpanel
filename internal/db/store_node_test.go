@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package db
 
 import (
@@ -15,14 +14,19 @@ import (
 )
 
 func newTestStore(t *testing.T) *Store {
+	return newTestStoreWithMaxConnections(t, 0)
+}
+
+func newTestStoreWithMaxConnections(t *testing.T, maxConnections int) *Store {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			Path:        dbPath,
-			AutoMigrate: true,
+			Path:           dbPath,
+			AutoMigrate:    true,
+			MaxConnections: maxConnections,
 		},
 		Docker: config.DockerConfig{
 			Host: "unix:///var/run/docker.sock",
