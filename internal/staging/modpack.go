@@ -27,9 +27,27 @@ const stagedContentRoot = ".carbon-panel/staged"
 // sync must never turn it into a pack target.
 const modpackPendingCommitFile = ".carbon-panel_pending_update"
 
+// modpackGitDir is the clone cache directory name. The scheduler keeps the live
+// pending marker beside it, so that marker's basename is the cache directory
+// name joined with the marker file name.
+const modpackGitDir = ".carbon-panel_modpack_git"
+
+// modpackPendingCommitSibling is the basename of the live pending marker:
+// cacheDir + modpackPendingCommitFile. A pack must never publish it.
+const modpackPendingCommitSibling = modpackGitDir + modpackPendingCommitFile
+
 func isModpackInternalPath(rel string) bool {
 	rel = path.Clean(strings.ReplaceAll(rel, "\\", "/"))
-	return rel == modpackPendingCommitFile || strings.HasPrefix(rel, modpackPendingCommitFile+"/")
+	// The scheduler's live marker is a sibling of the clone cache, so its
+	// basename is the cache directory name joined with the marker file name.
+	// Both the prefixed sibling and the legacy in-cache marker are controller
+	// state, never pack content.
+	for _, name := range []string{modpackPendingCommitSibling, modpackPendingCommitFile} {
+		if rel == name || strings.HasPrefix(rel, name+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // StageModpackTree copies a fetched pack into the open batch. The live pack
@@ -132,7 +150,7 @@ func modpackLivePath(rel string) (string, error) {
 	}
 	top := strings.SplitN(rel, "/", 2)[0]
 	switch strings.ToLower(top) {
-	case ".git", ".carbon-panel", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots", modpackPendingCommitFile:
+	case ".git", ".carbon-panel", modpackGitDir, ".carbon-panel_modpack_staged", ".carbon-panel_snapshots", modpackPendingCommitFile, modpackPendingCommitSibling:
 		return "", fmt.Errorf("modpack path %q is reserved", rel)
 	}
 	return rel, nil

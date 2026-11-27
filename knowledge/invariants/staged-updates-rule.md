@@ -43,6 +43,12 @@ Staging validation and direct commit refuse targets inside the undo subtree,
 including case and separator aliases, so publication cannot overwrite its own
 recovery manifest or backup files.
 
+Modpack expansion skips and refuses controller state: the clone cache and its
+staged and snapshot siblings, the legacy pending marker inside the cache, and
+the live pending marker kept beside the cache (the cache directory name joined
+with the marker file name). A pack therefore cannot publish over the scheduler's
+pending-update state.
+
 Client-only mod jars and archives that are not datapacks are rejected before
 any staged byte is kept.
 

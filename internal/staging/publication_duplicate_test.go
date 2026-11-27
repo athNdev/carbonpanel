@@ -37,8 +37,8 @@ func TestRecordedRecoveryRefusesLegacyDuplicateTarget(t *testing.T) {
 		Snapshot: string(snapshot),
 	}
 	owned := []storage.StagedContentChange{
-		{ID: "row-a", BatchID: record.BatchID, Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: "config/shared.txt", Status: storage.StagedStatusApplied},
-		{ID: "row-b", BatchID: record.BatchID, Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: "config/shared.txt", Status: storage.StagedStatusApplied},
+		{ID: "row-a", BatchID: record.BatchID, Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: "config/shared.txt", StagePath: "stage-a", Status: storage.StagedStatusApplied},
+		{ID: "row-b", BatchID: record.BatchID, Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: "config/shared.txt", StagePath: "stage-b", Status: storage.StagedStatusApplied},
 	}
 	err = restoreRecordedRecovery(ctx, acc, store, record, filepath.Join(undoRoot, record.BatchID), owned)
 	require.ErrorContains(t, err, "more than one recovery entry for target")

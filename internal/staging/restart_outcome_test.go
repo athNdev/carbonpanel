@@ -816,6 +816,37 @@ func TestPreDispatchInterruptedWithoutContainerResumesStandardCreation(t *testin
 	require.Equal(t, storage.PublicationCleaned, stored.Phase)
 }
 
+// TestRecordReplacementIgnoresTheBaselineIdentity covers the sub-branch where
+// Docker keeps the old identity because a typed preflight or a rollback left the
+// baseline container in place. Recording it as a replacement would refuse every
+// later retry at the identity check, so the expected identity must stay empty.
+func TestRecordReplacementIgnoresTheBaselineIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "baseline-identity", Name: "baseline-identity",
+		DataPath: data, ContainerID: "baseline", Status: storage.StatusRunning,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	publication := &RestartPublication{Commit: commit, Configs: applied, RuntimeAttempted: true}
+	require.NoError(t, publication.BeginDispatch(ctx))
+
+	require.NoError(t, publication.RecordReplacement(ctx, "baseline"))
+	record, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, record.Phase)
+	require.Equal(t, "baseline", record.BaselineContainerID)
+	require.Empty(t, record.ExpectedContainerID, "the baseline container is not a replacement identity")
+}
+
 func TestRecordReplacementSurvivesCanceledRequestContext(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
