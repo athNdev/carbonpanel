@@ -143,8 +143,7 @@ one at https://mozilla.org/MPL/2.0/.
 				loadError = checkUpdates
 					? 'The update check failed. The installed list was not refreshed.'
 					: 'Failed to read the installed mods from the server.';
-				if (checkUpdates && ownsStatus())
-					updateStatus = 'Update check failed. Try again.';
+				if (checkUpdates && ownsStatus()) updateStatus = 'Update check failed. Try again.';
 				// E2: the interceptor already toasted the formatted RPC error.
 				if (!wasRpcErrorToasted(error))
 					toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');

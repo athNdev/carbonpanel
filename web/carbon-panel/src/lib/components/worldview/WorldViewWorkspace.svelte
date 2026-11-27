@@ -12,7 +12,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
 	import { toast } from 'svelte-sonner';
-	import { AlertTriangle, ArrowLeft, Ban, Lock, Maximize, MapPin, RefreshCw, Users } from '@lucide/svelte';
+	import {
+		AlertTriangle,
+		ArrowLeft,
+		Ban,
+		Lock,
+		Maximize,
+		MapPin,
+		RefreshCw,
+		Users
+	} from '@lucide/svelte';
 	import {
 		CarbonPageHeader,
 		CarbonBreadcrumbs,
