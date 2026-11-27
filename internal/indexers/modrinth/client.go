@@ -304,3 +304,22 @@ func (c *Client) GetProjects(ctx context.Context, ids []string) ([]ProjectDetail
 	}
 	return projects, nil
 }
+
+// VersionsByFileHash identifies installed bytes independently of a local filename or mod ID.
+func (c *Client) VersionsByFileHash(ctx context.Context, hashes []string) (map[string]Version, error) {
+	versions := make(map[string]Version)
+	err := c.http.PostJSON(ctx, c.baseURL+"/version_files", map[string]any{
+		"algorithm": "sha512", "hashes": hashes,
+	}, &versions)
+	return versions, err
+}
+
+// CompatibleUpdatesByFileHash requests release builds for the server's exact loader and game version.
+func (c *Client) CompatibleUpdatesByFileHash(ctx context.Context, hashes []string, loader, game string) (map[string]Version, error) {
+	versions := make(map[string]Version)
+	err := c.http.PostJSON(ctx, c.baseURL+"/version_files/update", map[string]any{
+		"algorithm": "sha512", "hashes": hashes, "loaders": []string{loader},
+		"game_versions": []string{game}, "version_types": []string{"release"},
+	}, &versions)
+	return versions, err
+}
