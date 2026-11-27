@@ -89,7 +89,46 @@ func TestPersistentHostPathPicksTheDeepestMount(t *testing.T) {
 	if !ok {
 		t.Fatal("persistentHostPath found nothing")
 	}
-	if hostDir != "/srv/data" {
-		t.Fatalf("host dir = %q, want the deepest mount's source", hostDir)
+	if hostDir != "/srv/data/servers/x" {
+		t.Fatalf("host dir = %q, want the deepest mount's source plus the suffix", hostDir)
+	}
+}
+
+func TestResolveParentMountInfoPreservesTheDataDirSuffix(t *testing.T) {
+	const parent = `1060 1052 8:1 /srv/carbon-panel /app rw,relatime - ext4 /dev/sda1 rw
+`
+	withMountinfo(t, parent)
+
+	mapping, err := Resolve(context.Background(), hostNetworked{}, dirsFor("/app/data"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mapping.HostDir != "/srv/carbon-panel/data" {
+		t.Fatalf("host dir = %q, want the parent source plus the data suffix", mapping.HostDir)
+	}
+	if got, want := mapping.ToHost("/app/data/servers/a"), "/srv/carbon-panel/data/servers/a"; got != want {
+		t.Errorf("ToHost = %q, want %q", got, want)
+	}
+}
+
+func TestPersistentHostPathRequiresAWholeComponentPrefix(t *testing.T) {
+	const parent = `1060 1052 8:1 /srv/carbon-panel /app rw,relatime - ext4 /dev/sda1 rw
+`
+	withMountinfo(t, parent)
+
+	if hostDir, ok := persistentHostPath(Dirs{DataDir: "/application"}); ok {
+		t.Fatalf("persistentHostPath = %q, want no answer for a sibling path", hostDir)
+	}
+}
+
+func TestPersistentHostPathIgnoresASuffixUnderARootMount(t *testing.T) {
+	// A root mount still says nothing about where the directory lives on the
+	// host, so a suffix must not turn it into an answer.
+	const rootMount = `1060 1052 8:1 / /app rw,relatime - ext4 /dev/sda1 rw
+`
+	withMountinfo(t, rootMount)
+
+	if hostDir, ok := persistentHostPath(Dirs{DataDir: "/app/data"}); ok {
+		t.Fatalf("persistentHostPath = %q, want no answer for a root-mounted path", hostDir)
 	}
 }

@@ -4,7 +4,7 @@ title: "Runtime model — Mount boundary + Work temp"
 description: "The daemon interprets a bind source on the host, not inside the panel's"
 status: stable
 owners: [oss-runtime]
-code_refs: [cmd/carbon-panel, internal/rpc, internal/proxy, internal/db, internal/docker, internal/docker/resource_enforcement.go, pkg/runtimeprofile, web/carbon-panel/src/lib/utils/resource-enforcement.ts, pkg/files, internal/scheduler, internal/operation, internal/reconciler, web/carbon-panel]
+code_refs: [cmd/carbon-panel, internal/rpc, internal/proxy, internal/db, internal/docker, internal/docker/resource_enforcement.go, internal/hostmount, pkg/runtimeprofile, web/carbon-panel/src/lib/utils/resource-enforcement.ts, pkg/files, internal/scheduler, internal/operation, internal/reconciler, web/carbon-panel]
 sources:
   - title: Parent concept
     resource: runtime.md
@@ -30,12 +30,15 @@ Startup refuses the mapping rather than degrading:
 Detection prefers the daemon's view of the panel's own container. A
 host-networked container has no container to inspect — its hostname is the
 machine name — so the panel also reads the kernel mount table, where the source
-path of a bind mount is recorded. That path is the host directory. Detection is
-best-effort so a restricted Docker socket proxy does not stop the panel
-booting. When the mount table cannot be read, the deprecated
-`CARBONPANEL_HOST_DATA_PATH` is used if set, and otherwise paths are used
-as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is the
-source of truth.
+path of a bind mount is recorded. Both sources choose the deepest mount that
+covers `storage.data_dir`; the part of the directory below that mount's
+destination is appended to its source (`/app` + `/srv/carbon-panel` maps
+`/app/data` to `/srv/carbon-panel/data`). An exact mount keeps the reported
+source unchanged. Detection is best-effort so a restricted Docker socket proxy
+does not stop the panel booting. When the mount table cannot be read, the
+deprecated `CARBONPANEL_HOST_DATA_PATH` is used if set, and otherwise paths are
+used as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is
+the source of truth.
 
 A remote module bind uses its server-relative path even when the controller
 and daemon share the same absolute storage root. Preparing a bind directory
