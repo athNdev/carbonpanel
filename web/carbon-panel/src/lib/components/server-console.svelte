@@ -10,7 +10,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onDestroy, tick, untrack } from 'svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { create } from '@bufbuild/protobuf';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -117,8 +117,12 @@ one at https://mozilla.org/MPL/2.0/.
 	// role=alert node. The log stream itself is role=log (polite) so
 	// per-line output stays quiet for screen readers.
 	let alertMessage = $state('');
-	function reportError(message: string) {
-		toast.error(message);
+	function reportError(message: string, error?: unknown) {
+		// The RPC interceptor already toasted non-silent RPC failures; keep the
+		// assertive announcement exactly once without a second error toast.
+		if (!wasRpcErrorToasted(error)) {
+			toast.error(message);
+		}
 		alertMessage = message;
 	}
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
@@ -336,7 +340,8 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (error) {
 			if (!ownsLogBuffer(owner) || !logListingSeq.isCurrent(listingSeq)) return;
 			reportError(
-				'Failed to fetch logs: ' + (error instanceof Error ? error.message : 'Unknown error')
+				'Failed to fetch logs: ' + (error instanceof Error ? error.message : 'Unknown error'),
+				error
 			);
 		} finally {
 			if (ownsLogBuffer(owner)) loading = false;
@@ -356,7 +361,8 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (error) {
 			if (!ownsLogBuffer(owner)) return;
 			reportError(
-				'Failed to clear logs: ' + (error instanceof Error ? error.message : 'Unknown error')
+				'Failed to clear logs: ' + (error instanceof Error ? error.message : 'Unknown error'),
+				error
 			);
 		} finally {
 			if (ownsLogBuffer(owner)) clearing = false;
@@ -400,7 +406,8 @@ one at https://mozilla.org/MPL/2.0/.
 			}
 		} catch (error) {
 			reportError(
-				'Failed to execute command: ' + (error instanceof Error ? error.message : 'Unknown error')
+				'Failed to execute command: ' + (error instanceof Error ? error.message : 'Unknown error'),
+				error
 			);
 		} finally {
 			loading = false;
@@ -424,7 +431,9 @@ one at https://mozilla.org/MPL/2.0/.
 			}
 		} catch (error) {
 			reportError(
-				'Failed to upload to mclo.gs: ' + (error instanceof Error ? error.message : 'Unknown error')
+				'Failed to upload to mclo.gs: ' +
+					(error instanceof Error ? error.message : 'Unknown error'),
+				error
 			);
 		} finally {
 			uploading = false;

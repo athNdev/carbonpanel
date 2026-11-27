@@ -17,7 +17,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm,
 		CarbonErrorState
 	} from '$lib/components/carbon';
-	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Module } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/carbonpanel/v1/module_pb';
@@ -75,7 +75,10 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (err) {
 			if (!silent) {
 				loadError = err instanceof Error ? err.message : 'Failed to load modules';
-				toast.error('Failed to load modules');
+				// The RPC interceptor already toasted non-silent failures.
+				if (!wasRpcErrorToasted(err)) {
+					toast.error('Failed to load modules');
+				}
 			}
 		} finally {
 			if (!silent) loading = false;
@@ -89,9 +92,11 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Starting ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(
-				`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					`Failed to start module: ${error instanceof Error ? error.message : 'Unknown error'}`
+				);
+			}
 		} finally {
 			actionLoading = null;
 		}
@@ -104,9 +109,11 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Stopping ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(
-				`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					`Failed to stop module: ${error instanceof Error ? error.message : 'Unknown error'}`
+				);
+			}
 		} finally {
 			actionLoading = null;
 		}
@@ -119,9 +126,11 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Restarting ${module.name}...`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(
-				`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					`Failed to restart module: ${error instanceof Error ? error.message : 'Unknown error'}`
+				);
+			}
 		} finally {
 			actionLoading = null;
 		}
@@ -144,9 +153,11 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Module "${module.name}" deleted`);
 			await loadModules(true);
 		} catch (error) {
-			toast.error(
-				`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					`Failed to delete module: ${error instanceof Error ? error.message : 'Unknown error'}`
+				);
+			}
 		} finally {
 			actionLoading = null;
 			pendingDelete = null;
