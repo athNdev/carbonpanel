@@ -241,6 +241,12 @@ type Reconciler struct {
 	// SERVER_STOP announcement is re-emitted if the initiating RPC never
 	// finalizes (see suppressStopAnnouncement / flushPendingStops).
 	pendingStops map[string]pendingStop
+	// retries marks servers whose convergence pass failed since their last
+	// successful pass. The first failure of an episode releases the lifecycle
+	// transition normally so the transition-end hook retries immediately;
+	// later failures release quietly and fall back to the periodic sweep, so a
+	// persistent fault cannot spin the reconciler.
+	retries map[string]bool
 
 	ctx      context.Context
 	wg       sync.WaitGroup
@@ -284,6 +290,7 @@ func New(store Store, clients ClientResolver, proxy ProxyRouter, bus EventEmitte
 		backends:     make(map[string]backendRef),
 		loops:        newRestartTracker(),
 		pendingStops: make(map[string]pendingStop),
+		retries:      make(map[string]bool),
 		stop:         make(chan struct{}),
 	}
 }
@@ -798,15 +805,39 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		r.convergeWhenTransitionEnds(serverID)
 		return nil
 	}
-	// This pass is itself the convergence the transition-end hook would
-	// request. Releasing quietly keeps the hook for genuine operator and
-	// lifecycle releases instead of letting every pass queue the next one.
-	defer transition.ReleaseQuiet()
+	// A pass that converged, or deliberately did nothing, is itself the
+	// convergence the transition-end hook would request: release it quietly so
+	// it cannot queue the next one. A transient failure is different - the hook
+	// is the prompt retry - so the first failure of an episode releases
+	// normally. Later failures release quietly and fall back to the periodic
+	// sweep, keeping a persistent fault from becoming an unbounded self-nudge
+	// loop.
+	retry := false
+	defer func() {
+		if retry && r.beginRetry(serverID) {
+			transition.Release()
+			return
+		}
+		if !retry {
+			r.clearRetry(serverID)
+		}
+		transition.ReleaseQuiet()
+	}()
 
 	server, err := r.store.GetServer(ctx, serverID)
-	if err != nil || server == nil {
-		// Deleted, or a transient DB read failure; either way there is nothing
-		// safe to converge.
+	if err != nil {
+		// A deleted server is a deliberate no-op; a read failure is transient
+		// and must retry promptly instead of waiting for the sweep.
+		r.loops.reset(serverID)
+		r.clearPendingStop(serverID)
+		if errors.Is(err, db.ErrServerNotFound) {
+			return nil
+		}
+		retry = true
+		return fmt.Errorf("get server: %w", err)
+	}
+	if server == nil {
+		// Deleted between listing and this pass; nothing safe to converge.
 		r.loops.reset(serverID)
 		r.clearPendingStop(serverID)
 		return nil
@@ -817,11 +848,13 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		if r.log != nil {
 			r.log.Warn("reconciler: node %q unavailable for server %s: %v", server.NodeID, server.Name, err)
 		}
+		retry = true
 		return nil
 	}
 
 	obs, err := r.observe(ctx, cli, server.ID)
 	if err != nil {
+		retry = true
 		return err
 	}
 
@@ -868,6 +901,7 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	adopted := false
 	if obs.Exists && obs.ContainerID != "" && obs.ContainerID != server.ContainerID {
 		if err := r.store.UpdateServerContainerID(ctx, server.ID, obs.ContainerID); err != nil {
+			retry = true
 			return fmt.Errorf("adopt container id: %w", err)
 		}
 		if r.log != nil {
@@ -920,6 +954,7 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	statusChanged := dec.status != "" && dec.status != prev
 	if statusChanged {
 		if err := r.store.UpdateServerStatus(ctx, server.ID, dec.status); err != nil {
+			retry = true
 			return fmt.Errorf("update status: %w", err)
 		}
 		server.Status = dec.status
@@ -980,6 +1015,29 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	r.flushPendingStops(ctx, server, obs)
 
 	return nil
+}
+
+// beginRetry records that serverID still needs a retry and reports whether this
+// is the first failure of the episode. Only that first failure releases the
+// transition loudly; a repeated failure stays quiet and leaves the next attempt
+// to the periodic sweep.
+func (r *Reconciler) beginRetry(serverID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.retries[serverID] {
+		return false
+	}
+	r.retries[serverID] = true
+	return true
+}
+
+// clearRetry forgets a server's failure episode after a pass that needed no
+// retry, whether it converged or deliberately did nothing (for example a
+// deleted server).
+func (r *Reconciler) clearRetry(serverID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.retries, serverID)
 }
 
 // scheduleServerChildModules queues a module pass for every sidecar on serverID

@@ -58,7 +58,7 @@ func (f *fakeStore) GetServer(_ context.Context, id string) (*db.Server, error) 
 	defer f.mu.Unlock()
 	s, ok := f.servers[id]
 	if !ok {
-		return nil, fmt.Errorf("server not found")
+		return nil, db.ErrServerNotFound
 	}
 	cp := *s
 	return &cp, nil
@@ -1507,12 +1507,27 @@ func TestReconcilerPassDoesNotNudgeItself(t *testing.T) {
 		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
 	}
 
-	// Give any self-queued follow-up well past the debounce window to run. With
-	// the self-nudge loop, passes keep arriving every window and this count
-	// grows; without it, the single startup pass is all that runs.
-	deadline := time.Now().Add(10 * r.cfg.DebounceWindow)
-	for time.Now().Before(deadline) {
-		time.Sleep(r.cfg.DebounceWindow)
+	// Wait deterministically for the startup pass to release its transition
+	// rather than guessing with a fixed delay. Claiming the transition proves
+	// the pass ended; claiming it while the pass still owned the lock would
+	// race and report ErrTransitionInFlight. A self-queued follow-up would have
+	// notified the hook before releasing, so the notification and observation
+	// counts still catch a self-nudge.
+	var external *docker.Transition
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var claimErr error
+		external, claimErr = docker.TryBeginServerTransition(server.ID)
+		if claimErr == nil {
+			break
+		}
+		if !errors.Is(claimErr, docker.ErrTransitionInFlight) {
+			t.Fatalf("external transition: %v", claimErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("startup pass never released its lifecycle transition")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if got := cli.observeCalls(); got != 1 {
 		t.Fatalf("startup pass scheduled %d follow-up observations, want 1 total", got)
@@ -1520,18 +1535,169 @@ func TestReconcilerPassDoesNotNudgeItself(t *testing.T) {
 	if got := notified.Load(); got != 0 {
 		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
 	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("startup pass queued %d follow-up passes, want 0", got)
+	}
 
 	// An operator/lifecycle release is still a real transition end: it notifies
 	// and queues a convergence pass.
-	external, err := docker.TryBeginServerTransition(server.ID)
-	if err != nil {
-		t.Fatalf("external transition: %v", err)
-	}
 	external.Release()
 	if got := notified.Load(); got != 1 {
 		t.Fatalf("external release notified %d times, want 1", got)
 	}
 	waitForObserveCalls(t, cli, 2)
+}
+
+// transientResolveClient fails every container resolution, modelling a
+// transient Docker outage. It embeds the sequenced fake for the methods the
+// failing path never reaches.
+type transientResolveClient struct {
+	sequencedClient
+	mu       sync.Mutex
+	resolves int
+}
+
+func (c *transientResolveClient) ResolveContainer(context.Context, string) (*container.Summary, error) {
+	c.mu.Lock()
+	c.resolves++
+	c.mu.Unlock()
+	return nil, errors.New("transient docker unavailable")
+}
+
+func (c *transientResolveClient) resolveCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resolves
+}
+
+func waitForResolveCalls(t *testing.T, cli *transientResolveClient, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cli.resolveCalls() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("container resolutions = %d, want at least %d", cli.resolveCalls(), want)
+}
+
+// deletedServerStore lists the server for the sweep but reports it deleted to
+// the convergence pass, modelling a row removed between list and reconcile.
+type deletedServerStore struct {
+	*fakeStore
+	mu       sync.Mutex
+	getCalls int
+}
+
+func (s *deletedServerStore) GetServer(context.Context, string) (*db.Server, error) {
+	s.mu.Lock()
+	s.getCalls++
+	s.mu.Unlock()
+	return nil, db.ErrServerNotFound
+}
+
+func (s *deletedServerStore) getServerCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getCalls
+}
+
+func pendingDebounceTimers(r *Reconciler) int {
+	r.deb.mu.Lock()
+	defer r.deb.mu.Unlock()
+	return len(r.deb.timers)
+}
+
+// TestReconcilerTransientFailureRequestsOneRetry: a pass that fails on a
+// transient error must release the transition normally so the transition-end
+// hook retries once, but a repeated failure must release quietly instead of
+// spinning the reconciler.
+func TestReconcilerTransientFailureRequestsOneRetry(t *testing.T) {
+	server := &db.Server{ID: "srv-transient", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	cli := &transientResolveClient{}
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	waitForResolveCalls(t, cli, 2)
+	if err := docker.WaitForServerTransition(ctx, server.ID); err != nil {
+		t.Fatalf("wait for retry pass: %v", err)
+	}
+	if got := notified.Load(); got != 1 {
+		t.Fatalf("transition releases notified %d times, want exactly 1 (one retry request)", got)
+	}
+	if got := cli.resolveCalls(); got != 2 {
+		t.Fatalf("container resolutions = %d, want exactly 2 (startup + one retry)", got)
+	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("failed retry queued %d follow-up passes, want 0", got)
+	}
+}
+
+// TestReconcilerDeletedServerNoOpDoesNotRetry: a server deleted between the
+// sweep listing and the pass is a deliberate no-op, not a failure to retry.
+func TestReconcilerDeletedServerNoOpDoesNotRetry(t *testing.T) {
+	server := &db.Server{ID: "srv-deleted", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := &deletedServerStore{fakeStore: newFakeStore(server)}
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: &sequencedClient{}}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && store.getServerCalls() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := store.getServerCalls(); got == 0 {
+		t.Fatal("the deleted server's pass never ran")
+	}
+	if err := docker.WaitForServerTransition(ctx, server.ID); err != nil {
+		t.Fatalf("wait for deleted-server pass: %v", err)
+	}
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("deleted-server no-op notified the transition-end hook %d times, want 0", got)
+	}
+	if got := store.getServerCalls(); got != 1 {
+		t.Fatalf("deleted server read %d times, want exactly 1 (no loop)", got)
+	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("deleted-server no-op queued %d follow-up passes, want 0", got)
+	}
 }
 
 func waitForObserveCalls(t *testing.T, cli *sequencedClient, want int) {
