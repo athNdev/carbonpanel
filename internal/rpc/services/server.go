@@ -2727,19 +2727,25 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			// never recreate or start a runtime for a replayed request.
 			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
 		}
-		if result != nil && result.NewContainerID != "" {
-			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
-			}
-		}
 		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(recreateErr, &outcomeErr) {
 				if outcomeErr.Operation == nil {
 					publication.RuntimeIdentityUnresolved = true
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 				}
+				// A typed preflight proves no container mutation began; set the
+				// flag before deciding whether to record an identity.
 				publication.RuntimePreflight = outcomeErr.Preflight
+			}
+		}
+		if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
+		if recreateErr != nil {
+			if publication.RuntimeIdentityUnresolved {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
@@ -2838,16 +2844,21 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			s.prepareServerConfig(ctx, server, serverConfig)
 			publication.RuntimeAttempted = true
 			result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
-			if result != nil && result.NewContainerID != "" {
+			if err != nil {
+				var outcomeErr *serverruntime.RecreationError
+				if errors.As(err, &outcomeErr) {
+					if outcomeErr.Operation == nil {
+						publication.RuntimeIdentityUnresolved = true
+					}
+					publication.RuntimePreflight = outcomeErr.Preflight
+				}
+			}
+			if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
 				if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 				}
 			}
 			if err != nil {
-				var outcomeErr *serverruntime.RecreationError
-				if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
-					publication.RuntimeIdentityUnresolved = true
-				}
 				s.log.Error("Failed to recreate container: %v", err)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", err))
 			}
@@ -3219,19 +3230,23 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			// never recreate or start a runtime for a replayed request.
 			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
 		}
-		if result != nil && result.NewContainerID != "" {
-			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
-			}
-		}
 		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
 			if errors.As(recreateErr, &outcomeErr) {
 				if outcomeErr.Operation == nil {
 					publication.RuntimeIdentityUnresolved = true
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 				}
 				publication.RuntimePreflight = outcomeErr.Preflight
+			}
+		}
+		if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
+		if recreateErr != nil {
+			if publication.RuntimeIdentityUnresolved {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
@@ -3414,7 +3429,17 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			publication.RuntimePreflight = false
 			publication.RuntimeAttempted = true
 			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
-			if recResult != nil && recResult.NewContainerID != "" {
+			if recErr != nil {
+				var outcomeErr *serverruntime.RecreationError
+				if errors.As(recErr, &outcomeErr) {
+					if outcomeErr.Operation == nil {
+						publication.RuntimeIdentityUnresolved = true
+					} else {
+						publication.RuntimePreflight = outcomeErr.Preflight
+					}
+				}
+			}
+			if recResult != nil && recResult.NewContainerID != "" && !publication.RuntimePreflight {
 				if recordErr := publication.RecordReplacement(ctx, recResult.NewContainerID); recordErr != nil {
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 				}
@@ -3448,14 +3473,6 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 				return connect.NewResponse(&v1.RestartServerResponse{
 					Status: "starting",
 				}), nil
-			}
-			var outcomeErr *serverruntime.RecreationError
-			if errors.As(recErr, &outcomeErr) {
-				if outcomeErr.Operation == nil {
-					publication.RuntimeIdentityUnresolved = true
-				} else {
-					publication.RuntimePreflight = outcomeErr.Preflight
-				}
 			}
 			err = errors.Join(err, recErr)
 		} else {

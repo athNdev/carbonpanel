@@ -489,6 +489,12 @@ func (c *NextRestartCommit) RecordReplacement(ctx context.Context, containerID s
 	if c.publication.phase() != storage.PublicationDispatched {
 		return nil
 	}
+	if c.publication.record != nil && containerID == c.publication.record.BaselineContainerID {
+		// Docker preserves the old identity when a typed preflight or a
+		// rollback leaves the baseline container in place. Recording it as a
+		// replacement would later refuse every retry at the identity check.
+		return nil
+	}
 	return c.store.RecordUpdatePublicationReplacement(ctx, c.batchID, c.publication.attempt(), containerID)
 }
 
@@ -953,10 +959,15 @@ func (c *NextRestartCommit) abandonPreflightDispatch(ctx context.Context) error 
 	if c == nil || c.publication == nil {
 		return nil
 	}
-	if c.publication.phase() != storage.PublicationDispatched {
+	switch c.publication.phase() {
+	case storage.PublicationDispatched, storage.PublicationIdentityUnresolved:
+		// The store accepts the identity-unresolved phase only with an empty
+		// expected identity; a recorded replacement belongs to identity
+		// verification, not to a later preflight's no-mutation proof.
+		return c.store.AbandonPreflightDispatch(ctx, c.batchID, c.publication.attempt())
+	default:
 		return nil
 	}
-	return c.store.AbandonPreflightDispatch(ctx, c.batchID, c.publication.attempt())
 }
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.

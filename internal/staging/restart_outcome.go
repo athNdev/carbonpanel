@@ -165,11 +165,17 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	if !p.HasChanges() {
 		return nil
 	}
-	if p.RuntimeIdentityUnresolved {
+	// A typed preflight proves that this attempt sent no stop, rename, create or
+	// remove request. It cannot erase an in-place request that may have been
+	// accepted, so only the preflight-only case may disregard an unresolved
+	// identity marker left by the same attempt.
+	preflightOnly := p.RuntimePreflight && !p.RuntimeInPlaceMayHaveMutated
+	if p.RuntimeIdentityUnresolved && !(preflightOnly && p.Commit.ExpectedReplacementID() == "") {
 		// Docker created a replacement but its canonical ID could not be saved.
 		// The runtime may contain this batch, so retain and seal it; the
 		// identity-unresolved record lets a retry adopt the created canonical
-		// container and verify it before finalizing.
+		// container and verify it before finalizing. Without a recorded identity
+		// a later typed preflight may still abandon it below.
 		return errors.Join(p.Commit.sealRetained(ctx),
 			errors.New("container replacement succeeded but its canonical identity could not be saved; retry the lifecycle operation to adopt and verify the replacement before finalizing"))
 	}
@@ -182,7 +188,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		}
 		return nil
 	}
-	if p.RuntimeAttempted && (!p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated) {
+	if p.RuntimeAttempted && !preflightOnly {
 		// Seal admission before returning: the applied rows and their recovery
 		// tree belong to this attempt, and a new staged row must not be appended
 		// to the same batch before a retry resolves it.
@@ -195,7 +201,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		// container, so rollback would let that replacement outlive the rows.
 		return errors.Join(sealErr, errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation"))
 	}
-	if p.Commit.NeedsIdentityVerification() && (!p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated) {
+	if p.Commit.NeedsIdentityVerification() && !preflightOnly {
 		// A durable dispatch intent exists but this attempt did not positively
 		// observe its outcome. Never compensate or clean up over it; a retry
 		// must verify the exact recorded replacement identity first.
@@ -234,7 +240,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	}
 	if failed == nil && sealErr == nil {
 		if p.Commit.NeedsIdentityVerification() {
-			if !p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated {
+			if !preflightOnly {
 				// The dispatch is unverified. Keep the batch sealed so
 				// admission cannot append work to it.
 				return errors.Join(sealErr, errors.New("recorded runtime dispatch retained; the batch stays sealed until its replacement identity is verified"))

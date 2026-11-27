@@ -345,15 +345,16 @@ func (s *Store) AbandonUpdatePublication(ctx context.Context, batchID string, at
 	return fmt.Errorf("%w: batch %s attempt %d is %s and cannot be abandoned", ErrPublicationTransition, batchID, record.Attempt, record.Phase)
 }
 
-// AbandonPreflightDispatch releases a dispatched attempt only after a typed
-// Docker preflight proved that no container mutation began. AbandonUpdatePublication
-// refuses the dispatched phase generically because an unverified or ambiguous
-// dispatch must be settled by identity verification; this method exists only for
-// that provable no-mutation case and is idempotent for an already abandoned
-// attempt.
+// AbandonPreflightDispatch releases a dispatched or identity-unresolved attempt
+// only after a typed Docker preflight proved that no container mutation began,
+// and only while no replacement identity is recorded. AbandonUpdatePublication
+// refuses those phases generically because an unverified or ambiguous dispatch
+// must be settled by identity verification; this method exists only for that
+// provable no-mutation case and is idempotent for an already abandoned attempt.
 func (s *Store) AbandonPreflightDispatch(ctx context.Context, batchID string, attempt int) error {
 	res := s.db.WithContext(ctx).Model(&ServerUpdatePublication{}).
-		Where("batch_id = ? AND attempt = ? AND phase = ?", batchID, attempt, PublicationDispatched).
+		Where("batch_id = ? AND attempt = ? AND phase IN ? AND COALESCE(expected_container_id, '') = ''", batchID, attempt,
+			[]PublicationPhase{PublicationDispatched, PublicationIdentityUnresolved}).
 		Update("phase", PublicationAbandoned)
 	if res.Error != nil {
 		return res.Error
@@ -370,6 +371,9 @@ func (s *Store) AbandonPreflightDispatch(ctx context.Context, batchID string, at
 	}
 	if record.Attempt == attempt && record.Phase == PublicationAbandoned {
 		return nil
+	}
+	if record.ExpectedContainerID != "" {
+		return fmt.Errorf("%w: batch %s already recorded replacement %s; a typed preflight cannot abandon it", ErrPublicationTransition, batchID, record.ExpectedContainerID)
 	}
 	return fmt.Errorf("%w: batch %s attempt %d is %s, not a preflight-refused dispatch", ErrPublicationTransition, batchID, record.Attempt, record.Phase)
 }
