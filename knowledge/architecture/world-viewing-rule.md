@@ -48,14 +48,3 @@ cookie renewed before each map session. Each asset read rechecks the server’s
 map-read permission. Renderer endpoints stay private. Endpoint and renderer
 failures have distinct states. Authorized commands remain available on saved
 terrain or when the renderer is unavailable.
-
-Managed BlueMap install and private discovery share one node eligibility
-check. It accepts legacy controller aliases and enabled registered nodes
-marked local in persisted state. Discovery uses the controller Docker client,
-checks the server's current node assignment and opens only its confined storage.
-Managed startup holds the server transition through its bounded Docker call
-and terminal state write. Manual Start, Restart, Recreate and managed updates
-share that lease and recheck node eligibility. Async recreation keeps the lease.
-Only the guarded installer sets the persisted managed marker. Module metadata
-updates preserve that decision. A canceled post-create write records the known
-container ID and stopped state so a later Start can reuse it.
