@@ -41,6 +41,7 @@ type fakeLifecycleDocker struct {
 	err           error
 	starts        []string
 	recreateCalls int
+	resolveCalls  int
 	resolvedID    string
 	resolveErr    error
 }
@@ -55,6 +56,7 @@ func (f *fakeLifecycleDocker) RecreateContainer(context.Context, string, *storag
 }
 
 func (f *fakeLifecycleDocker) ResolveContainer(context.Context, string) (*container.Summary, error) {
+	f.resolveCalls++
 	if f.resolveErr != nil {
 		return nil, f.resolveErr
 	}
@@ -626,4 +628,89 @@ func TestWakePreparationRetainsOwnershipUntilStartOutcome(t *testing.T) {
 	current, err := store.GetStagedContent(ctx, row.ID)
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusApplied, current.Status)
+}
+
+// openNextRestartBatch creates an open, empty batch in the next-restart window
+// so a test can attach a publication record without staged rows.
+func openNextRestartBatch(t *testing.T, store *storage.Store, serverID string) string {
+	t.Helper()
+	placeholder, err := store.AddStagedContent(context.Background(), &storage.StagedContentChange{
+		ServerID: serverID, Kind: storage.StagedKindFile, Action: storage.StagedActionInstall,
+		TargetPath: "placeholder", StagePath: ".carbon-panel/staged/placeholder/placeholder", FileName: "placeholder",
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Where("id = ?", placeholder.ID).Delete(&storage.StagedContentChange{}).Error)
+	require.NoError(t, store.DB().Model(&storage.ServerUpdateBatch{}).Where("id = ?", placeholder.BatchID).
+		Update("window", string(storage.UpdateWindowNextRestart)).Error)
+	return placeholder.BatchID
+}
+
+// TestDispatchedFileOnlyWakeVerifiesRecordedReplacement is the OSS-424/OSS-425
+// regression for a wake that skipped identity verification. A file-only
+// publication records its dispatch but owes no new container, so the wake path
+// must still verify the recorded replacement instead of returning "no work";
+// otherwise the deferred Resolve rejects the unverified dispatch and the server
+// cannot wake through this path.
+func TestDispatchedFileOnlyWakeVerifiesRecordedReplacement(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "wake-dispatched", Name: "wake-dispatched", DataPath: t.TempDir(),
+		Status: storage.StatusDeepSleep, ContainerID: "replacement",
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openNextRestartBatch(t, store, server.ID)
+
+	record, err := store.BeginUpdatePublication(ctx, batch, server.ID, "old")
+	require.NoError(t, err)
+	require.NoError(t, store.RecordUpdatePublicationSnapshot(ctx, batch, record.Attempt, "[]"))
+	require.NoError(t, store.RecordUpdatePublicationDispatch(ctx, batch, record.Attempt, "[]", "[]"))
+	require.NoError(t, store.RecordUpdatePublicationReplacement(ctx, batch, record.Attempt, "replacement"))
+
+	client := &fakeLifecycleDocker{resolvedID: "replacement"}
+	handled, err := prepareStagedLifecycle(ctx, store, client, nil, server, false, false, nil, nil)
+	require.NoError(t, err, "an unverified file-only dispatch must be resolved by identity, not rejected")
+	require.False(t, handled, "the caller's normal wake continues on the verified replacement")
+	require.NotZero(t, client.resolveCalls, "the wake must reconcile the tracked identity")
+	require.Zero(t, client.recreateCalls, "identity verification must not recreate the container")
+	verified, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Contains(t, []storage.PublicationPhase{storage.PublicationVerified, storage.PublicationCleaned}, verified.Phase,
+		"the recorded replacement identity was positively accepted")
+	require.Equal(t, "replacement", verified.VerifiedContainerID)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open, "the verified file-only publication owes cleanup only")
+}
+
+// TestWakeEmptyBatchTakesNoWorkFastPath keeps the fast path for a batch with
+// neither pending work nor an unverified dispatch: the wake must not touch
+// Docker or leave a publication seal behind.
+func TestWakeEmptyBatchTakesNoWorkFastPath(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{
+		ID: "wake-noop", Name: "wake-noop", DataPath: t.TempDir(),
+		Status: storage.StatusDeepSleep, ContainerID: "old",
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	openNextRestartBatch(t, store, server.ID)
+
+	client := &fakeLifecycleDocker{resolvedID: "old"}
+	var owner *staging.RestartPublication
+	handled, err := prepareStagedLifecycle(ctx, store, client, nil, server, false, false, nil,
+		func(p *staging.RestartPublication) { owner = p })
+	require.NoError(t, err)
+	require.False(t, handled)
+	require.Nil(t, owner)
+	require.Zero(t, client.resolveCalls)
+	require.Zero(t, client.recreateCalls)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Nil(t, open.SealedAt, "a no-work wake must not leave a publication seal")
 }

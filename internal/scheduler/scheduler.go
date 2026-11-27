@@ -1483,10 +1483,15 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	// container again; the caller's normal start/wake proceeds on the current
 	// replacement and the deferred Resolve finishes the batch.
 	needsPublication := publication.Commit.NeedsRuntimePublication()
-	if appliedNow == 0 && !pending && !needsPublication {
+	// An unverified dispatch is pending work even when it owes no runtime
+	// publication: a file-only batch records the dispatch without needing a new
+	// container. Returning "no work" here would skip the identity check, and the
+	// deferred Resolve would then reject the dispatch and block the wake.
+	needsIdentityVerification := publication.Commit.NeedsIdentityVerification()
+	if appliedNow == 0 && !pending && !needsPublication && !needsIdentityVerification {
 		return false, nil
 	}
-	if publication.Commit.NeedsIdentityVerification() {
+	if needsIdentityVerification {
 		// A dispatch intent is durable but its outcome was not verified. Repair
 		// the tracked identity if the canonical container differs, then accept
 		// only the exact replacement identity captured at creation. Discovery of
