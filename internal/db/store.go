@@ -377,6 +377,17 @@ func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) erro
 		return s.db.WithContext(ctx).Save(config).Error
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Take SQLite's writer lock before the guard's reads. A deferred
+		// transaction that reads first and writes later can lose the snapshot
+		// upgrade to a concurrent commit and fail with SQLITE_BUSY_SNAPSHOT
+		// ("database is locked"), which busy_timeout does not retry. The
+		// UPDATE matches the row being saved at most and changes nothing; a
+		// zero-row UPDATE still starts the write transaction when the legacy
+		// server has no config row yet.
+		if err := tx.Model(&ServerConfig{}).Where("server_id = ?", config.ServerID).
+			UpdateColumn("server_id", gorm.Expr("server_id")).Error; err != nil {
+			return err
+		}
 		if err := ensureDirectRuntimeSaveAllowed(tx, config); err != nil {
 			return err
 		}
