@@ -29,7 +29,9 @@ sources:
   Closing and reopening for another format, a server identity or status change,
   and teardown release the former attempt, so a late success or rejection cannot
   replace the active session, filename or phase. The download action requires
-  the current ready session.
+  the current ready session. Export preparation is a silent RPC call: the shared
+  interceptor must not toast for a stale attempt, and only the fenced current
+  attempt reports its failure.
 - Create-from-Archive binds preview and create to the same concrete node and
   renders typed findings plus that node's capacity. The current upload's
   successful preflight outranks cached inventory, including newly enabled,

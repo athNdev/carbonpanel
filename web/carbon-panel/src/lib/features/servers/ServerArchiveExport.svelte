@@ -9,7 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { Archive } from '@lucide/svelte';
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
 	import { CarbonButton, CarbonModal } from '$lib/components/carbon';
 	import { ServerStatus, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -108,7 +108,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					format: format as ServerArchiveFormat,
 					consistency: STOPPED_CONSISTENCY
 				},
-				ARCHIVE_RPC_OPTIONS
+				{ ...ARCHIVE_RPC_OPTIONS, ...silentCallOptions }
 			);
 			if (generation !== attempt || !open || server.id !== requestedServerId) return;
 			sessionId = result.sessionId;
@@ -119,7 +119,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (generation !== attempt || !open || server.id !== requestedServerId) return;
 			error = cause instanceof Error ? cause.message : 'Archive preparation failed.';
 			phase = 'error';
-			if (!wasRpcErrorToasted(cause)) toast.error(error);
+			// The request is silent so the shared interceptor cannot toast for a
+			// stale attempt. Only the current, fenced attempt reports its failure.
+			toast.error(error);
 		}
 	}
 

@@ -28,8 +28,12 @@ mock.module('$app/env', () => ({ browser: true }));
 mock.module('$app/state', () => ({
 	page: { url: new URL('http://localhost/'), params: {}, data: {} }
 }));
+const toasts: string[] = [];
 mock.module('svelte-sonner', () => ({
-	toast: { error: () => {}, success: () => {} }
+	toast: {
+		error: (message: unknown) => toasts.push(String(message)),
+		success: () => {}
+	}
 }));
 
 const { mount, unmount } = await import('svelte');
@@ -38,6 +42,11 @@ const { ServerStatus } = await import('../../proto/carbonpanel/v1/common_pb');
 const { ServerArchiveFormat } = await import('../../proto/carbonpanel/v1/server_pb');
 const { default: ServerArchiveExport } = await import('./ServerArchiveExport.svelte');
 const { default: ExportHost } = await import('../../../../test/fixtures/export-host.svelte');
+
+// Capture the real client call and transport fetch before any test replaces
+// them, so the interceptor-seam test drives the production RPC path.
+const realExportServerArchive = rpcClient.server.exportServerArchive.bind(rpcClient.server);
+const realFetch = globalThis.fetch;
 
 const flush = async (ms = 80) => {
 	await new Promise((resolve) => setTimeout(resolve, ms));
@@ -283,6 +292,83 @@ test('a server change fences the in-flight preparation', async () => {
 	} finally {
 		unmount(host as never);
 		target.remove();
+	}
+});
+
+test('a stale rejection cannot toast through the real silent RPC interceptor', async () => {
+	toasts.length = 0;
+	type PendingCall = {
+		headers: Headers;
+		resolve: (response: Response) => void;
+		reject: (error: unknown) => void;
+	};
+	const pending: PendingCall[] = [];
+	const errorResponse = (message: string) =>
+		new Response(JSON.stringify({ code: 'failed_precondition', message }), {
+			status: 500,
+			headers: { 'content-type': 'application/json' }
+		});
+
+	globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+		let resolve!: PendingCall['resolve'];
+		let reject!: PendingCall['reject'];
+		const response = new Promise<Response>((ok, fail) => {
+			resolve = ok;
+			reject = fail;
+		});
+		pending.push({ headers: new Headers(init?.headers), resolve, reject });
+		return response;
+	}) as typeof fetch;
+
+	const ui = mountExport();
+	try {
+		(rpcClient.server as unknown as Record<string, unknown>).exportServerArchive =
+			realExportServerArchive;
+
+		await openExport();
+		await prepare();
+		assert.equal(pending.length, 1, 'the first preparation reached the transport');
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await flush();
+		await openExport();
+		await chooseFormat('TAR.GZ (.tar.gz)');
+		await prepare();
+		assert.equal(pending.length, 2, 'the reopened attempt reached the transport');
+
+		pending[0].resolve(errorResponse('stale ZIP refusal'));
+		await flush();
+		assert.deepEqual(
+			toasts,
+			[],
+			'the interceptor and the fenced component stay quiet for a stale rejection'
+		);
+		assert.ok(
+			document
+				.querySelector('[data-testid="archive-export-panel"]')
+				?.textContent?.includes('Preparing archive'),
+			'the reopened attempt stays authoritative'
+		);
+
+		pending[1].resolve(errorResponse('current tar.gz refusal'));
+		await flush();
+		assert.equal(toasts.length, 1, 'only the current attempt reports a failure');
+		assert.match(toasts[0] ?? '', /current tar\.gz refusal/);
+		assert.ok(
+			document
+				.querySelector('[data-testid="archive-export-panel"]')
+				?.textContent?.includes('current tar.gz refusal'),
+			'the current attempt shows its own failure inline'
+		);
+		assert.ok(
+			pending.every((call) => call.headers.get('x-silent-request') === 'true'),
+			'the export request is silent so the shared interceptor cannot toast'
+		);
+	} finally {
+		ui.unmount();
+		globalThis.fetch = realFetch;
+		(rpcClient.server as unknown as Record<string, unknown>).exportServerArchive =
+			realExportServerArchive;
 	}
 });
 
