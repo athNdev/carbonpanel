@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -18,6 +19,39 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// ErrDuplicateStagedTarget refuses a second live content row with the same
+// normalized target inside one batch. Publication records one live post-image
+// per target, so two rows would make an interrupted APPLYING snapshot
+// unverifiable and permanently refuse recovery.
+var ErrDuplicateStagedTarget = errors.New("staged target already exists in this batch")
+
+// normalizedStagedTarget matches the publication-time target identity: case,
+// separator and trailing-separator aliases name the same live file.
+func normalizedStagedTarget(value string) string {
+	return strings.TrimSuffix(strings.ToLower(path.Clean(strings.ReplaceAll(value, "\\", "/"))), "/")
+}
+
+// rejectDuplicateStagedTarget runs inside the admission transaction after the
+// row insert, so a duplicate rolls back the insert instead of committing a
+// batch publication cannot recover.
+func rejectDuplicateStagedTarget(tx *gorm.DB, row *StagedContentChange, batchID string) error {
+	var rows []StagedContentChange
+	if err := tx.Select("id", "target_path").
+		Where("batch_id = ? AND status = ?", batchID, StagedStatusStaged).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	target := normalizedStagedTarget(row.TargetPath)
+	for _, existing := range rows {
+		if existing.ID == row.ID || normalizedStagedTarget(existing.TargetPath) != target {
+			continue
+		}
+		return fmt.Errorf("%w: %q is already staged in batch %s as row %s; discard that item before staging it again",
+			ErrDuplicateStagedTarget, row.TargetPath, batchID, existing.ID)
+	}
+	return nil
+}
 
 // ensureStagedModApprovalAdmission enforces durable operator approval on
 // reviewed mod replacements. A reviewed row must carry the SHA-512 its staged
@@ -188,7 +222,10 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		if err := ensureReviewedModRuntimeAdmission(tx, row, batch.ID); err != nil {
 			return err
 		}
-		return tx.Create(row).Error
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		return rejectDuplicateStagedTarget(tx, row, batch.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -414,6 +451,9 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 			return err
 		}
 		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		if err := rejectDuplicateStagedTarget(tx, row, batchID); err != nil {
 			return err
 		}
 		if err := requireBatchAdmission(tx, row.ServerID); err != nil {

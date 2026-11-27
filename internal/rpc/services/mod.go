@@ -534,7 +534,8 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			}
 			if errors.Is(err, errInvalidModUpdateWindow) {
 				code = connect.CodeInvalidArgument
-			} else if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) ||
+			} else if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrDuplicateStagedTarget) ||
+				errors.Is(err, storage.ErrStagedModVersionChange) ||
 				errors.Is(err, storage.ErrStagedModRuntimeTargetChanged) ||
 				errors.Is(err, storage.ErrReviewedModRuntimeUnknown) || errors.Is(err, errReviewedModRuntimeChanged) {
 				code = connect.CodeFailedPrecondition

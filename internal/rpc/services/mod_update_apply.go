@@ -612,7 +612,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 					VersionID: sel.GetCandidateVersionId(),
 					Filename:  sel.GetCandidateFilename(),
 				}, runtimeServer.ModLoader, runtimeServer.MCVersion)
-			if errors.Is(err, storage.ErrUpdateBatchConflict) {
+			if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrDuplicateStagedTarget) {
 				return err
 			}
 			if err != nil {
