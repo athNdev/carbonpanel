@@ -8,6 +8,7 @@ code_refs:
   - internal/rpc/services/server.go
   - internal/docker/stop.go
   - internal/docker/transition.go
+  - internal/reconciler
   - internal/rpc/services/server_version_compat.go
   - internal/minecraft/modcompat.go
 sources:
@@ -29,9 +30,11 @@ sources:
   the lock.
 - `docker.SetTransitionEndNotifier(reconciler.NotifyTransitionEnded)` ends the
   reconciler's blind window: stored status converges when a lifecycle
-  transition releases, not at the next sweep. Only `Release` notifies; the
-  reconciler's own pass uses `ReleaseQuiet` because that pass already converged
-  the server, so releasing it must not queue a redundant follow-up pass.
+  transition releases, not at the next sweep. Only `Release` notifies. A pass
+  that converged or deliberately did nothing uses `ReleaseQuiet` so it cannot
+  queue a redundant follow-up. A transient failure releases normally on the
+  first failure of an episode and quietly afterwards, so it retries promptly
+  without self-nudging forever; the sweep covers a persistent fault.
 
 # Version-change gate
 
