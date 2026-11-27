@@ -855,7 +855,17 @@ func (s *SupportService) addOperationsToBundle(ctx context.Context, tarWriter *t
 	if err != nil {
 		return fmt.Errorf("list server operations: %w", err)
 	}
-	views := operation.DescribeAll(ops)
+	byID := make(map[string]*storage.Node)
+	if nodes, nodeErr := s.store.ListNodes(ctx); nodeErr == nil {
+		for _, node := range nodes {
+			byID[node.ID] = node
+		}
+	} else {
+		// A missing node list must not drop the journal from the bundle; it
+		// only leaves every correlation unknown.
+		s.log.Warn("Continuing operations.json without node correlation: %v", nodeErr)
+	}
+	views := operation.DescribeAllAtForNodes(ops, byID, time.Now())
 	counts := operation.CountByOutcome(views)
 	summary := make(map[string]int, len(counts))
 	for outcome, n := range counts {

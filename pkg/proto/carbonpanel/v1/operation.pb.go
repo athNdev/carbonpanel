@@ -56,7 +56,20 @@ type LifecycleOperation struct {
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// Client request id that keyed this journal row. Empty when the caller
 	// did not supply one and the journal generated an internal key.
-	RequestId     string `protobuf:"bytes,14,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId string `protobuf:"bytes,14,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Node the operation was recorded against. Joins the row to a node without
+	// exposing a Docker daemon id or host.
+	NodeId string `protobuf:"bytes,15,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// The stable journal key: the client request id plus the mutation kind, or a
+	// generated key when no client id was supplied. Non-secret.
+	RequestKey string `protobuf:"bytes,16,opt,name=request_key,json=requestKey,proto3" json:"request_key,omitempty"`
+	// Stable reason code for the outcome, e.g. "executing_stale" or
+	// "uncertain_external_effect". Safe for a UI or runbook to branch on.
+	ReasonCode string `protobuf:"bytes,17,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	// Derived correlation state for the recorded node endpoint: matched,
+	// unmatched or unknown. It never carries the Docker daemon id, host, socket
+	// or credential; "unknown" means daemon identity could not be compared.
+	Correlation   string `protobuf:"bytes,18,opt,name=correlation,proto3" json:"correlation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -185,6 +198,34 @@ func (x *LifecycleOperation) GetUpdatedAt() *timestamppb.Timestamp {
 func (x *LifecycleOperation) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *LifecycleOperation) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *LifecycleOperation) GetRequestKey() string {
+	if x != nil {
+		return x.RequestKey
+	}
+	return ""
+}
+
+func (x *LifecycleOperation) GetReasonCode() string {
+	if x != nil {
+		return x.ReasonCode
+	}
+	return ""
+}
+
+func (x *LifecycleOperation) GetCorrelation() string {
+	if x != nil {
+		return x.Correlation
 	}
 	return ""
 }
@@ -517,7 +558,7 @@ var File_carbonpanel_v1_operation_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_operation_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecarbonpanel/v1/operation.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\x03\n" +
+	"\x1ecarbonpanel/v1/operation.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe4\x04\n" +
 	"\x12LifecycleOperation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
@@ -539,7 +580,13 @@ const file_carbonpanel_v1_operation_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x0e \x01(\tR\trequestId\"d\n" +
+	"request_id\x18\x0e \x01(\tR\trequestId\x12\x17\n" +
+	"\anode_id\x18\x0f \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\vrequest_key\x18\x10 \x01(\tR\n" +
+	"requestKey\x12\x1f\n" +
+	"\vreason_code\x18\x11 \x01(\tR\n" +
+	"reasonCode\x12 \n" +
+	"\vcorrelation\x18\x12 \x01(\tR\vcorrelation\"d\n" +
 	"\x15ListOperationsRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x18\n" +
 	"\aoutcome\x18\x02 \x01(\tR\aoutcome\x12\x14\n" +

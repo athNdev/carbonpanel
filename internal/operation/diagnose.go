@@ -36,6 +36,52 @@ const (
 	OutcomeUnknown Outcome = "unknown"
 )
 
+// ReasonCode is the stable classification behind an outcome. Two rows can both
+// be "unknown" for different reasons, and a UI or runbook needs to tell a stale
+// attempt from an operation that never started without parsing prose.
+type ReasonCode string
+
+const (
+	// ReasonRunning means the mutation is still being attempted.
+	ReasonRunning ReasonCode = "running"
+	// ReasonCompleted means the mutation completed and was recorded.
+	ReasonCompleted ReasonCode = "completed"
+	// ReasonAttemptFailed means the mutation returned an error and was recorded.
+	ReasonAttemptFailed ReasonCode = "attempt_failed"
+	// ReasonRecovered means the lock was released without confirming the effect.
+	ReasonRecovered ReasonCode = "recovered_without_confirmation"
+	// ReasonPreparedNotStarted means the intent was recorded but the attempt had
+	// not begun, so the external effect did not happen yet.
+	ReasonPreparedNotStarted ReasonCode = "prepared_not_started"
+	// ReasonUncertainEffect means the mutation reached an external effect that
+	// was not observed. Retrying blindly could repeat it.
+	ReasonUncertainEffect ReasonCode = "uncertain_external_effect"
+	// ReasonExecutingStale means the attempt stopped advancing before recording
+	// a completion. It may still be running, so it is not a failure to retry.
+	ReasonExecutingStale ReasonCode = "executing_stale"
+	// ReasonUnrecognisedPhase means the stored phase is not one this panel knows.
+	ReasonUnrecognisedPhase ReasonCode = "unrecognised_phase"
+)
+
+// Correlation is a derived, non-secret statement about whether a journal row
+// still belongs to the node endpoint it recorded. It never carries the Docker
+// daemon id itself: an operator can join the row to a server/node and see
+// whether the recorded endpoint still matches without seeing a host or a
+// daemon fingerprint.
+type Correlation string
+
+const (
+	// CorrelationMatched means the recorded node endpoint and daemon identity
+	// are present and still match the current node.
+	CorrelationMatched Correlation = "matched"
+	// CorrelationUnmatched means the node, endpoint generation or daemon
+	// identity recorded on the operation differs from the current node.
+	CorrelationUnmatched Correlation = "unmatched"
+	// CorrelationUnknown means the identity was not observed on one side, so a
+	// match cannot be claimed either way.
+	CorrelationUnknown Correlation = "unknown"
+)
+
 // NextAction is the safe next step for an operation in its current state. It
 // is a stable code so a UI, a runbook or a support engineer can agree on the
 // remedy without parsing an error string.
@@ -77,22 +123,29 @@ func ValidOutcome(name string) bool {
 // operator needs to tell the outcomes apart and to pick a next step; it never
 // carries credentials or a Docker host.
 type View struct {
-	ID                 string     `json:"id"`
-	ServerID           string     `json:"serverId"`
-	Kind               string     `json:"kind"`
-	Phase              string     `json:"phase"`
-	Outcome            Outcome    `json:"outcome"`
-	NextAction         NextAction `json:"nextAction"`
-	Reason             string     `json:"reason"`
-	EndpointGeneration int64      `json:"endpointGeneration"`
-	HasContainer       bool       `json:"hasContainer"`
-	HoldsLock          bool       `json:"holdsLock"`
-	LastError          string     `json:"lastError,omitempty"`
-	StartedAt          time.Time  `json:"startedAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	ID                 string      `json:"id"`
+	ServerID           string      `json:"serverId"`
+	NodeID             string      `json:"nodeId,omitempty"`
+	Kind               string      `json:"kind"`
+	Phase              string      `json:"phase"`
+	Outcome            Outcome     `json:"outcome"`
+	NextAction         NextAction  `json:"nextAction"`
+	ReasonCode         ReasonCode  `json:"reasonCode"`
+	Reason             string      `json:"reason"`
+	Correlation        Correlation `json:"correlation"`
+	EndpointGeneration int64       `json:"endpointGeneration"`
+	HasContainer       bool        `json:"hasContainer"`
+	HoldsLock          bool        `json:"holdsLock"`
+	LastError          string      `json:"lastError,omitempty"`
+	StartedAt          time.Time   `json:"startedAt"`
+	UpdatedAt          time.Time   `json:"updatedAt"`
 	// RequestID is the client request id that keyed this row, when one was
 	// supplied. It is the join key with activity events.
 	RequestID string `json:"requestId,omitempty"`
+	// RequestKey is the stable journal key (client request id plus kind, or a
+	// generated key). It is non-secret and lets an operator quote exactly the
+	// row the journal matched on.
+	RequestKey string `json:"requestKey,omitempty"`
 }
 
 // Describe projects a journal row for diagnostics, judged against the wall
@@ -103,20 +156,32 @@ func Describe(op *db.ServerOperation) View {
 
 // DescribeAt projects a journal row as it should be read at now. Whether an
 // operation is still in flight depends on when it was last advanced, so the
-// clock is a parameter instead of a hidden dependency.
+// clock is a parameter instead of a hidden dependency. Without a node identity
+// the correlation is unknown; use DescribeAtForNode when the current node is
+// available.
 func DescribeAt(op *db.ServerOperation, now time.Time) View {
+	return DescribeAtForNode(op, nil, now)
+}
+
+// DescribeAtForNode projects a journal row against the node it recorded. The
+// node is only used to derive a matched/unmatched/unknown correlation; the
+// projection still never carries a daemon id, host or credential.
+func DescribeAtForNode(op *db.ServerOperation, node *db.Node, now time.Time) View {
 	if op == nil {
 		return View{}
 	}
-	outcome, action, reason := classify(op, now)
+	outcome, action, code, reason := classify(op, now)
 	return View{
 		ID:                 op.ID,
 		ServerID:           op.ServerID,
+		NodeID:             op.NodeID,
 		Kind:               op.Kind,
 		Phase:              op.Phase,
 		Outcome:            outcome,
 		NextAction:         action,
+		ReasonCode:         code,
 		Reason:             reason,
+		Correlation:        Correlate(op, node),
 		EndpointGeneration: op.EndpointGeneration,
 		HasContainer:       op.ContainerID != "",
 		HoldsLock:          op.ActiveServer != nil,
@@ -124,7 +189,36 @@ func DescribeAt(op *db.ServerOperation, now time.Time) View {
 		StartedAt:          op.CreatedAt,
 		UpdatedAt:          op.UpdatedAt,
 		RequestID:          ClientRequestID(op),
+		RequestKey:         strings.TrimSpace(op.RequestKey),
 	}
+}
+
+// Correlate compares the identity recorded on an operation with the node's
+// current identity and returns only a derived state. A missing daemon identity
+// is unknown, never a match: the panel must not claim an endpoint it has not
+// observed.
+func Correlate(op *db.ServerOperation, node *db.Node) Correlation {
+	if op == nil || node == nil {
+		return CorrelationUnknown
+	}
+	if strings.TrimSpace(op.NodeID) == "" {
+		return CorrelationUnknown
+	}
+	if node.ID != op.NodeID {
+		return CorrelationUnmatched
+	}
+	if op.EndpointGeneration > 0 && node.EndpointGeneration > 0 &&
+		op.EndpointGeneration != node.EndpointGeneration {
+		return CorrelationUnmatched
+	}
+	if op.DaemonID != "" && node.DaemonID != "" && op.DaemonID != node.DaemonID {
+		return CorrelationUnmatched
+	}
+	if op.DaemonID == "" || node.DaemonID == "" ||
+		op.EndpointGeneration == 0 || node.EndpointGeneration == 0 {
+		return CorrelationUnknown
+	}
+	return CorrelationMatched
 }
 
 // ClientRequestID is the caller-supplied request id stored on a journal row.
@@ -153,37 +247,45 @@ func DescribeAll(ops []db.ServerOperation) []View {
 // DescribeAllAt projects every row at one instant, so a list never shows two
 // rows judged by clocks that disagree.
 func DescribeAllAt(ops []db.ServerOperation, now time.Time) []View {
+	return DescribeAllAtForNodes(ops, nil, now)
+}
+
+// DescribeAllAtForNodes projects every row at one instant with a node lookup for
+// the derived correlation. A missing node leaves the correlation unknown.
+func DescribeAllAtForNodes(ops []db.ServerOperation, nodes map[string]*db.Node, now time.Time) []View {
 	views := make([]View, 0, len(ops))
 	for i := range ops {
-		views = append(views, DescribeAt(&ops[i], now))
+		views = append(views, DescribeAtForNode(&ops[i], nodes[ops[i].NodeID], now))
 	}
 	return views
 }
 
-// classify maps the durable phase to an outcome and the action that follows.
-func classify(op *db.ServerOperation, now time.Time) (Outcome, NextAction, string) {
+// classify maps the durable phase to an outcome, the action that follows and
+// the stable reason code. Reason is the human sentence; ReasonCode is what a
+// caller branches on.
+func classify(op *db.ServerOperation, now time.Time) (Outcome, NextAction, ReasonCode, string) {
 	switch op.Phase {
 	case db.ServerOperationComplete:
-		return OutcomeSuccess, ActionNone, "the operation completed and was recorded"
+		return OutcomeSuccess, ActionNone, ReasonCompleted, "the operation completed and was recorded"
 	case db.ServerOperationFailed:
-		return OutcomeFailed, ActionRetryNewRequestID, "the attempt failed; the same request id is refused, so retry with a new one"
+		return OutcomeFailed, ActionRetryNewRequestID, ReasonAttemptFailed, "the attempt failed; the same request id is refused, so retry with a new one"
 	case db.ServerOperationRecovered:
-		return OutcomeUnknown, ActionNone, "the lifecycle lock was released without confirming the result; the container was observed at startup or an operator resolved it"
+		return OutcomeUnknown, ActionNone, ReasonRecovered, "the lifecycle lock was released without confirming the result; the container was observed at startup or an operator resolved it"
 	case db.ServerOperationPrepared:
-		return OutcomeUnknown, ActionWait, "the intent was recorded but the attempt had not started; the effect did not happen yet"
+		return OutcomeUnknown, ActionWait, ReasonPreparedNotStarted, "the intent was recorded but the attempt had not started; the effect did not happen yet"
 	case db.ServerOperationExecuting:
 		// An explicit uncertainty note is a first-class unknown even while the
 		// process is alive: the mutation reached an external effect that was
 		// not observed, and a blind retry could repeat it.
 		if strings.Contains(op.LastError, UncertainOutcomeMarker) {
-			return OutcomeUnknown, ActionResolve, op.LastError
+			return OutcomeUnknown, ActionResolve, ReasonUncertainEffect, RedactError(op.LastError)
 		}
 		if inFlight(op.UpdatedAt, now) {
-			return OutcomeRunning, ActionWait, "the mutation is still being attempted; wait for it to finish"
+			return OutcomeRunning, ActionWait, ReasonRunning, "the mutation is still being attempted; wait for it to finish"
 		}
-		return OutcomeUnknown, ActionResolve, "the attempt started but no completion was recorded; the external effect is unknown until it is observed"
+		return OutcomeUnknown, ActionResolve, ReasonExecutingStale, "the attempt started but no completion was recorded; the external effect is unknown until it is observed"
 	default:
-		return OutcomeUnknown, ActionContactOperator, "the recorded phase is not one this panel recognises"
+		return OutcomeUnknown, ActionContactOperator, ReasonUnrecognisedPhase, "the recorded phase is not one this panel recognises"
 	}
 }
 

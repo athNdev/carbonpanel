@@ -8,9 +8,11 @@ import assert from 'node:assert/strict';
 
 import {
 	canReleaseLock,
+	correlationTagType,
 	countOperationsByOutcome,
 	operationActionLabel,
-	outcomeTagType
+	outcomeTagType,
+	requiresManualCheck
 } from './server-operations';
 
 test('an unknown outcome is amber, never red', () => {
@@ -49,6 +51,30 @@ test('the lock is only offered for release when the server is actually blocked',
 	assert.equal(canReleaseLock({ holdsLock: true, nextAction: 'wait' }), false);
 });
 
+test('a stale or uncertain unknown row says do not retry blindly', () => {
+	assert.equal(requiresManualCheck({ outcome: 'unknown', reasonCode: 'executing_stale' }), true);
+	assert.equal(
+		requiresManualCheck({ outcome: 'unknown', reasonCode: 'uncertain_external_effect' }),
+		true
+	);
+	// A definite failure is safe to retry with a new request id; a recovered
+	// row has already been resolved and needs no warning.
+	assert.equal(requiresManualCheck({ outcome: 'failed', reasonCode: 'attempt_failed' }), false);
+	assert.equal(
+		requiresManualCheck({ outcome: 'unknown', reasonCode: 'recovered_without_confirmation' }),
+		false
+	);
+	assert.equal(requiresManualCheck({ outcome: 'success', reasonCode: 'completed' }), false);
+});
+
+test('correlation never renders a daemon match when the state is unknown', () => {
+	assert.equal(correlationTagType('matched'), 'green');
+	assert.equal(correlationTagType('unmatched'), 'red');
+	// Unknown is neutral, not a success and not a failure.
+	assert.equal(correlationTagType('unknown'), 'gray');
+	assert.equal(correlationTagType(undefined as unknown as string), 'gray');
+});
+
 test('counts add up to the number of rows', () => {
 	const counts = countOperationsByOutcome([
 		{ outcome: 'success' },
@@ -82,4 +108,15 @@ test('journal copy is trimmed to the approved sentences', () => {
 		'empty state must use the trimmed copy'
 	);
 	assert.ok(content.includes('op.requestId'), 'journal rows must show the request id for joining');
+	assert.ok(content.includes('op.requestKey'), 'journal rows must show the stored request key');
+	assert.ok(content.includes('op.nodeId'), 'journal rows must join to a node without a daemon id');
+	assert.ok(
+		content.includes('op.correlation'),
+		'journal rows must show the derived correlation state'
+	);
+	assert.ok(content.includes('op.reasonCode'), 'journal rows must show the stable reason code');
+	assert.ok(
+		content.includes('requiresManualCheck(op)'),
+		'stale and uncertain rows must warn against a blind retry'
+	);
 });

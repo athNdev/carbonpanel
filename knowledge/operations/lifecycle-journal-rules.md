@@ -45,15 +45,16 @@ sources:
   gone. It must refuse a server that still exists, and it must not stop a
   container or delete world files.
 - Finished journal rows may be deleted after 30 days. An active lock may not.
-- Diagnostics project the journal, never the raw row. `operation.Describe` maps
-  the durable phase to three outcomes — success, failed, or unknown — and to a
-  stable next action: `retry_with_new_request_id` after a failure (the same key
-  is refused), `resolve_operation` for an attempt that started but never
-  finished, `wait` while it is still expected to finish. An unknown outcome is
-  never reported as success or failure; the external effect may or may not have
-  happened.
+- Diagnostics project the journal, never the raw row: stable outcome, reason
+  code and next action (`retry_with_new_request_id`, `resolve_operation`,
+  `wait`). `unknown` is never success or failure; stale `executing` is
+  `executing_stale`, uncertain effect is `uncertain_external_effect`, both
+  "do not retry blindly".
+- The projection joins by node id, endpoint generation, request key and phase.
+  Daemon identity appears only as `matched` / `unmatched` / `unknown`; no raw
+  daemon id, host, socket or credential. See
+  [ADR 0058](../../docs/adr/0058-operation-daemon-id-disclosure.md).
 - Credentials in recorded error text are redacted before it reaches a
   diagnostic. Hosts, paths and daemon messages stay: they are the evidence.
-- The activity feed stores the same client `request_id` as the journal row it
-  records, so operators can join the two without guessing. An empty client
-  id stays empty on activity; it is not invented after the fact.
+- The activity feed stores the same client `request_id` as the journal row, so
+  operators can join them; an empty id stays empty.

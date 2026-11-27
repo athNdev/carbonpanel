@@ -16,9 +16,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/operation_pb';
 	import {
 		canReleaseLock,
+		correlationTagType,
 		countOperationsByOutcome,
 		operationActionLabel,
-		outcomeTagType
+		outcomeTagType,
+		requiresManualCheck
 	} from './server-operations';
 	import { CarbonConfirm, CarbonTag } from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
@@ -168,12 +170,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	{#if operations.length > 0}
 		<div class="overflow-x-auto">
-			<table class="w-full min-w-[720px] text-xs" aria-label="Lifecycle operation journal">
+			<table class="w-full min-w-[900px] text-xs" aria-label="Lifecycle operation journal">
 				<thead>
 					<tr class="border-b border-border text-left text-muted-foreground">
 						<th scope="col" class="py-2 pr-4 font-medium">Started</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Operation</th>
-						<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Node</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Request key</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Outcome</th>
 						<th scope="col" class="py-2 pr-4 font-medium">What happened</th>
 						<th scope="col" class="py-2 font-medium">Next step</th>
@@ -185,15 +188,36 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<td class="py-2 pr-4 font-mono whitespace-nowrap text-muted-foreground"
 								>{formatTimestamp(op.startedAt)}</td
 							>
-							<td class="py-2 pr-4 font-mono whitespace-nowrap">{op.kind}</td>
-							<td class="max-w-[180px] truncate py-2 pr-4 font-mono" title={op.requestId || ''}
-								>{op.requestId || '—'}</td
+							<td class="py-2 pr-4 whitespace-nowrap">
+								<div class="font-mono">{op.kind}</div>
+								<div class="text-[11px] text-muted-foreground">{op.phase}</div>
+							</td>
+							<td class="py-2 pr-4 whitespace-nowrap">
+								<div class="font-mono" title={op.nodeId || ''}>{op.nodeId || '—'}</div>
+								<div
+									class="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
+								>
+									<span>gen {op.endpointGeneration}</span>
+									<CarbonTag type={correlationTagType(op.correlation)} size="sm"
+										>{op.correlation || 'unknown'}</CarbonTag
+									>
+								</div>
+							</td>
+							<td
+								class="max-w-[180px] truncate py-2 pr-4 font-mono"
+								title={`request id: ${op.requestId || '—'}`}
 							>
+								{op.requestKey || op.requestId || '—'}
+							</td>
 							<td class="py-2 pr-4">
 								<CarbonTag type={outcomeTagType(op.outcome)} size="sm">{op.outcome}</CarbonTag>
+								{#if requiresManualCheck(op)}
+									<p class="mt-1 text-[11px] font-medium text-warning-text">Do not retry blindly</p>
+								{/if}
 							</td>
 							<td class="max-w-[380px] py-2 pr-4">
-								<p class="text-muted-foreground">{op.reason}</p>
+								<p class="font-mono text-[11px] text-muted-foreground">{op.reasonCode}</p>
+								<p class="mt-1 text-muted-foreground">{op.reason}</p>
 								{#if op.lastError}
 									<p class="mt-1 font-mono text-[11px] break-words text-muted-foreground">
 										{op.lastError}

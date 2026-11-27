@@ -146,6 +146,57 @@ func TestDescribeCarriesTheEvidenceAnOperatorNeeds(t *testing.T) {
 	}
 }
 
+func TestCorrelateDerivesANonSecretEndpointState(t *testing.T) {
+	o := op(db.ServerOperationExecuting)
+	o.NodeID = "node-1"
+	o.EndpointGeneration = 3
+	o.DaemonID = "raw-daemon-a"
+	node := &db.Node{ID: "node-1", EndpointGeneration: 3, DaemonID: "raw-daemon-a"}
+
+	if got := Correlate(o, node); got != CorrelationMatched {
+		t.Errorf("matching endpoint = %q, want matched", got)
+	}
+	changedGeneration := *node
+	changedGeneration.EndpointGeneration = 4
+	if got := Correlate(o, &changedGeneration); got != CorrelationUnmatched {
+		t.Errorf("changed generation = %q, want unmatched", got)
+	}
+	changedDaemon := *node
+	changedDaemon.DaemonID = "raw-daemon-b"
+	if got := Correlate(o, &changedDaemon); got != CorrelationUnmatched {
+		t.Errorf("changed daemon = %q, want unmatched", got)
+	}
+	unobserved := *node
+	unobserved.DaemonID = ""
+	if got := Correlate(o, &unobserved); got != CorrelationUnknown {
+		t.Errorf("missing daemon identity = %q, want unknown", got)
+	}
+	if got := Correlate(o, nil); got != CorrelationUnknown {
+		t.Errorf("missing node = %q, want unknown", got)
+	}
+}
+
+func TestDescribeDoesNotExposeTheDaemonID(t *testing.T) {
+	o := op(db.ServerOperationExecuting)
+	o.NodeID = "node-1"
+	o.EndpointGeneration = 2
+	o.DaemonID = "raw-daemon-fingerprint"
+	node := &db.Node{ID: "node-1", EndpointGeneration: 2, DaemonID: "raw-daemon-fingerprint"}
+	view := DescribeAtForNode(o, node, atRow)
+
+	if view.Correlation != CorrelationMatched {
+		t.Fatalf("correlation = %q, want matched", view.Correlation)
+	}
+	if view.NodeID != "node-1" || view.EndpointGeneration != 2 {
+		t.Fatalf("correlation fields = (%q, %d), want node-1 and 2", view.NodeID, view.EndpointGeneration)
+	}
+	for _, field := range []string{view.Reason, view.LastError, string(view.Correlation), view.NodeID} {
+		if strings.Contains(field, "raw-daemon-fingerprint") {
+			t.Fatalf("raw daemon id leaked in %q", field)
+		}
+	}
+}
+
 func TestRedactErrorRemovesCredentials(t *testing.T) {
 	cases := map[string]string{
 		"dial tcp://admin:hunter2@10.0.0.5:2376: connection refused": "dial tcp://<redacted>@10.0.0.5:2376: connection refused",

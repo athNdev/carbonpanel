@@ -13,16 +13,16 @@ sources:
 
 Every create, start, stop, restart, delete and migrate is written to
 `server_operations` before the Docker call and advanced afterwards. The row is
-`prepared` while the intent is being recorded, `executing` when the attempt
-starts, and `complete`, `failed` or `recovered` when it settles. A per-server
-unique index on the active lock means two lifecycle mutations of one world
-cannot interleave.
+`prepared` while the intent is recorded, `executing` when the attempt starts,
+and `complete`, `failed` or `recovered` when it settles. A per-server unique
+index on the active lock stops two lifecycle mutations of one world interleaving.
 
-`operation.Describe` projects a row into exactly one outcome — `success`,
-`failed`, `running` or `unknown` — plus a stable next-action code. `unknown` is
-a first-class answer: a mutation whose external effect was never recorded is
-neither a success nor a failure, and collapsing it into either is the bug this
-exists to prevent.
+`operation.Describe` projects a row into one outcome — `success`, `failed`,
+`running` or `unknown` — plus a stable reason and next-action code. `unknown` is
+first-class: an unrecorded external effect is neither success nor failure. Stale
+`executing` and uncertain-effect rows are `unknown` with reason codes
+`executing_stale` / `uncertain_external_effect` and `resolve_operation`, never a
+blind retry.
 
 # Rules
 
@@ -36,20 +36,19 @@ exists to prevent.
   operator note, writes an audit entry and nudges the reconciler.
 - Recorded error text is redacted for credentials, never for hosts, paths or
   daemon messages: those are the evidence.
+- Operator projections expose node id, endpoint generation, request key, phase
+  and timestamps, plus correlation `matched`, `unmatched` or `unknown`. A raw
+  Docker daemon id is never serialized (wire, panel, `-operations list`,
+  `operations.json`); missing observation is `unknown`, not a match. See
+  [ADR 0058](../../docs/adr/0058-operation-daemon-id-disclosure.md).
 - The journal is readable only through a server: every RPC carries a
-  `server_id` that is the RBAC object id, and an empty one is not a wildcard
-  grant.
-- A journaled mutation that writes an activity row stores the client
-  `request_id` on that row. `operation.Describe` exposes the same id so a
-  journal row and an activity event join. Listing activity for one server
-  never returns another server's rows or request ids. Redaction of recorded
-  error text is unchanged.
-- Generate and Upload always attach `operations.json` (the projected journal)
-  and `observations.json` (per-server stale vs last-good join evidence). Writing
-  the helper is not enough; the archive path must call it.
-- `GetServer` projects that same join classification onto live fields.
-  Last-good SLP is not current playable state. See
-  [actionable recovery](../operations/actionable-recovery.md).
+  `server_id` that is the RBAC object id, and an empty one is not a wildcard.
+- A journaled mutation stores the same client `request_id` on its activity row,
+  so the two join. Activity listing stays server-scoped; redaction is unchanged.
+- Generate and Upload attach `operations.json` (projected journal) and
+  `observations.json` (stale vs last-good join evidence).
+- `GetServer` projects that join classification onto live fields; last-good SLP
+  is not playable state. See [actionable recovery](../operations/actionable-recovery.md).
 
 # Read next
 
