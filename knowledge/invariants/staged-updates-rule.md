@@ -53,7 +53,7 @@ Staged pack bytes live under staging; the live pack stays as it is until the
 window, which commits the pack with any staged config, mods, and datapacks
 and recreates a changed module container without starting a deep-sleeping
 server. A legacy cron row stays alone, refusing shared content, config, or
-timed windows; ordinary changes wait until it clears.
+timed windows; ordinary changes are refused until it is applied or discarded.
 
 The server configuration screen reads that open batch. From there an admin
 chooses next restart, a UTC timestamp, or idle minutes, and can discard one

@@ -279,8 +279,13 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 			if pending {
 				return fmt.Errorf("%w: open batch %s already has staged config waiting on window %q; apply or discard that config before staging cron config", ErrUpdateBatchConflict, batch.ID, batch.Window)
 			}
+			// An empty batch carries no content and no config, so its window can
+			// be retargeted to isolate the cron config. A batch with content or
+			// pending config was refused above and must never be retargeted.
 			if UpdateWindow(batch.Window) != UpdateWindow(StagedApplyScheduled) {
-				return fmt.Errorf("%w: open batch %s uses window %q and cannot isolate a cron config; apply or discard its changes before staging cron config", ErrUpdateBatchConflict, batch.ID, batch.Window)
+				if err := setBatchWindow(tx, batch, UpdateWindow(StagedApplyScheduled), StagedApplyScheduled, nil, 0); err != nil {
+					return err
+				}
 			}
 		} else {
 			cron, err := hasBatchCronConfig(tx, batch.ID)

@@ -14,6 +14,7 @@ import (
 )
 
 func newTestStore(t *testing.T) *Store {
+	t.Helper()
 	return newTestStoreWithMaxConnections(t, 0)
 }
 

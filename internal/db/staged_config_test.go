@@ -239,6 +239,65 @@ func TestScheduledConfigStaysIsolatedFromTimedBatches(t *testing.T) {
 	})
 }
 
+func TestScheduledConfigRetargetsEmptyBatchButNotPopulatedOnes(t *testing.T) {
+	ctx := context.Background()
+	when := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+
+	t.Run("empty batch retargeted to the cron window", func(t *testing.T) {
+		const serverID = "srv-cron-empty-batch"
+		store := newStagedTestStore(t, serverID)
+
+		// Leave an open batch whose only row was discarded: no content and no
+		// pending config, but its old window is not the cron window.
+		timed, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "timed"}, UpdateWindowAtTime, &when, 0)
+		require.NoError(t, err)
+		require.NoError(t, store.DiscardStagedConfigChange(ctx, timed.ID))
+
+		cron, err := store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyScheduled, "0 3 * * *")
+		require.NoError(t, err)
+		assert.Equal(t, timed.BatchID, cron.BatchID, "the empty batch was reused")
+
+		batch, err := store.OpenUpdateBatch(ctx, serverID)
+		require.NoError(t, err)
+		require.NotNil(t, batch)
+		assert.Equal(t, string(UpdateWindow(StagedApplyScheduled)), batch.Window)
+		assert.Nil(t, batch.ApplyAt)
+		assert.Zero(t, batch.IdleMinutes)
+	})
+
+	t.Run("content still refuses a cron stage", func(t *testing.T) {
+		const serverID = "srv-cron-content-refused"
+		store := newStagedTestStore(t, serverID)
+		_, err := store.AddStagedContent(ctx, &StagedContentChange{
+			ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete, TargetPath: "mods/a.jar",
+		})
+		require.NoError(t, err)
+
+		_, err = store.StageConfigChange(ctx, serverID, map[string]any{"motd": "cron"}, StagedApplyScheduled, "0 3 * * *")
+		require.ErrorIs(t, err, ErrUpdateBatchConflict)
+	})
+
+	t.Run("pending config still refuses a cron stage", func(t *testing.T) {
+		const serverID = "srv-cron-config-refused"
+		store := newStagedTestStore(t, serverID)
+		_, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "timed"}, UpdateWindowAtTime, &when, 0)
+		require.NoError(t, err)
+
+		_, err = store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyScheduled, "0 3 * * *")
+		require.ErrorIs(t, err, ErrUpdateBatchConflict)
+	})
+
+	t.Run("another cron row still refuses", func(t *testing.T) {
+		const serverID = "srv-cron-row-refused"
+		store := newStagedTestStore(t, serverID)
+		_, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "cron"}, StagedApplyScheduled, "0 3 * * *")
+		require.NoError(t, err)
+
+		_, err = store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyScheduled, "0 4 * * *")
+		require.ErrorIs(t, err, ErrUpdateBatchConflict)
+	})
+}
+
 func TestStagedConfigWithMissingConfigRowAndSingleConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
