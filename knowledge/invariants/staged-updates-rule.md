@@ -5,7 +5,7 @@ description: "A server has one open update batch. Staging adds to that batch. It
 status: stable
 owners: [oss-runtime]
 code_refs: [internal/db/staged_config.go, internal/db/staged_content.go, internal/rpc/services/stage_content.go, internal/staging, internal/rpc/services/update_batch.go, internal/scheduler/scheduler.go, web/carbon-panel/src/lib/components/server-configuration.svelte, web/carbon-panel/src/lib/components/server-tasks.svelte]
-verified: { by: agent:opencode, at: 2026-11-20 }
+verified: { by: agent:opencode, at: 2026-11-28 }
 sources:
   - title: Parent concept
     resource: staged-updates.md
