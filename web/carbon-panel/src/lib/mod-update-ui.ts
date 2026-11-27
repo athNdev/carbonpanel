@@ -50,9 +50,48 @@ export function updateStateClass(state: string | undefined): string {
 	}
 }
 
-export function buildUpdateSelections(mods: ModLike[], selectedIds: string[]): UpdateSelection[] {
+// Identity of the candidate the operator actually reviewed. Installed fields
+// are deliberately excluded: installation drift is already refused by the RPC.
+export function updateCandidateFingerprint(preview?: UpdatePreviewLike | null): string {
+	if (!preview) return '';
+	return [
+		preview.candidateVersionId ?? '',
+		preview.candidateSha512 ?? '',
+		preview.candidateFilename ?? ''
+	].join('\u0000');
+}
+
+// A selection survives a refresh only while the row is still available and the
+// currently offered candidate is the one that was reviewed.
+export function currentUpdateSelectionIds(
+	mods: ModLike[],
+	selectedIds: string[],
+	selectedFingerprints: Record<string, string>
+): string[] {
+	const byId = new Map(mods.map((mod) => [mod.id, mod]));
+	return selectedIds.filter((id) => {
+		const recorded = selectedFingerprints[id];
+		if (recorded === undefined) return false;
+		const mod = byId.get(id);
+		return (
+			mod?.updatePreview?.state === 'available' &&
+			updateCandidateFingerprint(mod.updatePreview) === recorded
+		);
+	});
+}
+
+export function buildUpdateSelections(
+	mods: ModLike[],
+	selectedIds: string[],
+	selectedFingerprints?: Record<string, string>
+): UpdateSelection[] {
 	return mods
-		.filter((mod) => selectedIds.includes(mod.id) && mod.updatePreview?.state === 'available')
+		.filter((mod) => {
+			if (!selectedIds.includes(mod.id) || mod.updatePreview?.state !== 'available') return false;
+			if (!selectedFingerprints) return true;
+			const recorded = selectedFingerprints[mod.id];
+			return recorded !== undefined && updateCandidateFingerprint(mod.updatePreview) === recorded;
+		})
 		.map((mod) => ({
 			modId: mod.id,
 			fileName: mod.fileName,

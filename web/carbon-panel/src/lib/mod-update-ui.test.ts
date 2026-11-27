@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
 	buildPolicyConfig,
 	buildUpdateSelections,
+	currentUpdateSelectionIds,
 	DEFAULT_POLICY_STATE,
 	policyFromPersistedTask,
+	updateCandidateFingerprint,
 	updateStateClass,
 	type ModLike
 } from './mod-update-ui';
@@ -43,6 +45,87 @@ test('installed mod update selection only includes checked available previews', 
 		}
 	]);
 	assert.deepEqual(buildUpdateSelections(mods, ['mod-2', 'mod-3']), []);
+});
+
+function withPreview(changes: Partial<NonNullable<ModLike['updatePreview']>>): ModLike {
+	return {
+		...available,
+		updatePreview: { ...available.updatePreview, ...changes }
+	};
+}
+
+test('a recorded candidate fingerprint stages only while the reviewed release is still offered', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	assert.deepEqual(buildUpdateSelections([available], ['mod-1'], { 'mod-1': fingerprint }), [
+		{
+			modId: 'mod-1',
+			fileName: 'mod.jar',
+			installedSha512: 'installed-hash',
+			candidateVersionId: 'version-2',
+			candidateSha512: 'candidate-hash',
+			candidateFilename: 'mod-2.jar'
+		}
+	]);
+});
+
+test('a refreshed candidate version, digest or filename invalidates the selection', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	for (const changes of [
+		{ candidateVersionId: 'version-3' },
+		{ candidateSha512: 'other-hash' },
+		{ candidateFilename: 'mod-3.jar' }
+	]) {
+		assert.deepEqual(
+			buildUpdateSelections([withPreview(changes)], ['mod-1'], { 'mod-1': fingerprint }),
+			[],
+			`${Object.keys(changes)[0]} change must not stage the unreviewed candidate`
+		);
+	}
+});
+
+test('a row leaving the available state invalidates the selection', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	assert.deepEqual(
+		buildUpdateSelections([withPreview({ state: 'review_required' })], ['mod-1'], {
+			'mod-1': fingerprint
+		}),
+		[]
+	);
+});
+
+test('current selection ids keep only rows whose candidate still matches the review', () => {
+	const unchanged: ModLike = { ...available, id: 'mod-1', fileName: 'unchanged.jar' };
+	const changed: ModLike = {
+		...withPreview({ candidateVersionId: 'version-3' }),
+		id: 'mod-2',
+		fileName: 'changed.jar'
+	};
+	const fingerprints = {
+		'mod-1': updateCandidateFingerprint(unchanged.updatePreview),
+		'mod-2': updateCandidateFingerprint(available.updatePreview)
+	};
+	assert.deepEqual(
+		currentUpdateSelectionIds([unchanged, changed], ['mod-1', 'mod-2'], fingerprints),
+		['mod-1']
+	);
+	assert.deepEqual(currentUpdateSelectionIds([unchanged, changed], ['mod-1', 'mod-2'], {}), []);
+});
+
+test('the candidate fingerprint distinguishes version, digest and filename', () => {
+	const base = updateCandidateFingerprint(available.updatePreview);
+	assert.notEqual(
+		base,
+		updateCandidateFingerprint({ ...available.updatePreview, candidateVersionId: 'v3' })
+	);
+	assert.notEqual(
+		base,
+		updateCandidateFingerprint({ ...available.updatePreview, candidateSha512: 's3' })
+	);
+	assert.notEqual(
+		base,
+		updateCandidateFingerprint({ ...available.updatePreview, candidateFilename: 'f3.jar' })
+	);
+	assert.equal(updateCandidateFingerprint(null), '');
 });
 
 test('each preview state has the intended presentation treatment', () => {

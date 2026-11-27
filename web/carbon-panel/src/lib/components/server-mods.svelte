@@ -42,9 +42,11 @@ one at https://mozilla.org/MPL/2.0/.
 	import {
 		buildPolicyConfig,
 		buildUpdateSelections,
+		currentUpdateSelectionIds,
 		DEFAULT_POLICY_STATE,
 		isCurrentServer,
 		policyFromPersistedTask,
+		updateCandidateFingerprint,
 		updateStateClass
 	} from '$lib/mod-update-ui';
 	import { summarizeModUpdateCheck } from '$lib/utils/mod-update-summary';
@@ -89,6 +91,9 @@ one at https://mozilla.org/MPL/2.0/.
 	// OSS-424 manual review and apply. Selection is explicit: a preview never
 	// stages bytes on its own, and only state=available rows can be selected.
 	let selectedUpdates = $state<string[]>([]);
+	// The reviewed candidate identity for each checked row. A selection is only
+	// stageable while the current preview still matches this fingerprint.
+	let selectedUpdateFingerprints = $state<Record<string, string>>({});
 	let updateWindow = $state<'next' | 'time' | 'idle'>('next');
 	let applyAtLocal = $state('');
 	let idleMinutes = $state(15);
@@ -121,10 +126,24 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let availableUpdates = $derived(mods.filter((mod) => mod.updatePreview?.state === 'available'));
 
-	function toggleUpdateSelection(id: string) {
-		selectedUpdates = selectedUpdates.includes(id)
-			? selectedUpdates.filter((selected) => selected !== id)
-			: [...selectedUpdates, id];
+	let currentSelectedUpdates = $derived(
+		currentUpdateSelectionIds(mods, selectedUpdates, selectedUpdateFingerprints)
+	);
+
+	function toggleUpdateSelection(mod: Mod) {
+		if (mod.updatePreview?.state !== 'available') return;
+		if (selectedUpdates.includes(mod.id)) {
+			selectedUpdates = selectedUpdates.filter((selected) => selected !== mod.id);
+			const fingerprints = { ...selectedUpdateFingerprints };
+			delete fingerprints[mod.id];
+			selectedUpdateFingerprints = fingerprints;
+		} else {
+			selectedUpdates = [...selectedUpdates, mod.id];
+			selectedUpdateFingerprints = {
+				...selectedUpdateFingerprints,
+				[mod.id]: updateCandidateFingerprint(mod.updatePreview)
+			};
+		}
 	}
 
 	function applyWindowEnum(): ConfigApplyWindow {
@@ -270,6 +289,7 @@ one at https://mozilla.org/MPL/2.0/.
 			previousServerId = server.id;
 			updateStatus = '';
 			selectedUpdates = [];
+			selectedUpdateFingerprints = {};
 			checking = false;
 			mods = [];
 			loading = true;
@@ -299,6 +319,21 @@ one at https://mozilla.org/MPL/2.0/.
 			loadMods();
 			loadPolicy();
 		}
+	});
+
+	// A refresh can replace or withdraw the candidate an operator selected. Drop
+	// the stale selection instead of staging a release they did not review.
+	$effect(() => {
+		const validIds = currentSelectedUpdates;
+		if (validIds.length >= selectedUpdates.length) return;
+		const affected = selectedUpdates
+			.filter((id) => !validIds.includes(id))
+			.map((id) => mods.find((mod) => mod.id === id)?.fileName ?? id);
+		const fingerprints: Record<string, string> = {};
+		for (const id of validIds) fingerprints[id] = selectedUpdateFingerprints[id];
+		selectedUpdates = validIds;
+		selectedUpdateFingerprints = fingerprints;
+		updateStatus = `Selection cleared for ${affected.join(', ')}: the available release changed and must be reviewed and selected again.`;
 	});
 
 	let filteredMods = $derived.by(() => {
@@ -384,7 +419,11 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function stageSelectedUpdates() {
-		const selections = buildUpdateSelections(mods, selectedUpdates);
+		const selections = buildUpdateSelections(
+			mods,
+			currentSelectedUpdates,
+			selectedUpdateFingerprints
+		);
 		if (selections.length === 0) return;
 
 		let applyAtUnix = 0;
@@ -414,6 +453,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const refused = response.stagedUpdates.length - staged;
 			updateStatus = `Staged ${staged} update(s) for the pending batch${refused ? `; ${refused} refused and left untouched` : ''}.`;
 			selectedUpdates = [];
+			selectedUpdateFingerprints = {};
 			if (staged > 0) {
 				toast.success(`${staged} mod update(s) staged`);
 				await loadMods(true);
@@ -714,10 +754,12 @@ one at https://mozilla.org/MPL/2.0/.
 				kind="primary"
 				size="sm"
 				class="w-full justify-center sm:w-auto"
-				disabled={stagingUpdates || selectedUpdates.length === 0}
+				disabled={stagingUpdates || currentSelectedUpdates.length === 0}
 				onclick={stageSelectedUpdates}
 			>
-				Stage {selectedUpdates.length} selected update{selectedUpdates.length === 1 ? '' : 's'}
+				Stage {currentSelectedUpdates.length} selected update{currentSelectedUpdates.length === 1
+					? ''
+					: 's'}
 			</CarbonButton>
 		</div>
 	{/if}
@@ -906,7 +948,7 @@ one at https://mozilla.org/MPL/2.0/.
 												<input
 													type="checkbox"
 													checked={selectedUpdates.includes(mod.id)}
-													onchange={() => toggleUpdateSelection(mod.id)}
+													onchange={() => toggleUpdateSelection(mod)}
 													class="h-3.5 w-3.5 accent-primary"
 												/>
 												Stage this update
