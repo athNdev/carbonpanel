@@ -1720,6 +1720,20 @@ func (s *Store) UpdateTaskExecution(ctx context.Context, execution *TaskExecutio
 	return s.db.WithContext(ctx).Save(execution).Error
 }
 
+// UpdateTaskExecutionOutput replaces only the output column. Chain-stop
+// bookkeeping must not rewrite a terminal status, error or end time that a
+// cancellation or another writer already recorded. It reports whether a row
+// was updated.
+func (s *Store) UpdateTaskExecutionOutput(ctx context.Context, id, output string) (bool, error) {
+	res := s.db.WithContext(ctx).Model(&TaskExecution{}).
+		Where("id = ?", id).
+		Update("output", output)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
 // UpdateTaskExecutionIfRunning applies an outcome only while the durable row is
 // still running. A cancellation or another writer that already reached a
 // terminal state keeps its outcome, so a late worker cannot overwrite it. It

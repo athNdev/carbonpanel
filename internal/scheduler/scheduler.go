@@ -656,8 +656,8 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Create skipped execution record
 		execution := claimed
-		now := time.Now()
 		if execution == nil {
+			now := time.Now()
 			execution = &storage.TaskExecution{
 				ID:        uuid.New().String(),
 				TaskID:    task.ID,
@@ -672,12 +672,11 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 				s.log.Error("Task %s: failed to record skipped execution: %v", task.Name, err)
 			}
 		} else {
-			execution.Status = storage.ExecutionStatusSkipped
-			execution.EndedAt = &now
-			execution.Error = "server offline"
-			if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
-				s.log.Error("Task %s: failed to record skipped execution: %v", task.Name, err)
-			}
+			// The claim is still running. A cancellation may have won the
+			// handoff and storage may be transiently unavailable, so use the
+			// guarded, bounded terminal write instead of an unconditional save:
+			// it keeps a cancellation and never leaves the claim running.
+			s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusSkipped, "server offline")
 		}
 
 		// Skipped steps still fan out to children (each child applies its
@@ -881,8 +880,13 @@ func (s *Scheduler) recordChainStop(ctx context.Context, execution *storage.Task
 		execution.Output += "\n"
 	}
 	execution.Output += note
-	if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
+	// Chain-stop bookkeeping is not an outcome. Write only the output column so
+	// a terminal status, error or end time owned by a cancellation or another
+	// writer is never overwritten.
+	if updated, err := s.store.UpdateTaskExecutionOutput(ctx, execution.ID, execution.Output); err != nil {
 		s.log.Error("Task execution %s: failed to record chain stop: %v", execution.ID, err)
+	} else if !updated {
+		s.log.Debug("Task execution %s: chain stop was not recorded on a missing row", execution.ID)
 	}
 }
 
@@ -996,8 +1000,21 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 			} else {
 				exec.Duration = now.Sub(exec.StartedAt).Milliseconds()
 			}
-			if updateErr := s.store.UpdateTaskExecution(ctx, exec); updateErr != nil {
+			// The row was running when it was read, but an active worker may
+			// have finished it since. Only cancel while it is still running so
+			// this orphan path never overwrites someone else's outcome.
+			updated, updateErr := s.store.UpdateTaskExecutionIfRunning(ctx, exec)
+			if updateErr != nil {
 				return fmt.Errorf("failed to cancel orphaned execution: %w", updateErr)
+			}
+			if !updated {
+				current, getErr := s.store.GetTaskExecution(ctx, executionID)
+				if getErr != nil || current == nil {
+					s.log.Warn("Task execution %s: cancellation found no running row to update: %v", executionID, getErr)
+				} else {
+					s.log.Info("Task execution %s: cancellation kept the existing %s outcome", executionID, current.Status)
+				}
+				return fmt.Errorf("execution not found or already finished")
 			}
 			return nil
 		}
@@ -1036,12 +1053,20 @@ func (s *Scheduler) persistTerminalExecution(ctx context.Context, execution *sto
 	}
 }
 
-// failClaimedExecution records a terminal outcome for a slot claim that was
+// failClaimedExecution records a terminal failure for a slot claim that was
 // refused or could not start, so the consumed slot is never silent and no
-// execution stays stuck in running until the next process start. The write has
-// its own bounded context so caller cancellation cannot abandon the claim, and
-// it retries briefly because storage may recover during the retry window.
+// execution stays stuck in running until the next process start.
 func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage.TaskExecution, reason string) {
+	s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusFailed, reason)
+}
+
+// persistClaimedOutcome writes a terminal outcome for a claimed execution. A
+// cancellation that won the handoff is kept instead of the requested status.
+// The write has its own bounded context so caller cancellation cannot abandon
+// the claim, and it retries briefly because storage may recover during the
+// retry window. It is guarded on the row still running, so a late write cannot
+// overwrite an outcome another writer already recorded.
+func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storage.TaskExecution, status storage.ExecutionStatus, reason string) {
 	if execution == nil {
 		return
 	}
@@ -1057,7 +1082,7 @@ func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage
 		execution.Status = storage.ExecutionStatusCancelled
 		execution.Error = "execution cancelled"
 	} else {
-		execution.Status = storage.ExecutionStatusFailed
+		execution.Status = status
 		execution.Error = reason
 	}
 	execution.EndedAt = &now
@@ -1067,10 +1092,14 @@ func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage
 	defer cancel()
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		_, lastErr = s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
-		if lastErr == nil {
+		updated, err := s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
+		if err == nil {
+			if !updated {
+				s.log.Debug("Task execution %s: kept an outcome written by a cancellation", execution.ID)
+			}
 			return
 		}
+		lastErr = err
 		if writeCtx.Err() != nil {
 			break
 		}
