@@ -384,9 +384,12 @@
 	function unavailableDimensionMessage(): string {
 		if (!requestedDimension || requestedDimension === activeDimension) return '';
 		const active = nativeDimensionLabel(activeDimension);
+		const activeWithArticle = active.startsWith('The ')
+			? 'the ' + active.slice(4)
+			: 'the ' + active;
 		return (
 			`${nativeDimensionLabel(requestedDimension)} is unavailable for this save. ` +
-			`Showing ${active}.`
+			`Showing ${activeWithArticle}.`
 		);
 	}
 
