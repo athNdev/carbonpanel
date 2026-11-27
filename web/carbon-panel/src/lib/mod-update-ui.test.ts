@@ -183,16 +183,30 @@ test('pruning clears only a changed available candidate and keeps the rest selec
 		id: 'mod-2',
 		fileName: 'changed.jar'
 	};
+	// A withdrawn row can carry a different installed file and candidate too.
+	// Only the availability guard keeps it out of `changed`, so it must stay
+	// selected with the fingerprint recorded at review time.
+	const withdrawn: ModLike = {
+		...withPreview({
+			state: 'unavailable',
+			installedSha512: 'reinstalled-hash',
+			candidateVersionId: 'version-4',
+			candidateSha512: 'other-candidate-hash',
+			candidateFilename: 'mod-4.jar'
+		}),
+		id: 'mod-3',
+		fileName: 'withdrawn.jar'
+	};
 	const prune = pruneUpdateSelections(
-		[unchanged, changed],
-		['mod-1', 'mod-2'],
-		{ 'mod-1': fingerprint, 'mod-2': fingerprint },
+		[unchanged, changed, withdrawn],
+		['mod-1', 'mod-2', 'mod-3'],
+		{ 'mod-1': fingerprint, 'mod-2': fingerprint, 'mod-3': fingerprint },
 		true
 	);
-	assert.deepEqual(prune.kept, ['mod-1']);
+	assert.deepEqual(prune.kept, ['mod-1', 'mod-3']);
 	assert.deepEqual(prune.changed, ['mod-2']);
 	assert.deepEqual(prune.missing, []);
-	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
+	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint, 'mod-3': fingerprint });
 });
 
 test('a check that withdraws availability retains the reviewed selection quietly', () => {
@@ -207,6 +221,30 @@ test('a check that withdraws availability retains the reviewed selection quietly
 	assert.deepEqual(prune.changed, []);
 	assert.deepEqual(prune.missing, []);
 	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
+});
+
+test('a withdrawn row with a different identity is retained quietly and stays unstageable', () => {
+	// The availability guard, not identity equality, is what keeps this row out
+	// of `changed`: every field the fingerprint covers has moved, yet the row is
+	// no longer offered, so the review is retained rather than blamed.
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	const withdrawn = withPreview({
+		state: 'unavailable',
+		installedSha512: 'reinstalled-hash',
+		candidateVersionId: 'version-4',
+		candidateSha512: 'other-candidate-hash',
+		candidateFilename: 'mod-4.jar'
+	});
+	assert.notEqual(updateCandidateFingerprint(withdrawn.updatePreview), fingerprint);
+	const fingerprints = { 'mod-1': fingerprint };
+	const prune = pruneUpdateSelections([withdrawn], ['mod-1'], fingerprints, true);
+	assert.deepEqual(prune.kept, ['mod-1']);
+	assert.deepEqual(prune.changed, []);
+	assert.deepEqual(prune.missing, []);
+	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
+	// Retained intent must not reach the staging request.
+	assert.deepEqual(currentUpdateSelectionIds([withdrawn], ['mod-1'], fingerprints), []);
+	assert.deepEqual(buildUpdateSelections([withdrawn], ['mod-1'], fingerprints), []);
 });
 
 test('a reload without previews keeps reviewed candidates and drops only deleted mods', () => {
