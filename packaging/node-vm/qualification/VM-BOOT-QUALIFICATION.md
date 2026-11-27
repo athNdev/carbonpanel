@@ -796,10 +796,13 @@ tolerance.
 1. reads the base virtual size and format with `qemu-img info`;
 2. converts the pinned base **read-only** to a raw copy in the owned attempt
    directory;
-3. validates the protective MBR, both GPT headers, entry CRCs and existing
-   partition bounds, then rewrites only the protective MBR size, the primary
+3. validates the protective MBR (partition type 0xEE, start LBA 1 and
+   `SizeInLBA` equal to the disk's last LBA), both GPT headers, entry CRCs and
+   existing partition bounds, then rewrites only the protective MBR
+   `SizeInLBA` (last-LBA sized, capped at 0xFFFFFFFF), the primary
    `alternate_lba`/`last_usable_lba`, the relocated backup entry array and the
-   relocated backup header at the new end (`scripts/node_vm_gpt.py`);
+   relocated backup header at the new end (`scripts/node_vm_gpt.py`); the
+   read-back applies the same PMBR check and fails closed on any other size;
 4. converts the raw copy to a standalone qcow2, runs `qemu-img check`, confirms
    the virtual size, and refuses if the base image's size or mtime changed;
 5. deletes the raw intermediate and records the geometry in `boot_disk.gpt` in
@@ -814,11 +817,11 @@ of them fails the `expanded_disk_guest` gate and exits non-zero.
 ### 19.3 Offline evidence only
 
 `python -m unittest discover -s scripts -p 'test_node_vm_*.py'` covers GPT
-expansion and refusal cases (shrink, non-GPT, MBR/GPT CRC or entry mismatch,
-header at the wrong LBA, unaligned size), base-image preservation, the serial
-gates, and the expanded acceptance receipt. Those fixtures are synthetic: **no
-boot was performed in this lane, and the arm64 20 GiB profile remains
-unqualified.** The new code path has not been exercised against a real qcow2.
+expansion and refusal cases (shrink, non-GPT, PMBR start/size, MBR/GPT CRC or
+entry mismatch, header at the wrong LBA, unaligned size), base-image
+preservation, the serial gates, and the expanded acceptance receipt. Those
+fixtures are synthetic: **no boot was performed in this lane, and the arm64
+20 GiB profile remains unqualified.** The new code path has not been exercised against a real qcow2.
 
 ### 19.4 Exact-head hosted experiment (prepared, not dispatched)
 

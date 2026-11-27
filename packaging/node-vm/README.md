@@ -126,8 +126,9 @@ OVMF/edk2 or fails closed (use `CARBON_OVMF_CODE`/`CARBON_OVMF_VARS` for a
 non-standard host) rather than falling back to BIOS. On a capable disposable
 runner, `--firmware uefi --machine q35 --disk-size 20G` exercises the declared
 amd64 profile; `--arch aarch64 --machine virt --firmware uefi --disk-size 20G`
-prepares the same expanded profile for arm64 by relocating the GPT backup header
-before boot (no expanded arm64 boot is claimed yet). `--arch aarch64 --machine
+prepares the same expanded profile for arm64 by sizing the protective MBR to
+the disk's last LBA and relocating the GPT backup header before boot (no
+expanded arm64 boot is claimed yet). `--arch aarch64 --machine
 virt --firmware uefi` exercises the declared arm64 target at the base disk size
 and selects `-cpu max` (TCG) or `-cpu host` (KVM). The isolated amd64 QEMU/TCG
 run covers filesystem expansion, a second boot and saved identity persistence.

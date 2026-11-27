@@ -71,8 +71,9 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   `node-8bd7872baf90ee073c7238d87d4f8730`. The 20 GiB arm64 expansion is not
   qualified because the guest did not find its BOOT/UEFI labels before
   `growpart`; the amd64 20 GiB evidence is separate. The harness now expands a
-  read-only flattened copy and relocates the GPT backup header to the new end
-  before boot; that correction is offline-fixture-tested only and still needs a
+  read-only flattened copy, sizes the protective MBR to the new last LBA and
+  relocates the GPT backup header to the new end before boot; that correction
+  is offline-fixture-tested only and still needs a
   hosted expanded boot (sections 19.3-19.4 of the boot report).
 - A Linux-only controller/agent fixture ran the real shared enrollment
   authority and `agent.Run` over loopback TLS 1.3. It passed challenge,

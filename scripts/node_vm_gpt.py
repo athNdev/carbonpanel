@@ -183,7 +183,16 @@ def _read_layout(handle, disk_size):
     if mbr[MBR_PARTITION_OFFSET + 4] != PROTECTIVE_MBR_TYPE:
         raise GptError("not a protective MBR (partition type 0x%02x)"
                        % mbr[MBR_PARTITION_OFFSET + 4])
+    mbr_start_lba = _u32(mbr, MBR_PARTITION_OFFSET + 8)
     mbr_sectors = _u32(mbr, MBR_PARTITION_OFFSET + 12)
+    expected_mbr_sectors = min(last_lba, MBR_MAX_SECTORS)
+    if mbr_start_lba != 1:
+        raise GptError("protective MBR partition starts at LBA %d, expected LBA 1"
+                       % mbr_start_lba)
+    if mbr_sectors != expected_mbr_sectors:
+        raise GptError(
+            "protective MBR size %d does not match the disk's last LBA %d"
+            % (mbr_sectors, expected_mbr_sectors))
 
     primary = _read_header(handle, 1)
     if primary["alternate_lba"] <= 1:
@@ -244,6 +253,7 @@ def _summary(layout):
         "disk_size": layout["disk_size"],
         "total_sectors": layout["total_sectors"],
         "last_lba": layout["last_lba"],
+        "mbr_size_in_lba": layout["mbr_sectors"],
         "alternate_lba": primary["alternate_lba"],
         "last_usable_lba": primary["last_usable_lba"],
         "first_usable_lba": primary["first_usable_lba"],
@@ -289,8 +299,10 @@ def plan_expansion(layout, new_disk_size):
     _set_header_crc(backup, layout["backup"]["header_size"])
 
     mbr = bytearray(layout["mbr"])
+    # The protective partition starts at LBA 1, so its sector count runs from
+    # LBA 1 through the last LBA: the last LBA itself, capped for large disks.
     struct.pack_into("<I", mbr, MBR_PARTITION_OFFSET + 12,
-                     min(new_last_lba + 1, MBR_MAX_SECTORS))
+                     min(new_last_lba, MBR_MAX_SECTORS))
 
     writes = [
         # The backup must exist before the primary header points at it.

@@ -417,6 +417,7 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(overlay.stat().st_size, new_size)
             self.assertFalse((root / "work" / "expanded.raw").exists())
             inspection = boot_qual.gpt.inspect_disk(overlay)
+            self.assertEqual(inspection["mbr_size_in_lba"], new_size // 512 - 1)
             self.assertEqual(inspection["alternate_lba"], new_size // 512 - 1)
             for call in fake.calls:
                 if call[1] == "convert":

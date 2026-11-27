@@ -51,7 +51,8 @@ def _entries(partitions):
     return bytes(data)
 
 
-def _write_gpt(path, total_bytes, partitions, alternate_lba=None, last_usable=None):
+def _write_gpt(path, total_bytes, partitions, alternate_lba=None, last_usable=None,
+               mbr_start_lba=1, mbr_size_in_lba=None):
     assert total_bytes % SECTOR == 0
     total_sectors = total_bytes // SECTOR
     last_lba = total_sectors - 1
@@ -64,11 +65,12 @@ def _write_gpt(path, total_bytes, partitions, alternate_lba=None, last_usable=No
     if alternate_lba is None:
         alternate_lba = last_lba
 
+    if mbr_size_in_lba is None:
+        mbr_size_in_lba = min(last_lba, gpt.MBR_MAX_SECTORS)
     mbr = bytearray(SECTOR)
     mbr[gpt.MBR_PARTITION_OFFSET + 4] = gpt.PROTECTIVE_MBR_TYPE
-    struct.pack_into("<I", mbr, gpt.MBR_PARTITION_OFFSET + 8, 1)
-    struct.pack_into("<I", mbr, gpt.MBR_PARTITION_OFFSET + 12,
-                     min(last_lba + 1, gpt.MBR_MAX_SECTORS))
+    struct.pack_into("<I", mbr, gpt.MBR_PARTITION_OFFSET + 8, mbr_start_lba)
+    struct.pack_into("<I", mbr, gpt.MBR_PARTITION_OFFSET + 12, mbr_size_in_lba)
     mbr[510:512] = b"\x55\xaa"
 
     primary = _header(my_lba=1, alternate_lba=alternate_lba,
@@ -153,6 +155,7 @@ class ExpandTests(unittest.TestCase):
             self.assertEqual(result["old_last_lba"], before["last_lba"])
             self.assertEqual(result["new_last_lba"], self.NEW // SECTOR - 1)
             inspection = gpt.inspect_disk(path)
+            self.assertEqual(inspection["mbr_size_in_lba"], self.NEW // SECTOR - 1)
             self.assertEqual(inspection["alternate_lba"], self.NEW // SECTOR - 1)
             self.assertEqual(inspection["last_usable_lba"],
                              self.NEW // SECTOR - 1 - ENTRY_SECTORS - 1)
@@ -170,13 +173,33 @@ class ExpandTests(unittest.TestCase):
                                        ENTRY_SECTORS * SECTOR)
             self.assertEqual(backup_entries, before["entries"])
 
-    def test_protective_mbr_describes_the_expanded_disk(self):
+    def test_protective_mbr_is_sized_to_the_expanded_disk_last_lba(self):
         with tempfile.TemporaryDirectory() as directory:
             path, _ = self._disk(directory)
             gpt.expand_disk(path, self.NEW)
+            expected = self.NEW // SECTOR - 1
             mbr = _bytes_at(path, 0, SECTOR)
             self.assertEqual(struct.unpack_from(
-                "<I", mbr, gpt.MBR_PARTITION_OFFSET + 12)[0], self.NEW // SECTOR)
+                "<I", mbr, gpt.MBR_PARTITION_OFFSET + 8)[0], 1)
+            self.assertEqual(struct.unpack_from(
+                "<I", mbr, gpt.MBR_PARTITION_OFFSET + 12)[0], expected)
+            self.assertEqual(gpt.inspect_disk(path)["mbr_size_in_lba"], expected)
+
+    def test_twenty_gib_plan_sizes_the_pmbr_to_the_last_lba(self):
+        # Plan-only: applying it would allocate a 20 GiB fixture on constrained
+        # runners. The 16 MiB case above exercises the actual write and read-back.
+        with tempfile.TemporaryDirectory() as directory:
+            path, _ = self._disk(directory)
+            target = gpt.parse_disk_size("20G")
+            expected = 41_943_039
+            self.assertEqual(target // SECTOR - 1, expected)
+            with open(path, "rb") as handle:
+                parsed = gpt._read_layout(handle, path.stat().st_size)
+            plan = gpt.plan_expansion(parsed, target)
+            mbr = dict(plan["writes"])[0]
+            self.assertEqual(plan["new_last_lba"], expected)
+            self.assertEqual(struct.unpack_from(
+                "<I", mbr, gpt.MBR_PARTITION_OFFSET + 12)[0], expected)
 
     def test_leaves_partition_data_and_the_primary_entry_array_untouched(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -295,6 +318,24 @@ class RefusalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(gpt.GptError, "MBR signature"):
                 gpt.inspect_disk(self._broken(directory, mutate))
+
+    def test_refuses_a_protective_mbr_that_does_not_start_at_lba_1(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "disk.raw"
+            _write_gpt(path, self.OLD, ((2048, 4096),), mbr_start_lba=0)
+            with self.assertRaisesRegex(
+                    gpt.GptError, "starts at LBA 0, expected LBA 1"):
+                gpt.inspect_disk(path)
+
+    def test_refuses_a_protective_mbr_that_is_one_sector_too_long(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "disk.raw"
+            _write_gpt(path, self.OLD, ((2048, 4096),),
+                       mbr_size_in_lba=self.OLD // SECTOR)
+            with self.assertRaisesRegex(
+                    gpt.GptError,
+                    "protective MBR size .* does not match the disk's last LBA"):
+                gpt.inspect_disk(path)
 
     def test_refuses_a_corrupt_primary_header_crc(self):
         def mutate(path, info):
