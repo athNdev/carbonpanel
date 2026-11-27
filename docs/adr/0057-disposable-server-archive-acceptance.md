@@ -80,13 +80,14 @@ connections to the fixture endpoints and refuses redirects.
 
 The harness then creates a managed Vanilla source without Docker overrides,
 requires both the `failed_precondition` code and the specific running-export
-refusal message, saves and populates a deterministic fixture, exports both
-native formats, verifies each archive's schema/runtime/per-file SHA-256 and
-expanded size, uploads and previews each archive against the remote node,
-creates each import stopped, checks the new server identity and actual assigned
-port, and verifies destination bytes. The RPC job then starts and joins both
-imports; the UI job stops after the stopped-bytes proof and leaves boot/join
-continuity to the RPC receipt.
+refusal message, saves and populates a deterministic fixture, and records both
+native formats: over RPC in the RPC job, through the production panel in the UI
+job. It verifies each archive's schema/runtime/per-file SHA-256 and expanded
+size, previews each archive against the remote node, creates each import stopped,
+checks the new server identity and actual assigned port, and verifies
+destination bytes. The RPC job then starts and joins both imports; the UI job
+stops after the stopped-bytes proof and leaves boot/join continuity to the RPC
+receipt.
 
 Every check is fail-closed and written to a JSON report. Cleanup is bounded and
 verifies that only servers created by this run are gone; an uncleaned owned
