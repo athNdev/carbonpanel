@@ -12,9 +12,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
 	import { toast } from 'svelte-sonner';
-	import { AlertTriangle, Ban, Lock, Maximize, MapPin, RefreshCw, Users } from '@lucide/svelte';
+	import { AlertTriangle, ArrowLeft, Ban, Lock, Maximize, MapPin, RefreshCw, Users } from '@lucide/svelte';
 	import {
 		CarbonPageHeader,
+		CarbonBreadcrumbs,
 		CarbonTag,
 		CarbonButton,
 		CarbonSelect,
@@ -85,13 +86,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let {
 		serverId,
 		worldKey,
-		presentation = 'dialog',
+		presentation = 'page',
 		enabled = true,
 		onexpand
 	}: {
 		serverId: string;
 		worldKey?: string;
-		presentation?: 'preview' | 'dialog';
+		presentation?: 'page' | 'preview' | 'dialog';
 		enabled?: boolean;
 		onexpand?: () => void;
 	} = $props();
@@ -145,6 +146,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let blueMapSetupKey = $state('');
 	let deniedByRead = $state(false);
 	let denied = $derived(deniedByRead || isReadDenied(statusError));
+	let canBrowseAll = $derived(checkPermission(auth.permissions, 'world_view', 'read', '*'));
+	let worldListHref = $derived(
+		canBrowseAll
+			? resolve('/worlds')
+			: resolve('/worlds') + '?' + new URLSearchParams({ server: serverId })
+	);
 	let worldTitle = $derived(
 		canRead && !denied ? statusTarget?.name || worldRef?.levelName || 'World map' : 'World map'
 	);
@@ -793,6 +800,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		class="min-w-0 flex-1 space-y-4 bg-background font-sans text-foreground"
 		data-testid="showcase-world-map-content"
 	>
+		{#if presentation === 'page'}
+			<CarbonBreadcrumbs
+				items={[{ label: 'World View', href: worldListHref }, { label: worldTitle }]}
+			/>
+		{/if}
+
 		<CarbonPageHeader title={worldTitle}>
 			{#snippet tag()}
 				{#if canRead && !denied && worldRef}
@@ -806,6 +819,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			{/snippet}
 			{#snippet actions()}
+				{#if presentation === 'page'}
+					<CarbonButton kind="tertiary" size="sm" href={worldListHref} class="gap-2">
+						<ArrowLeft class="h-3.5 w-3.5" />
+						<span>{canBrowseAll ? 'All worlds' : 'Server maps'}</span>
+					</CarbonButton>
+				{/if}
 				{#if canRead && !denied && worldRef && !statusUnavailable && view !== 'unknown'}
 					<CarbonButton kind="secondary" size="sm" class="gap-2" onclick={retry}>
 						<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />

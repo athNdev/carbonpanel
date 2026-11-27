@@ -32,7 +32,9 @@ denials and scope changes clear the current map session. Renderer changes
 acquire a matching session before mounting the replacement map.
 
 The native viewport reads saved Overworld terrain through a scoped session.
-Renderer readiness does not imply live players. The native map also offers
+The `/worlds` list and `/worlds/[server]/[world]` page routes remain the
+page-level entry points; the server tab dialog complements them rather than
+replacing them. Renderer readiness does not imply live players. The native map also offers
 managed BlueMap setup with the existing authorization and consent checks.
 Format checks and tiles share bounded workers. Deferred inventory checks keep
 world links visible. Active lifecycle operations temporarily refuse reads.
