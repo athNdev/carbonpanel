@@ -88,3 +88,59 @@ test('the preparation phase reports a longer-running operation', async () => {
 	assert.match(html, /Preparing archive/);
 	assert.match(html, /can take several minutes/);
 });
+
+function actionTag(html: string, testId: string): string {
+	return html.match(new RegExp(`<button[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? '';
+}
+
+function classTokens(markup: string): string[] {
+	return (markup.match(/class="([^"]*)"/)?.[1] ?? '').split(/\s+/).filter(Boolean);
+}
+
+test('export actions keep the 40px CarbonButton control geometry', async () => {
+	const carbonButton = readFileSync(
+		new URL('../../components/carbon/CarbonButton.svelte', import.meta.url),
+		'utf8'
+	);
+	// The exact class sets the modal trigger renders; if CarbonButton moves, the
+	// panel copy below must move with it.
+	const mdSize = 'h-[var(--carbon-control-md)] px-4 text-sm';
+	const primaryKind =
+		'bg-primary text-primary-foreground hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] border border-transparent';
+	assert.ok(carbonButton.includes(mdSize), 'CarbonButton md size classes moved');
+	assert.ok(carbonButton.includes(primaryKind), 'CarbonButton primary classes moved');
+
+	const actions = {
+		prepare: actionTag(await renderPanel(), 'archive-prepare'),
+		download: actionTag(
+			await renderPanel({ phase: 'ready', acknowledged: true }),
+			'archive-download'
+		),
+		retry: actionTag(
+			await renderPanel({ phase: 'error', error: 'fixture refusal' }),
+			'archive-retry'
+		)
+	};
+	for (const [name, markup] of Object.entries(actions)) {
+		assert.ok(markup, `${name} action must render`);
+		const tokens = classTokens(markup);
+		assert.ok(
+			tokens.includes('h-[var(--carbon-control-md)]'),
+			`${name}: actions use the 40px Carbon control height`
+		);
+		assert.ok(
+			!tokens.some((token) => /^py-/.test(token)),
+			`${name}: actions must not hand-roll vertical padding`
+		);
+	}
+	for (const name of ['prepare', 'download'] as const) {
+		const tokens = classTokens(actions[name]);
+		for (const token of `${mdSize} ${primaryKind}`.split(' ')) {
+			assert.ok(tokens.includes(token), `${name}: missing CarbonButton token ${token}`);
+		}
+	}
+	// Try again keeps its compact secondary/mono intent, only the height changes.
+	const retryTokens = classTokens(actions.retry);
+	assert.ok(retryTokens.includes('font-mono') && retryTokens.includes('uppercase'));
+	assert.ok(retryTokens.includes('hover:bg-accent'));
+});

@@ -9,6 +9,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	Presentational export control. The container owns the RPC, download session
 	and notifications; every string that states a contract (formats, disclosure,
 	consistency) is passed in from archive-presentation.ts. No runtime imports.
+
+	The actions therefore repeat CarbonButton's md geometry instead of importing
+	it: `h-[var(--carbon-control-md)]` and the primary/secondary class sets below
+	match CarbonButton.svelte so the dialog's own actions stay 40 px like the
+	CarbonButton that opens it. ArchiveExportPanel.test.ts pins these class sets
+	against CarbonButton.svelte's source.
 -->
 <script lang="ts">
 	type ArchivePhase = 'idle' | 'preparing' | 'ready' | 'error';
@@ -137,7 +143,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					type="button"
 					disabled={!acknowledged}
 					onclick={ondownload}
-					class="focus-ring cursor-pointer rounded-none border border-transparent bg-primary px-4 py-2 font-sans text-xs font-semibold text-primary-foreground transition-colors hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+					class="focus-ring motion-press inline-flex h-[var(--carbon-control-md)] cursor-pointer items-center justify-center border border-transparent bg-primary px-4 font-sans text-sm font-normal tracking-[0.16px] whitespace-nowrap text-primary-foreground transition-[color,background-color,border-color,transform] select-none hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] disabled:cursor-not-allowed disabled:opacity-50"
 					data-testid="archive-download"
 				>
 					Download archive
@@ -150,7 +156,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<button
 				type="button"
 				onclick={onprepare}
-				class="focus-ring cursor-pointer rounded-none border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground uppercase hover:bg-accent"
+				class="focus-ring inline-flex h-[var(--carbon-control-md)] cursor-pointer items-center justify-center border border-border bg-background px-4 font-mono text-xs whitespace-nowrap text-foreground uppercase transition-colors select-none hover:bg-accent"
+				data-testid="archive-retry"
 			>
 				Try again
 			</button>
@@ -163,7 +170,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				type="button"
 				disabled={running}
 				onclick={onprepare}
-				class="focus-ring cursor-pointer rounded-none border border-transparent bg-primary px-4 py-2 font-sans text-xs font-semibold text-primary-foreground transition-colors hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+				class="focus-ring motion-press inline-flex h-[var(--carbon-control-md)] cursor-pointer items-center justify-center border border-transparent bg-primary px-4 font-sans text-sm font-normal tracking-[0.16px] whitespace-nowrap text-primary-foreground transition-[color,background-color,border-color,transform] select-none hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] disabled:cursor-not-allowed disabled:opacity-50"
 				data-testid="archive-prepare"
 			>
 				Prepare export

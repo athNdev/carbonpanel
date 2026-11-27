@@ -25,6 +25,10 @@ sources:
   consistency only and never stops a live server. Show the third-party
   credential disclosure before enabling an authorized download and do not claim
   to detect secrets inside opaque plugin or mod files.
+- Keep the export panel import-free so it renders in isolation, and reproduce
+  CarbonButton's `--carbon-control-md` (40 px) geometry for its actions instead
+  of hand-rolled padding; the control list is pinned by
+  `ArchiveExportPanel.test.ts`.
 - Fence an export preparation to the current open modal attempt and server.
   Closing and reopening for another format, a server identity or status change,
   and teardown release the former attempt, so a late success or rejection cannot
