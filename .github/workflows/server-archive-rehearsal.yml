@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: MPL-2.0
-# CI-only backend acceptance rehearsal for native server portability archives
-# (OSS-426 export, OSS-427 preview/import).
+# CI-only acceptance rehearsals for native server portability archives
+# (OSS-426 export, OSS-427 preview/import, OSS-428 create-from-archive UI).
 #
-# One disposable GitHub-hosted Linux job builds the exact candidate with an
-# empty frontend embed, starts an isolated controller container and a SECOND
-# privileged Docker-in-Docker engine on its own bridge with a private storage
-# mount, then exports and re-imports a managed Vanilla server as both native ZIP
-# and tar.gz over RPC. It verifies the downloaded archive and destination hashes,
-# proves the imports are stopped before start, and joins both imported Minecraft
-# servers with the pinned protocol client.
+# Two jobs share one disposable GitHub-hosted Linux runner definition:
+#   * `rehearsal` is the backend RPC round trip with an empty frontend embed.
+#   * `ui` builds the exact production frontend and drives the real
+#     /servers/[id] export and /servers/new archive wizard in Chromium against
+#     the same disposable controller and second Docker engine.
+# Both jobs export and re-import a managed Vanilla server as native ZIP and
+# tar.gz, verify the downloaded archive and destination hashes, prove the
+# imports are stopped before start, and clean up only their own labeled
+# resources. The RPC job additionally starts and joins both imports; the UI job
+# proves the UI transport leaves the same saved bytes on the remote engine and
+# leaves boot/join continuity to the RPC receipt.
 #
-# OSS-428 create-from-archive browser acceptance belongs to #686. This job does
-# not build or exercise the UI, does not publish, deploy or contact a live panel,
-# and keeps repository permissions read-only with no credentials.
+# This workflow does not publish, deploy or contact a live panel. It keeps
+# repository permissions read-only with no credentials and refuses fork PRs.
 name: Server archive acceptance rehearsal
 
 on:
@@ -25,7 +28,18 @@ on:
       - 'scripts/test_server_archive_rehearsal_ci.py'
       - 'scripts/qualify-server-archive-hosted.sh'
       - 'scripts/qualify-archive-player.mjs'
+      - 'scripts/qualify-archive-ui-hosted.mjs'
+      - 'scripts/qualify-archive-ui-hosted.test.mjs'
       - 'scripts/qualify-compose-client/**'
+      - 'scripts/review/browser.mjs'
+      - 'scripts/review/setup-browser.mjs'
+      - 'scripts/manual-review/e2e/package.json'
+      - 'scripts/manual-review/e2e/bun.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/src/lib/api/stream-download.ts'
+      - 'web/carbon-panel/src/lib/features/servers/**'
+      - 'web/carbon-panel/src/routes/servers/**'
       - 'internal/serverarchive/**'
       - 'internal/nodestorage/**'
       - 'internal/rpc/services/server_archive*.go'
@@ -154,5 +168,119 @@ jobs:
         with:
           name: server-archive-rehearsal-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/server-archive-rehearsal/evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  ui:
+    name: Production UI ZIP + tar.gz export/import
+    # Same repository-owned PR or explicit dispatch rule as the RPC job. The
+    # production frontend and Chromium run only inside this disposable job.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node for the pinned browser driver
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.0.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+
+      - name: Set up Bun for the exact production frontend
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+
+      - name: Install the pinned readiness client
+        run: npm ci --prefix scripts/qualify-compose-client --ignore-scripts --no-audit --no-fund
+
+      - name: Install the pinned browser and its disposable dependencies
+        run: node scripts/review/setup-browser.mjs --with-deps
+
+      - name: Validate the harness offline
+        run: |
+          set -euo pipefail
+          python3 -m unittest scripts.test_server_archive_rehearsal_ci
+          node --test scripts/qualify-archive-ui-hosted.test.mjs
+          bash -n scripts/qualify-server-archive-hosted.sh
+          node --check scripts/qualify-archive-ui-hosted.mjs
+          node --check scripts/qualify-archive-player.mjs
+
+      - name: Run the disposable controller, engine and production UI
+        env:
+          STAGED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CANDIDATE_VERSION: 2.0.1-verify.ci
+          ARCHIVE_UI: '1'
+        run: |
+          bash scripts/qualify-server-archive-hosted.sh "$RUNNER_TEMP/server-archive-ui"
+
+      - name: Print UI evidence summary
+        if: always()
+        run: |
+          evidence="$RUNNER_TEMP/server-archive-ui/evidence"
+          if [[ -f "$evidence/run-status.txt" ]]; then
+            cat "$evidence/run-status.txt"
+          fi
+          if [[ -f "$evidence/cleanup.txt" ]]; then
+            cat "$evidence/cleanup.txt"
+          fi
+          report="$evidence/server-archive-rehearsal.json"
+          if [[ -f "$report" ]]; then
+            python3 - "$report" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("server archive UI rehearsal pass:", report.get("pass"))
+          scope = report.get("scope") or {}
+          print("scope:", scope.get("mode"), scope.get("surface"))
+          print("browser acceptance:", scope.get("browser_acceptance"))
+          if report.get("error"):
+              print("error:", report["error"])
+          if report.get("cleanup_error"):
+              print("cleanup error:", report["cleanup_error"])
+          candidate = report.get("candidate") or {}
+          print("candidate:", candidate.get("version"), candidate.get("commit"),
+                (candidate.get("provenance") or {}).get("image_revision"))
+          for phase in ("refusal", "export", "import"):
+              detail = (report.get("ui") or {}).get(phase) or {}
+              browser = detail.get("browser") or {}
+              print("ui", phase, "record:", detail.get("record_file"),
+                    "browser:", browser.get("browserVersion"),
+                    "screenshots:", len(detail.get("screenshots") or []))
+          for name, detail in (report.get("formats") or {}).items():
+              print(name, "archive:", detail.get("archive_sha256"),
+                    "files:", detail.get("file_count"),
+                    "transport:", detail.get("transport"))
+          for name, detail in (report.get("imports") or {}).items():
+              print(name, "import:", detail.get("server_id"), "node:", detail.get("node_id"),
+                    "transport:", detail.get("transport"),
+                    "status-before-start:", detail.get("status_before_start"),
+                    "files:", detail.get("verified_files"))
+          cleanup = report.get("cleanup") or {}
+          print("cleanup pass:", cleanup.get("pass"),
+                "failures:", cleanup.get("failures") or [])
+          print("failed checks:", report.get("failed_checks") or [])
+          PY
+          fi
+
+      - name: Upload disposable evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-archive-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/server-archive-ui/evidence
           if-no-files-found: error
           retention-days: 14

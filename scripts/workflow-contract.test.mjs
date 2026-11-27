@@ -196,3 +196,39 @@ test('verify-publication-ref gate sets GH_TOKEN in its own step env', () => {
     'verify-publication-ref calls gh; it must set GH_TOKEN in its own step env'
   );
 });
+
+test('server archive UI rehearsal keeps the RPC job and adds a read-only disposable UI job', () => {
+  const source = read('server-archive-rehearsal.yml');
+
+  // The existing RPC receipt keeps its exact artifact name and permissions.
+  assert.match(source, /permissions:\n  contents: read/);
+  assert.match(
+    source,
+    /name: server-archive-rehearsal-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/
+  );
+  assert.match(source, /bash scripts\/qualify-server-archive-hosted\.sh "\$RUNNER_TEMP\/server-archive-rehearsal"/);
+
+  const uiStart = source.indexOf('\n  ui:\n');
+  assert.ok(uiStart >= 0, 'the production UI job is missing');
+  const ui = source.slice(uiStart);
+
+  // Fork PRs still cannot run PR-contributed code with a Docker socket.
+  assert.match(ui, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  // The UI job checks out the same PR head it builds and photographs.
+  assert.match(ui, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(ui, /persist-credentials: false/);
+  // The production frontend mode is explicit and uses the shared hosted wrapper.
+  assert.match(ui, /ARCHIVE_UI: '1'/);
+  assert.match(ui, /bash scripts\/qualify-server-archive-hosted\.sh "\$RUNNER_TEMP\/server-archive-ui"/);
+  // The browser driver is validated offline before any disposable service starts.
+  assert.match(ui, /node --test scripts\/qualify-archive-ui-hosted\.test\.mjs/);
+  assert.match(ui, /node --check scripts\/qualify-archive-ui-hosted\.mjs/);
+  // Evidence survives a failed run but no write scope or credential is added.
+  assert.match(
+    ui,
+    /name: server-archive-ui-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/
+  );
+  assert.match(ui, /if: always\(\)[\s\S]*actions\/upload-artifact/);
+  assert.doesNotMatch(ui, /secrets\./);
+  assert.doesNotMatch(ui, /contents: write|packages: write|id-token: write/);
+});

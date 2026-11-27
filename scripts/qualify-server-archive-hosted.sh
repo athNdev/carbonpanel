@@ -8,8 +8,12 @@
 # evidence tree. It refuses to run outside a GitHub-hosted job so it can never
 # adopt a developer workstation, a live panel or another checkout.
 #
-# This is the backend RPC rehearsal (OSS-426/427) with an empty frontend embed.
-# OSS-428 browser acceptance belongs to #686 and is deliberately not claimed here.
+# This wrapper has two modes. The default is the backend RPC rehearsal
+# (OSS-426/427) with an empty frontend embed. ARCHIVE_UI=1 builds the real
+# production frontend, keeps the same disposable controller and second engine,
+# and adds the OSS-428 browser export/import phases driven by
+# scripts/qualify-archive-ui-hosted.mjs. Both modes share one provenance record,
+# one evidence tree and the same ownership-gated cleanup.
 set -euo pipefail
 umask 077
 
@@ -146,6 +150,18 @@ stage=identity
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+if [[ "${ARCHIVE_UI:-0}" == 1 ]]; then
+  stage=ui-browser
+  # The pinned driver and browser are installed by scripts/review/setup-browser.mjs.
+  # Refuse to start the controller when the disposable browser cache is absent
+  # instead of discovering it after the exact-head image is built.
+  browser_cache="${PLAYWRIGHT_BROWSERS_PATH:-$repo_root/tmp/review-browsers}"
+  [[ -d "$browser_cache" ]] || {
+    echo "review browser cache is missing: $browser_cache" >&2
+    false
+  }
+fi
+
 stage=dind-digest
 python3 - "$dind_repository" "$dind_digest" <<'PY' | tee "$evidence/dind-registry-digest.txt"
 import json, sys, urllib.request
@@ -178,8 +194,20 @@ grep -F "$dind_digest" "$evidence/dind-repo-digests.json"
 
 stage=build
 echo "=== Build the exact-head candidate and controller image ==="
-mkdir -p web/carbon-panel/build
-touch web/carbon-panel/build/.gitkeep
+if [[ "${ARCHIVE_UI:-0}" == 1 ]]; then
+  stage=frontend
+  echo "=== Build the exact-head production frontend ==="
+  (cd web/carbon-panel && bun install --frozen-lockfile) \
+    > "$evidence/frontend-install.txt" 2>&1
+  (cd web/carbon-panel && APP_VERSION="$CANDIDATE_VERSION" bun run build) \
+    > "$evidence/frontend-build.txt" 2>&1
+  test -f web/carbon-panel/build/index.html
+  test -f web/carbon-panel/build/version.json
+  grep -F "$CANDIDATE_VERSION" web/carbon-panel/build/version.json
+else
+  mkdir -p web/carbon-panel/build
+  touch web/carbon-panel/build/.gitkeep
+fi
 export CGO_ENABLED=0
 ldflags="-s -w \
   -X github.com/athNdev/carbon-panel/internal/buildinfo.Version=$CANDIDATE_VERSION \
@@ -392,6 +420,11 @@ PY
 
 stage=rehearsal
 echo "=== Run the native archive acceptance rehearsal ==="
+ui_args=()
+if [[ "${ARCHIVE_UI:-0}" == 1 ]]; then
+  ui_args=(--ui-driver "$repo_root/scripts/qualify-archive-ui-hosted.mjs")
+  echo "=== Production UI export/import phases are enabled ==="
+fi
 set +e
 QUALIFY_NPM_PREFIX="$PWD/scripts/qualify-compose-client" \
 python3 scripts/server_archive_rehearsal_ci.py \
@@ -407,7 +440,8 @@ python3 scripts/server_archive_rehearsal_ci.py \
   --mc-version "${MC_VERSION:-1.21.1}" \
   --readiness-host 127.0.0.1 \
   --destination-readiness-host "$remote_address" \
-  --readiness-script "$PWD/scripts/qualify-archive-player.mjs"
+  --readiness-script "$PWD/scripts/qualify-archive-player.mjs" \
+  "${ui_args[@]}"
 status=$?
 set -e
 cp "$work/server-archive-rehearsal.json" "$evidence/" 2>/dev/null || true
