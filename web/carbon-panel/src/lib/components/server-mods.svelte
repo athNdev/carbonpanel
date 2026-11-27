@@ -407,6 +407,11 @@ one at https://mozilla.org/MPL/2.0/.
 			mods = response.mods;
 			previewsSupplied = checkUpdates;
 			if (checkUpdates) {
+				// A completed check supersedes the notice an earlier check left
+				// behind. Clear it before the prune effect reads the new rows, so
+				// this check either raises its own still-true notice or leaves
+				// none; a plain reload, server change or failure keeps the old one.
+				selectionNotice = '';
 				updateStatus = summarizeModUpdateCheck(mods.map((mod) => mod.updatePreview?.state));
 			}
 		} catch (_e) {
@@ -709,9 +714,13 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	{/snippet}
 	<p role="status" class="px-3 text-sm text-muted-foreground">{updateStatus}</p>
-	{#if selectionNotice}
-		<p role="status" class="px-3 text-sm text-warning-text">{selectionNotice}</p>
-	{/if}
+	<!--
+		Always mounted: a live region must already be in the accessibility tree
+		before its text changes, or a screen reader may not announce the update.
+		An empty region renders no line box, so it adds no gap between the check
+		summary above and the update bar below.
+	-->
+	<p role="status" class="px-3 text-sm text-warning-text">{selectionNotice}</p>
 	{#if availableUpdates.length > 0}
 		<!--
 			One compact control per row on a phone: an inline label beside the
