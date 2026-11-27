@@ -160,21 +160,38 @@ jobs:
 
       # Gate changed lines while publishing the complete compatible-toolchain
       # report below. Historical debt is visible without blocking unrelated work.
-      # The action's own only-new-issues mode fetches the PR patch through the
-      # GitHub API and degrades to reporting every finding when a diff exceeds
-      # 20000 lines, so the gate computes the merge base from git instead.
-      - name: Resolve lint base
-        run: |
-          base="$(git merge-base origin/main HEAD)"
-          # An empty --new-from-rev would silently gate nothing.
-          test -n "$base"
-          echo "LINT_BASE=$base" >> "$GITHUB_ENV"
-
-      - name: golangci-lint (new/changed code only)
+      #
+      # Do not use the action's only-new-issues for pull requests: it fetches
+      # the PR diff through the GitHub API, which rejects diffs over 20,000
+      # lines before lint runs. Compare against the exact PR base commit
+      # instead; the checkout above has full history (fetch-depth: 0).
+      - name: golangci-lint (changed lines vs pull request base)
+        if: github.event_name == 'pull_request'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.13.2
-          args: --new-from-rev=${{ env.LINT_BASE }}
+          only-new-issues: 'false'
+          args: --new-from-rev=${{ github.event.pull_request.base.sha }}
+
+      # A push has no pull_request base. github.event.before is the previous
+      # tip of main, so gate only commits introduced by this push.
+      - name: golangci-lint (changed lines since previous main commit)
+        if: github.event_name == 'push' && github.event.before != '' && github.event.before != '0000000000000000000000000000000000000000'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.13.2
+          only-new-issues: 'false'
+          args: --new-from-rev=${{ github.event.before }}
+
+      # New branches, tags and non-push/non-PR events have no usable base
+      # commit. Preserve the current behavior instead of passing an empty or
+      # all-zero revision to --new-from-rev.
+      - name: golangci-lint (changed lines only, no usable base)
+        if: github.event_name != 'pull_request' && (github.event.before == '' || github.event.before == '0000000000000000000000000000000000000000')
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.13.2
+          only-new-issues: 'true'
 
       - name: Record full lint debt
         if: always()
