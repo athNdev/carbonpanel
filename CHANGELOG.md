@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Paper, Purpur, Pufferfish, Folia, Spigot and Bukkit servers can browse and install plugins from Hangar (merged with Modrinth plugin results), with versions filtered by the server's Minecraft version and downloads written to the server's `plugins/` directory. Uploaded plugin jars are classified by their `plugin.yml` / `paper-plugin.yml` metadata.
-- Server mods can check installed files against Modrinth by SHA-512 and preview a compatible release with its exact candidate file, checksum and dependency policy. An operator-selected update is re-verified and staged into the server's open update batch with an apply window; automatic `mod_update` scheduled tasks use the same reviewed flow.
+- Server mods can check installed files against Modrinth by SHA-512 and preview a compatible release with its exact candidate file and checksum. The preview is read-only and does not change the server.
 - Changing a server's Minecraft version is refused up front with the exact list of installed mods or plugins whose declared constraints cannot satisfy the target, instead of recreating into a broken state.
 - Starting a server while its previous stop is still finishing waits for the stop instead of failing, and the interactive stop window is shorter, so rapid start and stop clicks can no longer hold the server in a long transition.
 - The server map renders the Nether and the End alongside the Overworld, understands current save formats (including LZ4-compressed regions), and refreshes while Minecraft saves. A dimension picker keeps the camera in place, and the viewport states how old the visible save is.
