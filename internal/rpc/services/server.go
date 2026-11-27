@@ -1858,10 +1858,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 
 // preflightReviewedModRuntimeTarget refuses an UpdateServer that would move the
 // effective Docker runtime target while a reviewed mod candidate is staged. It
-// runs before the write phase, so a refusal leaves the committed server and
-// config rows paired; otherwise the config sync's guard would fail after the
-// server row was already saved and every later read or lifecycle call would
-// fail on the inconsistent pair.
+// runs before the write phase so an already-invalid request does not reserve
+// ports, and CommitServerSettings re-runs the same check inside its writer
+// transaction so a candidate admitted after this read still refuses the pair.
 func (s *ServerService) preflightReviewedModRuntimeTarget(ctx context.Context, current *storage.Server, currentConfig *storage.ServerConfig, proposed *storage.Server, proposedConfig *storage.ServerConfig) error {
 	err := s.store.RefuseReviewedModRuntimeChange(ctx, current, currentConfig, proposed, proposedConfig)
 	if err == nil {
@@ -2162,7 +2161,11 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		return nil, err
 	}
 
-	// Commit phase: every write follows the preflight.
+	// Commit phase: every write follows the preflight. The server row and the
+	// config row commit in one writer transaction that re-runs the reviewed-mod
+	// check, so an admission that commits after the preflight cannot be
+	// invalidated between the check and the pair. The candidate check uses the
+	// committed rows read under that same lock.
 	if replaceAdditionalPorts {
 		if err := s.store.ReplaceAdditionalPortLeases(ctx, proposed.NodeID, proposed.ID, hostPorts(additionalPorts, proposed.ProxyHostname != "")); err != nil {
 			if errors.Is(err, storage.ErrPortLeaseHeld) {
@@ -2177,28 +2180,25 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 		}()
 	}
-	if saveModpackConfig {
-		if err := s.store.UpdateServerConfig(ctx, proposedConfig); err != nil {
-			s.log.Error("Failed to update server config with modpack settings: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save modpack configuration: %w", err))
-		}
-	}
-	if memoryChanged {
-		// Runs after the modpack save so its read-modify-write preserves the
-		// modpack fields.
-		if err := s.store.UpdateServerConfigMemory(ctx, proposed.ID, proposed.Memory); err != nil {
-			s.log.Error("Failed to update server config memory: %v", err)
-		}
-	}
-
 	server = &proposed
-	// Save server updates first
-	if err := s.store.UpdateServer(ctx, server); err != nil {
-		s.log.Error("Failed to update server: %v", err)
+	if err := s.store.CommitServerSettings(ctx, storage.ServerSettingsCommit{
+		ServerID:       proposed.ID,
+		Proposed:       server,
+		ProposedConfig: proposedConfig,
+		SaveConfig:     saveModpackConfig,
+	}); err != nil {
+		s.log.Error("Failed to update server settings: %v", err)
 		if errors.Is(err, storage.ErrStagedModVersionChange) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+	}
+	if memoryChanged {
+		// Runs after the commit so its read-modify-write preserves the
+		// modpack fields.
+		if err := s.store.UpdateServerConfigMemory(ctx, proposed.ID, proposed.Memory); err != nil {
+			s.log.Error("Failed to update server config memory: %v", err)
+		}
 	}
 	rollbackAdditional = false
 	if capacityLockHeld {

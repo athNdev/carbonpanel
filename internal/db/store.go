@@ -372,26 +372,35 @@ func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) er
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
+// takeServerConfigWriterLock takes SQLite's writer lock before a guard's reads.
+// A deferred transaction that reads first and writes later can lose the
+// snapshot upgrade to a concurrent commit and fail with SQLITE_BUSY_SNAPSHOT
+// ("database is locked"), which busy_timeout does not retry. The UPDATE matches
+// the row being saved at most and changes nothing; a zero-row UPDATE still
+// starts the write transaction when the legacy server has no config row yet.
+func takeServerConfigWriterLock(tx *gorm.DB, serverID string) error {
+	return tx.Model(&ServerConfig{}).Where("server_id = ?", serverID).
+		UpdateColumn("server_id", gorm.Expr("server_id")).Error
+}
+
+// saveServerConfigTx runs the reviewed-mod guard and the save inside the
+// caller's transaction. The caller must already hold the writer lock.
+func saveServerConfigTx(tx *gorm.DB, config *ServerConfig) error {
+	if err := ensureDirectRuntimeSaveAllowed(tx, config); err != nil {
+		return err
+	}
+	return tx.Save(config).Error
+}
+
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
 	if config == nil || config.ServerID == "" {
 		return s.db.WithContext(ctx).Save(config).Error
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Take SQLite's writer lock before the guard's reads. A deferred
-		// transaction that reads first and writes later can lose the snapshot
-		// upgrade to a concurrent commit and fail with SQLITE_BUSY_SNAPSHOT
-		// ("database is locked"), which busy_timeout does not retry. The
-		// UPDATE matches the row being saved at most and changes nothing; a
-		// zero-row UPDATE still starts the write transaction when the legacy
-		// server has no config row yet.
-		if err := tx.Model(&ServerConfig{}).Where("server_id = ?", config.ServerID).
-			UpdateColumn("server_id", gorm.Expr("server_id")).Error; err != nil {
+		if err := takeServerConfigWriterLock(tx, config.ServerID); err != nil {
 			return err
 		}
-		if err := ensureDirectRuntimeSaveAllowed(tx, config); err != nil {
-			return err
-		}
-		return tx.Save(config).Error
+		return saveServerConfigTx(tx, config)
 	})
 }
 

@@ -54,19 +54,22 @@ func reviewedRuntimeTargetTx(tx *gorm.DB, serverID string) (ModLoader, string, e
 
 // RefuseReviewedModRuntimeChange refuses a proposed server/config pair when it
 // would move the effective Docker runtime target while a reviewed mod candidate
-// is staged. UpdateServer calls it before any write so a refusal leaves the
-// committed server and config rows untouched; the store guard remains the
-// backstop for other writers.
-//
-// It compares the effective targets rather than raw field inequality, so a
-// no-op or non-runtime update still succeeds. A proposal that touches no
-// runtime input passes even when the current target cannot be resolved, which
-// matches the guard's behavior for unrelated config saves.
+// is staged. UpdateServer may call it as an early preflight; the serialized
+// settings commit re-runs the same check inside its writer transaction, so a
+// concurrent admission cannot invalidate the review between that check and the
+// server/config writes. It compares the effective targets rather than raw field
+// inequality, so a no-op or non-runtime update still succeeds. A proposal that
+// touches no runtime input passes even when the current target cannot be
+// resolved, which matches the guard's behavior for unrelated config saves.
 func (s *Store) RefuseReviewedModRuntimeChange(ctx context.Context, current *Server, currentConfig *ServerConfig, proposed *Server, proposedConfig *ServerConfig) error {
+	return refuseReviewedModRuntimeChangeTx(s.db.WithContext(ctx), current, currentConfig, proposed, proposedConfig)
+}
+
+func refuseReviewedModRuntimeChangeTx(tx *gorm.DB, current *Server, currentConfig *ServerConfig, proposed *Server, proposedConfig *ServerConfig) error {
 	if current == nil || proposed == nil || currentConfig == nil || proposedConfig == nil {
 		return nil
 	}
-	hasStaged, err := s.HasStagedReviewedModCandidates(ctx, current.ID)
+	hasStaged, err := hasStagedReviewedModCandidates(tx, current.ID)
 	if err != nil || !hasStaged {
 		return err
 	}
