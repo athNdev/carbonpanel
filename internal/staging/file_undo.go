@@ -204,21 +204,11 @@ type pendingFile struct {
 
 func buildStreamingFiles(acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]pendingFile, error) {
 	var files []pendingFile
-	// Older data may already carry two rows for one normalized target. One live
-	// post-image cannot match both recorded entries, so recovery would refuse
-	// forever. Refuse before the first live write and name both rows so the
-	// operator can discard one duplicate and retry.
-	byTarget := make(map[string]string, len(rows))
-	for _, row := range rows {
-		if row.Kind == storage.StagedKindModule {
-			continue
-		}
-		target := normalizeStagedTarget(row.TargetPath)
-		if previous, ok := byTarget[target]; ok {
-			return nil, fmt.Errorf("staged batch contains more than one row for target %q (rows %s and %s); discard one duplicate before retrying", row.TargetPath, previous, row.ID)
-		}
-		byTarget[target] = row.ID
-	}
+	// Expand every row to the exact live targets it will write before checking
+	// uniqueness. A modpack row stores the literal TargetPath "modpack", so the
+	// collision with a separately staged pack file is only visible after its
+	// staged tree is expanded. One live post-image cannot match two recorded
+	// entries, so recovery would refuse forever if both were admitted.
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
 			continue
@@ -259,6 +249,14 @@ func buildStreamingFiles(acc nodestorage.Accessor, rows []storage.StagedContentC
 			item.expectedStageSha512 = row.ApprovedSha512
 		}
 		files = append(files, item)
+	}
+	byTarget := make(map[string]pendingFile, len(files))
+	for _, file := range files {
+		target := normalizeStagedTarget(file.target)
+		if previous, ok := byTarget[target]; ok {
+			return nil, fmt.Errorf("staged batch contains more than one row for target %q (rows %s and %s); discard one duplicate before retrying", file.target, previous.rowID, file.rowID)
+		}
+		byTarget[target] = file
 	}
 	return files, nil
 }

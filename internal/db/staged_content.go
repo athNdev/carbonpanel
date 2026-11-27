@@ -26,6 +26,12 @@ import (
 // unverifiable and permanently refuse recovery.
 var ErrDuplicateStagedTarget = errors.New("staged target already exists in this batch")
 
+// ErrModpackBatchConflict refuses a modpack row together with a separately
+// staged file or reviewed-mod row in one batch. A modpack expands to arbitrary
+// pack paths, so admission cannot prove the two will not write the same live
+// target; requiring a separate batch is the smallest safe closure.
+var ErrModpackBatchConflict = errors.New("a modpack update cannot share a batch with separately staged file or mod content")
+
 // normalizedStagedTarget matches the publication-time target identity: case,
 // separator and trailing-separator aliases name the same live file.
 func normalizedStagedTarget(value string) string {
@@ -49,6 +55,31 @@ func rejectDuplicateStagedTarget(tx *gorm.DB, row *StagedContentChange, batchID 
 		}
 		return fmt.Errorf("%w: %q is already staged in batch %s as row %s; discard that item before staging it again",
 			ErrDuplicateStagedTarget, row.TargetPath, batchID, existing.ID)
+	}
+	return nil
+}
+
+// rejectModpackBatchMix refuses a modpack row alongside separately staged file
+// or reviewed-mod rows. The modpack's expanded live targets are not known at
+// admission, so accepting the mix could admit two rows for one live path.
+func rejectModpackBatchMix(tx *gorm.DB, row *StagedContentChange, batchID string) error {
+	if row.Kind != StagedKindModpack && row.Kind != StagedKindFile && row.Kind != StagedKindMod {
+		return nil
+	}
+	var rows []StagedContentChange
+	if err := tx.Select("id", "kind").
+		Where("batch_id = ? AND status = ? AND id <> ?", batchID, StagedStatusStaged, row.ID).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, existing := range rows {
+		mixed := (row.Kind == StagedKindModpack && (existing.Kind == StagedKindFile || existing.Kind == StagedKindMod)) ||
+			((row.Kind == StagedKindFile || row.Kind == StagedKindMod) && existing.Kind == StagedKindModpack)
+		if !mixed {
+			continue
+		}
+		return fmt.Errorf("%w: batch %s already has %s row %s; discard it or apply it in a separate batch before staging this %s row",
+			ErrModpackBatchConflict, batchID, existing.Kind, existing.ID, row.Kind)
 	}
 	return nil
 }
@@ -225,7 +256,10 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		if err := tx.Create(row).Error; err != nil {
 			return err
 		}
-		return rejectDuplicateStagedTarget(tx, row, batch.ID)
+		if err := rejectDuplicateStagedTarget(tx, row, batch.ID); err != nil {
+			return err
+		}
+		return rejectModpackBatchMix(tx, row, batch.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -454,6 +488,9 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 			return err
 		}
 		if err := rejectDuplicateStagedTarget(tx, row, batchID); err != nil {
+			return err
+		}
+		if err := rejectModpackBatchMix(tx, row, batchID); err != nil {
 			return err
 		}
 		if err := requireBatchAdmission(tx, row.ServerID); err != nil {

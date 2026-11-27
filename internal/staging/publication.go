@@ -168,6 +168,17 @@ func restoreRecordedRecovery(ctx context.Context, acc nodestorage.Accessor, stor
 	if len(entries) == 0 {
 		return fmt.Errorf("batch %s recorded an empty recovery snapshot", record.BatchID)
 	}
+	// Old data may already record two entries for one normalized live target.
+	// One live post-image cannot verify both, so refuse before restoring or
+	// restaging anything instead of leaving an unrecoverable snapshot.
+	recordedTargets := make(map[string]int, len(entries))
+	for i, entry := range entries {
+		target := normalizeStagedTarget(entry.Target)
+		if previous, ok := recordedTargets[target]; ok {
+			return fmt.Errorf("batch %s recorded more than one recovery entry for target %q (entries %d and %d); discard the duplicate staged row before retrying the lifecycle", record.BatchID, entry.Target, previous, i)
+		}
+		recordedTargets[target] = i
+	}
 	for i, entry := range entries {
 		owner, ok := byID[entry.RowID]
 		if !ok {
