@@ -45,8 +45,9 @@ The World View workspace can open a built-in map for a supported Java save on
 the controller's local Docker node. Explicit renderer configuration takes
 precedence. The panel switches to a discovered BlueMap installation when it
 can serve this world's map, and uses the built-in map while that installation
-is stopped or waiting for its first render when a readable save is available. A native
-map reads a qualified saved Overworld or End dimension. **Map span** sets the longer edge of the
+is stopped or waiting for its first render when a readable save is available.
+A native map reads a qualified saved Overworld or End dimension. **Map span**
+sets the longer edge of the
 viewport from 32 to 1,024 blocks. **Auto** opens at 256 blocks and expands to
 512 when every tile in the initial view has complete coverage. The span sets how
 much fits on screen. Pan or use **Jump** to reach any valid coordinate.
@@ -74,8 +75,9 @@ The server's canonical level, current node generation, World Library revision
 and last restore operation scope each key. Restoring a backup invalidates open
 map keys even when the level folder name stays the same. The manifest lists
 the dimensions allowed for the save. The controller permits two concurrent
-renders. A busy request can be retried. The server supplies rendered tiles and keeps raw region files on the owning
-server. Viewing uses no runtime module, game assets or external services.
+renders. A busy request can be retried. The server supplies rendered tiles and
+keeps raw region files on the owning server. Viewing uses no runtime module,
+game assets or external services.
 
 ## Qualification
 

@@ -206,8 +206,10 @@ need it.
 
 ## 3. Capability matrix
 
-Adapter capabilities gate external map controls. The built-in viewport uses its
-authorized manifest to decide which dimensions it can open.
+Capabilities come from the adapter and gate visible controls. Unsupported means
+unsupported — no lookalike control is substituted. The built-in viewport
+additionally uses its authorized manifest to decide which saved dimensions it
+can open.
 
 | Capability | Built-in terrain | BlueMap | squaremap | Dynmap | Static |
 | --- | --- | --- | --- | --- | --- |

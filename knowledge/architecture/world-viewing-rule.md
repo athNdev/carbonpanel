@@ -31,16 +31,17 @@ maps and retries temporary failures while the scope remains authorized. Read
 denials and scope changes clear the current map session. Renderer changes
 acquire a matching session before mounting the replacement map.
 
-Native terrain uses bounded workers and a scoped map session. Inventory can
-defer format checks. Lifecycle operations temporarily refuse reads. The
-viewport aborts tiles outside its current session, dimension or viewport.
-It identifies empty and partial saves. See [native transport](../decisions/native-worldview-transport.md)
-for dimension eligibility and coordinate links. Non-sensitive point markers
-use scoped ListMapOverlays results for the selected dimension, and their list
-can center offscreen points. The native map also offers managed BlueMap setup
-with the existing authorization and consent checks. Shared links carry
-coordinates and require the recipient’s scoped read permission. Native World
-View never changes the save.
+The native viewport reads saved terrain through a scoped session for the
+dimensions the manifest lists. Renderer readiness does not imply live players.
+The native map also offers managed BlueMap setup with the existing authorization
+and consent checks. Format checks and tiles share bounded workers. Deferred
+inventory checks keep world links visible. Active lifecycle operations
+temporarily refuse reads. The viewport bounds tile requests and aborts work
+outside the current session, dimension or viewport. It identifies empty and
+partial saves. Shared links carry coordinates and require the recipient’s
+scoped read permission. The readonly map shows non-sensitive markers,
+waypoints and points of interest for the selected dimension from scoped
+ListMapOverlays results. The marker list centers offscreen points.
 
 Renderer traffic stays same-origin with short-lived keys and an AuthStore session
 cookie renewed before each map session. Each asset read rechecks the server’s
