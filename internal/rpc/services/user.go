@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -151,6 +152,17 @@ func (s *UserService) CreateUser(ctx context.Context, req *connect.Request[v1.Cr
 		}
 	}
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventUserCreate,
+		SubjectTyp: "user",
+		SubjectID:  user.ID,
+	}, map[string]any{
+		"username":  user.Username,
+		"roles":     strings.Join(msg.Roles, ","),
+		"email_set": user.Email != nil && *user.Email != "",
+		"active":    user.IsActive,
+	})
+
 	item, err := s.userWithRoleSources(ctx, user)
 	if err != nil {
 		return nil, err
@@ -190,6 +202,23 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to update user: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update user"))
 	}
+
+	roleNames := ""
+	rolesChanged := roleUpdate != nil
+	if rolesChanged {
+		roleNames = strings.Join(roleUpdate.Roles, ",")
+	}
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventUserUpdate,
+		SubjectTyp: "user",
+		SubjectID:  msg.Id,
+	}, map[string]any{
+		"email_changed":  msg.Email != nil,
+		"active_changed": msg.IsActive != nil,
+		"roles_changed":  rolesChanged,
+		"roles":          roleNames,
+	})
+
 	user, err := s.store.GetUser(ctx, msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
@@ -225,10 +254,24 @@ func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID is required"))
 	}
 
+	var properties map[string]any
+	if user, err := s.store.GetUser(ctx, msg.Id); err == nil {
+		properties = map[string]any{
+			"username":      user.Username,
+			"auth_provider": user.AuthProvider,
+		}
+	}
+
 	if err := s.store.DeleteUser(ctx, msg.Id); err != nil {
 		s.log.Error("Failed to delete user: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete user"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventUserDelete,
+		SubjectTyp: "user",
+		SubjectID:  msg.Id,
+	}, properties)
 
 	return connect.NewResponse(&v1.DeleteUserResponse{
 		Message: "user deleted",

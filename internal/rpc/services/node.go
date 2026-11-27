@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/activity"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodescan"
@@ -214,6 +216,17 @@ func (s *NodeService) CreateNode(ctx context.Context, req *connect.Request[v1.Cr
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create node: %w", err))
 	}
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventNodeCreate,
+		SubjectTyp: "node",
+		SubjectID:  node.ID,
+	}, map[string]any{
+		"name":        node.Name,
+		"is_local":    node.IsLocal,
+		"tls_enabled": node.TLSEnabled,
+		"enabled":     node.Enabled,
+	})
+
 	if node.Enabled && s.pool != nil {
 		go func() {
 			_, _ = s.pool.PingNode(context.Background(), node.ID)
@@ -238,8 +251,10 @@ func (s *NodeService) UpdateNode(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	hostOrTLSChanged := false
-	if msg.Name != nil {
+	changed := make([]string, 0, 12)
+	if msg.Name != nil && *msg.Name != node.Name {
 		node.Name = *msg.Name
+		changed = append(changed, "name")
 	}
 	if msg.Host != nil && *msg.Host != node.Host {
 		if err := validateNodeHost(*msg.Host); err != nil {
@@ -247,58 +262,82 @@ func (s *NodeService) UpdateNode(ctx context.Context, req *connect.Request[v1.Up
 		}
 		node.Host = *msg.Host
 		hostOrTLSChanged = true
+		changed = append(changed, "host")
 	}
-	if msg.AdvertisedIp != nil {
+	if msg.AdvertisedIp != nil && *msg.AdvertisedIp != node.AdvertisedIP {
 		node.AdvertisedIP = *msg.AdvertisedIp
+		changed = append(changed, "advertised_ip")
 	}
 	// Empty TLS strings mean "unchanged", not "clear". Read responses are
 	// redacted, so an edit form that echoes the response back sends empty cert
 	// and key fields; treating those as a clear would silently destroy stored
 	// credentials and invalidate every cached pool client. A non-empty value is
 	// required to replace credentials. See docs/adr/0018-node-response-redaction.md.
+	tlsCredentialChanged := false
 	if msg.TlsCaCert != nil && *msg.TlsCaCert != "" && *msg.TlsCaCert != node.TLSCACert {
 		node.TLSCACert = *msg.TlsCaCert
-		hostOrTLSChanged = true
+		hostOrTLSChanged, tlsCredentialChanged = true, true
+		changed = append(changed, "tls_ca_cert")
 	}
 	if msg.TlsCert != nil && *msg.TlsCert != "" && *msg.TlsCert != node.TLSCert {
 		node.TLSCert = *msg.TlsCert
-		hostOrTLSChanged = true
+		hostOrTLSChanged, tlsCredentialChanged = true, true
+		changed = append(changed, "tls_cert")
 	}
 	if msg.TlsKey != nil && *msg.TlsKey != "" && *msg.TlsKey != node.TLSKey {
 		node.TLSKey = *msg.TlsKey
-		hostOrTLSChanged = true
+		hostOrTLSChanged, tlsCredentialChanged = true, true
+		changed = append(changed, "tls_key")
 	}
 	if msg.TlsEnabled != nil && *msg.TlsEnabled != node.TLSEnabled {
 		node.TLSEnabled = *msg.TlsEnabled
 		hostOrTLSChanged = true
+		changed = append(changed, "tls_enabled")
 	}
 	if msg.TlsSkipVerify != nil && *msg.TlsSkipVerify != node.TLSSkipVerify {
 		node.TLSSkipVerify = *msg.TlsSkipVerify
 		hostOrTLSChanged = true
+		changed = append(changed, "tls_skip_verify")
 	}
-	if msg.MaxMemoryMb != nil {
+	if msg.MaxMemoryMb != nil && *msg.MaxMemoryMb != node.MaxMemoryMB {
 		node.MaxMemoryMB = *msg.MaxMemoryMb
+		changed = append(changed, "max_memory_mb")
 	}
-	if msg.MaxServers != nil {
+	if msg.MaxServers != nil && int(*msg.MaxServers) != node.MaxServers {
 		node.MaxServers = int(*msg.MaxServers)
+		changed = append(changed, "max_servers")
 	}
-	if msg.Enabled != nil {
+	if msg.Enabled != nil && *msg.Enabled != node.Enabled {
 		node.Enabled = *msg.Enabled
+		changed = append(changed, "enabled")
 	}
 	storageChanged := false
 	if msg.StorageRoot != nil && *msg.StorageRoot != node.StorageRoot {
 		node.StorageRoot = *msg.StorageRoot
 		storageChanged = true
+		changed = append(changed, "storage_root")
 	}
 	if msg.ControllerStorageRoot != nil && *msg.ControllerStorageRoot != node.ControllerStorageRoot {
 		node.ControllerStorageRoot = *msg.ControllerStorageRoot
 		storageChanged = true
+		changed = append(changed, "controller_storage_root")
 	}
 
 	if err := s.store.UpdateNode(ctx, node); err != nil {
 		s.log.Error("Failed to update node: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update node: %w", err))
 	}
+
+	sort.Strings(changed)
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventNodeUpdate,
+		SubjectTyp: "node",
+		SubjectID:  node.ID,
+	}, map[string]any{
+		"changed_fields":           strings.Join(changed, ","),
+		"tls_credentials_replaced": tlsCredentialChanged,
+		"endpoint_generation":      node.EndpointGeneration,
+	})
 
 	if (hostOrTLSChanged || storageChanged) && s.pool != nil {
 		_ = s.pool.RemoveNode(node.ID)
@@ -327,10 +366,25 @@ func (s *NodeService) DeleteNode(ctx context.Context, req *connect.Request[v1.De
 		_ = s.pool.RemoveNode(msg.Id)
 	}
 
+	var properties map[string]any
+	if node, err := s.store.GetNode(ctx, msg.Id); err == nil && node != nil {
+		properties = map[string]any{
+			"name":        node.Name,
+			"is_local":    node.IsLocal,
+			"tls_enabled": node.TLSEnabled,
+		}
+	}
+
 	if err := s.store.DeleteNode(ctx, msg.Id); err != nil {
 		s.log.Error("Failed to delete node %s: %v", msg.Id, err)
 		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventNodeDelete,
+		SubjectTyp: "node",
+		SubjectID:  msg.Id,
+	}, properties)
 
 	return connect.NewResponse(&v1.DeleteNodeResponse{
 		Success: true,

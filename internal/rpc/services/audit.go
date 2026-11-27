@@ -13,6 +13,8 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
 // auditPropertyStringMaxBytes bounds every string property so a provider
@@ -48,6 +50,19 @@ type auditFields struct {
 // auditCommandVerbMaxBytes), command_length is the original command's byte
 // length, and error is present only on a failed send.
 func (s *ServerService) audit(ctx context.Context, fields auditFields, properties map[string]any) {
+	writeAudit(ctx, s.store, s.log, fields, properties)
+}
+
+// writeAudit is the shared append path for services that do not otherwise own
+// a ServerService. It keeps the same guarantees as ServerService.audit: the
+// actor comes only from the request context, string properties are bounded,
+// and a failed audit is logged but never returned or allowed to change the
+// operation being audited.
+func writeAudit(ctx context.Context, store *storage.Store, log *logger.Logger, fields auditFields, properties map[string]any) {
+	if store == nil {
+		return
+	}
+
 	actorID, actorName := "", ""
 	if u := auth.GetUserFromContext(ctx); u != nil {
 		actorID, actorName = u.ID, u.Username
@@ -66,13 +81,15 @@ func (s *ServerService) audit(ctx context.Context, fields auditFields, propertie
 		if err != nil {
 			// Keep the row even when a value cannot be encoded; the event and
 			// subject still matter for the audit trail.
-			s.log.Error("Audit properties could not be encoded for %s: %v", fields.Event, err)
+			if log != nil {
+				log.Error("Audit properties could not be encoded for %s: %v", fields.Event, err)
+			}
 		} else {
 			props = string(encoded)
 		}
 	}
 
-	if err := activity.Log(s.store.DB(), activity.Entry{
+	if err := activity.Log(store.DB(), activity.Entry{
 		ActorID:    actorID,
 		ActorName:  actorName,
 		IP:         fields.IP,
@@ -82,8 +99,8 @@ func (s *ServerService) audit(ctx context.Context, fields auditFields, propertie
 		ServerID:   fields.ServerID,
 		Properties: props,
 		RequestID:  strings.TrimSpace(fields.RequestID),
-	}); err != nil {
-		s.log.Error("Audit log failed for %s: %v", fields.Event, err)
+	}); err != nil && log != nil {
+		log.Error("Audit log failed for %s: %v", fields.Event, err)
 	}
 }
 

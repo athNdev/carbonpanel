@@ -20,6 +20,7 @@ existing password/secret/RCON-URI patterns it now masks `Bearer ...`,
 `token=...`, `x-api-key:` and related key/value forms. Operation-journal
 redaction remains a separate helper with the same intent.
 
-Not yet implemented: a general HTTP 401/403 denial event for every route
-(which needs a request ID and careful volume control), and `auth.token_revoked`
-emission on API-token deletion. Those are follow-ups, not claimed coverage.
+API-token deletion now emits `auth.token_revoked` with the token id and no
+plaintext or hash. Not yet implemented: a general HTTP 401/403 denial event for
+every route (which needs a request ID and careful volume control). That remains
+a follow-up, not claimed coverage.

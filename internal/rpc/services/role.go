@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -118,6 +119,16 @@ func (s *RoleService) CreateRole(ctx context.Context, req *connect.Request[v1.Cr
 
 	perms := s.enforcer.GetPermissionsForRole(role.Name)
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRoleCreate,
+		SubjectTyp: "role",
+		SubjectID:  role.ID,
+	}, map[string]any{
+		"name":             role.Name,
+		"is_default":       role.IsDefault,
+		"permission_count": len(msg.Permissions),
+	})
+
 	return connect.NewResponse(&v1.CreateRoleResponse{
 		Role: dbRoleToProto(role, perms),
 	}), nil
@@ -139,6 +150,9 @@ func (s *RoleService) UpdateRole(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("cannot modify system role"))
 	}
 
+	nameChanged := msg.Name != nil && *msg.Name != role.Name
+	descriptionChanged := msg.Description != nil && *msg.Description != role.Description
+	defaultChanged := msg.IsDefault != nil && *msg.IsDefault != role.IsDefault
 	if msg.Name != nil {
 		role.Name = *msg.Name
 	}
@@ -153,6 +167,17 @@ func (s *RoleService) UpdateRole(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to update role: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update role"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRoleUpdate,
+		SubjectTyp: "role",
+		SubjectID:  role.ID,
+	}, map[string]any{
+		"name":                role.Name,
+		"name_changed":        nameChanged,
+		"description_changed": descriptionChanged,
+		"default_changed":     defaultChanged,
+	})
 
 	perms := s.enforcer.GetPermissionsForRole(role.Name)
 
@@ -184,6 +209,14 @@ func (s *RoleService) DeleteRole(ctx context.Context, req *connect.Request[v1.De
 		s.log.Error("Failed to delete role: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete role"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRoleDelete,
+		SubjectTyp: "role",
+		SubjectID:  role.ID,
+	}, map[string]any{
+		"name": role.Name,
+	})
 
 	return connect.NewResponse(&v1.DeleteRoleResponse{
 		Message: "role deleted",
@@ -380,6 +413,16 @@ func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update permissions"))
 	}
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRolePermissionsUpdate,
+		SubjectTyp: "role",
+		SubjectID:  msg.RoleName,
+	}, map[string]any{
+		"role_name":        msg.RoleName,
+		"permission_count": len(perms),
+		"wildcard":         permissionsContainWildcard(perms),
+	})
+
 	return connect.NewResponse(&v1.UpdatePermissionsResponse{
 		Message: "permissions updated",
 	}), nil
@@ -404,6 +447,12 @@ func (s *RoleService) AssignRole(ctx context.Context, req *connect.Request[v1.As
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to assign role"))
 	}
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRoleAssign,
+		SubjectTyp: "user",
+		SubjectID:  msg.UserId,
+	}, map[string]any{"role_name": msg.RoleName})
+
 	return connect.NewResponse(&v1.AssignRoleResponse{
 		Message: "role assigned",
 	}), nil
@@ -420,6 +469,12 @@ func (s *RoleService) UnassignRole(ctx context.Context, req *connect.Request[v1.
 		s.log.Error("Failed to unassign role: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to unassign role"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventRoleUnassign,
+		SubjectTyp: "user",
+		SubjectID:  msg.UserId,
+	}, map[string]any{"role_name": msg.RoleName})
 
 	return connect.NewResponse(&v1.UnassignRoleResponse{
 		Message: "role unassigned",

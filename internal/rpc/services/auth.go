@@ -455,6 +455,25 @@ func (s *AuthService) UpdateAuthSettings(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update auth settings"))
 	}
 
+	settings := make(map[string]any, 4)
+	if msg.LocalAuthEnabled != nil {
+		settings["local_auth_enabled"] = *msg.LocalAuthEnabled
+	}
+	if msg.AllowRegistration != nil {
+		settings["allow_registration"] = *msg.AllowRegistration
+	}
+	if msg.AnonymousAccess != nil {
+		settings["anonymous_access"] = *msg.AnonymousAccess
+	}
+	if msg.SessionTimeout != nil {
+		settings["session_timeout"] = *msg.SessionTimeout
+	}
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventAuthSettingsUpdate,
+		SubjectTyp: "settings",
+		SubjectID:  "auth",
+	}, settings)
+
 	// Return the updated config
 	configResp, err := s.GetAuthConfig(ctx, connect.NewRequest(&v1.GetAuthConfigRequest{}))
 	if err != nil {
@@ -532,6 +551,18 @@ func (s *AuthService) CreateInvite(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create invite"))
 	}
 
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventInviteCreate,
+		SubjectTyp: "invite",
+		SubjectID:  invite.ID,
+	}, map[string]any{
+		"invite_id":  invite.ID,
+		"roles":      strings.Join(invite.Roles, ","),
+		"max_uses":   invite.MaxUses,
+		"has_pin":    invite.PinHash != "",
+		"has_expiry": invite.ExpiresAt != nil,
+	})
+
 	return connect.NewResponse(&v1.CreateInviteResponse{
 		Invite: dbInviteToProto(invite),
 	}), nil
@@ -570,6 +601,12 @@ func (s *AuthService) DeleteInvite(ctx context.Context, req *connect.Request[v1.
 		s.log.Error("Failed to delete invite: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete invite"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventInviteDelete,
+		SubjectTyp: "invite",
+		SubjectID:  req.Msg.Id,
+	}, map[string]any{"invite_id": req.Msg.Id})
 
 	return connect.NewResponse(&v1.DeleteInviteResponse{}), nil
 }
@@ -619,6 +656,20 @@ func (s *AuthService) CreateAPIToken(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create API token"))
 	}
 
+	tokenProps := map[string]any{
+		"token_id":   apiToken.ID,
+		"name":       apiToken.Name,
+		"has_expiry": apiToken.ExpiresAt != nil,
+	}
+	if msg.ExpiresInDays != nil {
+		tokenProps["expires_in_days"] = *msg.ExpiresInDays
+	}
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventAPITokenCreate,
+		SubjectTyp: "api_token",
+		SubjectID:  apiToken.ID,
+	}, tokenProps)
+
 	return connect.NewResponse(&v1.CreateAPITokenResponse{
 		PlaintextToken: plaintext,
 		ApiToken:       dbAPITokenToProto(apiToken),
@@ -667,6 +718,12 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 		s.log.Error("Failed to delete API token: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("API token not found"))
 	}
+
+	writeAudit(ctx, s.store, s.log, auditFields{
+		Event:      activity.EventAuthTokenRevoked,
+		SubjectTyp: "api_token",
+		SubjectID:  req.Msg.Id,
+	}, map[string]any{"token_id": req.Msg.Id})
 
 	return connect.NewResponse(&v1.DeleteAPITokenResponse{}), nil
 }
