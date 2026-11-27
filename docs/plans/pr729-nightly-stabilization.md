@@ -27,9 +27,14 @@ Already merged into main and not re-added: `#680` installed-mod update preview,
 | `da3fc578d` | kept | Removed the last policy reference from the installed-mod preview comment. |
 | `7ba5c920b` | kept | Named the split follow-up commits in this plan. |
 | `208ad57a1` | kept | Changelog now describes the retained installed-mod preview as read-only. |
+| `376d635f0` | kept | Listed every split commit in this plan. |
+| `9fcad83a` | kept | Replaced the deleted update-panel mapping on the published design-system page with the retained read-only preview; the page test now rejects the removed helpers. |
+| `064b283f` | kept | Restored the three retained staged-batch tests from `5f8af05ed` and rewrote the cron admission race against the retained `AddStagedContent` path. |
+| `271241b6` | kept | Marked the removed update-panel scope and stale symbols/copy in the planning docs. |
+| `HEAD` (this bookkeeping commit) | kept | Recorded the follow-up commits and the remaining queue in this plan. |
 
-Any later documentation-only commit records these rows; no code changes follow
-`da3fc578d`.
+No product behavior changes follow `da3fc578d`; later commits are documentation
+and the restored retained tests.
 
 Primary sources removed: `a46a91da7`, `c8d8a476c`, the apply-specific hunks in
 `582aa1c17`, `95627a7ad` and `710491538`, and the server-mods update panel from
@@ -103,6 +108,16 @@ main's `/worlds` routes were not touched.
 - #687 owns the reviewed apply RPC fields, apply service, scheduler policy,
   staging candidate context and review UI. Do not re-add a second copy here.
 - #715 owns End admission and qualification on the current `/worlds` routes.
+- The PR body/description rewrite is orchestrator-owned. This checkout does not
+  edit the GitHub PR body.
+- Orphaned persisted `mod_update` scheduled-task rows from earlier Nightly runs
+  remain in existing databases. They are inert but currently hit
+  `unknown task type` in the scheduler; a cleanup or remap follow-up is needed.
+- Deleted-proto-tag wire hygiene: the split removed `ModUpdateSelection`,
+  `StagedModUpdate`, `UpdateModRequest` fields 6-9, `UpdateModResponse` fields
+  2-3 and `TaskType` value 10 (`TASK_TYPE_MOD_UPDATE`). Reserve those numbers
+  and names before any future reuse; do not renumber retained fields. This
+  follow-up deliberately does not touch proto.
 - Packaged/browser matrix and any Docker/live stack were not run this pass.
 - Live acceptance is not claimed. The merge gate still needs an exact-head
   browser review of the affected routes plus the normal PR receipt.
@@ -120,3 +135,20 @@ Focused source checks only; packaged/browser matrix is deferred.
 - `cd web/carbon-panel && bun run check`
 - focused `bun test` for the touched frontend files
 - `golangci-lint v2.13.2 run --new-from-rev=020ebb7e ./...`
+
+### Split follow-up checks (2026-11-27)
+
+- `git diff --check` clean; `gofmt -l internal/db/staged_config_test.go` empty.
+- `GOTOOLCHAIN=go1.26.11 go vet ./...` pass.
+- `GOTOOLCHAIN=go1.26.11 go test ./internal/db/... ./internal/staging/...
+  ./internal/rpc/...` pass.
+- The four restored tests pass explicitly. Each was mutation-checked against
+  the retained behavior (legacy batch retargeting, transactional rollback,
+  idle-clock reset and cron admission) and failed when that behavior was
+  temporarily broken.
+- `python scripts/test_design_system_page.py` 12/12 pass.
+- `go run ./cmd/knowledge-lint -root . -fix` then without `-fix`: 234
+  concepts, indexes current, 40/40 queries; the pre-existing container/data
+  invariant re-verify warnings remain.
+- `bun scripts/proto-generate.mjs --check`: generated Go/TS outputs match.
+- Local only: no push, GitHub or Jira action; live acceptance not claimed.
