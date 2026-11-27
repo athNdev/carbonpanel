@@ -153,7 +153,12 @@ function alertText(target: HTMLElement): string {
 }
 
 function spinnerCount(target: HTMLElement): number {
-	return target.querySelectorAll('.animate-spin').length;
+	// PR 729 replaced CarbonButton's ad-hoc border spinner with the shared
+	// CarbonSpinner (whose rotation is owned by its own scoped keyframes). The
+	// OSS-185 cleanup contract still counts whichever loading indicator the
+	// merged design renders: Tailwind's animate-spin for Loader2 call sites and
+	// the design-system arc inside buttons.
+	return target.querySelectorAll('.animate-spin, .carbon-spinner').length;
 }
 
 function watchAlert(target: HTMLElement) {
