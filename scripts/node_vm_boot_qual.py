@@ -11,7 +11,7 @@ Evidence produced is explicit and gate-scoped:
   - image/seed/ISO preparation (offline, deterministic inputs)
   - firmware and QEMU availability; UEFI is the declared artifact target and a
     missing OVMF/edk2 install is reported BLOCKED rather than falling back to BIOS
-  - boot attempt (optionally on an expanded qcow2 overlay)
+  - boot attempt (optionally on an expanded, GPT-normalized standalone disk)
   - serial-console markers (cloud-init progress, first-boot enrollment stdout,
     reboot/power-state signals) without claiming secrets are absent unless the
     captured log is actually scanned
@@ -36,9 +36,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 try:  # works for `python scripts/...` and as an import target in tests
     from scripts import node_vm_build as build
+    from scripts import node_vm_gpt as gpt
     from scripts import node_vm_verify_image as verify_image
 except ImportError:  # pragma: no cover - CLI path
     import node_vm_build as build
+    import node_vm_gpt as gpt
     import node_vm_verify_image as verify_image
 
 # enroll.py prints this JSON object to stdout on success (see enroll.py main()).
@@ -57,6 +59,25 @@ SECRET_MARKERS = (
     "enrollment_secret:",
     "enrollment-secret.bin",  # filename may appear in logs; raw contents must not
 )
+
+# Signatures of a disk whose virtual size grew but whose GPT did not. The
+# retained arm64 expanded-profile run recorded the alternate-header mismatch and
+# the resulting BOOT/UEFI label timeouts before growpart could run.
+GPT_BACKUP_MISMATCH_RE = re.compile(
+    r"GPT: the backup GPT header is not at the end of the disk"
+    r"|the alternate GPT header is not at the end of the disk"
+    r"|GPT PMBR size mismatch"
+    r"|backup GPT table is not on the end of the disk",
+    re.IGNORECASE,
+)
+BOOT_LABEL_FAILURE_RE = re.compile(
+    r"Timed out waiting for device[^\n]*/dev/disk/by-label/(?:BOOT|UEFI)"
+    r"|Failed to mount[^\n]*/boot(?:/efi)?"
+    r"|Dependency failed for[^\n]*(?:boot|efi)\.mount",
+    re.IGNORECASE,
+)
+EMERGENCY_MODE_RE = re.compile(
+    r"You are in emergency mode|Reached target Emergency Mode", re.IGNORECASE)
 
 
 class BootQualError(RuntimeError):
@@ -87,6 +108,7 @@ ATTEMPT_MARKER = "boot-qual-attempt.json"
 ATTEMPT_OUTPUT_NAMES = (
     "boot-qual-report.json",
     "boot-disk.qcow2",
+    "expanded.raw",
     "seed.iso",
     "seed",
     "uefi-vars.fd",
@@ -300,17 +322,133 @@ def make_seed_iso(seed_nocloud_dir, iso_path):
         "no ISO tool found (need cloud-localds, xorriso, or genisoimage/mkisofs)")
 
 
-def prepare_overlay(image_path, work_dir, size=None):
-    """Create a disposable qcow2 overlay/copy for boot; never mutate source.
+def _command_detail(stream):
+    text = " ".join(str(stream or "").split())
+    return (": " + text[:300]) if text else ""
 
-    size is passed through to qemu-img (for example "20G") to exercise an
-    expanded disk. Resizing without qemu-img is refused: a plain copy cannot
-    change the virtual size, and silently booting the base size would hide the
-    gate being qualified.
+
+def _qemu_img_info(qemu_img, path, label):
+    proc = run([qemu_img, "info", "--output=json", str(path)])
+    if proc.returncode != 0:
+        raise BootQualError("%s: qemu-img info failed%s"
+                           % (label, _command_detail(proc.stderr)))
+    try:
+        info = json.loads(proc.stdout)
+    except (TypeError, ValueError) as exc:
+        raise BootQualError("%s: qemu-img info returned invalid JSON: %s"
+                           % (label, exc)) from exc
+    if not isinstance(info, dict):
+        raise BootQualError("%s: qemu-img info returned no image record" % label)
+    return info
+
+
+def prepare_expanded_disk(image_path, work_dir, size):
+    """Create a standalone expanded qcow2 whose GPT describes its own size.
+
+    Extending a qcow2 overlay's virtual size leaves the base image's GPT backup
+    header at the old end and keeps ``alternate_lba``/``last_usable_lba`` at the
+    old geometry. The guest then sees a 3.5 GiB table on a 20 GiB device and the
+    early ``LABEL=BOOT``/``LABEL=UEFI`` mounts can fail before ``growpart`` runs.
+
+    The pinned base is opened read-only by qemu-img and flattened into a raw copy
+    in the owned work directory. Only that copy's protective MBR, primary header,
+    relocated backup entry array and relocated backup header are rewritten; the
+    base image is never opened for writing and its size/mtime are checked after
+    the run. The guest still owns partition and filesystem growth.
+    """
+    image_path = Path(image_path).resolve()
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    overlay = work_dir / "boot-disk.qcow2"
+    raw = work_dir / "expanded.raw"
+    if overlay.exists() or overlay.is_symlink():
+        raise BootQualError("boot disk already exists; use a new work directory")
+    if raw.exists() or raw.is_symlink():
+        raise BootQualError("expanded raw disk already exists; use a new work directory")
+    try:
+        target_size = gpt.parse_disk_size(size)
+    except gpt.GptError as exc:
+        raise BootQualError(str(exc)) from exc
+    qemu_img = which_any("qemu-img")
+    if not qemu_img:
+        raise BootQualError(
+            "qemu-img is required to create an expanded boot disk of %s" % size)
+    info = _qemu_img_info(qemu_img, image_path, "base image")
+    if info.get("format") != "qcow2":
+        raise BootQualError(
+            "expanded boot requires a qcow2 base image, got %r" % info.get("format"))
+    try:
+        base_size = int(info["virtual-size"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BootQualError("base image has no usable virtual size") from exc
+    if target_size <= base_size:
+        raise BootQualError(
+            "requested disk size %s is not larger than the base image (%d bytes)"
+            % (size, base_size))
+    before = image_path.stat()
+    try:
+        proc = run([qemu_img, "convert", "-f", "qcow2", "-O", "raw",
+                    str(image_path), str(raw)])
+        if proc.returncode != 0 or not raw.is_file():
+            raise BootQualError("qemu-img convert to raw failed%s"
+                               % _command_detail(proc.stderr))
+        try:
+            expansion = gpt.expand_disk(raw, target_size)
+        except gpt.GptError as exc:
+            raise BootQualError("expanded GPT normalization failed: %s" % exc) from exc
+        proc = run([qemu_img, "convert", "-f", "raw", "-O", "qcow2", "-S", "4k",
+                    str(raw), str(overlay)])
+        if proc.returncode != 0 or not overlay.is_file():
+            raise BootQualError("qemu-img convert to qcow2 failed%s"
+                               % _command_detail(proc.stderr))
+        proc = run([qemu_img, "check", str(overlay)])
+        if proc.returncode != 0:
+            raise BootQualError("qemu-img check reported errors in the expanded disk%s"
+                               % _command_detail(proc.stdout or proc.stderr))
+        overlay_info = _qemu_img_info(qemu_img, overlay, "expanded disk")
+        try:
+            virtual_size = int(overlay_info["virtual-size"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BootQualError("expanded disk has no usable virtual size") from exc
+        if virtual_size != target_size:
+            raise BootQualError(
+                "expanded disk virtual size %d does not match the requested %d"
+                % (virtual_size, target_size))
+        after = image_path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise BootQualError("base image changed during expansion; refusing to boot")
+        return {
+            "path": str(overlay),
+            "mode": "expanded-gpt",
+            "tool": "qemu-img",
+            "size": str(size),
+            "virtual_size": target_size,
+            "base_virtual_size": base_size,
+            "base_image_unchanged": True,
+            "gpt": expansion,
+        }
+    except Exception:
+        raw.unlink(missing_ok=True)
+        overlay.unlink(missing_ok=True)
+        raise
+    finally:
+        raw.unlink(missing_ok=True)
+
+
+def prepare_overlay(image_path, work_dir, size=None):
+    """Create a disposable boot disk; never mutate the source image.
+
+    Without a size, a qcow2 backing overlay keeps the base 3.5 GiB geometry and
+    cost. With a size, the disk is flattened and its GPT is normalized for the
+    new virtual size before the guest boots (see prepare_expanded_disk). A plain
+    copy cannot change the virtual size, and silently booting the base size would
+    hide the gate being qualified.
     """
     image_path = Path(image_path)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    if size:
+        return prepare_expanded_disk(image_path, work_dir, size)
     overlay = work_dir / "boot-disk.qcow2"
     try:
         # qemu-img create can truncate its output. Reserve a new file before
@@ -322,23 +460,15 @@ def prepare_overlay(image_path, work_dir, size=None):
         qemu_img = which_any("qemu-img")
         if qemu_img:
             cmd = [qemu_img, "create", "-f", "qcow2", "-F", "qcow2",
-                   "-b", str(image_path.resolve())]
-            cmd.append(str(overlay))
-            if size:
-                cmd.append(str(size))
+                   "-b", str(image_path.resolve()), str(overlay)]
             proc = run(cmd)
             if proc.returncode == 0 and overlay.stat().st_size > 0:
-                result = {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
-                if size:
-                    result["size"] = str(size)
-                return result
+                return {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
             # fallback to full copy if backing fails (e.g. format quirks)
-        if size:
-            raise BootQualError(
-                "qemu-img is required to create an expanded boot disk of %s" % size)
         shutil.copy2(image_path, overlay)
         os.chmod(overlay, 0o600)
-        return {"path": str(overlay), "mode": "copy", "tool": "copy-fallback" if qemu_img else "copy"}
+        return {"path": str(overlay), "mode": "copy",
+                "tool": "copy-fallback" if qemu_img else "copy"}
     except Exception:
         overlay.unlink(missing_ok=True)
         raise
@@ -426,6 +556,9 @@ def scan_serial_log(path):
         "node_id": None,
         "fingerprint": None,
         "reboot_or_poweroff_signal": False,
+        "gpt_backup_header_mismatch": False,
+        "boot_label_failure": False,
+        "emergency_mode": False,
         "simple_secret_markers_found": [],
     }
     p = Path(path)
@@ -456,6 +589,9 @@ def scan_serial_log(path):
                   r"reboot: (?:Restarting system|Power down)\s*$",
                   text, re.MULTILINE)
     )
+    result["gpt_backup_header_mismatch"] = bool(GPT_BACKUP_MISMATCH_RE.search(text))
+    result["boot_label_failure"] = bool(BOOT_LABEL_FAILURE_RE.search(text))
+    result["emergency_mode"] = bool(EMERGENCY_MODE_RE.search(text))
     # Only flag high-signal literal secret material markers; absence is not proven.
     for marker in SECRET_MARKERS:
         if marker in text and marker != "enrollment-secret.bin":
@@ -736,6 +872,31 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
     serial_scan = scan_serial_log(serial_log)
     report["gates"]["serial_console"] = {"status": "SCANNED", **serial_scan}
 
+    if disk_size:
+        failure_markers = [
+            name for name in ("gpt_backup_header_mismatch", "boot_label_failure",
+                              "emergency_mode")
+            if serial_scan.get(name)
+        ]
+        if failure_markers:
+            status = "FAIL"
+            detail = {"failure_markers": failure_markers}
+        elif not serial_scan.get("exists"):
+            status = "NOT_OBSERVED"
+            detail = {"reason": "no serial console was captured"}
+        else:
+            status = "PASS"
+            detail = {
+                "note": "no stale-GPT, BOOT/UEFI label or emergency-mode marker "
+                        "was seen; this does not prove growpart or resize2fs ran",
+            }
+        report["gates"]["expanded_disk_guest"] = {
+            "status": status,
+            "disk_size": disk_size,
+            "gpt": report["gates"].get("boot_disk", {}).get("gpt"),
+            **detail,
+        }
+
     # Interpret gates conservatively from markers
     if serial_scan.get("enroll_stdout_json"):
         report["gates"]["first_boot_identity_marker"] = {
@@ -836,7 +997,9 @@ def main(argv=None):
     parser.add_argument("--accel", help="qemu accel (tcg or kvm); default: kvm if /dev/kvm else tcg")
     parser.add_argument("--firmware", choices=("uefi", "bios"), default="uefi",
                         help="guest firmware; default uefi matches the declared artifact target")
-    parser.add_argument("--disk-size", help="qcow2 overlay virtual size (for example 20G); requires qemu-img")
+    parser.add_argument("--disk-size", help="expanded standalone disk virtual "
+                        "size (for example 20G); requires qemu-img and normalizes "
+                        "the GPT backup header before boot")
     parser.add_argument("--machine", help="qemu machine type (for example q35, pc or virt)")
     parser.add_argument(
         "--restrict-user-network", action="store_true",
@@ -922,7 +1085,8 @@ def main(argv=None):
         if args.disk_size:
             report["gates"]["disk_size"] = {
                 "status": "CONFIGURED", "size": args.disk_size,
-                "note": "expanded-disk boot is not qualified; prepare_overlay requires qemu-img for this size",
+                "note": "expanded-disk boot prepares a GPT-normalized standalone "
+                        "disk with qemu-img; no boot was attempted here",
             }
         report["gates"]["boot_attempt"] = {
             "status": "NOT_RUN", "reason": "no --image provided (prepare-only)"}
@@ -950,7 +1114,7 @@ def main(argv=None):
         g.get("status") == "FAIL"
         for k, g in report.get("gates", {}).items()
         if k in ("image_bytes_verified", "seed", "seed_iso", "boot_disk",
-                 "firmware", "boot_attempt")
+                 "firmware", "boot_attempt", "expanded_disk_guest")
     )
     return EXIT_QUALIFICATION_FAILURE if hard_fail else 0
 

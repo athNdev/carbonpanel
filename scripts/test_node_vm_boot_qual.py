@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -11,8 +12,10 @@ from unittest import mock
 
 try:
     from scripts import node_vm_boot_qual as boot_qual
+    from scripts import test_node_vm_gpt as gpt_fixture
 except ImportError:  # pragma: no cover
     import node_vm_boot_qual as boot_qual
+    import test_node_vm_gpt as gpt_fixture
 
 
 def _write_seed(root):
@@ -45,6 +48,42 @@ class _FakeProc:
 
     def wait(self, timeout=None):
         return self.returncode
+
+
+class _FakeQemuImg:
+    """Emulate qemu-img with file copies so GPT normalization runs for real."""
+
+    def __init__(self, base_size, target_size, *, fail_check=False,
+                 mutate_base=False):
+        self.base_size = base_size
+        self.target_size = target_size
+        self.fail_check = fail_check
+        self.mutate_base = mutate_base
+        self.calls = []
+
+    def __call__(self, cmd, **kwargs):
+        self.calls.append(list(cmd))
+        action = cmd[1] if len(cmd) > 1 else ""
+        if action == "info":
+            path = Path(cmd[-1])
+            virtual = (self.target_size if path.name == "boot-disk.qcow2"
+                       else self.base_size)
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                json.dumps({"format": "qcow2", "virtual-size": virtual}), "")
+        if action == "convert":
+            source, dest = Path(cmd[-2]), Path(cmd[-1])
+            if self.mutate_base:
+                data = bytearray(source.read_bytes())
+                data[-1] ^= 0x01
+                source.write_bytes(bytes(data))
+                os.utime(source, None)
+            shutil.copyfile(source, dest)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        if action == "check":
+            return subprocess.CompletedProcess(
+                cmd, 1 if self.fail_check else 0, "fixture check", "")
+        raise AssertionError("unexpected qemu-img invocation: %r" % (cmd,))
 
 
 def _run_main(argv):
@@ -141,6 +180,47 @@ class SerialScanTests(unittest.TestCase):
         finally:
             os.unlink(path)
         self.assertIn("BEGIN PRIVATE KEY", r["simple_secret_markers_found"])
+
+    def test_detects_stale_gpt_and_boot_label_failure_markers(self):
+        text = "\n".join([
+            "[    3.1] GPT: the backup GPT header is not at the end of the disk",
+            "[    4.2] systemd[1]: Timed out waiting for device "
+            "/dev/disk/by-label/BOOT.",
+            "[    4.3] systemd[1]: Timed out waiting for device "
+            "/dev/disk/by-label/UEFI.",
+            "[    9.9] systemd[1]: Reached target Emergency Mode.",
+        ]) + "\n"
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
+            f.write(text)
+            path = f.name
+        try:
+            r = boot_qual.scan_serial_log(path)
+        finally:
+            os.unlink(path)
+        self.assertTrue(r["gpt_backup_header_mismatch"])
+        self.assertTrue(r["boot_label_failure"])
+        self.assertTrue(r["emergency_mode"])
+
+    def test_normal_expanded_boot_without_failure_markers_is_clean(self):
+        text = "\n".join([
+            "[    3.1] EXT4-fs (vda1): mounted filesystem",
+            "[    5.0] cloud-init[99]: growpart: CHANGED: partition=1 start=..."
+            " old: size=... end=... new: size=... end=...",
+            "[   42.0] Cloud-init v. 26.1 finished at Fri, 27 Nov 2026 00:00:00 "
+            "+0000. Datasource DataSourceNoCloud [seed=/dev/vdb]",
+            "[   43.0] reboot: Restarting system",
+        ]) + "\n"
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
+            f.write(text)
+            path = f.name
+        try:
+            r = boot_qual.scan_serial_log(path)
+        finally:
+            os.unlink(path)
+        self.assertTrue(r["cloud_init_finished"])
+        self.assertFalse(r["gpt_backup_header_mismatch"])
+        self.assertFalse(r["boot_label_failure"])
+        self.assertFalse(r["emergency_mode"])
 
 
 class IsoHelperTests(unittest.TestCase):
@@ -312,28 +392,165 @@ class CommandTests(unittest.TestCase):
                 boot_qual.which_any = orig
             self.assertFalse((work_dir / "boot-disk.qcow2").exists())
 
-    def test_expanded_overlay_passes_size_to_qemu_img(self):
+    def test_expanded_overlay_relocates_gpt_without_touching_the_base(self):
         with tempfile.TemporaryDirectory() as directory:
-            work_dir = Path(directory)
-            source = work_dir / "base.qcow2"
-            source.write_bytes(b"fixture base image")
-            calls = []
-            orig_which, orig_run = boot_qual.which_any, boot_qual.run
+            root = Path(directory)
+            base = root / "base.qcow2"
+            old_size = 8 * 1024 * 1024
+            new_size = 16 * 1024 * 1024
+            gpt_fixture._write_gpt(base, old_size, ((2048, 4096),))
+            before = base.read_bytes()
+            fake = _FakeQemuImg(old_size, new_size)
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-img" if "qemu-img" in names else None)), \
+                    mock.patch.object(boot_qual, "run", new=fake):
+                info = boot_qual.prepare_overlay(base, root / "work", size="16M")
+            self.assertEqual(base.read_bytes(), before)
+            self.assertEqual(info["mode"], "expanded-gpt")
+            self.assertEqual(info["size"], "16M")
+            self.assertEqual(info["virtual_size"], new_size)
+            self.assertEqual(info["base_virtual_size"], old_size)
+            self.assertTrue(info["base_image_unchanged"])
+            self.assertEqual(info["gpt"]["status"], "EXPANDED")
+            self.assertEqual(info["gpt"]["new_last_lba"], new_size // 512 - 1)
+            overlay = Path(info["path"])
+            self.assertEqual(overlay.stat().st_size, new_size)
+            self.assertFalse((root / "work" / "expanded.raw").exists())
+            inspection = boot_qual.gpt.inspect_disk(overlay)
+            self.assertEqual(inspection["alternate_lba"], new_size // 512 - 1)
+            for call in fake.calls:
+                if call[1] == "convert":
+                    self.assertNotEqual(Path(call[-1]).resolve(), base.resolve())
 
-            def fake_run(cmd, **kwargs):
-                calls.append(cmd)
-                Path(cmd[-2]).write_bytes(b"qcow2 metadata")
-                return subprocess.CompletedProcess(cmd, 0, "", "")
+    def test_expanded_overlay_refuses_a_non_gpt_base_and_cleans_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base.qcow2"
+            base.write_bytes(b"\x00" * (8 * 1024 * 1024))
+            fake = _FakeQemuImg(8 * 1024 * 1024, 16 * 1024 * 1024)
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-img" if "qemu-img" in names else None)), \
+                    mock.patch.object(boot_qual, "run", new=fake):
+                with self.assertRaisesRegex(
+                        boot_qual.BootQualError, "GPT normalization failed"):
+                    boot_qual.prepare_overlay(base, root / "work", size="16M")
+            work = root / "work"
+            self.assertFalse((work / "boot-disk.qcow2").exists())
+            self.assertFalse((work / "expanded.raw").exists())
 
-            try:
-                boot_qual.which_any = lambda *names: "/usr/bin/qemu-img" if "qemu-img" in names else None
-                boot_qual.run = fake_run
-                info = boot_qual.prepare_overlay(source, work_dir, size="20G")
-            finally:
-                boot_qual.which_any, boot_qual.run = orig_which, orig_run
-            self.assertEqual(info["size"], "20G")
-            self.assertEqual(calls[0][-1], "20G")
-            self.assertEqual(source.read_bytes(), b"fixture base image")
+    def test_expanded_overlay_refuses_a_base_that_changed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base.qcow2"
+            gpt_fixture._write_gpt(base, 8 * 1024 * 1024, ((2048, 4096),))
+            fake = _FakeQemuImg(8 * 1024 * 1024, 16 * 1024 * 1024,
+                                mutate_base=True)
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-img" if "qemu-img" in names else None)), \
+                    mock.patch.object(boot_qual, "run", new=fake):
+                with self.assertRaisesRegex(
+                        boot_qual.BootQualError, "base image changed"):
+                    boot_qual.prepare_overlay(base, root / "work", size="16M")
+
+    def test_expanded_overlay_refuses_a_failed_qcow2_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base.qcow2"
+            gpt_fixture._write_gpt(base, 8 * 1024 * 1024, ((2048, 4096),))
+            fake = _FakeQemuImg(8 * 1024 * 1024, 16 * 1024 * 1024,
+                                fail_check=True)
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-img" if "qemu-img" in names else None)), \
+                    mock.patch.object(boot_qual, "run", new=fake):
+                with self.assertRaisesRegex(
+                        boot_qual.BootQualError, "qemu-img check"):
+                    boot_qual.prepare_overlay(base, root / "work", size="16M")
+            self.assertFalse((root / "work" / "boot-disk.qcow2").exists())
+
+    def test_expanded_overlay_refuses_a_target_that_is_not_larger(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base.qcow2"
+            gpt_fixture._write_gpt(base, 8 * 1024 * 1024, ((2048, 4096),))
+            fake = _FakeQemuImg(8 * 1024 * 1024, 8 * 1024 * 1024)
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-img" if "qemu-img" in names else None)), \
+                    mock.patch.object(boot_qual, "run", new=fake):
+                with self.assertRaisesRegex(
+                        boot_qual.BootQualError, "not larger"):
+                    boot_qual.prepare_overlay(base, root / "work", size="8M")
+            self.assertEqual([call[1] for call in fake.calls], ["info"])
+
+    def test_expanded_overlay_protects_a_prior_raw_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base.qcow2"
+            gpt_fixture._write_gpt(base, 8 * 1024 * 1024, ((2048, 4096),))
+            work = root / "work"
+            work.mkdir()
+            prior = work / "expanded.raw"
+            prior.write_bytes(b"prior raw bytes")
+            with self.assertRaisesRegex(
+                    boot_qual.BootQualError, "expanded raw disk already exists"):
+                boot_qual.prepare_overlay(base, work, size="16M")
+            self.assertEqual(prior.read_bytes(), b"prior raw bytes")
+
+
+class ExpandedDiskGateTests(unittest.TestCase):
+    def _report(self, serial_text, create_serial=True):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = _write_seed(root)
+            image = root / "base.qcow2"
+            image.write_bytes(b"fixture")
+            work = root / "work"
+            work.mkdir()
+            serial = work / "serial-console.log"
+            if create_serial:
+                serial.write_text(serial_text, encoding="utf-8")
+            disk = work / "boot-disk.qcow2"
+            overlay = {
+                "path": str(disk), "mode": "expanded-gpt", "tool": "qemu-img",
+                "size": "16M", "virtual_size": 16 * 1024 * 1024,
+                "gpt": {"status": "EXPANDED"},
+            }
+            with mock.patch.object(boot_qual, "which_any", new=lambda *names: (
+                    "/usr/bin/qemu-system-x86_64"
+                    if "qemu-system-x86_64" in names else None)), \
+                    mock.patch.object(boot_qual, "make_seed_iso", new=_fake_iso), \
+                    mock.patch.object(boot_qual, "prepare_overlay",
+                                      return_value=overlay), \
+                    mock.patch.object(boot_qual.subprocess, "Popen",
+                                      return_value=_FakeProc(0)):
+                return boot_qual.run_boot_attempt(
+                    image, seed, work, firmware="bios", disk_size="16M",
+                    do_offline_inspect=False, output_reservation="fixture")
+
+    def test_clean_expanded_serial_passes_the_guest_gate(self):
+        report = self._report(
+            "[    1.0] mounted /boot\nreboot: Restarting system\n")
+        gate = report["gates"]["expanded_disk_guest"]
+        self.assertEqual(gate["status"], "PASS")
+        self.assertEqual(gate["disk_size"], "16M")
+        self.assertEqual(gate["gpt"]["status"], "EXPANDED")
+        self.assertNotIn("failure_markers", gate)
+
+    def test_stale_gpt_or_label_failure_fails_the_guest_gate(self):
+        report = self._report(
+            "GPT PMBR size mismatch (7340031 != 41943039) will be corrected "
+            "by write.\n"
+            "Timed out waiting for device /dev/disk/by-label/BOOT.\n"
+            "Reached target Emergency Mode.\n")
+        gate = report["gates"]["expanded_disk_guest"]
+        self.assertEqual(gate["status"], "FAIL")
+        self.assertIn("gpt_backup_header_mismatch", gate["failure_markers"])
+        self.assertIn("boot_label_failure", gate["failure_markers"])
+        self.assertIn("emergency_mode", gate["failure_markers"])
+
+    def test_missing_serial_capture_is_not_a_pass(self):
+        report = self._report("", create_serial=False)
+        self.assertEqual(
+            report["gates"]["expanded_disk_guest"]["status"], "NOT_OBSERVED")
 
 
 class FirmwareTests(unittest.TestCase):
