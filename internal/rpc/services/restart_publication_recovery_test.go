@@ -286,10 +286,11 @@ func TestStartCreatePersistenceFailureRetainsContainerAndRetryFinalizes(t *testi
 }
 
 // An interruption after a completed restart unpause leaves the database PAUSED
-// over a container that is already running. The completed request ID stays
-// refused, but a new request ID must observe the running container, record
-// RUNNING and restart exactly once instead of failing the unpause.
-func TestRestartUnpauseCrashStateRecoversWithNewRequest(t *testing.T) {
+// over a container that is already running. This recovery covers the case with
+// no dispatched publication: the completed request ID stays refused, but a new
+// request ID observes the live container, records RUNNING and restarts exactly
+// once instead of failing the unpause.
+func TestRestartUnpauseCrashStateWithNoDispatchedPublicationRecoversWithNewRequest(t *testing.T) {
 	ctx := context.Background()
 	svc, server := newRestartPublicationTestServer(t, "unpause-crash")
 	var starts, stops, unpauses atomic.Int32
@@ -350,9 +351,9 @@ func TestRestartUnpauseCrashStateRecoversWithNewRequest(t *testing.T) {
 
 // A successful unpause whose RUNNING status cannot be persisted fails closed:
 // it must not claim success and must not restart under a still-PAUSED intent.
-// Dropping the persistence failure lets a new request ID recover the running
-// container and finish the restart.
-func TestRestartUnpauseStatusPersistFailureFailsClosedAndRetryRecovers(t *testing.T) {
+// With no dispatched publication, dropping the persistence failure lets a new
+// request ID recover the running container and finish the restart.
+func TestRestartUnpauseStatusPersistFailureWithNoDispatchedPublicationFailsClosedAndRetryRecovers(t *testing.T) {
 	ctx := context.Background()
 	svc, server := newRestartPublicationTestServer(t, "unpause-status-fail")
 	var starts, stops, unpauses atomic.Int32
@@ -411,6 +412,198 @@ func TestRestartUnpauseStatusPersistFailureFailsClosedAndRetryRecovers(t *testin
 	current, err = svc.store.GetServer(ctx, server.ID)
 	require.NoError(t, err)
 	require.Equal(t, storage.StatusStarting, current.Status)
+}
+
+// A paused server whose container is not live must never be reported as a
+// successful start. Docker refuses the unpause, the observed state is stopped,
+// and StartServer must return that error without writing RUNNING or starting a
+// container.
+func TestStartPausedContainerWithExitedContainerFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	svc, server := newRestartPublicationTestServer(t, "start-unpause-stopped")
+	var starts, stops, unpauses atomic.Int32
+	serveRestartAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
+			_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":false,"Status":"exited"}}`))
+		case strings.HasSuffix(r.URL.Path, "/unpause"):
+			unpauses.Add(1)
+			http.Error(w, `{"message":"Container is not paused"}`, http.StatusInternalServerError)
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			stops.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			starts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	require.NoError(t, svc.store.UpdateServerStatus(ctx, server.ID, storage.StatusPaused))
+
+	response, err := svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID, RequestId: "start-unpause-stopped"}))
+	require.Error(t, err)
+	require.Nil(t, response, "a stopped container is not a successful start")
+	require.ErrorContains(t, err, "failed to resume server")
+	require.ErrorContains(t, err, "not paused")
+	require.EqualValues(t, 1, unpauses.Load())
+	require.Zero(t, starts.Load(), "a stopped container must not be started as if it resumed")
+	require.Zero(t, stops.Load())
+
+	stored, err := svc.store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StatusPaused, stored.Status, "the false success must not persist RUNNING")
+}
+
+// resumePausedContainer may ignore a refused unpause only when the container is
+// observed live. Paused, stopped, unknown and absent containers keep the
+// original failure, and a canceled request cannot be mistaken for a resume.
+func TestResumePausedContainerAcceptsOnlyLiveObservedState(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	_ = svc.docker.Close()
+	inspect := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	tests := []struct {
+		name    string
+		inspect http.HandlerFunc
+		cancel  bool
+		wantErr bool
+	}{
+		{name: "running", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`)},
+		{name: "unhealthy", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running","Health":{"Status":"unhealthy"}}}`)},
+		{name: "paused", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":false,"Status":"paused","Paused":true}}`), wantErr: true},
+		{name: "stopped", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":false,"Status":"exited"}}`), wantErr: true},
+		{name: "unknown", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":false,"Status":"unknown"}}`), wantErr: true},
+		{name: "absent", inspect: func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }, wantErr: true},
+		{name: "canceled", inspect: inspect(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`), cancel: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serveRestartAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/unpause"):
+					http.Error(w, `{"message":"Container is not paused"}`, http.StatusInternalServerError)
+				case strings.HasSuffix(r.URL.Path, "/json"):
+					tt.inspect(w, r)
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			err := resumePausedContainer(ctx, svc.docker, "original")
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// A content-only staged batch is dispatched before its unpause, but an in-place
+// unpause has no replacement identity. If the RUNNING status write then fails,
+// the batch is retained as dispatched with an empty expected identity and a new
+// request ID must be refused at the identity check rather than acknowledged.
+// The dispatched in-place batch is not auto-recovered in this pass.
+func TestRestartUnpauseStatusPersistFailureWithDispatchedContentStaysFailClosed(t *testing.T) {
+	ctx := context.Background()
+	svc, server := newRestartPublicationTestServer(t, "unpause-dispatched-content")
+	var starts, stops, unpauses atomic.Int32
+	serveRestartAPI(t, svc, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[{"Id":"original","Names":["/carbon-panel-server-unpause-dispatched-content"],"Labels":{"carbon-panel.server.id":"unpause-dispatched-content"},"State":"running","Status":"running"}]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
+			_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/unpause"):
+			unpauses.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			stops.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			starts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	require.NoError(t, svc.store.UpdateServerStatus(ctx, server.ID, storage.StatusPaused))
+	row := stageRestartTestFile(t, svc, server, "staged.txt", "new")
+
+	require.NoError(t, svc.store.DB().Exec(
+		`CREATE TRIGGER fail_unpause_dispatched_status BEFORE UPDATE OF status ON servers
+		 WHEN NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'status unavailable'); END`).Error)
+	_, err := svc.RestartServer(ctx, connect.NewRequest(&v1.RestartServerRequest{Id: server.ID, RequestId: "unpause-dispatched-content"}))
+	require.ErrorContains(t, err, "status could not be saved before restarting")
+	require.EqualValues(t, 1, unpauses.Load())
+	require.Zero(t, stops.Load(), "a failed status write must not claim the restart")
+	require.Zero(t, starts.Load())
+
+	current, err := svc.store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StatusPaused, current.Status)
+	got, err := svc.store.GetStagedContent(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusApplied, got.Status)
+	open, err := svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.NotNil(t, open.SealedAt, "the dispatched in-place batch is retained fail-closed")
+	require.Nil(t, open.PublishedAt)
+	record, err := svc.store.GetUpdatePublication(ctx, open.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, record.Phase)
+	require.Empty(t, record.ExpectedContainerID, "an in-place unpause has no replacement identity")
+
+	require.NoError(t, svc.store.DB().Exec(`DROP TRIGGER fail_unpause_dispatched_status`).Error)
+	response, err := svc.RestartServer(ctx, connect.NewRequest(&v1.RestartServerRequest{Id: server.ID, RequestId: "unpause-dispatched-content-retry"}))
+	require.Error(t, err)
+	require.Nil(t, response)
+	require.ErrorContains(t, err, `is not the recorded replacement ""`)
+	require.EqualValues(t, 1, unpauses.Load(), "the retry must not silently acknowledge or re-unpause")
+	require.Zero(t, stops.Load())
+	require.Zero(t, starts.Load())
+
+	open, err = svc.store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	require.Nil(t, open.PublishedAt, "the identity refusal is not an acknowledgement")
+	record, err = svc.store.GetUpdatePublication(ctx, open.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationDispatched, record.Phase)
+	require.Empty(t, record.ExpectedContainerID)
 }
 
 // A completed request ID must not write a durable dispatch for freshly staged

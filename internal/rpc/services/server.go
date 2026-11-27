@@ -2907,15 +2907,17 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 // Docker refuses an unpause when the container is not frozen. A completed
 // unpause whose status write was interrupted leaves the database PAUSED while
 // the container is already running, so a new request ID must observe the
-// running state and continue instead of failing the lifecycle. Only an observed
-// non-paused state is accepted; any other refusal stays an error.
+// running state and continue instead of failing the lifecycle. Only a live
+// observed state (running or unhealthy) is accepted; paused, stopped, error and
+// absent containers keep the original unpause error so a stopped runtime is
+// never mistaken for a successful resume.
 func resumePausedContainer(ctx context.Context, dockerCli *docker.Client, containerID string) error {
 	if err := dockerCli.UnpauseContainer(ctx, containerID); err != nil {
 		observed, observeErr := dockerCli.GetContainerStatus(ctx, containerID)
 		if observeErr != nil {
 			return errors.Join(err, fmt.Errorf("failed to verify the container state after the unpause was refused: %w", observeErr))
 		}
-		if observed != storage.StatusPaused {
+		if observed == storage.StatusRunning || observed == storage.StatusUnhealthy {
 			return nil
 		}
 		return err
