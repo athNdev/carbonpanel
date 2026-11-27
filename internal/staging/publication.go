@@ -16,6 +16,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 )
 
 // errModuleRecoveryAmbiguous refuses to restore a recovery snapshot when a
@@ -176,6 +177,19 @@ func restoreRecordedRecovery(ctx context.Context, acc nodestorage.Accessor, stor
 			return err
 		}
 	}
+	// Prove every target is either untouched or exactly this attempt's completed
+	// write before mutating anything. A target that matches neither may hold an
+	// ordinary save that landed after the interrupted attempt; restoring over it
+	// would erase that save.
+	for _, entry := range entries {
+		state, err := classifyRecoveryTarget(ctx, acc, entry)
+		if err != nil {
+			return fmt.Errorf("recovery could not verify target %q: %w", entry.Target, err)
+		}
+		if state == recoveryTargetAmbiguous {
+			return fmt.Errorf("batch %s recorded live writes to %q, but its current content is neither the recorded pre-write snapshot nor this attempt's staged bytes; an ordinary save may have landed after the interrupted attempt, so recovery refuses to overwrite it: inspect and resolve the batch before retrying", record.BatchID, entry.Target)
+		}
+	}
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
 		if !entry.Existed {
@@ -226,6 +240,9 @@ func validateRecordedEntry(entry undoEntry, owner storage.StagedContentChange, r
 			return fmt.Errorf("recovery entry %d target %q is not the owned target %q", index, entry.Target, owner.TargetPath)
 		}
 	}
+	if err := validateRecordedSource(entry, owner, index); err != nil {
+		return err
+	}
 	if entry.Existed {
 		want := path.Join(recovery, fmt.Sprintf("%06d.data", index))
 		if entry.Backup != want {
@@ -240,4 +257,113 @@ func validateRecordedEntry(entry undoEntry, owner storage.StagedContentChange, r
 		return fmt.Errorf("recovery entry %d references a backup for a target that did not exist", index)
 	}
 	return nil
+}
+
+// validateRecordedSource proves the recorded staged source is the row's own
+// controller-owned payload. Snapshots written before sources were recorded are
+// accepted but classified conservatively during recovery.
+func validateRecordedSource(entry undoEntry, owner storage.StagedContentChange, index int) error {
+	if entry.Action != "" {
+		switch entry.Action {
+		case storage.StagedActionInstall, storage.StagedActionReplace, storage.StagedActionDelete:
+		default:
+			return fmt.Errorf("recovery entry %d has an unknown action %q", index, entry.Action)
+		}
+		if entry.Action != owner.Action {
+			return fmt.Errorf("recovery entry %d action %q is not the owned action %q", index, entry.Action, owner.Action)
+		}
+	}
+	if entry.Action == storage.StagedActionDelete {
+		if entry.Source != "" {
+			return fmt.Errorf("recovery entry %d records a source for a delete", index)
+		}
+		return nil
+	}
+	if entry.Source == "" {
+		return nil
+	}
+	source := normalizeStagedTarget(entry.Source)
+	if source == "" || source == "." || source == undoRoot || strings.HasPrefix(source, undoRoot+"/") {
+		return fmt.Errorf("recovery entry %d has a reserved source %q", index, entry.Source)
+	}
+	if path.IsAbs(source) || source == ".." || strings.HasPrefix(source, "../") {
+		return fmt.Errorf("recovery entry %d has a source outside the server data root: %q", index, entry.Source)
+	}
+	if owner.Kind == storage.StagedKindModpack {
+		root := normalizeStagedTarget(owner.StagePath)
+		if root == "" || (source != root && !strings.HasPrefix(source, root+"/")) {
+			return fmt.Errorf("recovery entry %d source %q is not inside the owned staged tree", index, entry.Source)
+		}
+		return nil
+	}
+	if source != normalizeStagedTarget(owner.StagePath) {
+		return fmt.Errorf("recovery entry %d source %q is not the owned staged payload %q", index, entry.Source, owner.StagePath)
+	}
+	return nil
+}
+
+// recoveryTargetState is the verdict for one recorded target before a recovery
+// restore mutates it.
+type recoveryTargetState int
+
+const (
+	// recoveryTargetUntouched means the target still holds the recorded
+	// pre-image (or never existed), so restoring it is a no-op.
+	recoveryTargetUntouched recoveryTargetState = iota
+	// recoveryTargetWritten means the target holds exactly this attempt's
+	// recorded post-image, so restoring it recovers the interrupted write.
+	recoveryTargetWritten
+	// recoveryTargetAmbiguous means neither identity matches: an ordinary write
+	// may have landed after the interrupted attempt.
+	recoveryTargetAmbiguous
+)
+
+// classifyRecoveryTarget proves that a recorded target is either untouched or
+// exactly this attempt's completed write. Live files are written through atomic
+// temp-and-rename writers, so a target is never half-written; any third identity
+// is evidence of a later writer and must not be overwritten.
+func classifyRecoveryTarget(ctx context.Context, acc nodestorage.Accessor, entry undoEntry) (recoveryTargetState, error) {
+	info, err := acc.Stat(entry.Target)
+	exists := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		return recoveryTargetAmbiguous, err
+	}
+	var currentSHA string
+	var currentSize int64
+	if exists {
+		if !info.Mode().IsRegular() {
+			return recoveryTargetAmbiguous, nil
+		}
+		currentSHA, currentSize, err = fileSHA256(ctx, acc, entry.Target, storageworker.MaxStreamBytes)
+		if err != nil {
+			return recoveryTargetAmbiguous, err
+		}
+		if entry.Existed && currentSize == entry.Size && currentSHA == entry.SHA256 {
+			return recoveryTargetUntouched, nil
+		}
+	}
+	if entry.Action == storage.StagedActionDelete {
+		if !exists {
+			return recoveryTargetWritten, nil
+		}
+		return recoveryTargetAmbiguous, nil
+	}
+	if !exists && !entry.Existed {
+		// The target did not exist before and holds no staged post-image now:
+		// this attempt never reached it.
+		return recoveryTargetUntouched, nil
+	}
+	if entry.Source == "" {
+		// A snapshot recorded before staged sources were captured can only prove
+		// the unchanged pre-image.
+		return recoveryTargetAmbiguous, nil
+	}
+	postSHA, postSize, err := fileSHA256(ctx, acc, entry.Source, storageworker.MaxStreamBytes)
+	if err != nil {
+		return recoveryTargetAmbiguous, fmt.Errorf("recovery could not verify staged source %q for target %q: %w", entry.Source, entry.Target, err)
+	}
+	if exists && currentSize == postSize && currentSHA == postSHA {
+		return recoveryTargetWritten, nil
+	}
+	return recoveryTargetAmbiguous, nil
 }

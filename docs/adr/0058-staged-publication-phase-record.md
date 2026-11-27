@@ -63,11 +63,25 @@ not safe evidence:
 6. A pre-dispatch interruption with no container resumes the normal create path.
    A verified retry finishes cleanup and bookkeeping and leaves the operator's
    explicit start/restart in control.
+7. An `applying` restore first proves every recorded target is either its
+   recorded pre-image or exactly this attempt's staged post-image. The snapshot
+   records each entry's staged source and action for that check; a snapshot that
+   predates those fields is only trusted for unchanged targets. A target with
+   any third identity, such as an ordinary save that landed after the
+   interrupted attempt, stops recovery with an operator-inspection error
+   instead of overwriting it. A failed attempt also keeps the server's exclusive
+   data-write lease until the retry consumes the snapshot, so ordinary panel
+   writes cannot land under it in the meantime; the retry re-adopts that
+   retained lease rather than taking a second exclusive claim.
 
 ## Consequences
 
 - A crash between snapshot, live write, dispatch, and verification has a
   defined conservative action, and an ambiguous transition never runs cleanup.
+- An interrupted `applying` attempt recovers automatically only while its
+  targets are still provably its own or untouched. An interleaved ordinary save
+  is preserved and reported instead of silently erased, and the data path stays
+  closed to ordinary writes until that recovery is resolved.
 - The record is derived only from controller/DB state; no game-owned file can
   steer restoration.
 - Timed/idle publication is not claimed by this contract. Its journal still

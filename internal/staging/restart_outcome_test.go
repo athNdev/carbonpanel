@@ -995,3 +995,173 @@ func TestModuleIntentMakesInterruptedRecoveryAmbiguousAndSealed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before, after, "ambiguous recovery must not restore or clean up")
 }
+
+// stageTwoFileBatch stages two ordinary file rows in created order and returns
+// the batch id plus the rows as the publisher will select them.
+func stageTwoFileBatch(t *testing.T, store *storage.Store, data, serverID, first, second string) (string, []storage.StagedContentChange) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(data, first), []byte("old-"+first), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(data, second), []byte("old-"+second), 0o644))
+	batch := openBatch(t, store, serverID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, serverID, first, "new-"+first)
+	stageFile(t, store, data, batch, serverID, second, "new-"+second)
+	rows, err := store.ListBatchContent(context.Background(), batch)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	return batch, rows
+}
+
+// failPublishingSecondFile removes the later row's staged source so the publish
+// loop writes the first target and then fails before touching the second. The
+// durable APPLYING phase and its snapshot stay in place.
+func failPublishingSecondFile(t *testing.T, store *storage.Store, server *storage.Server, data string, rows []storage.StagedContentChange) error {
+	t.Helper()
+	require.Equal(t, "second.txt", rows[1].TargetPath, "rows are ordered by creation")
+	require.NoError(t, os.Remove(filepath.Join(data, filepath.FromSlash(rows[1].StagePath))))
+	_, err := CommitNextRestartFiles(context.Background(), store, server, nil)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, datawrite.ErrExclusiveBusy)
+	return err
+}
+
+// TestApplyingRecoveryRefusesToOverwriteAnOrdinarySave covers the data-safety
+// hazard after an interrupted APPLYING attempt: ordinary saves may land on the
+// same targets before the retry. The retry must refuse instead of restoring the
+// snapshot over bytes it cannot prove it wrote.
+func TestApplyingRecoveryRefusesToOverwriteAnOrdinarySave(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "recover-save", Name: "recover-save", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("old"), 0o644))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+	rows, err := store.ListBatchContent(ctx, batch)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	// A first attempt records the snapshot and copies the staged file, then
+	// stops before the row is marked APPLIED.
+	record, err := store.BeginUpdatePublication(ctx, batch, server.ID, server.ContainerID)
+	require.NoError(t, err)
+	acc, err := openAccessor(ctx, store, server, nil)
+	require.NoError(t, err)
+	_, err = commitFilesForPublication(ctx, acc, rows, newPublicationAttempt(store, record))
+	require.NoError(t, err)
+	require.NoError(t, acc.Close())
+	applying, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationApplying, applying.Phase)
+
+	// The panel restarted, so the in-process lease is gone; an ordinary save
+	// then lands on the target the interrupted attempt already wrote.
+	lease, err := datawrite.TryShared(server.ID)
+	require.NoError(t, err, "no lease survives a process restart")
+	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("saved"), 0o644))
+	lease.Release()
+	recovery := filepath.Join(data, ".carbon-panel", "undo", batch)
+
+	_, err = CommitNextRestartFiles(ctx, store, server, nil)
+	require.ErrorContains(t, err, "refuses to overwrite it")
+	live, err := os.ReadFile(filepath.Join(data, "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "saved", string(live), "the later save must be preserved")
+	require.DirExists(t, recovery, "an ambiguous recovery must keep its evidence")
+	current, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, storage.PublicationApplying, current.Phase)
+	// Recovery stays fail-closed: ordinary writes are still refused until the
+	// ambiguous target is resolved.
+	_, err = datawrite.TryShared(server.ID)
+	require.ErrorIs(t, err, datawrite.ErrExclusiveHeld)
+}
+
+// TestInterruptedApplyingAttemptRecoversItsOwnWrites proves a plain interrupted
+// attempt still restores and republishes automatically once the obstacle is
+// gone, including the untouched target it never reached.
+func TestInterruptedApplyingAttemptRecoversItsOwnWrites(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "recover-partial", Name: "recover-partial", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
+	failPublishingSecondFile(t, store, server, data, rows)
+
+	written, err := os.ReadFile(filepath.Join(data, "first.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new-first.txt", string(written), "the attempt wrote the first target before failing")
+	untouched, err := os.ReadFile(filepath.Join(data, "second.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "old-second.txt", string(untouched), "the failing copy must not touch its target")
+
+	// A process restart drops the retained lease; recovery must still prove the
+	// written target by its staged post-image and restore it automatically.
+	retainedRecoveryLeases.Lock()
+	if lease := retainedRecoveryLeases.byServer[server.ID]; lease != nil {
+		delete(retainedRecoveryLeases.byServer, server.ID)
+		lease.Release()
+	}
+	retainedRecoveryLeases.Unlock()
+	require.NoError(t, os.WriteFile(filepath.Join(data, filepath.FromSlash(rows[1].StagePath)), []byte("new-second.txt"), 0o644))
+	before, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	require.NotNil(t, commit)
+	t.Cleanup(commit.Finish)
+	for _, target := range []string{"first.txt", "second.txt"} {
+		body, readErr := os.ReadFile(filepath.Join(data, target))
+		require.NoError(t, readErr)
+		require.Equal(t, "new-"+target, string(body), "the retry republishes the staged bytes")
+	}
+	// The interrupted attempt's tree was consumed and replaced by this
+	// attempt's own snapshot. Recovery restored the recorded pre-image first, so
+	// the fresh snapshot records that restored content.
+	backup, err := os.ReadFile(filepath.Join(data, ".carbon-panel", "undo", batch, "000000.data"))
+	require.NoError(t, err)
+	require.Equal(t, "old-first.txt", string(backup), "the new snapshot records the restored pre-image")
+	commit.Finish()
+	after, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, before.Attempt+1, after.Attempt, "the interrupted attempt was restored and retired")
+	lease, err := datawrite.TryShared(server.ID)
+	require.NoError(t, err, "the resolved retry releases the data path")
+	lease.Release()
+}
+
+// TestFailedApplyingAttemptKeepsTheLeaseUntilRetry proves the failed attempt
+// keeps the exclusive data-write lease while its recovery is pending, so an
+// ordinary write cannot land under the snapshot, and that the retry re-adopts
+// that lease instead of deadlocking on a second exclusive claim.
+func TestFailedApplyingAttemptKeepsTheLeaseUntilRetry(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "recover-lease", Name: "recover-lease", DataPath: data}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	_, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
+	failPublishingSecondFile(t, store, server, data, rows)
+
+	_, err := datawrite.TryShared(server.ID)
+	require.ErrorIs(t, err, datawrite.ErrExclusiveHeld,
+		"ordinary writes must stay refused while an APPLYING recovery is pending")
+
+	require.NoError(t, os.WriteFile(filepath.Join(data, filepath.FromSlash(rows[1].StagePath)), []byte("new-second.txt"), 0o644))
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err, "the retry re-adopts the retained lease")
+	require.NotNil(t, commit)
+	for _, target := range []string{"first.txt", "second.txt"} {
+		body, readErr := os.ReadFile(filepath.Join(data, target))
+		require.NoError(t, readErr)
+		require.Equal(t, "new-"+target, string(body))
+	}
+	_, err = datawrite.TryShared(server.ID)
+	require.ErrorIs(t, err, datawrite.ErrExclusiveHeld, "the commit handle still owns the path")
+	commit.Finish()
+	lease, err := datawrite.TryShared(server.ID)
+	require.NoError(t, err)
+	lease.Release()
+}

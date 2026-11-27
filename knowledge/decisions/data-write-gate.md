@@ -29,7 +29,8 @@ new shared writer cannot slip in between a completed drain and ownership.
 `ApplyBatch` releases the lease when its journaled callback finishes.
 `CommitNextRestartFiles` returns a commit handle because the start/restart call
 site has no journal: the handle keeps the lease until the caller calls
-`Finish` on success or `Undo` on failure. `Undo` after `Finish` is a no-op.
+`Finish` on success or `Undo` on failure. `Undo` after `Finish` is a no-op. A
+failed `applying` recovery keeps the lease until the retry resolves it.
 
 A reviewed live digest travels with its target as a typed drift guard. It is
 checked during snapshot creation and again immediately before the live writer

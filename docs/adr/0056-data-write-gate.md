@@ -40,7 +40,10 @@ must therefore outlive the commit function without becoming a second journal.
    and any rollback finish. `CommitNextRestartFiles` returns a commit handle
    that keeps the exclusive lease until the caller calls `Finish` on success or
    `Undo` on failure. `Finish` does not undo, and `Undo` after `Finish` is a
-   no-op.
+   no-op. A next-restart attempt that fails with an `applying` recovery snapshot
+   keeps the lease instead of releasing it, and the retry re-adopts that
+   retained lease; ordinary writes stay refused until the recorded snapshot is
+   resolved (ADR 0058).
 3. Direct file-service writes, uploads, deletes, renames, moves, copies, folder
    creation, archive creation, extraction and remote archive download, plus
    direct mod enable/disable/delete and optimization-stack installs, take a

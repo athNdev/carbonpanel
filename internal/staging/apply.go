@@ -538,21 +538,30 @@ func (c *NextRestartCommit) Finish() {
 // ApplyConfigs so a row staged after this selection cannot enter the restart.
 func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (*NextRestartCommit, error) {
 	resolver := firstResolver(resolvers)
-	write, err := datawrite.AcquireExclusive(ctx, server.ID)
+	write, err := acquireRecoveryLease(ctx, server.ID)
 	if err != nil {
 		return nil, err
 	}
 	owned := false
+	batchID := ""
 	defer func() {
-		if !owned {
-			write.Release()
+		if owned {
+			return
 		}
+		// An interrupted attempt whose durable phase is APPLYING may have
+		// written live files and owes a restore. Keep ordinary writes out until
+		// the retry owns the path again; releasing here would let a save land
+		// under the recorded snapshot and be erased by the restore.
+		if publicationRecoveryPending(ctx, store, batchID) {
+			retainRecoveryLease(server.ID, write)
+			return
+		}
+		write.Release()
 	}()
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	if err != nil {
 		return nil, err
 	}
-	batchID := ""
 	published := false
 	if batch.WindowMatches(storage.UpdateWindowNextRestart, nil, 0) {
 		batchID = batch.ID
@@ -1110,6 +1119,13 @@ func lockHeld(err error) bool {
 		return false
 	}
 	if errors.Is(err, operation.ErrInProgress) {
+		return true
+	}
+	// A retained recovery lease keeps the exclusive data path owned until the
+	// next-restart retry resolves its snapshot. That is contention, not a failed
+	// publication, so the sweep waits for the next tick instead of reporting an
+	// error on every run.
+	if errors.Is(err, datawrite.ErrExclusiveBusy) {
 		return true
 	}
 	return strings.Contains(strings.ToUpper(err.Error()), "UNIQUE")

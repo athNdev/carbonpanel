@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path"
@@ -25,8 +26,15 @@ const undoRoot = ".carbon-panel/undo"
 type undoEntry struct {
 	// RowID binds each recovery entry to the staged content row that owns the
 	// target. Recovery refuses an entry whose row is not in this batch.
-	RowID   string `json:"row_id,omitempty"`
-	Target  string `json:"target"`
+	RowID  string `json:"row_id,omitempty"`
+	Target string `json:"target"`
+	// Source is the controller-owned staged file this attempt copies to Target
+	// (empty for a delete). Recovery uses it, together with Action, to prove the
+	// current target is this attempt's completed write before restoring over it.
+	// Snapshots written before this field existed leave it empty and are
+	// verified conservatively.
+	Source  string `json:"source,omitempty"`
+	Action  string `json:"action,omitempty"`
 	Backup  string `json:"backup,omitempty"`
 	Existed bool   `json:"existed"`
 	Size    int64  `json:"size"`
@@ -81,40 +89,51 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	return result, w.Commit()
 }
 
-// fileSHA512 reads one file without loading it into memory and verifies that
-// it did not change while the digest was being calculated.
-func fileSHA512(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, error) {
+// fileDigest reads one file without loading it into memory and verifies that it
+// did not change while the digest was being calculated.
+func fileDigest(ctx context.Context, acc nodestorage.Accessor, target string, limit int64, digest hash.Hash) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	before, err := acc.Stat(target)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if !before.Mode().IsRegular() {
-		return "", fmt.Errorf("file %s is not a regular file", target)
+		return "", 0, fmt.Errorf("file %s is not a regular file", target)
 	}
 	r, err := acc.OpenRead(ctx, target)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	h := sha512.New()
-	n, copyErr := io.CopyBuffer(h, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	n, copyErr := io.CopyBuffer(digest, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
 	closeErr := r.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if n > limit {
-		return "", fmt.Errorf("file %s exceeds the %d-byte digest limit", target, limit)
+		return "", 0, fmt.Errorf("file %s exceeds the %d-byte digest limit", target, limit)
 	}
 	after, err := acc.Stat(target)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
-		return "", fmt.Errorf("file %s changed while its digest was checked", target)
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) || n != before.Size() {
+		return "", 0, fmt.Errorf("file %s changed while its digest was checked", target)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(digest.Sum(nil)), n, nil
+}
+
+func fileSHA512(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, error) {
+	sum, _, err := fileDigest(ctx, acc, target, limit, sha512.New())
+	return sum, err
+}
+
+// fileSHA256 returns the size and SHA-256 of one regular file. Recovery compares
+// a live target against both its recorded pre-image and this attempt's staged
+// post-image with it.
+func fileSHA256(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, int64, error) {
+	return fileDigest(ctx, acc, target, limit, sha256.New())
 }
 
 // validSHA512Hex reports whether value is a complete SHA-512 in hex.
@@ -305,7 +324,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			return abortPreparation(err)
 		}
 		item := fileSnap{target: file.target, recoveryRoot: recovery}
-		record := undoEntry{RowID: file.rowID, Target: file.target}
+		record := undoEntry{RowID: file.rowID, Target: file.target, Source: file.source, Action: file.action}
 		if err == nil {
 			if !info.Mode().IsRegular() {
 				return abortPreparation(fmt.Errorf("staged target %s is not a regular file", file.target))

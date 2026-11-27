@@ -10,7 +10,7 @@ sources:
     resource: staged-updates.md
   - title: Publication phase record decision
     resource: ../../docs/adr/0058-staged-publication-phase-record.md
-verified: { by: agent:opencode, at: 2026-11-27 }
+verified: { by: agent:opencode, at: 2026-11-28 }
 ---
 # Rule
 
@@ -46,7 +46,10 @@ unverified or ambiguous dispatch seals the batch and runs no cleanup; a verified
 
 Interrupted recovery uses only the controller-owned snapshot (owned row ids, targets and backup digests), validating ownership and every backup reference
 before mutation. A preparing attempt may discard an incomplete backup; prepared has not written live data; applying restores the recorded snapshot and
-restages its rows. Module intent is durable before module rows or containers change, so an interrupted module transition is sealed, never auto-restored.
+restages its rows. Before an applying restore mutates a target it proves the current bytes are the recorded pre-image or exactly this attempt's staged
+post-image; any other identity, such as an ordinary save that landed after the failure, is refused for operator inspection instead of overwritten. A failed
+attempt keeps the exclusive data-write lease until the retry consumes the snapshot, so ordinary writes cannot land in between, and the retry re-adopts that
+retained lease. Module intent is durable before module rows or containers change, so an interrupted module transition is sealed, never auto-restored.
 Game-data manifests are never recovery evidence, and legacy batches without a record do not auto-restore. Applied content rows stay durable cleanup
 evidence: retry cleanup instead of republishing. Mixed rows resolve by discarding newly staged rows and retrying the retained snapshot; recovery is never
 overwritten to make room. Timed/idle publication still uses the operation journal and is not covered here; see [timed/idle publisher limits](../failures/staged-publication-timed-outcome.md).
