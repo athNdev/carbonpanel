@@ -107,12 +107,16 @@ const evidence = {
     status: "not-run",
     blocker:
       "This Windows checkout has no disposable Linux/WSL review stack or Docker daemon; AGENTS.md keeps Docker fixtures in a disposable named session and this assignment forbids starting a full Docker stack on the host.",
-    commands: [
+    exactHead: "git rev-parse HEAD must equal head.sha before the hosted run",
+    lifecycle: [
       "node scripts/review/run.mjs single-seeded up",
-      "REVIEW_BASE=http://127.0.0.1:<session-port> PANEL_REVIEW_USER=<review-user> PANEL_REVIEW_PASSWORD=<review-password> node scripts/review/run.mjs single-seeded review --plan scripts/review/plan-console.json",
+      "node scripts/review/setup-browser.mjs",
+      "read the named session port and PANEL_REVIEW_USER/PANEL_REVIEW_PASSWORD from the disposable stack",
+      "exercise the same /servers/[id] and /servers/new state list against REVIEW_BASE on that exact head",
       "node scripts/review/run.mjs single-seeded down",
     ],
-    note: "The hosted path must be rerun at the exact head before claiming live-engine acceptance. This fixture run is UI/route evidence only.",
+    automation:
+      "This commit records the normal-route fixture run only and does not claim a hosted-mode driver. A hosted rerun is a separate exact-head step; live-controller and engine round trips remain separate evidence and are not part of this result set.",
   },
   views: [],
   states: [],
