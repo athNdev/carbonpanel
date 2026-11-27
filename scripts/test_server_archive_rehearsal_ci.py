@@ -1248,6 +1248,14 @@ class UiAcceptanceEvidenceTests(unittest.TestCase):
                     "admin", "throwaway-secret", driver=rehearsal.UI_DRIVER)
         self.assertEqual(raised.exception.created_server_ids, ["srv-zip"])
 
+    def test_download_custody_refuses_bytes_changed_before_import(self):
+        facts = rehearsal.verify_ui_evidence(
+            self.record("export"), self.export_plan(), self.evidence)
+        rehearsal.assert_ui_download_custody(self.evidence, facts)
+        (self.evidence / "source.zip").write_bytes(b"altered-after-verification")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "changed before"):
+            rehearsal.assert_ui_download_custody(self.evidence, facts)
+
     def test_verification_failure_still_exposes_created_ids_for_cleanup(self):
         def fake_run(command, env=None, **kwargs):
             ui_dir = Path(command[command.index("--out") + 1])

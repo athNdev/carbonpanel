@@ -974,6 +974,18 @@ def _ui_created_server_ids(record):
     return ids
 
 
+def assert_ui_download_custody(ui_dir, export_facts):
+    """The wizard must upload the same bytes the Python verifier accepted."""
+    for archive_format in ("zip", "tar.gz"):
+        exported = (export_facts.get("exports") or {}).get(archive_format)
+        if not exported:
+            raise RehearsalError("UI export evidence is missing %s" % archive_format)
+        path = _ui_artifact(ui_dir, exported.get("file"))
+        if sha256_file(path) != exported.get("sha256"):
+            raise RehearsalError(
+                "UI export %s changed before the import phase" % archive_format)
+
+
 def _ui_string(value, label):
     if not isinstance(value, str) or value.strip() == "":
         raise RehearsalError("UI evidence %s is empty" % label)
@@ -2069,6 +2081,10 @@ def execute(args):
         imports = {}
         if args.ui_driver:
             phase = "ui_import"
+            # Re-check the custody chain before uploading: the file the wizard
+            # receives must still be the byte-for-byte download that the Python
+            # verifier accepted, not merely a file with the same name.
+            assert_ui_download_custody(ui_dir, ui_evidence["export"])
             try:
                 ui_evidence["import"] = run_ui_phase(
                     workspace, evidence,
