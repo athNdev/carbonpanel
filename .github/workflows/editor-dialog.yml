@@ -37,7 +37,9 @@ concurrency:
 jobs:
   editor-dialog:
     name: File editor in Chromium
-    runs-on: ubuntu-latest
+    # Playwright install-deps uses the Microsoft apt repo, which returns HTTP
+    # 403 for Ubuntu 26.04 (ubuntu-latest); the noble repo is still published.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       # runner.temp is only available in step context, not job-level env.
