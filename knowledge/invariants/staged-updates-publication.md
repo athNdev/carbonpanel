@@ -28,9 +28,11 @@ rollback; ordinary writes take a shared lease and are refused meanwhile. A next-
 target's live digest is rechecked immediately before its writer commits; an out-of-band process remains outside the typed guard. See ADR 0056.
 A restart selects its file and config rows in one exclusive snapshot. A legacy `on_restart` or `scheduled` batch window is normalized to next restart before selection, and legacy unbatched on-restart config joins the same snapshot; timed, idle and independent cron rows stay out. A pending legacy unbatched runtime config is included in the reviewed-mod compatibility check. Each next-restart batch owns one durable `server_update_publications` record and
 attempt generation, with phases preparing, prepared, applying, dispatched, verified, cleaned and abandoned. The record, not mutable status, APPLIED rows
-or container discovery, decides whether a runtime dispatch happened. Dispatch records the exact applied config/content ids inside the journaled mutation
-immediately before the first Docker mutation and captures the replacement identity returned at creation. A completed or replayed request whose callback is
-suppressed writes no dispatch and does not seal fresh rows; the request is refused so a new request ID can publish. The replacement identity is persisted
+or container discovery, decides whether a runtime dispatch happened. Dispatch records the exact applied config/content ids inside the journaled mutation that
+performs the runtime write, immediately before that write (unpause, start, create or recreate), and captures the replacement identity returned at creation.
+Dispatch is idempotent, so one attempt records it once even when several journaled steps follow. A completed or replayed request whose callback is
+suppressed, or is refused by the journal's container-identity binding after an earlier replacement changed the tracked id, writes no dispatch and mutates
+no container; its fresh rows are restaged and the batch stays unsealed, and the request is refused so a new request ID can publish. The replacement identity is persisted
 with a bounded context detached from caller cancellation, so a created container stays verifiable after the request is cancelled. A created container is
 never removed because persisting its server fields failed: it may already contain the staged bytes and is retained under the recorded identity for an
 identity-verifying retry. A retry acknowledges only that exact identity for that attempt; reconciling another canonical

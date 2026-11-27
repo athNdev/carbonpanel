@@ -2510,6 +2510,11 @@ func unsafeDataRemoval(path string) bool {
 	return rest == ""
 }
 
+// errLifecycleRequestCompleted refuses a replay whose journaled callback was
+// suppressed: the runtime mutation already ran for this request ID and no
+// staged row may be published under it.
+var errLifecycleRequestCompleted = errors.New("this lifecycle request ID was already completed; retry the staged change with a new request ID")
+
 // A completed request ID may suppress the mutation callback. It cannot
 // acknowledge fresh staged changes that were published by this attempt. The
 // dispatch intent is written inside the journaled callback so a suppressed
@@ -2525,7 +2530,7 @@ func (s *ServerService) runPublicationMutation(ctx context.Context, publication 
 		return mutate()
 	})
 	if err == nil && !ran && publication.HasChanges() {
-		return errors.New("this lifecycle request ID was already completed; retry the staged change with a new request ID")
+		return errLifecycleRequestCompleted
 	}
 	return err
 }
@@ -2680,11 +2685,23 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		if err := publication.BeginDispatch(ctx); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", err))
+		// The dispatch and the replacement share the journaled mutation: a
+		// completed request ID suppresses both, so fresh rows are never
+		// published under a runtime this request did not touch.
+		var result *docker.RecreateContainerResult
+		recreateRan := false
+		recreateErr := s.runPublicationMutation(ctx, &publication, server, "start_recreate", requestID, func() error {
+			publication.RuntimeAttempted = true
+			recreateRan = true
+			var err error
+			result, err = serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			return err
+		})
+		if recreateErr == nil && !recreateRan {
+			// The request ID already completed and nothing needed publishing:
+			// never recreate or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
 		}
-		publication.RuntimeAttempted = true
-		result, recreateErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if result != nil && result.NewContainerID != "" {
 			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
@@ -2722,14 +2739,25 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		// A completed request ID suppresses this journaled mutation before the
+		// dispatch and the create, so a replay cannot build a container for
+		// freshly applied rows.
+		var containerID string
+		createRan := false
+		if createErr := s.runPublicationMutation(ctx, &publication, server, "start_create", requestID, func() error {
+			publication.RuntimeAttempted = true
+			createRan = true
+			var err error
+			containerID, err = dockerCli.CreateContainer(ctx, server, serverConfig)
+			return err
+		}); createErr != nil {
+			s.log.Error("Failed to create container: %v", createErr)
+			return nil, createContainerError(createErr)
 		}
-		publication.RuntimeAttempted = true
-		containerID, err := dockerCli.CreateContainer(ctx, server, serverConfig)
-		if err != nil {
-			s.log.Error("Failed to create container: %v", err)
-			return nil, createContainerError(err)
+		if !createRan {
+			// The request ID already completed and nothing needed publishing:
+			// never create or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
 		}
 		if recordErr := publication.RecordReplacement(ctx, containerID); recordErr != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
@@ -2750,11 +2778,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	}
 
 	if !stagedContainerStarted {
-		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
-		}
-
-		// Start container
+		// Start container. The dispatch is written inside the journaled
+		// mutation, immediately before this live write, and only for a request
+		// that still runs.
 		if err := s.runPublicationMutation(ctx, &publication, server, "start", requestID, func() error {
 			publication.RuntimeAttempted = true
 			return serverruntime.Start(ctx, s.store, dockerCli, server)
@@ -3119,26 +3145,38 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
+		// The dispatch and the replacement share the journaled mutation: a
+		// completed request ID suppresses both, so fresh config is never
+		// published under a runtime this request did not touch.
+		var result *docker.RecreateContainerResult
+		recreateRan := false
+		recreateErr := s.runPublicationMutation(ctx, &publication, server, "restart_recreate", requestID, func() error {
+			publication.RuntimeAttempted = true
+			recreateRan = true
+			var err error
+			result, err = serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			return err
+		})
+		if recreateErr == nil && !recreateRan {
+			// The request ID already completed and nothing needed publishing:
+			// never recreate or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
 		}
-		publication.RuntimeAttempted = true
-		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if result != nil && result.NewContainerID != "" {
 			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 			}
 		}
-		if err != nil {
+		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(err, &outcomeErr) {
+			if errors.As(recreateErr, &outcomeErr) {
 				if outcomeErr.Operation == nil {
 					publication.RuntimeIdentityUnresolved = true
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 				}
 				publication.RuntimePreflight = outcomeErr.Preflight
 			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", err))
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
 		if !result.WasRunning {
 			if err := s.runPublicationMutation(ctx, &publication, server, "restart_start", requestID, func() error {
@@ -3262,14 +3300,15 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}), nil
 	}
 
-	// If server is paused, unpause it first so Docker can restart it
+	// If server is paused, unpause it first so Docker can restart it. The
+	// unpause is a journaled mutation: a completed request ID must not resume
+	// the container or record a dispatch for freshly staged rows.
 	if server.Status == storage.StatusPaused && server.ContainerID != "" {
-		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
-		}
-		publication.RuntimeAttempted = true
-		publication.RuntimeInPlaceMayHaveMutated = true
-		if err := dockerCli.UnpauseContainer(ctx, server.ContainerID); err != nil {
+		if err := s.runPublicationMutation(ctx, &publication, server, "restart_unpause", requestID, func() error {
+			publication.RuntimeAttempted = true
+			publication.RuntimeInPlaceMayHaveMutated = true
+			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
+		}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
 		}
 	}
