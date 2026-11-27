@@ -27,7 +27,6 @@ streamed through the WebSocket hub.
   stays due, and a manual trigger returns that error. An unknown check is
   treated as running.
 - A bare cron expression uses the task timezone; an explicit `TZ=` or `CRON_TZ=` prefix wins. A missed slot is not replayed: one due check runs the task once.
-- A due slot is claimed only when schedule, deadline, and policy revision match. Concurrent policy edits refuse stale snapshots.
 - Only invalid schedule definitions disable tasks. Transient next-run persistence failures leave tasks enabled and due; invalid-schedule disable requires the exact observed state.
 - When a chain stops at a step, that execution names the step and says the
   remaining steps were not run.
