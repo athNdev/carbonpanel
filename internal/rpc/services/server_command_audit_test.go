@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"connectrpc.com/connect"
 
@@ -132,12 +133,11 @@ func TestSendCommandWritesOneBoundedAuditRow(t *testing.T) {
 	if err := json.Unmarshal([]byte(row.Properties), &props); err != nil {
 		t.Fatalf("decode audit properties %q: %v", row.Properties, err)
 	}
-	gotCommand, _ := props["command"].(string)
-	if !strings.HasPrefix(gotCommand, "say ") {
-		t.Fatalf("audit command = %q, want the attempted command prefix", gotCommand)
+	if got := props["command"]; got != "say" {
+		t.Fatalf("audit command = %v, want only the verb say", got)
 	}
-	if len(gotCommand) > auditPropertyStringMaxBytes {
-		t.Fatalf("audit command is %d bytes, want at most %d", len(gotCommand), auditPropertyStringMaxBytes)
+	if got := props["command_length"]; got != float64(len(commandText)) {
+		t.Fatalf("audit command_length = %v, want %d", got, len(commandText))
 	}
 	if props["silent"] != true {
 		t.Fatalf("audit silent = %v, want true", props["silent"])
@@ -147,6 +147,90 @@ func TestSendCommandWritesOneBoundedAuditRow(t *testing.T) {
 	}
 	if _, ok := props["error"]; ok {
 		t.Fatalf("successful command audit carried an error: %v", props["error"])
+	}
+	if strings.Contains(row.Properties, strings.Repeat("x", 20)) {
+		t.Fatal("audit properties carry console command arguments")
+	}
+}
+
+func TestSendCommandAuditStoresVerbButNotArguments(t *testing.T) {
+	svc, store := newCommandAuditTestService(t, commandAuditExecutor{output: "ok"})
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "actor-login", Username: "dana"})
+	commandText := "/login s3cret hunter2"
+
+	res, err := svc.SendCommand(ctx, connect.NewRequest(&v1.SendCommandRequest{
+		Id:      "srv-command",
+		Command: commandText,
+	}))
+	if err != nil {
+		t.Fatalf("SendCommand: %v", err)
+	}
+	if !res.Msg.Success {
+		t.Fatalf("SendCommand success = false, error = %q", res.Msg.Error)
+	}
+
+	rows := commandAuditRows(t, store)
+	if len(rows) != 1 {
+		t.Fatalf("command audit rows = %d, want exactly one", len(rows))
+	}
+	row := rows[0]
+	for _, secret := range []string{"s3cret", "hunter2"} {
+		if strings.Contains(row.Properties, secret) {
+			t.Fatalf("audit properties leak command argument %q: %s", secret, row.Properties)
+		}
+	}
+
+	var props map[string]any
+	if err := json.Unmarshal([]byte(row.Properties), &props); err != nil {
+		t.Fatalf("decode audit properties %q: %v", row.Properties, err)
+	}
+	if got := props["command"]; got != "/login" {
+		t.Fatalf("audit command = %v, want the verb /login", got)
+	}
+	if got := props["command_length"]; got != float64(len(commandText)) {
+		t.Fatalf("audit command_length = %v, want %d bytes", got, len(commandText))
+	}
+	if props["success"] != true {
+		t.Fatalf("audit success = %v, want true", props["success"])
+	}
+}
+
+func TestSendCommandAuditBoundsMultibyteVerb(t *testing.T) {
+	svc, store := newCommandAuditTestService(t, commandAuditExecutor{output: "ok"})
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "actor-verb", Username: "erin"})
+	verb := strings.Repeat("é", 40) // 80 bytes, over the 64-byte verb bound
+	commandText := verb + " argument"
+
+	if _, err := svc.SendCommand(ctx, connect.NewRequest(&v1.SendCommandRequest{
+		Id:      "srv-command",
+		Command: commandText,
+	})); err != nil {
+		t.Fatalf("SendCommand: %v", err)
+	}
+
+	rows := commandAuditRows(t, store)
+	if len(rows) != 1 {
+		t.Fatalf("command audit rows = %d, want exactly one", len(rows))
+	}
+	var props map[string]any
+	if err := json.Unmarshal([]byte(rows[0].Properties), &props); err != nil {
+		t.Fatalf("decode audit properties %q: %v", rows[0].Properties, err)
+	}
+	gotVerb, _ := props["command"].(string)
+	if len(gotVerb) > 64 {
+		t.Fatalf("audit command is %d bytes, want at most 64", len(gotVerb))
+	}
+	if !utf8.ValidString(gotVerb) {
+		t.Fatalf("audit command split a UTF-8 rune: %q", gotVerb)
+	}
+	if gotVerb != strings.Repeat("é", 32) {
+		t.Fatalf("audit command = %q, want 32 runes (64 bytes) of the verb", gotVerb)
+	}
+	if strings.Contains(rows[0].Properties, "argument") {
+		t.Fatalf("audit properties carry command arguments: %s", rows[0].Properties)
+	}
+	if got := props["command_length"]; got != float64(len(commandText)) {
+		t.Fatalf("audit command_length = %v, want %d bytes", got, len(commandText))
 	}
 }
 
@@ -180,12 +264,79 @@ func TestSendCommandFailureStillWritesOneAuditRow(t *testing.T) {
 	if err := json.Unmarshal([]byte(row.Properties), &props); err != nil {
 		t.Fatalf("decode audit properties %q: %v", row.Properties, err)
 	}
+	if got := props["command"]; got != "list" {
+		t.Fatalf("audit command = %v, want the verb list", got)
+	}
+	if got := props["command_length"]; got != float64(len("list")) {
+		t.Fatalf("audit command_length = %v, want %d", got, len("list"))
+	}
 	if props["success"] != false {
 		t.Fatalf("audit success = %v, want false", props["success"])
 	}
 	errText, _ := props["error"].(string)
 	if !strings.Contains(errText, "sender unavailable") {
 		t.Fatalf("audit error = %q, want the sender failure", errText)
+	}
+}
+
+func TestSendCommandFailureBoundsErrorPropertyOnRuneBoundary(t *testing.T) {
+	longError := strings.Repeat("é", 400) // 800 bytes, over the 512-byte property bound
+	svc, store := newCommandAuditTestService(t, commandAuditExecutor{err: errors.New(longError)})
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "actor-4", Username: "frank"})
+
+	if _, err := svc.SendCommand(ctx, connect.NewRequest(&v1.SendCommandRequest{
+		Id:      "srv-command",
+		Command: "list",
+	})); err != nil {
+		t.Fatalf("SendCommand: %v", err)
+	}
+
+	rows := commandAuditRows(t, store)
+	if len(rows) != 1 {
+		t.Fatalf("command audit rows = %d, want exactly one", len(rows))
+	}
+	var props map[string]any
+	if err := json.Unmarshal([]byte(rows[0].Properties), &props); err != nil {
+		t.Fatalf("decode audit properties %q: %v", rows[0].Properties, err)
+	}
+	errText, _ := props["error"].(string)
+	if len(errText) > 512 {
+		t.Fatalf("audit error is %d bytes, want at most 512", len(errText))
+	}
+	if !utf8.ValidString(errText) {
+		t.Fatalf("audit error split a UTF-8 rune: %q", errText)
+	}
+	if !strings.HasSuffix(errText, "...") {
+		t.Fatalf("audit error = %q, want a truncation marker", errText)
+	}
+	if !utf8.ValidString(strings.TrimSuffix(errText, "...")) {
+		t.Fatalf("audit error did not cut on a rune boundary: %q", errText)
+	}
+	if !strings.Contains(errText, "é") {
+		t.Fatalf("audit error = %q, want the multibyte error content", errText)
+	}
+}
+
+func TestSendCommandRejectedRequestsWriteNoAuditRow(t *testing.T) {
+	svc, store := newCommandAuditTestService(t, commandAuditExecutor{output: "ok"})
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "actor-5", Username: "grace"})
+
+	if _, err := svc.SendCommand(ctx, connect.NewRequest(&v1.SendCommandRequest{
+		Id:      "srv-missing",
+		Command: "list",
+	})); err == nil {
+		t.Fatal("SendCommand with an unknown server returned nil error")
+	}
+
+	if _, err := svc.SendCommand(ctx, connect.NewRequest(&v1.SendCommandRequest{
+		Id:      "srv-command",
+		Command: "",
+	})); err == nil {
+		t.Fatal("SendCommand with an empty command returned nil error")
+	}
+
+	if rows := commandAuditRows(t, store); len(rows) != 0 {
+		t.Fatalf("rejected commands wrote %d audit rows, want zero: %+v", len(rows), rows)
 	}
 }
 

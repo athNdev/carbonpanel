@@ -463,12 +463,15 @@ func (s *ServerService) auditServerLifecycle(ctx context.Context, ip, event, ser
 
 // auditServerCommand records one attempted console command. It is called only
 // after the request passed lookup, running-state and argument validation, and
-// covers both a successful and a failed send.
+// covers both a successful and a failed send. Only the command verb and its
+// original byte length are stored: arguments can contain credentials and the
+// feed is readable with the scoped activity:read permission.
 func (s *ServerService) auditServerCommand(ctx context.Context, ip, serverID, command string, silent, success bool, sendErr error) {
 	properties := map[string]any{
-		"command": command,
-		"silent":  silent,
-		"success": success,
+		"command":        commandVerb(command),
+		"command_length": len(command),
+		"silent":         silent,
+		"success":        success,
 	}
 	if sendErr != nil {
 		properties["error"] = sendErr.Error()

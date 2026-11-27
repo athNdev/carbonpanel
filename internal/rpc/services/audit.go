@@ -15,11 +15,17 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 )
 
-// auditPropertyStringMaxBytes bounds every string property so a console
-// command or provider error cannot bloat the audit table. A longer value is
-// cut on a UTF-8 boundary and ends with "..."; the result never exceeds the
-// bound.
+// auditPropertyStringMaxBytes bounds every string property so a provider
+// error or otherwise unexpected value cannot bloat the audit table. A longer
+// value is cut on a UTF-8 boundary and ends with "..."; the result never
+// exceeds the bound.
 const auditPropertyStringMaxBytes = 512
+
+// auditCommandVerbMaxBytes bounds the recorded server.command verb. The feed
+// is readable with the scoped activity:read permission and a console command
+// can carry plugin credentials (/login <password>), so the audit stores only
+// the verb and the original byte length, never the arguments.
+const auditCommandVerbMaxBytes = 64
 
 // auditFields identifies one activity row apart from its properties. The
 // actor always comes from the request context, never from a caller-supplied
@@ -37,8 +43,10 @@ type auditFields struct {
 // not break the operation being audited. ActorID/ActorName are read from the
 // request context, RequestID is trimmed, and Properties is the JSON encoding
 // of properties (empty when there are none). The server.command shape is
-// {"command": string, "silent": bool, "success": bool, "error": string},
-// where error is present only on a failed send.
+// {"command": string, "command_length": number, "silent": bool,
+// "success": bool, "error": string}, where command is only the verb (at most
+// auditCommandVerbMaxBytes), command_length is the original command's byte
+// length, and error is present only on a failed send.
 func (s *ServerService) audit(ctx context.Context, fields auditFields, properties map[string]any) {
 	actorID, actorName := "", ""
 	if u := auth.GetUserFromContext(ctx); u != nil {
@@ -89,4 +97,24 @@ func boundAuditString(value string) string {
 		cut--
 	}
 	return value[:cut] + marker
+}
+
+// commandVerb returns the first whitespace-delimited token of command, with
+// surrounding whitespace removed. A longer verb is cut on a UTF-8 boundary so
+// the result never exceeds auditCommandVerbMaxBytes. The arguments are never
+// returned.
+func commandVerb(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	verb := fields[0]
+	if len(verb) <= auditCommandVerbMaxBytes {
+		return verb
+	}
+	cut := auditCommandVerbMaxBytes
+	for cut > 0 && !utf8.RuneStart(verb[cut]) {
+		cut--
+	}
+	return verb[:cut]
 }
