@@ -1011,8 +1011,14 @@ async function openWizard(page, view, options) {
         : "PK\x03\x04fixture-server",
     ),
   });
-  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
   const label = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
+  if (previewMode === "fail") {
+    await page.getByTestId("archive-preview-error").waitFor({
+      timeout: 15_000,
+    });
+    return label;
+  }
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
   await page
     .getByTestId("archive-preview")
     .getByText(label, { exact: true })
@@ -1335,6 +1341,52 @@ async function exerciseNewRoute(page, view) {
     view,
     target: page.getByTestId("archive-destination-empty").locator("xpath=.."),
   });
+
+  // A refusing preview is the fixture's failed branch: it must be recorded as a
+  // failed call with its Connect code, not as a missing HTTP status.
+  await openWizard(page, view, {
+    name: `archive-route-refused-${view.name}`,
+    format: "zip",
+    previewMode: "fail",
+  });
+  await captureState(page, {
+    route: "/servers/new",
+    state: "preview-error",
+    view,
+    target: page.getByTestId("archive-preview-error"),
+  });
+  const failedPreviews = await capturePreviews(page, view, "preview-error");
+  assert.ok(
+    failedPreviews.length >= 1,
+    "the refusing preview must be exposed by the fixture",
+  );
+  const failedPreview = failedPreviews.at(-1);
+  assert.equal(
+    failedPreview.outcome,
+    "failed",
+    "a refused preview is recorded as failed",
+  );
+  assert.equal(failedPreview.errorCode, 14, "Connect Unavailable (14)");
+  assert.equal(failedPreview.errorName, "Unavailable");
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "success";
+  });
+  await page
+    .getByRole("button", { name: "Retry preview", exact: true })
+    .click();
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/new",
+    state: "preview-retried",
+    view,
+    target: page.getByTestId("archive-preview"),
+  });
+  const retriedPreviews = await capturePreviews(page, view, "preview-retried");
+  assert.ok(
+    retriedPreviews.length >= 1,
+    "retrying the preview must call the fixture again",
+  );
+  assert.equal(retriedPreviews.at(-1).outcome, "resolved");
 }
 
 try {
