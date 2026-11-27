@@ -176,6 +176,82 @@ func TestOfflineSkipKeepsCancellationThatWonHandoff(t *testing.T) {
 	require.False(t, pendingExec, "the handoff must be forgotten")
 }
 
+// A manual run's RPC context can be cancelled when the client disconnects. The
+// terminal write must still land so the row does not stay running.
+func TestTerminalExecutionWriteSurvivesCancelledCaller(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	server := &storage.Server{ID: "terminal-cancelled-caller", Name: "terminal cancelled caller", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	task := &storage.ScheduledTask{
+		ID: "terminal-cancelled-caller-task", ServerID: server.ID, Name: "terminal cancelled caller",
+		TaskType: storage.TaskTypeCommand, Schedule: storage.ScheduleTypeInterval,
+		Status: storage.TaskStatusEnabled,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	now := time.Now()
+	execution := &storage.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, ServerID: server.ID,
+		Status: storage.ExecutionStatusRunning, StartedAt: now,
+	}
+	require.NoError(t, store.CreateTaskExecution(ctx, execution))
+
+	s := NewScheduler(store, nil, nil, nil, nil, logger.New())
+	caller, cancel := context.WithCancel(ctx)
+	cancel()
+	ended := time.Now()
+	execution.Status = storage.ExecutionStatusCompleted
+	execution.EndedAt = &ended
+	execution.Duration = ended.Sub(execution.StartedAt).Milliseconds()
+	s.persistTerminalExecution(caller, execution)
+
+	stored, err := store.GetTaskExecution(ctx, execution.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.ExecutionStatusCompleted, stored.Status)
+	require.NotNil(t, stored.EndedAt)
+	running, err := store.HasRunningExecution(ctx, task.ID)
+	require.NoError(t, err)
+	require.False(t, running, "a cancelled caller must not leave the claim running")
+}
+
+// A cancellation that won the handoff during an offline RequireOnline skip must
+// not start the child chain: the operator cancelled the run.
+func TestOfflineSkipCancellationDoesNotDispatchChildren(t *testing.T) {
+	s, store, ctx, task := newOfflineSkipFixture(t, "offline-skip-child-cancel")
+	task.IntervalSecs = 3600
+	child := &storage.ScheduledTask{
+		ID: "offline-skip-child-cancel-child", ServerID: task.ServerID, Name: "cancelled child",
+		TaskType: storage.TaskTypeCommand, Schedule: storage.ScheduleTypeInterval,
+		Status: storage.TaskStatusEnabled, ParentTaskID: &task.ID, StepOrder: 0,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, child))
+
+	claim := newScheduledExecution(task, time.Now())
+	require.NoError(t, store.CreateTaskExecution(ctx, claim))
+	s.registerPendingExecution(claim.ID)
+	require.NoError(t, s.CancelExecution(claim.ID))
+
+	execution, err := s.executeTask(ctx, task, "manual", 0, nil, claim)
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+	require.Equal(t, storage.ExecutionStatusCancelled, execution.Status)
+	require.Zero(t, countExecutions(t, store, ctx, child.ID),
+		"a cancelled offline skip must not dispatch the child chain")
+
+	stored, err := store.GetTaskExecution(ctx, claim.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.ExecutionStatusCancelled, stored.Status)
+	require.Equal(t, "execution cancelled", stored.Error)
+	require.NotNil(t, stored.EndedAt)
+
+	// The skip path advances the non-scheduled trigger's next run even when the
+	// cancellation wins.
+	reloaded, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded.NextRun, "a cancelled skip must still advance the schedule")
+}
+
 // A transient storage failure on the offline skip write must be retried so the
 // claim does not stay running and block later runs.
 func TestOfflineSkipRetriesAfterStorageRecovery(t *testing.T) {

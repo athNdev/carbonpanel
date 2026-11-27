@@ -676,7 +676,16 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 			// handoff and storage may be transiently unavailable, so use the
 			// guarded, bounded terminal write instead of an unconditional save:
 			// it keeps a cancellation and never leaves the claim running.
-			s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusSkipped, "server offline")
+			if cancelled := s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusSkipped, "server offline"); cancelled {
+				// The cancellation won the handoff. Keep the cancelled outcome
+				// and do not start child steps the operator cancelled.
+				if trigger != "scheduled" {
+					if err := s.updateNextRun(task, nil); err != nil {
+						s.log.Error("Task %s: failed to advance schedule after cancelled skip: %v", task.Name, err)
+					}
+				}
+				return execution, nil
+			}
 		}
 
 		// Skipped steps still fan out to children (each child applies its
@@ -1039,11 +1048,16 @@ func newScheduledExecution(task *storage.ScheduledTask, now time.Time) *storage.
 
 // persistTerminalExecution writes an outcome only while the durable row is
 // still running. A cancel that won the handoff keeps its cancelled outcome.
+// The write has its own bounded context because a manual run's RPC context can
+// be cancelled after the client disconnects while the row still needs its
+// terminal outcome.
 func (s *Scheduler) persistTerminalExecution(ctx context.Context, execution *storage.TaskExecution) {
 	if execution == nil {
 		return
 	}
-	updated, err := s.store.UpdateTaskExecutionIfRunning(ctx, execution)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	updated, err := s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
 	if err != nil {
 		s.log.Error("Task execution %s: failed to record outcome: %v", execution.ID, err)
 		return
@@ -1060,15 +1074,16 @@ func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage
 	s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusFailed, reason)
 }
 
-// persistClaimedOutcome writes a terminal outcome for a claimed execution. A
-// cancellation that won the handoff is kept instead of the requested status.
-// The write has its own bounded context so caller cancellation cannot abandon
-// the claim, and it retries briefly because storage may recover during the
-// retry window. It is guarded on the row still running, so a late write cannot
-// overwrite an outcome another writer already recorded.
-func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storage.TaskExecution, status storage.ExecutionStatus, reason string) {
+// persistClaimedOutcome writes a terminal outcome for a claimed execution and
+// reports whether a pending cancellation won the handoff. A cancellation that
+// won is kept instead of the requested status. The write has its own bounded
+// context so caller cancellation cannot abandon the claim, and it retries
+// briefly because storage may recover during the retry window. It is guarded on
+// the row still running, so a late write cannot overwrite an outcome another
+// writer already recorded.
+func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storage.TaskExecution, status storage.ExecutionStatus, reason string) bool {
 	if execution == nil {
-		return
+		return false
 	}
 	s.executionMu.Lock()
 	cancelled := s.pendingCancellations[execution.ID]
@@ -1097,7 +1112,7 @@ func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storag
 			if !updated {
 				s.log.Debug("Task execution %s: kept an outcome written by a cancellation", execution.ID)
 			}
-			return
+			return cancelled
 		}
 		lastErr = err
 		if writeCtx.Err() != nil {
@@ -1112,6 +1127,7 @@ func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storag
 		}
 	}
 	s.log.Error("Task execution %s: failed to record outcome after retries: %v", execution.ID, lastErr)
+	return cancelled
 }
 
 // updateNextRun calculates and updates the next run time for a task. It uses
