@@ -203,3 +203,23 @@ func TestStageModpackRefusesASymlink(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, open)
 }
+
+// TestStageModpackNeverPublishesThePendingMarker proves a marker left inside
+// the clone cache (old controller state) is not staged as pack content.
+func TestStageModpackNeverPublishesThePendingMarker(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "marker", Name: "marker", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "keep.txt"), []byte("pack"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, modpackPendingCommitFile), []byte("deadbeef\n"), 0o644))
+
+	row, err := StageModpackTree(ctx, store, server, src, "modpack marker")
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(data, row.StagePath, modpackPendingCommitFile))
+	require.FileExists(t, filepath.Join(data, row.StagePath, "keep.txt"))
+	require.NoFileExists(t, filepath.Join(data, modpackPendingCommitFile))
+}

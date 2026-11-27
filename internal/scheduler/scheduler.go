@@ -1527,24 +1527,28 @@ func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerCli
 	}
 	publication.RuntimeAttempted = true
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
-	if result != nil && result.NewContainerID != "" {
-		if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
-			return true, errors.Join(recordErr, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
-		}
-	}
 	if recreateErr != nil {
 		var outcomeErr *serverruntime.RecreationError
 		if errors.As(recreateErr, &outcomeErr) {
 			if outcomeErr.Operation == nil {
 				publication.RuntimeIdentityUnresolved = true
-				// Docker already runs the applied spec. Preserve the pending marker
-				// for retry/reconciliation rather than roll back only the database.
-				return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
 			}
 			// A typed preflight ended before any container mutation; the old
 			// container may still be running and that is not evidence about the
-			// failed replacement.
+			// failed replacement. Record the flag before any identity write.
 			publication.RuntimePreflight = outcomeErr.Preflight
+		}
+	}
+	if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+		if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+			return true, errors.Join(recordErr, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+		}
+	}
+	if recreateErr != nil {
+		if publication.RuntimeIdentityUnresolved {
+			// Docker already runs the applied spec. Preserve the pending marker
+			// for retry/reconciliation rather than roll back only the database.
+			return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
 		}
 		return true, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr)
 	}
@@ -1968,28 +1972,78 @@ type ModpackUpdateTaskConfig struct {
 // staged, so HEAD already names the fetched commit when a later run starts.
 // Without this marker that run would compare HEAD with FETCH_HEAD, report "no
 // updates", and lose an update a refused stage never published.
+//
+// The live marker is a sibling of the clone cache, never inside it: a staging
+// pass or legacy sync may read the whole cache as pack content.
 const modpackPendingCommitFile = ".carbon-panel_pending_update"
 
+// removeModpackPendingCommit is replaceable in tests to prove a clear failure
+// is retried without staging a duplicate modpack row.
+var removeModpackPendingCommit = os.Remove
+
+func modpackPendingCommitPath(cacheDir string) string {
+	return cacheDir + modpackPendingCommitFile
+}
+
+func legacyModpackPendingCommitPath(cacheDir string) string {
+	return filepath.Join(cacheDir, modpackPendingCommitFile)
+}
+
 func readModpackPendingCommit(cacheDir string) string {
-	body, err := os.ReadFile(filepath.Join(cacheDir, modpackPendingCommitFile))
-	if err != nil {
-		return ""
+	for _, name := range []string{modpackPendingCommitPath(cacheDir), legacyModpackPendingCommitPath(cacheDir)} {
+		body, err := os.ReadFile(name)
+		if err == nil {
+			return strings.TrimSpace(string(body))
+		}
 	}
-	return strings.TrimSpace(string(body))
+	return ""
 }
 
 // writeModpackPendingCommit records the fetched commit before the cache is
 // reset or staged. A write failure must stop the update rather than let the
-// fetched commit become invisible on the next run.
+// fetched commit become invisible on the next run. The path is outside the
+// clone cache, so it can also be written before an initial clone starts.
 func writeModpackPendingCommit(cacheDir, commit string) error {
 	if commit == "" {
 		return nil
 	}
-	return os.WriteFile(filepath.Join(cacheDir, modpackPendingCommitFile), []byte(commit+"\n"), 0o644)
+	return os.WriteFile(modpackPendingCommitPath(cacheDir), []byte(commit+"\n"), 0o644)
 }
 
-func clearModpackPendingCommit(cacheDir string) {
-	_ = os.Remove(filepath.Join(cacheDir, modpackPendingCommitFile))
+// clearModpackPendingCommit removes both the current marker and a marker left
+// inside the clone cache by an older version. A failure is returned, not
+// ignored, so the next run can retry clearing and staging idempotently.
+func clearModpackPendingCommit(cacheDir string) error {
+	var failed error
+	for _, name := range []string{modpackPendingCommitPath(cacheDir), legacyModpackPendingCommitPath(cacheDir)} {
+		if err := removeModpackPendingCommit(name); err != nil && !os.IsNotExist(err) {
+			failed = errors.Join(failed, err)
+		}
+	}
+	return failed
+}
+
+// modpackStagedInOpenBatch reports whether this exact fetched commit already
+// has a staged modpack row. It makes a failed marker clear safe to retry: the
+// next run finishes the clear instead of staging the same commit twice.
+func (s *Scheduler) modpackStagedInOpenBatch(ctx context.Context, serverID, label string) (bool, error) {
+	batch, err := s.store.OpenUpdateBatch(ctx, serverID)
+	if err != nil {
+		return false, err
+	}
+	if batch == nil {
+		return false, nil
+	}
+	rows, err := s.store.ListBatchContent(ctx, batch.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.Kind == storage.StagedKindModpack && row.FileName == label {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // executeModpackUpdateTask handles cloning or fetching updates from Git/source, syncing into the server directory, and restarting if updates are applied
@@ -2044,6 +2098,12 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); os.IsNotExist(err) {
 		// Initial clone
 		_ = os.MkdirAll(cacheDir, 0755)
+		// Record that a clone is pending before it starts. A crash after the
+		// clone but before its commit is read must still be retried instead of
+		// leaving HEAD at the fetched commit with no marker.
+		if err := writeModpackPendingCommit(cacheDir, "initial-clone"); err != nil {
+			return "", fmt.Errorf("record the pending initial modpack clone for retry: %w", err)
+		}
 		s.log.Info("ModpackTask %s: Performing initial clone from %s (branch: %s)", task.Name, cfg.GitURL, branch)
 		if out, err := cloneFn(ctx, gitURL, branch, cacheDir); err != nil {
 			return string(out), fmt.Errorf("initial git clone failed: %w: %s", err, string(out))
@@ -2125,10 +2185,21 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			if remoteHash != "" {
 				label = "modpack " + remoteHash[:min(8, len(remoteHash))]
 			}
-			if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
-				return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
+			// A previous attempt may have staged this exact fetched commit but
+			// failed to clear its marker. Do not append a second modpack row for
+			// one commit; finish the clear and report the existing stage.
+			alreadyStaged, err := s.modpackStagedInOpenBatch(ctx, server.ID, label)
+			if err != nil {
+				return updateSummary, err
 			}
-			clearModpackPendingCommit(cacheDir)
+			if !alreadyStaged {
+				if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
+					return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
+				}
+			}
+			if err := clearModpackPendingCommit(cacheDir); err != nil {
+				return updateSummary + "; staged into the open batch", fmt.Errorf("staged modpack but could not clear the pending update marker; retry to clear it: %w", err)
+			}
 			return updateSummary + "; staged into the open batch", nil
 		}
 
@@ -2179,7 +2250,9 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			}
 			return out, syncErr
 		}
-		clearModpackPendingCommit(cacheDir)
+		if err := clearModpackPendingCommit(cacheDir); err != nil {
+			return fmt.Sprintf("%s\nModpack synced successfully, but the pending update marker could not be cleared; retry to clear it: %v", updateSummary, err), err
+		}
 
 		// Check if maintenance window or immediate restart is triggered
 		shouldRestartNow := cfg.RestartImmediately
@@ -2275,19 +2348,19 @@ func (s *Scheduler) syncModpackFiles(ctx context.Context, server *storage.Server
 	if s.log != nil {
 		s.log.Info("Syncing updated modpack files from %s to %s", srcDir, destRoot)
 	}
-	cmdRsync := exec.CommandContext(ctx, "rsync", "-avc",
-		"--exclude=.git",
-		"--exclude=.carbon-panel_modpack_git",
-		"--exclude=.carbon-panel_modpack_staged",
-		"--exclude=.carbon-panel_snapshots",
-		srcDir+"/", destRoot+"/")
+	excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots", modpackPendingCommitFile}
+	args := []string{"-avc"}
+	for _, exclude := range excludes {
+		args = append(args, "--exclude="+exclude)
+	}
+	args = append(args, srcDir+"/", destRoot+"/")
+	cmdRsync := exec.CommandContext(ctx, "rsync", args...)
 	if out, err := cmdRsync.CombinedOutput(); err != nil {
-		cmdCp := exec.CommandContext(ctx, "cp", "-rf", srcDir+"/.", destRoot+"/")
-		if cpOut, cpErr := cmdCp.CombinedOutput(); cpErr != nil {
-			excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots"}
-			if goErr := copyDirExcluding(srcDir, destRoot, excludes); goErr != nil {
-				return string(out) + "\n" + string(cpOut), fmt.Errorf("failed to copy modpack files: %w", goErr)
-			}
+		// rsync is not installed on every supported host. The Go fallback
+		// applies the same exclusions, including a legacy marker inside the
+		// clone cache, so controller state never becomes live pack content.
+		if goErr := copyDirExcluding(srcDir, destRoot, excludes); goErr != nil {
+			return string(out), fmt.Errorf("failed to copy modpack files: %w", goErr)
 		}
 	}
 	return "", nil

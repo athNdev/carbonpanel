@@ -22,6 +22,16 @@ import (
 
 const stagedContentRoot = ".carbon-panel/staged"
 
+// modpackPendingCommitFile is controller state written by the modpack scheduler.
+// A legacy copy could still sit in the clone cache, so staging and the legacy
+// sync must never turn it into a pack target.
+const modpackPendingCommitFile = ".carbon-panel_pending_update"
+
+func isModpackInternalPath(rel string) bool {
+	rel = path.Clean(strings.ReplaceAll(rel, "\\", "/"))
+	return rel == modpackPendingCommitFile || strings.HasPrefix(rel, modpackPendingCommitFile+"/")
+}
+
 // StageModpackTree copies a fetched pack into the open batch. The live pack
 // and the container are left as they are. A later window copies the tree.
 func StageModpackTree(ctx context.Context, store *storage.Store, server *storage.Server, srcDir, summary string, resolvers ...*nodestorage.Resolver) (*storage.StagedContentChange, error) {
@@ -57,6 +67,12 @@ func StageModpackTree(ctx context.Context, store *storage.Store, server *storage
 		rel = filepath.ToSlash(rel)
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("modpack stage refuses symlink %s", rel)
+		}
+		if isModpackInternalPath(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		parts := strings.Split(rel, "/")
 		if parts[0] == ".git" {
@@ -116,7 +132,7 @@ func modpackLivePath(rel string) (string, error) {
 	}
 	top := strings.SplitN(rel, "/", 2)[0]
 	switch strings.ToLower(top) {
-	case ".git", ".carbon-panel", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots":
+	case ".git", ".carbon-panel", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots", modpackPendingCommitFile:
 		return "", fmt.Errorf("modpack path %q is reserved", rel)
 	}
 	return rel, nil
@@ -159,6 +175,9 @@ func modpackFiles(acc nodestorage.Accessor, stageRoot string) ([]modpackFile, er
 				continue
 			}
 			rel := strings.TrimPrefix(child, stageRoot+"/")
+			if isModpackInternalPath(rel) {
+				continue
+			}
 			live, err := modpackLivePath(rel)
 			if err != nil {
 				return err
