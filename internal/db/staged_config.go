@@ -136,6 +136,50 @@ func configChangesReviewedModRuntime(changes map[string]any) bool {
 	return false
 }
 
+// ensureDirectRuntimeSaveAllowed closes the non-staged SaveServerConfig window
+// under a staged reviewed mod. A runtime-relevant diff is refused unless the
+// effective Docker target is provably unchanged; otherwise a direct save could
+// move the loader or game version after the candidate was reviewed.
+func ensureDirectRuntimeSaveAllowed(tx *gorm.DB, next *ServerConfig) error {
+	if next == nil || next.ServerID == "" {
+		return nil
+	}
+	hasStaged, err := hasStagedReviewedModCandidates(tx, next.ServerID)
+	if err != nil || !hasStaged {
+		return err
+	}
+	var live ServerConfig
+	if err := tx.Where("server_id = ?", next.ServerID).First(&live).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	current, err := ServerConfigToMap(&live)
+	if err != nil {
+		return err
+	}
+	desired, err := ServerConfigToMap(next)
+	if err != nil {
+		return err
+	}
+	if !configChangesReviewedModRuntime(DiffMaps(current, desired)) {
+		return nil
+	}
+	var server Server
+	serverErr := tx.Where("id = ?", next.ServerID).First(&server).Error
+	if serverErr == nil {
+		oldLoader, oldGame, oldErr := live.EffectiveRuntimeTarget(&server)
+		newLoader, newGame, newErr := next.EffectiveRuntimeTarget(&server)
+		if oldErr == nil && newErr == nil && oldLoader == newLoader && oldGame == newGame {
+			return nil
+		}
+	} else if !errors.Is(serverErr, gorm.ErrRecordNotFound) {
+		return serverErr
+	}
+	return fmt.Errorf("%w: apply or discard the staged reviewed mod update before changing the Docker runtime target", ErrStagedModVersionChange)
+}
+
 // RequireNoPendingReviewedModRuntimeChanges protects publication of legacy
 // mixed batches. The insert path checks inside its admission transaction.
 func (s *Store) RequireNoPendingReviewedModRuntimeChanges(ctx context.Context, serverID, batchID string) error {

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // ErrReviewedModRuntimeUnknown means Docker configuration does not identify
@@ -24,6 +26,29 @@ var customLauncherEnvironment = map[ModLoader][]string{
 	ModLoaderNeoForge: {"NEOFORGE_INSTALLER"},
 	ModLoaderPaper:    {"PAPER_CUSTOM_JAR", "PAPER_DOWNLOAD_URL"},
 	ModLoaderPurpur:   {"PURPUR_DOWNLOAD_URL"},
+}
+
+// reviewedRuntimeTargetTx resolves the same effective target as
+// ReviewedModRuntimeTarget inside an admission transaction, so a persisted
+// reviewed row and its target share one writer snapshot.
+func reviewedRuntimeTargetTx(tx *gorm.DB, serverID string) (ModLoader, string, error) {
+	var server Server
+	if err := tx.Where("id = ?", serverID).First(&server).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", "", ErrReviewedModRuntimeUnknown
+		}
+		return "", "", err
+	}
+	var config ServerConfig
+	err := tx.Where("server_id = ?", serverID).First(&config).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		var absent *ServerConfig
+		return absent.EffectiveRuntimeTarget(&server)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return config.EffectiveRuntimeTarget(&server)
 }
 
 // ReviewedModRuntimeTarget loads the configuration used at container creation.

@@ -48,12 +48,12 @@ commits.
   cannot acquire between items and split the operator's request.
 - A local or remote archive creation holds the shared lease from before the
   transport decision through the accessor write.
+- Fabric optimization installs hold a per-server install lock (and a
+  mods-directory lock for direct installs) across provider lookup, downloads and
+  cleanup, with the shared lease taken inside it. No lifecycle or publication
+  path takes the install lock, so there is no ordering cycle.
 - A staged publication waits for direct writers already in flight, including a
   remote archive download or extraction, instead of reading a partial tree.
-- Direct writes do not create per-file journal rows; the lifecycle journal and
-  this data gate cover different concerns.
-- The guard narrows but cannot close an out-of-band writer that bypasses the
-  panel; the final writer is not an atomic compare-and-swap.
-- The module archive-export fence from PR #681 must eventually merge with this
-  gate so one per-server owner covers archives, staged publication and direct
-  writes.
+- Direct writes do not create per-file journal rows; the journal and this gate cover different concerns.
+- The guard cannot close an out-of-band writer that bypasses the panel; the final writer is not an atomic compare-and-swap.
+- The module archive-export fence from PR #681 must eventually merge with this gate for one per-server owner.

@@ -151,7 +151,8 @@ type approvedModRelease struct {
 // closes the window between choosing the batch and writing its payload.
 func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
 	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
-	targetRel, fileName string, data []byte, expectedLiveSha512 string, approved approvedModRelease) (*storage.StagedContentChange, error) {
+	targetRel, fileName string, data []byte, expectedLiveSha512 string, approved approvedModRelease,
+	reviewedLoader storage.ModLoader, reviewedVersion string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -189,19 +190,21 @@ func stageModContentToBatch(ctx context.Context, store *storage.Store, server *s
 		return nil, err
 	}
 	row := &storage.StagedContentChange{
-		ID:                 id,
-		ServerID:           server.ID,
-		Kind:               storage.StagedKindMod,
-		Action:             storage.StagedActionReplace,
-		TargetPath:         target,
-		StagePath:          stagePath,
-		FileName:           base,
-		ExpectedLiveSha512: expectedLiveSha512,
-		ApprovedSha512:     approved.SHA512,
-		ApprovedProvider:   approved.Provider,
-		ApprovedProjectID:  approved.ProjectID,
-		ApprovedVersionID:  approved.VersionID,
-		ApprovedFilename:   approved.Filename,
+		ID:                     id,
+		ServerID:               server.ID,
+		Kind:                   storage.StagedKindMod,
+		Action:                 storage.StagedActionReplace,
+		TargetPath:             target,
+		StagePath:              stagePath,
+		FileName:               base,
+		ExpectedLiveSha512:     expectedLiveSha512,
+		ReviewedRuntimeLoader:  string(reviewedLoader),
+		ReviewedRuntimeVersion: reviewedVersion,
+		ApprovedSha512:         approved.SHA512,
+		ApprovedProvider:       approved.Provider,
+		ApprovedProjectID:      approved.ProjectID,
+		ApprovedVersionID:      approved.VersionID,
+		ApprovedFilename:       approved.Filename,
 	}
 	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
 		_ = acc.RemoveAll(stagedContentRoot + "/" + id)

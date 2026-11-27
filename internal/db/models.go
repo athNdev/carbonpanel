@@ -641,6 +641,14 @@ type StagedContentChange struct {
 	// update was staged. Publish must recheck it so a later local edit cannot
 	// be silently overwritten by a delayed apply. Empty means no precondition.
 	ExpectedLiveSha512 string `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
+	// ReviewedRuntimeLoader and ReviewedRuntimeVersion record the normalized
+	// effective Docker target the reviewed candidate was admitted against.
+	// Publication revalidates this durable target before any live-tree
+	// mutation so a later config or Docker override change cannot publish the
+	// jar onto a runtime it was never verified against. A reviewed row without
+	// them predates durable target admission and must be reviewed again.
+	ReviewedRuntimeLoader  string `json:"reviewed_runtime_loader,omitempty" gorm:"column:reviewed_runtime_loader"`
+	ReviewedRuntimeVersion string `json:"reviewed_runtime_version,omitempty" gorm:"column:reviewed_runtime_version"`
 	// ApprovedSha512 is the provider release digest the operator reviewed and
 	// the staged payload bytes were verified against at admission. Publication
 	// requires this durable value to match the payload and provider

@@ -27,6 +27,7 @@ func TestPublishRefusesDelayedLiveDriftAndPreservesStagedBytes(t *testing.T) {
 	store, data := newStageStore(t)
 	server := &storage.Server{ID: "drift-publish", Name: "drift-publish", DataPath: data, Status: storage.StatusStopped}
 	require.NoError(t, store.CreateServer(ctx, server))
+	setReviewedRuntimeTarget(t, store, server.ID)
 
 	live := filepath.Join(data, "mods", "mod.jar")
 	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
@@ -126,6 +127,7 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, server))
 	cfg := store.CreateDefaultServerConfig(server.ID)
 	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+	setReviewedRuntimeTarget(t, store, server.ID)
 
 	// Pre-existing mixed data on the same server: a future cron config was
 	// staged first, then the batch was retargeted to a due mod update window.
@@ -143,13 +145,16 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
 		BatchID: cron.BatchID, Status: storage.StagedStatusStaged,
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
-		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
-		ExpectedLiveSha512: digest512("installed"),
-		ApprovedSha512:     digest512("candidate"),
-		ApprovedProvider:   "modrinth",
-		ApprovedProjectID:  "project",
-		ApprovedVersionID:  "release",
-		ApprovedFilename:   "mod.jar",
+		StagePath:              ".carbon-panel/staged/candidate/mod.jar",
+		FileName:               "mod.jar",
+		ExpectedLiveSha512:     digest512("installed"),
+		ReviewedRuntimeLoader:  "fabric",
+		ReviewedRuntimeVersion: "1.21.1",
+		ApprovedSha512:         digest512("candidate"),
+		ApprovedProvider:       "modrinth",
+		ApprovedProjectID:      "project",
+		ApprovedVersionID:      "release",
+		ApprovedFilename:       "mod.jar",
 	}).Error
 	require.NoError(t, err)
 	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
@@ -205,6 +210,7 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, server))
 	cfg := store.CreateDefaultServerConfig(server.ID)
 	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+	setReviewedRuntimeTarget(t, store, server.ID)
 	cron, err := store.StageConfigChange(ctx, server.ID,
 		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
 	require.NoError(t, err)
@@ -236,13 +242,16 @@ func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
 		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
 		BatchID: cron.BatchID, Status: storage.StagedStatusStaged,
 		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
-		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
-		ExpectedLiveSha512: digest512("installed"),
-		ApprovedSha512:     digest512("candidate"),
-		ApprovedProvider:   "modrinth",
-		ApprovedProjectID:  "project",
-		ApprovedVersionID:  "release",
-		ApprovedFilename:   "mod.jar",
+		StagePath:              ".carbon-panel/staged/candidate/mod.jar",
+		FileName:               "mod.jar",
+		ExpectedLiveSha512:     digest512("installed"),
+		ReviewedRuntimeLoader:  "fabric",
+		ReviewedRuntimeVersion: "1.21.1",
+		ApprovedSha512:         digest512("candidate"),
+		ApprovedProvider:       "modrinth",
+		ApprovedProjectID:      "project",
+		ApprovedVersionID:      "release",
+		ApprovedFilename:       "mod.jar",
 	}).Error
 	require.NoError(t, err)
 	cron, err = store.GetStagedConfigChange(ctx, cron.ID)
@@ -277,6 +286,7 @@ func TestPublishAcceptsUnchangedLiveFile(t *testing.T) {
 	store, data := newStageStore(t)
 	server := &storage.Server{ID: "drift-ok", Name: "drift-ok", DataPath: data, Status: storage.StatusStopped}
 	require.NoError(t, store.CreateServer(ctx, server))
+	setReviewedRuntimeTarget(t, store, server.ID)
 	live := filepath.Join(data, "mods", "mod.jar")
 	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
 	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))

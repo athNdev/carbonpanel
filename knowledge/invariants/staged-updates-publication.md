@@ -19,7 +19,8 @@ freeze/deep-sleep player-count provider; the stretch start is stored on the batc
 server without starting the JVM; a running server is saved and restarted once; a frozen server is stopped, started and left running. A failed publish
 restores previous files/config and keeps rows staged for retry; completed retries only finish bookkeeping. A live field changed after staging stops the
 publish before any write. A reviewed mod candidate is validated against the effective Docker `ServerConfig` type and version, and a runtime config
-rollback is refused while one is still staged. The reviewed installed SHA-512 selects the copy: no match is drift, two matches are ambiguous. A fetched
+rollback or direct runtime-target save is refused while one is still staged. The admitted row persists that normalized loader/version and publication
+revalidates it against the current effective target before any live-tree mutation; a changed target is a typed refusal that preserves live bytes. The reviewed installed SHA-512 selects the copy: no match is drift, two matches are ambiguous. A fetched
 release with a required or incompatible dependency, or a temporary release lookup (network, timeout, rate limit, 5xx or decode), is refused before
 download; confirmed 404/410 is definitive. Per-item staging storage/IO failures keep earlier staged rows and retry, while validation refusals and batch
 conflicts stay per-item/admission refusals. The publisher owns the server data path exclusively from before the undo snapshot through publication and

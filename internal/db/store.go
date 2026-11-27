@@ -373,7 +373,15 @@ func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) er
 }
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Save(config).Error
+	if config == nil || config.ServerID == "" {
+		return s.db.WithContext(ctx).Save(config).Error
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureDirectRuntimeSaveAllowed(tx, config); err != nil {
+			return err
+		}
+		return tx.Save(config).Error
+	})
 }
 
 // SaveSyncedServerConfig updates only the fields propagated by global sync.

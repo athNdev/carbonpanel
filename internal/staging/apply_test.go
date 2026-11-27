@@ -644,28 +644,43 @@ func stageFile(t *testing.T, store *storage.Store, dataRoot, batchID, serverID, 
 	}).Error)
 }
 
+// setReviewedRuntimeTarget pins a known loader/version on the fixture config so
+// reviewed-mod rows can persist and publish a concrete runtime target.
+func setReviewedRuntimeTarget(t *testing.T, store *storage.Store, serverID string) {
+	t.Helper()
+	cfg, err := store.GetServerConfig(context.Background(), serverID)
+	require.NoError(t, err)
+	loader, version := "fabric", "1.21.1"
+	cfg.Type = &loader
+	cfg.Version = &version
+	require.NoError(t, store.SaveServerConfig(context.Background(), cfg))
+}
+
 func stageReviewedModRow(t *testing.T, store *storage.Store, dataRoot, batchID string, server *storage.Server, candidateBody string) string {
 	t.Helper()
+	setReviewedRuntimeTarget(t, store, server.ID)
 	id := server.ID + "-reviewed"
 	stageRel := ".carbon-panel/staged/" + id + "/mod.jar"
 	require.NoError(t, os.MkdirAll(filepath.Join(dataRoot, ".carbon-panel", "staged", id), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dataRoot, filepath.FromSlash(stageRel)), []byte(candidateBody), 0o644))
 	require.NoError(t, store.DB().Create(&storage.StagedContentChange{
-		ID:                 id,
-		ServerID:           server.ID,
-		BatchID:            batchID,
-		Kind:               storage.StagedKindMod,
-		Action:             storage.StagedActionReplace,
-		TargetPath:         "mods/mod.jar",
-		StagePath:          stageRel,
-		FileName:           "mod.jar",
-		ExpectedLiveSha512: modDigest("installed"),
-		ApprovedSha512:     modDigest(candidateBody),
-		ApprovedProvider:   "modrinth",
-		ApprovedProjectID:  "project",
-		ApprovedVersionID:  "release",
-		ApprovedFilename:   "mod.jar",
-		Status:             storage.StagedStatusStaged,
+		ID:                     id,
+		ServerID:               server.ID,
+		BatchID:                batchID,
+		Kind:                   storage.StagedKindMod,
+		Action:                 storage.StagedActionReplace,
+		TargetPath:             "mods/mod.jar",
+		StagePath:              stageRel,
+		FileName:               "mod.jar",
+		ExpectedLiveSha512:     modDigest("installed"),
+		ReviewedRuntimeLoader:  "fabric",
+		ReviewedRuntimeVersion: "1.21.1",
+		ApprovedSha512:         modDigest(candidateBody),
+		ApprovedProvider:       "modrinth",
+		ApprovedProjectID:      "project",
+		ApprovedVersionID:      "release",
+		ApprovedFilename:       "mod.jar",
+		Status:                 storage.StagedStatusStaged,
 	}).Error)
 	return stageRel
 }

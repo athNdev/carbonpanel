@@ -156,6 +156,9 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	// Save updated config
 	if err := s.store.SaveServerConfig(ctx, config); err != nil {
 		s.log.Error("Failed to save server config: %v", err)
+		if errors.Is(err, storage.ErrStagedModVersionChange) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save server configuration"))
 	}
 

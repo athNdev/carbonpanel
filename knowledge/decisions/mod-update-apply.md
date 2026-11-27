@@ -46,15 +46,15 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   the existing staged-batch guarantees. Durable approval, the data-write lease
   and window checks are in [Reviewed mod update publication](mod-update-publication.md).
 - The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
-- A disabled policy, missing planner, bad config or already-staged file cannot
-  stage a duplicate or an unchecked jar.
+- A disabled policy, missing planner, bad config or already-staged file cannot stage a duplicate or an unchecked jar.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
-- Journaled admission recomputes the runtime target after reload and refuses a
-  moved target for re-review. An open-batch file is reported `already_staged`
-  before download, spends no budget, and the under-journal recheck refuses a
-  late duplicate. A resubmission names the batch only after confirming it still
-  holds every reported file; a file no longer pending after a discard is
+- Journaled admission recomputes and then persists the normalized runtime
+  target; a moved target or a direct non-staged runtime save is refused while a
+  reviewed candidate is staged. An open-batch file is `already_staged` before
+  download and spends no budget; the under-journal recheck refuses a late
+  duplicate, and a resubmission names the batch only after confirming it still
+  holds every reported file. A file no longer pending after a discard is
   retryable and is not staged here.
 - Due slots and execution claims are in
   [Mod update scheduling and legacy rows](mod-update-scheduling.md).

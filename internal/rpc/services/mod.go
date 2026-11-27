@@ -26,13 +26,16 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"github.com/athNdev/carbon-panel/pkg/upload"
+	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -50,6 +53,12 @@ type ModService struct {
 	candidateFetcher modCandidateFetcher
 	updateLookup     modUpdateLookup
 	updateBudget     int64
+	// optimizationMu serializes Fabric optimization installs per server so two
+	// requests cannot interleave old-jar cleanup. optimizationFetch and
+	// optimizationClient are fixture seams for the same install path.
+	optimizationMu     keyedMutex
+	optimizationFetch  func(context.Context, string, string) (*modrinthVersionItem, error)
+	optimizationClient *http.Client
 }
 
 // SetModUpdateBatchBudget overrides the cumulative candidate-byte budget. It
@@ -526,6 +535,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			if errors.Is(err, errInvalidModUpdateWindow) {
 				code = connect.CodeInvalidArgument
 			} else if errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrStagedModVersionChange) ||
+				errors.Is(err, storage.ErrStagedModRuntimeTargetChanged) ||
 				errors.Is(err, storage.ErrReviewedModRuntimeUnknown) || errors.Is(err, errReviewedModRuntimeChanged) {
 				code = connect.CodeFailedPrecondition
 			} else if strings.Contains(err.Error(), "server not found") || strings.Contains(err.Error(), "no mod updates") {
@@ -791,15 +801,43 @@ const (
 	fabricOptimizationDownloadTimeout       = 2 * time.Minute
 )
 
+// guardedProviderHTTPClient is the connection-guarded, redirect-protecting
+// client used for provider API and download egress. Static URL validation
+// alone is not an SSRF guard; this mirrors the reviewed-mod fetcher and World
+// Library import transport.
+func guardedProviderHTTPClient(timeout time.Duration) *http.Client {
+	return indexers.ProtectCredentialsOnRedirect(utils.NewSafeHTTPClient(timeout, false))
+}
+
+func fabricOptimizationHTTPClient() *http.Client {
+	return guardedProviderHTTPClient(fabricOptimizationDownloadTimeout)
+}
+
+// fabricOptimizationInstallMu serializes standalone optimization installs that
+// share one mods directory. InstallFabricOptimizationStack also holds a
+// per-server lock across its complete sequence; this inner lock keeps a direct
+// install from interleaving with it or with another direct install.
+var fabricOptimizationInstallMu keyedMutex
+
 // installFabricOptimizationJar downloads one optimization mod through a
 // context-bound, bounded request and only replaces the live jar after the
 // complete body has been written to a temporary file in the mods directory. A
 // non-200, oversized, truncated or empty response leaves the existing jar in
-// place and removes the partial temporary file.
+// place and removes the partial temporary file. The guarded client refuses
+// literal-IP, private and disallowed provider targets before any write.
 func installFabricOptimizationJar(ctx context.Context, modsDir string, target modrinthVersionFile, prefix string) error {
+	return installFabricOptimizationJarWithClient(ctx, modsDir, target, prefix, nil)
+}
+
+func installFabricOptimizationJarWithClient(ctx context.Context, modsDir string, target modrinthVersionFile, prefix string, client *http.Client) error {
+	release := fabricOptimizationInstallMu.Lock(modsDir)
+	defer release()
 	targetPath, err := modInstallPath(modsDir, target.Filename)
 	if err != nil {
 		return err
+	}
+	if !providers.DownloadURLIsAllowed(target.URL) {
+		return errors.New("download URL is not an allowed provider target")
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, fabricOptimizationDownloadTimeout)
 	defer cancel()
@@ -807,7 +845,9 @@ func installFabricOptimizationJar(ctx context.Context, modsDir string, target mo
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: fabricOptimizationDownloadTimeout}
+	if client == nil {
+		client = fabricOptimizationHTTPClient()
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
@@ -871,13 +911,16 @@ func fetchModrinthModVersion(ctx context.Context, slug string, mcVersion string)
 	gameVersionsJSON := url.QueryEscape(fmt.Sprintf(`["%s"]`, mcVersion))
 	reqURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version?loaders=%s&game_versions=%s", slug, loadersJSON, gameVersionsJSON)
 
+	if !providers.DownloadURLIsAllowed(reqURL) {
+		return nil, errors.New("modrinth API URL is not an allowed provider target")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "CarbonPanel/1.0 (contact@carbon-panel.local)")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := guardedProviderHTTPClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -898,6 +941,15 @@ func fetchModrinthModVersion(ctx context.Context, slug string, mcVersion string)
 	}
 
 	return &versions[0], nil
+}
+
+// fetchOptimizationVersion keeps the provider seam testable without changing
+// the production Modrinth client.
+func (s *ModService) fetchOptimizationVersion(ctx context.Context, slug, mcVersion string) (*modrinthVersionItem, error) {
+	if s.optimizationFetch != nil {
+		return s.optimizationFetch(ctx, slug, mcVersion)
+	}
+	return fetchModrinthModVersion(ctx, slug, mcVersion)
 }
 
 // GetFabricOptimizationStack checks the status and compatibility of Lithium, FerriteCore, ModernFix, and C2ME
@@ -982,6 +1034,13 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server mod loader is not Fabric or Quilt"))
 	}
 
+	// Hold the per-server install lock across provider lookup, all downloads
+	// and old-jar cleanup so two stacks cannot delete each other's jars. It is
+	// taken before the shared data-write lease; no lifecycle or publication
+	// path takes this lock, so there is no ordering cycle.
+	releaseInstall := s.optimizationMu.Lock(server.ID)
+	defer releaseInstall()
+
 	releaseWrite, err := beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
@@ -1012,15 +1071,21 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 			continue
 		}
 
-		v, err := fetchModrinthModVersion(ctx, def.ModID, server.MCVersion)
+		v, err := s.fetchOptimizationVersion(ctx, def.ModID, server.MCVersion)
 		if err != nil || v == nil || len(v.Files) == 0 {
 			warnings = append(warnings, fmt.Sprintf("%s is not compatible with Minecraft %s: %v", def.Name, server.MCVersion, err))
 			continue
 		}
 
 		targetFile := v.Files[0]
-		if err := installFabricOptimizationJar(ctx, modsDir, targetFile, def.PrefixMatch); err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to install %s: %v", def.Name, err))
+		var installErr error
+		if s.optimizationClient != nil {
+			installErr = installFabricOptimizationJarWithClient(ctx, modsDir, targetFile, def.PrefixMatch, s.optimizationClient)
+		} else {
+			installErr = installFabricOptimizationJar(ctx, modsDir, targetFile, def.PrefixMatch)
+		}
+		if installErr != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to install %s: %v", def.Name, installErr))
 			continue
 		}
 

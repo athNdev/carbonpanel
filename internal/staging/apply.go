@@ -1023,14 +1023,41 @@ func stagedModuleConflict(ctx context.Context, store *storage.Store, server *sto
 	return nil
 }
 
-// requireReviewedModRuntimeConsistency refuses a legacy mixed batch whose
-// pending config rows would change the Docker runtime target while a reviewed
-// mod candidate is also staged in that batch. The insert path rejects this
-// state, so only pre-existing data reaches the check.
+// requireReviewedModRuntimeConsistency refuses a batch whose pending config
+// rows would change the Docker runtime target while a reviewed mod candidate is
+// also staged, and refuses a candidate whose durable admission target no longer
+// matches the effective target. The insert path rejects the mixed state, so
+// only pre-existing data reaches the first check. The target revalidation runs
+// before any live-tree mutation and preserves the staged and live bytes.
 func requireReviewedModRuntimeConsistency(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange) error {
+	var reviewed []storage.StagedContentChange
 	for _, row := range rows {
-		if row.Kind == storage.StagedKindMod && row.ExpectedLiveSha512 != "" {
-			return store.RequireNoPendingReviewedModRuntimeChanges(ctx, server.ID, row.BatchID)
+		if row.Kind != storage.StagedKindMod || row.ExpectedLiveSha512 == "" {
+			continue
+		}
+		if err := store.RequireNoPendingReviewedModRuntimeChanges(ctx, server.ID, row.BatchID); err != nil {
+			return err
+		}
+		reviewed = append(reviewed, row)
+	}
+	if len(reviewed) == 0 {
+		return nil
+	}
+	loader, game, err := store.ReviewedModRuntimeTarget(ctx, server)
+	if err != nil {
+		if errors.Is(err, storage.ErrReviewedModRuntimeUnknown) {
+			return fmt.Errorf("%w: %v; review and stage the mod update again", storage.ErrStagedModRuntimeTargetChanged, err)
+		}
+		return err
+	}
+	for _, row := range reviewed {
+		if row.ReviewedRuntimeLoader == "" || row.ReviewedRuntimeVersion == "" {
+			return fmt.Errorf("%w: staged reviewed mod %s has no durable runtime target; review and stage the update again",
+				storage.ErrStagedModRuntimeTargetChanged, row.FileName)
+		}
+		if row.ReviewedRuntimeLoader != string(loader) || row.ReviewedRuntimeVersion != game {
+			return fmt.Errorf("%w: staged reviewed mod %s was reviewed for %s/%s but the effective target is %s/%s; review and stage the update again",
+				storage.ErrStagedModRuntimeTargetChanged, row.FileName, row.ReviewedRuntimeLoader, row.ReviewedRuntimeVersion, loader, game)
 		}
 	}
 	return nil

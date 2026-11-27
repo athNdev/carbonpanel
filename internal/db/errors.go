@@ -24,6 +24,11 @@ var ErrStagedModApprovalInvalid = errors.New("staged reviewed mod approved diges
 // reviewed mod candidate is still staged against the current target.
 var ErrStagedModVersionChange = errors.New("staged reviewed mod candidate blocks the runtime target change")
 
+// ErrStagedModRuntimeTargetChanged marks a reviewed mod row whose durable
+// admission target no longer matches the effective Docker target at
+// publication. The operator must review and stage the update again.
+var ErrStagedModRuntimeTargetChanged = errors.New("staged reviewed mod runtime target changed")
+
 // ErrStagedModApprovalIdentityMissing marks a reviewed mod row that recorded an
 // approved digest before the durable provider release identity was persisted.
 // Publication must not infer that identity from the mutable sidecar; the

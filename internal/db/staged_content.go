@@ -42,13 +42,35 @@ func ensureStagedModApprovalAdmission(row *StagedContentChange) error {
 
 // ensureReviewedModRuntimeAdmission refuses a reviewed mod row while the same
 // batch already carries a pending runtime configuration change the review was
-// not verified against. It runs after the transaction's first write so the
-// check cannot straddle a concurrent config admission.
+// not verified against. It also records the normalized effective runtime
+// target on the row, or refuses a caller-supplied target that no longer
+// matches, so publication can revalidate the exact target the candidate was
+// verified against. It runs after the transaction's first write so the check
+// cannot straddle a concurrent config admission.
 func ensureReviewedModRuntimeAdmission(tx *gorm.DB, row *StagedContentChange, batchID string) error {
 	if row == nil || row.Kind != StagedKindMod || row.ExpectedLiveSha512 == "" {
 		return nil
 	}
-	return requireNoPendingReviewedModRuntimeChanges(tx, row.ServerID, batchID)
+	if err := requireNoPendingReviewedModRuntimeChanges(tx, row.ServerID, batchID); err != nil {
+		return err
+	}
+	loader, game, err := reviewedRuntimeTargetTx(tx, row.ServerID)
+	if err != nil {
+		if errors.Is(err, ErrReviewedModRuntimeUnknown) {
+			return fmt.Errorf("%w: %v; review the update when the Docker runtime target is known", ErrStagedModRuntimeTargetChanged, err)
+		}
+		return err
+	}
+	if row.ReviewedRuntimeLoader != "" || row.ReviewedRuntimeVersion != "" {
+		if row.ReviewedRuntimeLoader != string(loader) || row.ReviewedRuntimeVersion != game {
+			return fmt.Errorf("%w: candidate was reviewed for %s/%s but the effective target is %s/%s; review the update again",
+				ErrStagedModRuntimeTargetChanged, row.ReviewedRuntimeLoader, row.ReviewedRuntimeVersion, loader, game)
+		}
+		return nil
+	}
+	row.ReviewedRuntimeLoader = string(loader)
+	row.ReviewedRuntimeVersion = game
+	return nil
 }
 
 // hasStagedReviewedModCandidates reports whether the server has a staged
@@ -407,7 +429,17 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 		if err := requireNoBatchCronConfig(tx, batchID); err != nil {
 			return err
 		}
-		return ensureReviewedModRuntimeAdmission(tx, row, batch.ID)
+		if err := ensureReviewedModRuntimeAdmission(tx, row, batch.ID); err != nil {
+			return err
+		}
+		if row.Kind == StagedKindMod && row.ExpectedLiveSha512 != "" &&
+			(row.ReviewedRuntimeLoader != "" || row.ReviewedRuntimeVersion != "") {
+			return tx.Model(row).Updates(map[string]any{
+				"reviewed_runtime_loader":  row.ReviewedRuntimeLoader,
+				"reviewed_runtime_version": row.ReviewedRuntimeVersion,
+			}).Error
+		}
+		return nil
 	})
 }
 

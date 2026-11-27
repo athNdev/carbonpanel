@@ -131,6 +131,17 @@ func beginServerLifecycleTransition(id string) (*docker.Transition, error) {
 	return transition, nil
 }
 
+// stagedPublicationError keeps reviewed-mod admission refusals as
+// FailedPrecondition with their re-review guidance instead of flattening them
+// into an internal lifecycle failure.
+func stagedPublicationError(prefix string, err error) *connect.Error {
+	if errors.Is(err, storage.ErrStagedModVersionChange) ||
+		errors.Is(err, storage.ErrStagedModRuntimeTargetChanged) {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", prefix, err))
+}
+
 func (s *ServerService) getDockerClient(nodeID string) *docker.Client {
 	cli, err := s.getDockerClientStrict(nodeID)
 	if err != nil {
@@ -2511,7 +2522,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on start for server %s: %v", server.ID, fileErr)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
+		return nil, stagedPublicationError("failed to apply staged content", fileErr)
 	}
 	// Applied content whose publication an earlier lifecycle already accepted
 	// owes cleanup only. It must not trigger a new recreation; the normal start
@@ -2994,7 +3005,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on restart for server %s: %v", server.ID, fileErr)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
+		return nil, stagedPublicationError("failed to apply staged content", fileErr)
 	}
 	publication := staging.RestartPublication{
 		Commit: commit,

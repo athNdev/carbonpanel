@@ -290,6 +290,7 @@ type modUpdateAdmission func(context.Context, *storage.Server) error
 func modStagingErrorIsDefinitive(err error) bool {
 	return errors.Is(err, storage.ErrUpdateBatchConflict) ||
 		errors.Is(err, storage.ErrStagedModVersionChange) ||
+		errors.Is(err, storage.ErrStagedModRuntimeTargetChanged) ||
 		errors.Is(err, errStagedPath) ||
 		errors.Is(err, errStagedModValidation)
 }
@@ -610,7 +611,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 					ProjectID: item.projectID,
 					VersionID: sel.GetCandidateVersionId(),
 					Filename:  sel.GetCandidateFilename(),
-				})
+				}, runtimeServer.ModLoader, runtimeServer.MCVersion)
 			if errors.Is(err, storage.ErrUpdateBatchConflict) {
 				return err
 			}
