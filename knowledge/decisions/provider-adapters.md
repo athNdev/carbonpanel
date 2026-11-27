@@ -13,6 +13,9 @@ code_refs:
   - internal/rpc/handlers/mod_search.go
   - internal/rpc/handlers/mod_dep_titles.go
   - internal/rpc/handlers/packwiz.go
+  - internal/rpc/services/mod_update_preview.go
+  - proto/carbonpanel/v1/mod.proto
+  - web/carbon-panel/src/lib/components/server-mods.svelte
 sources:
   - title: Provider consolidation
     resource: https://carbonpanel.atlassian.net/browse/OSS-338
@@ -25,6 +28,9 @@ credentials, instance-owned transport and structured provider failures. Browse
 retains its sort/filter choices and HTTP response mapping. Packwiz update checks
 retain provider ordering, game/loader compatibility, primary-file choice and
 SHA-512 preference over SHA-1. An operation context reaches update-check requests.
+
+Installed-file previews identify active and disabled files by SHA-512. Modrinth filters listed releases by game, loader and server support.
+Unknown files, ambiguous artifacts and unresolved dependencies remain visible. Checking writes no server state; provider lookup failures are unavailable, never unidentified uploads, and their reason is the fixed "Provider lookup failed: Try again later." text without provider diagnostics.
 
 # Consequences
 

@@ -9,6 +9,7 @@
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
 - [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
+- [Archived gameplay settings seed the initial server config](server-archive-gameplay-precedence.md) — Valid archived gameplay values beat panel defaults but never replace destination identity, credentials or network settings.
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Channel changelog is generated presentation, not pinned prose](channel-changelog-presentation.md) — The public changelog is rendered from the one version contract plus hash-attested GitHub release notes, with a separate channel-presentation fingerprint for docs-only publication.
@@ -20,6 +21,7 @@
 - [Dashboard telemetry coverage](dashboard-telemetry-coverage.md) — Dashboard player and RAM totals describe running servers that reported telemetry.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
+- [Durable server archive import ownership and recovery](server-archive-import-recovery.md) — An archive submission records its chosen destination before placing data, and a retry removes only a directory whose durable marker proves this request created it.
 - [Explicit phase-result gate for every publication write](publication-phase-gate.md) — Every release side-effect phase checks direct results and verification outputs, and a terminal job fails an explicit publish when a required phase was skipped.
 - [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.

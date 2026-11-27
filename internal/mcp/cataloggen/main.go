@@ -64,7 +64,10 @@ func fieldsKey(m protoreflect.MessageDescriptor) string {
 	return strings.Join(parts, ";")
 }
 
-func buildForService(service string) string {
+func buildForMethod(service, method string) string {
+	if service == "ServerService" && (method == "ExportServerArchive" || method == "PreviewServerArchive") {
+		return "PanelBuildServerPortability"
+	}
 	switch service {
 	case "PlayerService", "WorldService", "WorldViewService", "ModBrowseService":
 		return "PanelBuildPostStable"
@@ -106,7 +109,7 @@ func main() {
 				method:    string(md.Name()),
 				client:    "New" + service + "Client",
 				scope:     scopeKey(procedure),
-				build:     buildForService(service),
+				build:     buildForMethod(service, string(md.Name())),
 			})
 			fingerprintParts = append(fingerprintParts, strings.Join([]string{
 				procedure,

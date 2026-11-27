@@ -30,6 +30,212 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ServerArchiveFormat selects the container encoding for a native server archive.
+type ServerArchiveFormat int32
+
+const (
+	ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_UNSPECIFIED ServerArchiveFormat = 0
+	ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_ZIP         ServerArchiveFormat = 1
+	ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_TAR_GZ      ServerArchiveFormat = 2
+)
+
+// Enum value maps for ServerArchiveFormat.
+var (
+	ServerArchiveFormat_name = map[int32]string{
+		0: "SERVER_ARCHIVE_FORMAT_UNSPECIFIED",
+		1: "SERVER_ARCHIVE_FORMAT_ZIP",
+		2: "SERVER_ARCHIVE_FORMAT_TAR_GZ",
+	}
+	ServerArchiveFormat_value = map[string]int32{
+		"SERVER_ARCHIVE_FORMAT_UNSPECIFIED": 0,
+		"SERVER_ARCHIVE_FORMAT_ZIP":         1,
+		"SERVER_ARCHIVE_FORMAT_TAR_GZ":      2,
+	}
+)
+
+func (x ServerArchiveFormat) Enum() *ServerArchiveFormat {
+	p := new(ServerArchiveFormat)
+	*p = x
+	return p
+}
+
+func (x ServerArchiveFormat) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ServerArchiveFormat) Descriptor() protoreflect.EnumDescriptor {
+	return file_carbonpanel_v1_server_proto_enumTypes[0].Descriptor()
+}
+
+func (ServerArchiveFormat) Type() protoreflect.EnumType {
+	return &file_carbonpanel_v1_server_proto_enumTypes[0]
+}
+
+func (x ServerArchiveFormat) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ServerArchiveFormat.Descriptor instead.
+func (ServerArchiveFormat) EnumDescriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{0}
+}
+
+// ServerArchiveConsistency declares the consistency policy used during export.
+type ServerArchiveConsistency int32
+
+const (
+	ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED ServerArchiveConsistency = 0
+	ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED     ServerArchiveConsistency = 1
+)
+
+// Enum value maps for ServerArchiveConsistency.
+var (
+	ServerArchiveConsistency_name = map[int32]string{
+		0: "SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED",
+		1: "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
+	}
+	ServerArchiveConsistency_value = map[string]int32{
+		"SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED": 0,
+		"SERVER_ARCHIVE_CONSISTENCY_STOPPED":     1,
+	}
+)
+
+func (x ServerArchiveConsistency) Enum() *ServerArchiveConsistency {
+	p := new(ServerArchiveConsistency)
+	*p = x
+	return p
+}
+
+func (x ServerArchiveConsistency) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ServerArchiveConsistency) Descriptor() protoreflect.EnumDescriptor {
+	return file_carbonpanel_v1_server_proto_enumTypes[1].Descriptor()
+}
+
+func (ServerArchiveConsistency) Type() protoreflect.EnumType {
+	return &file_carbonpanel_v1_server_proto_enumTypes[1]
+}
+
+func (x ServerArchiveConsistency) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ServerArchiveConsistency.Descriptor instead.
+func (ServerArchiveConsistency) EnumDescriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{1}
+}
+
+// ServerArchiveFindingSeverity ranks a preview finding as advisory or blocking.
+type ServerArchiveFindingSeverity int32
+
+const (
+	ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED ServerArchiveFindingSeverity = 0
+	ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_WARNING     ServerArchiveFindingSeverity = 1
+	ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER     ServerArchiveFindingSeverity = 2
+)
+
+// Enum value maps for ServerArchiveFindingSeverity.
+var (
+	ServerArchiveFindingSeverity_name = map[int32]string{
+		0: "SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED",
+		1: "SERVER_ARCHIVE_FINDING_SEVERITY_WARNING",
+		2: "SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER",
+	}
+	ServerArchiveFindingSeverity_value = map[string]int32{
+		"SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED": 0,
+		"SERVER_ARCHIVE_FINDING_SEVERITY_WARNING":     1,
+		"SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER":     2,
+	}
+)
+
+func (x ServerArchiveFindingSeverity) Enum() *ServerArchiveFindingSeverity {
+	p := new(ServerArchiveFindingSeverity)
+	*p = x
+	return p
+}
+
+func (x ServerArchiveFindingSeverity) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ServerArchiveFindingSeverity) Descriptor() protoreflect.EnumDescriptor {
+	return file_carbonpanel_v1_server_proto_enumTypes[2].Descriptor()
+}
+
+func (ServerArchiveFindingSeverity) Type() protoreflect.EnumType {
+	return &file_carbonpanel_v1_server_proto_enumTypes[2]
+}
+
+func (x ServerArchiveFindingSeverity) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ServerArchiveFindingSeverity.Descriptor instead.
+func (ServerArchiveFindingSeverity) EnumDescriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{2}
+}
+
+// ServerArchiveFindingCode identifies the reason a preview finding was reported.
+type ServerArchiveFindingCode int32
+
+const (
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED         ServerArchiveFindingCode = 0
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME      ServerArchiveFindingCode = 1
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP      ServerArchiveFindingCode = 2
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE  ServerArchiveFindingCode = 3
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE ServerArchiveFindingCode = 4
+	ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER  ServerArchiveFindingCode = 5
+)
+
+// Enum value maps for ServerArchiveFindingCode.
+var (
+	ServerArchiveFindingCode_name = map[int32]string{
+		0: "SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED",
+		1: "SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME",
+		2: "SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP",
+		3: "SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE",
+		4: "SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE",
+		5: "SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER",
+	}
+	ServerArchiveFindingCode_value = map[string]int32{
+		"SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED":         0,
+		"SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME":      1,
+		"SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP":      2,
+		"SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE":  3,
+		"SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE": 4,
+		"SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER":  5,
+	}
+)
+
+func (x ServerArchiveFindingCode) Enum() *ServerArchiveFindingCode {
+	p := new(ServerArchiveFindingCode)
+	*p = x
+	return p
+}
+
+func (x ServerArchiveFindingCode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ServerArchiveFindingCode) Descriptor() protoreflect.EnumDescriptor {
+	return file_carbonpanel_v1_server_proto_enumTypes[3].Descriptor()
+}
+
+func (ServerArchiveFindingCode) Type() protoreflect.EnumType {
+	return &file_carbonpanel_v1_server_proto_enumTypes[3]
+}
+
+func (x ServerArchiveFindingCode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ServerArchiveFindingCode.Descriptor instead.
+func (ServerArchiveFindingCode) EnumDescriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{3}
+}
+
 // Server list options
 type ListServersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -655,8 +861,10 @@ type CreateServerRequest struct {
 	RequestId string `protobuf:"bytes,23,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Exact mod loader version. Empty means the loader's latest.
 	LoaderVersion string `protobuf:"bytes,24,opt,name=loader_version,json=loaderVersion,proto3" json:"loader_version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Completed upload owned by the caller. Required request_id when importing.
+	ArchiveUploadId string `protobuf:"bytes,25,opt,name=archive_upload_id,json=archiveUploadId,proto3" json:"archive_upload_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CreateServerRequest) Reset() {
@@ -853,6 +1061,13 @@ func (x *CreateServerRequest) GetRequestId() string {
 func (x *CreateServerRequest) GetLoaderVersion() string {
 	if x != nil {
 		return x.LoaderVersion
+	}
+	return ""
+}
+
+func (x *CreateServerRequest) GetArchiveUploadId() string {
+	if x != nil {
+		return x.ArchiveUploadId
 	}
 	return ""
 }
@@ -2312,6 +2527,383 @@ func (x *ListServerPlayersResponse) GetOnlineCount() int32 {
 	return 0
 }
 
+// ExportServerArchiveRequest requests a consistent export of one stopped server.
+type ExportServerArchiveRequest struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	ServerId      string                   `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Format        ServerArchiveFormat      `protobuf:"varint,2,opt,name=format,proto3,enum=carbonpanel.v1.ServerArchiveFormat" json:"format,omitempty"`
+	Consistency   ServerArchiveConsistency `protobuf:"varint,3,opt,name=consistency,proto3,enum=carbonpanel.v1.ServerArchiveConsistency" json:"consistency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportServerArchiveRequest) Reset() {
+	*x = ExportServerArchiveRequest{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportServerArchiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportServerArchiveRequest) ProtoMessage() {}
+
+func (x *ExportServerArchiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportServerArchiveRequest.ProtoReflect.Descriptor instead.
+func (*ExportServerArchiveRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ExportServerArchiveRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+func (x *ExportServerArchiveRequest) GetFormat() ServerArchiveFormat {
+	if x != nil {
+		return x.Format
+	}
+	return ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_UNSPECIFIED
+}
+
+func (x *ExportServerArchiveRequest) GetConsistency() ServerArchiveConsistency {
+	if x != nil {
+		return x.Consistency
+	}
+	return ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED
+}
+
+// ExportServerArchiveResponse identifies the authorized download session for a prepared archive.
+type ExportServerArchiveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Filename      string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`
+	TotalSize     int64                  `protobuf:"varint,3,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportServerArchiveResponse) Reset() {
+	*x = ExportServerArchiveResponse{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportServerArchiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportServerArchiveResponse) ProtoMessage() {}
+
+func (x *ExportServerArchiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportServerArchiveResponse.ProtoReflect.Descriptor instead.
+func (*ExportServerArchiveResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *ExportServerArchiveResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ExportServerArchiveResponse) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *ExportServerArchiveResponse) GetTotalSize() int64 {
+	if x != nil {
+		return x.TotalSize
+	}
+	return 0
+}
+
+// PreviewServerArchiveRequest validates a caller-owned completed upload without creating a server.
+type PreviewServerArchiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UploadId      string                 `protobuf:"bytes,1,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewServerArchiveRequest) Reset() {
+	*x = PreviewServerArchiveRequest{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewServerArchiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewServerArchiveRequest) ProtoMessage() {}
+
+func (x *PreviewServerArchiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewServerArchiveRequest.ProtoReflect.Descriptor instead.
+func (*PreviewServerArchiveRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *PreviewServerArchiveRequest) GetUploadId() string {
+	if x != nil {
+		return x.UploadId
+	}
+	return ""
+}
+
+func (x *PreviewServerArchiveRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+// ServerArchiveFinding is a typed compatibility or capacity finding from preview.
+type ServerArchiveFinding struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Severity      ServerArchiveFindingSeverity `protobuf:"varint,1,opt,name=severity,proto3,enum=carbonpanel.v1.ServerArchiveFindingSeverity" json:"severity,omitempty"`
+	Code          ServerArchiveFindingCode     `protobuf:"varint,2,opt,name=code,proto3,enum=carbonpanel.v1.ServerArchiveFindingCode" json:"code,omitempty"`
+	Message       string                       `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServerArchiveFinding) Reset() {
+	*x = ServerArchiveFinding{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServerArchiveFinding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServerArchiveFinding) ProtoMessage() {}
+
+func (x *ServerArchiveFinding) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServerArchiveFinding.ProtoReflect.Descriptor instead.
+func (*ServerArchiveFinding) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ServerArchiveFinding) GetSeverity() ServerArchiveFindingSeverity {
+	if x != nil {
+		return x.Severity
+	}
+	return ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED
+}
+
+func (x *ServerArchiveFinding) GetCode() ServerArchiveFindingCode {
+	if x != nil {
+		return x.Code
+	}
+	return ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED
+}
+
+func (x *ServerArchiveFinding) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
+type PreviewServerArchiveResponse struct {
+	state           protoimpl.MessageState  `protogen:"open.v1"`
+	Format          ServerArchiveFormat     `protobuf:"varint,1,opt,name=format,proto3,enum=carbonpanel.v1.ServerArchiveFormat" json:"format,omitempty"`
+	SchemaVersion   int32                   `protobuf:"varint,2,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	ExporterVersion string                  `protobuf:"bytes,3,opt,name=exporter_version,json=exporterVersion,proto3" json:"exporter_version,omitempty"`
+	McVersion       string                  `protobuf:"bytes,4,opt,name=mc_version,json=mcVersion,proto3" json:"mc_version,omitempty"`
+	ModLoader       ModLoader               `protobuf:"varint,5,opt,name=mod_loader,json=modLoader,proto3,enum=carbonpanel.v1.ModLoader" json:"mod_loader,omitempty"`
+	LoaderVersion   string                  `protobuf:"bytes,6,opt,name=loader_version,json=loaderVersion,proto3" json:"loader_version,omitempty"`
+	Memory          int32                   `protobuf:"varint,7,opt,name=memory,proto3" json:"memory,omitempty"`
+	MaxPlayers      int32                   `protobuf:"varint,8,opt,name=max_players,json=maxPlayers,proto3" json:"max_players,omitempty"`
+	FileCount       int32                   `protobuf:"varint,9,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"`
+	ExpandedBytes   int64                   `protobuf:"varint,10,opt,name=expanded_bytes,json=expandedBytes,proto3" json:"expanded_bytes,omitempty"`
+	RequiredBytes   int64                   `protobuf:"varint,11,opt,name=required_bytes,json=requiredBytes,proto3" json:"required_bytes,omitempty"`
+	AvailableBytes  *int64                  `protobuf:"varint,12,opt,name=available_bytes,json=availableBytes,proto3,oneof" json:"available_bytes,omitempty"`
+	Findings        []*ServerArchiveFinding `protobuf:"bytes,13,rep,name=findings,proto3" json:"findings,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PreviewServerArchiveResponse) Reset() {
+	*x = PreviewServerArchiveResponse{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewServerArchiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewServerArchiveResponse) ProtoMessage() {}
+
+func (x *PreviewServerArchiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewServerArchiveResponse.ProtoReflect.Descriptor instead.
+func (*PreviewServerArchiveResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PreviewServerArchiveResponse) GetFormat() ServerArchiveFormat {
+	if x != nil {
+		return x.Format
+	}
+	return ServerArchiveFormat_SERVER_ARCHIVE_FORMAT_UNSPECIFIED
+}
+
+func (x *PreviewServerArchiveResponse) GetSchemaVersion() int32 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetExporterVersion() string {
+	if x != nil {
+		return x.ExporterVersion
+	}
+	return ""
+}
+
+func (x *PreviewServerArchiveResponse) GetMcVersion() string {
+	if x != nil {
+		return x.McVersion
+	}
+	return ""
+}
+
+func (x *PreviewServerArchiveResponse) GetModLoader() ModLoader {
+	if x != nil {
+		return x.ModLoader
+	}
+	return ModLoader_MOD_LOADER_UNSPECIFIED
+}
+
+func (x *PreviewServerArchiveResponse) GetLoaderVersion() string {
+	if x != nil {
+		return x.LoaderVersion
+	}
+	return ""
+}
+
+func (x *PreviewServerArchiveResponse) GetMemory() int32 {
+	if x != nil {
+		return x.Memory
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetMaxPlayers() int32 {
+	if x != nil {
+		return x.MaxPlayers
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetFileCount() int32 {
+	if x != nil {
+		return x.FileCount
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetExpandedBytes() int64 {
+	if x != nil {
+		return x.ExpandedBytes
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetRequiredBytes() int64 {
+	if x != nil {
+		return x.RequiredBytes
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetAvailableBytes() int64 {
+	if x != nil && x.AvailableBytes != nil {
+		return *x.AvailableBytes
+	}
+	return 0
+}
+
+func (x *PreviewServerArchiveResponse) GetFindings() []*ServerArchiveFinding {
+	if x != nil {
+		return x.Findings
+	}
+	return nil
+}
+
 var File_carbonpanel_v1_server_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_server_proto_rawDesc = "" +
@@ -2350,7 +2942,7 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x1cGetNextAvailablePortResponse\x12\x12\n" +
 	"\x04port\x18\x01 \x01(\x05R\x04port\x127\n" +
 	"\n" +
-	"used_ports\x18\x02 \x03(\v2\x18.carbonpanel.v1.UsedPortR\tusedPorts\"\xb2\a\n" +
+	"used_ports\x18\x02 \x03(\v2\x18.carbonpanel.v1.UsedPortR\tusedPorts\"\xde\a\n" +
 	"\x13CreateServerRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x128\n" +
@@ -2383,7 +2975,8 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x0fauto_deep_sleep\x18\x16 \x01(\bR\rautoDeepSleep\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x17 \x01(\tR\trequestId\x12%\n" +
-	"\x0eloader_version\x18\x18 \x01(\tR\rloaderVersion\"F\n" +
+	"\x0eloader_version\x18\x18 \x01(\tR\rloaderVersion\x12*\n" +
+	"\x11archive_upload_id\x18\x19 \x01(\tR\x0farchiveUploadId\"F\n" +
 	"\x14CreateServerResponse\x12.\n" +
 	"\x06server\x18\x01 \x01(\v2\x16.carbonpanel.v1.ServerR\x06server\"\x82\b\n" +
 	"\x13UpdateServerRequest\x12\x0e\n" +
@@ -2499,14 +3092,71 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\"X\n" +
 	"\x19ListServerPlayersResponse\x12\x18\n" +
 	"\aplayers\x18\x01 \x03(\tR\aplayers\x12!\n" +
-	"\fonline_count\x18\x02 \x01(\x05R\vonlineCount2\xa8\r\n" +
+	"\fonline_count\x18\x02 \x01(\x05R\vonlineCount\"\xc2\x01\n" +
+	"\x1aExportServerArchiveRequest\x12\x1b\n" +
+	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12;\n" +
+	"\x06format\x18\x02 \x01(\x0e2#.carbonpanel.v1.ServerArchiveFormatR\x06format\x12J\n" +
+	"\vconsistency\x18\x03 \x01(\x0e2(.carbonpanel.v1.ServerArchiveConsistencyR\vconsistency\"w\n" +
+	"\x1bExportServerArchiveResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
+	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\x03 \x01(\x03R\ttotalSize\"S\n" +
+	"\x1bPreviewServerArchiveRequest\x12\x1b\n" +
+	"\tupload_id\x18\x01 \x01(\tR\buploadId\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\xb8\x01\n" +
+	"\x14ServerArchiveFinding\x12H\n" +
+	"\bseverity\x18\x01 \x01(\x0e2,.carbonpanel.v1.ServerArchiveFindingSeverityR\bseverity\x12<\n" +
+	"\x04code\x18\x02 \x01(\x0e2(.carbonpanel.v1.ServerArchiveFindingCodeR\x04code\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xd7\x04\n" +
+	"\x1cPreviewServerArchiveResponse\x12;\n" +
+	"\x06format\x18\x01 \x01(\x0e2#.carbonpanel.v1.ServerArchiveFormatR\x06format\x12%\n" +
+	"\x0eschema_version\x18\x02 \x01(\x05R\rschemaVersion\x12)\n" +
+	"\x10exporter_version\x18\x03 \x01(\tR\x0fexporterVersion\x12\x1d\n" +
+	"\n" +
+	"mc_version\x18\x04 \x01(\tR\tmcVersion\x128\n" +
+	"\n" +
+	"mod_loader\x18\x05 \x01(\x0e2\x19.carbonpanel.v1.ModLoaderR\tmodLoader\x12%\n" +
+	"\x0eloader_version\x18\x06 \x01(\tR\rloaderVersion\x12\x16\n" +
+	"\x06memory\x18\a \x01(\x05R\x06memory\x12\x1f\n" +
+	"\vmax_players\x18\b \x01(\x05R\n" +
+	"maxPlayers\x12\x1d\n" +
+	"\n" +
+	"file_count\x18\t \x01(\x05R\tfileCount\x12%\n" +
+	"\x0eexpanded_bytes\x18\n" +
+	" \x01(\x03R\rexpandedBytes\x12%\n" +
+	"\x0erequired_bytes\x18\v \x01(\x03R\rrequiredBytes\x12,\n" +
+	"\x0favailable_bytes\x18\f \x01(\x03H\x00R\x0eavailableBytes\x88\x01\x01\x12@\n" +
+	"\bfindings\x18\r \x03(\v2$.carbonpanel.v1.ServerArchiveFindingR\bfindingsB\x12\n" +
+	"\x10_available_bytes*}\n" +
+	"\x13ServerArchiveFormat\x12%\n" +
+	"!SERVER_ARCHIVE_FORMAT_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19SERVER_ARCHIVE_FORMAT_ZIP\x10\x01\x12 \n" +
+	"\x1cSERVER_ARCHIVE_FORMAT_TAR_GZ\x10\x02*n\n" +
+	"\x18ServerArchiveConsistency\x12*\n" +
+	"&SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"SERVER_ARCHIVE_CONSISTENCY_STOPPED\x10\x01*\xa9\x01\n" +
+	"\x1cServerArchiveFindingSeverity\x12/\n" +
+	"+SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED\x10\x00\x12+\n" +
+	"'SERVER_ARCHIVE_FINDING_SEVERITY_WARNING\x10\x01\x12+\n" +
+	"'SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER\x10\x02*\xc4\x02\n" +
+	"\x18ServerArchiveFindingCode\x12+\n" +
+	"'SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED\x10\x00\x12.\n" +
+	"*SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME\x10\x01\x12.\n" +
+	"*SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP\x10\x02\x122\n" +
+	".SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE\x10\x03\x123\n" +
+	"/SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE\x10\x04\x122\n" +
+	".SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER\x10\x052\x8b\x0f\n" +
 	"\rServerService\x12V\n" +
 	"\vListServers\x12\".carbonpanel.v1.ListServersRequest\x1a#.carbonpanel.v1.ListServersResponse\x12P\n" +
 	"\tGetServer\x12 .carbonpanel.v1.GetServerRequest\x1a!.carbonpanel.v1.GetServerResponse\x12\\\n" +
 	"\rGetServerLogs\x12$.carbonpanel.v1.GetServerLogsRequest\x1a%.carbonpanel.v1.GetServerLogsResponse\x12b\n" +
 	"\x0fClearServerLogs\x12&.carbonpanel.v1.ClearServerLogsRequest\x1a'.carbonpanel.v1.ClearServerLogsResponse\x12q\n" +
 	"\x14GetNextAvailablePort\x12+.carbonpanel.v1.GetNextAvailablePortRequest\x1a,.carbonpanel.v1.GetNextAvailablePortResponse\x12Y\n" +
-	"\fCreateServer\x12#.carbonpanel.v1.CreateServerRequest\x1a$.carbonpanel.v1.CreateServerResponse\x12Y\n" +
+	"\fCreateServer\x12#.carbonpanel.v1.CreateServerRequest\x1a$.carbonpanel.v1.CreateServerResponse\x12n\n" +
+	"\x13ExportServerArchive\x12*.carbonpanel.v1.ExportServerArchiveRequest\x1a+.carbonpanel.v1.ExportServerArchiveResponse\x12q\n" +
+	"\x14PreviewServerArchive\x12+.carbonpanel.v1.PreviewServerArchiveRequest\x1a,.carbonpanel.v1.PreviewServerArchiveResponse\x12Y\n" +
 	"\fUpdateServer\x12#.carbonpanel.v1.UpdateServerRequest\x1a$.carbonpanel.v1.UpdateServerResponse\x12Y\n" +
 	"\fDeleteServer\x12#.carbonpanel.v1.DeleteServerRequest\x1a$.carbonpanel.v1.DeleteServerResponse\x12V\n" +
 	"\vStartServer\x12\".carbonpanel.v1.StartServerRequest\x1a#.carbonpanel.v1.StartServerResponse\x12S\n" +
@@ -2533,107 +3183,128 @@ func file_carbonpanel_v1_server_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_server_proto_rawDescData
 }
 
-var file_carbonpanel_v1_server_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_carbonpanel_v1_server_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_carbonpanel_v1_server_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_carbonpanel_v1_server_proto_goTypes = []any{
-	(*ListServersRequest)(nil),           // 0: carbonpanel.v1.ListServersRequest
-	(*ListServersResponse)(nil),          // 1: carbonpanel.v1.ListServersResponse
-	(*GetServerRequest)(nil),             // 2: carbonpanel.v1.GetServerRequest
-	(*GetServerResponse)(nil),            // 3: carbonpanel.v1.GetServerResponse
-	(*GetServerLogsRequest)(nil),         // 4: carbonpanel.v1.GetServerLogsRequest
-	(*LogEntry)(nil),                     // 5: carbonpanel.v1.LogEntry
-	(*GetServerLogsResponse)(nil),        // 6: carbonpanel.v1.GetServerLogsResponse
-	(*ClearServerLogsRequest)(nil),       // 7: carbonpanel.v1.ClearServerLogsRequest
-	(*ClearServerLogsResponse)(nil),      // 8: carbonpanel.v1.ClearServerLogsResponse
-	(*GetNextAvailablePortRequest)(nil),  // 9: carbonpanel.v1.GetNextAvailablePortRequest
-	(*UsedPort)(nil),                     // 10: carbonpanel.v1.UsedPort
-	(*GetNextAvailablePortResponse)(nil), // 11: carbonpanel.v1.GetNextAvailablePortResponse
-	(*CreateServerRequest)(nil),          // 12: carbonpanel.v1.CreateServerRequest
-	(*CreateServerResponse)(nil),         // 13: carbonpanel.v1.CreateServerResponse
-	(*UpdateServerRequest)(nil),          // 14: carbonpanel.v1.UpdateServerRequest
-	(*UpdateServerResponse)(nil),         // 15: carbonpanel.v1.UpdateServerResponse
-	(*DeleteServerRequest)(nil),          // 16: carbonpanel.v1.DeleteServerRequest
-	(*DeleteServerResponse)(nil),         // 17: carbonpanel.v1.DeleteServerResponse
-	(*StartServerRequest)(nil),           // 18: carbonpanel.v1.StartServerRequest
-	(*StartServerResponse)(nil),          // 19: carbonpanel.v1.StartServerResponse
-	(*StopServerRequest)(nil),            // 20: carbonpanel.v1.StopServerRequest
-	(*StopServerResponse)(nil),           // 21: carbonpanel.v1.StopServerResponse
-	(*PauseServerRequest)(nil),           // 22: carbonpanel.v1.PauseServerRequest
-	(*PauseServerResponse)(nil),          // 23: carbonpanel.v1.PauseServerResponse
-	(*DeepSleepServerRequest)(nil),       // 24: carbonpanel.v1.DeepSleepServerRequest
-	(*DeepSleepServerResponse)(nil),      // 25: carbonpanel.v1.DeepSleepServerResponse
-	(*RestartServerRequest)(nil),         // 26: carbonpanel.v1.RestartServerRequest
-	(*RestartServerResponse)(nil),        // 27: carbonpanel.v1.RestartServerResponse
-	(*RecreateServerRequest)(nil),        // 28: carbonpanel.v1.RecreateServerRequest
-	(*RecreateServerResponse)(nil),       // 29: carbonpanel.v1.RecreateServerResponse
-	(*SendCommandRequest)(nil),           // 30: carbonpanel.v1.SendCommandRequest
-	(*SendCommandResponse)(nil),          // 31: carbonpanel.v1.SendCommandResponse
-	(*UploadToMCLogsRequest)(nil),        // 32: carbonpanel.v1.UploadToMCLogsRequest
-	(*UploadToMCLogsResponse)(nil),       // 33: carbonpanel.v1.UploadToMCLogsResponse
-	(*MigrateServerRequest)(nil),         // 34: carbonpanel.v1.MigrateServerRequest
-	(*MigrateServerResponse)(nil),        // 35: carbonpanel.v1.MigrateServerResponse
-	(*ListServerPlayersRequest)(nil),     // 36: carbonpanel.v1.ListServerPlayersRequest
-	(*ListServerPlayersResponse)(nil),    // 37: carbonpanel.v1.ListServerPlayersResponse
-	(*Server)(nil),                       // 38: carbonpanel.v1.Server
-	(*timestamppb.Timestamp)(nil),        // 39: google.protobuf.Timestamp
-	(ModLoader)(0),                       // 40: carbonpanel.v1.ModLoader
-	(*AdditionalPort)(nil),               // 41: carbonpanel.v1.AdditionalPort
-	(*DockerOverrides)(nil),              // 42: carbonpanel.v1.DockerOverrides
+	(ServerArchiveFormat)(0),             // 0: carbonpanel.v1.ServerArchiveFormat
+	(ServerArchiveConsistency)(0),        // 1: carbonpanel.v1.ServerArchiveConsistency
+	(ServerArchiveFindingSeverity)(0),    // 2: carbonpanel.v1.ServerArchiveFindingSeverity
+	(ServerArchiveFindingCode)(0),        // 3: carbonpanel.v1.ServerArchiveFindingCode
+	(*ListServersRequest)(nil),           // 4: carbonpanel.v1.ListServersRequest
+	(*ListServersResponse)(nil),          // 5: carbonpanel.v1.ListServersResponse
+	(*GetServerRequest)(nil),             // 6: carbonpanel.v1.GetServerRequest
+	(*GetServerResponse)(nil),            // 7: carbonpanel.v1.GetServerResponse
+	(*GetServerLogsRequest)(nil),         // 8: carbonpanel.v1.GetServerLogsRequest
+	(*LogEntry)(nil),                     // 9: carbonpanel.v1.LogEntry
+	(*GetServerLogsResponse)(nil),        // 10: carbonpanel.v1.GetServerLogsResponse
+	(*ClearServerLogsRequest)(nil),       // 11: carbonpanel.v1.ClearServerLogsRequest
+	(*ClearServerLogsResponse)(nil),      // 12: carbonpanel.v1.ClearServerLogsResponse
+	(*GetNextAvailablePortRequest)(nil),  // 13: carbonpanel.v1.GetNextAvailablePortRequest
+	(*UsedPort)(nil),                     // 14: carbonpanel.v1.UsedPort
+	(*GetNextAvailablePortResponse)(nil), // 15: carbonpanel.v1.GetNextAvailablePortResponse
+	(*CreateServerRequest)(nil),          // 16: carbonpanel.v1.CreateServerRequest
+	(*CreateServerResponse)(nil),         // 17: carbonpanel.v1.CreateServerResponse
+	(*UpdateServerRequest)(nil),          // 18: carbonpanel.v1.UpdateServerRequest
+	(*UpdateServerResponse)(nil),         // 19: carbonpanel.v1.UpdateServerResponse
+	(*DeleteServerRequest)(nil),          // 20: carbonpanel.v1.DeleteServerRequest
+	(*DeleteServerResponse)(nil),         // 21: carbonpanel.v1.DeleteServerResponse
+	(*StartServerRequest)(nil),           // 22: carbonpanel.v1.StartServerRequest
+	(*StartServerResponse)(nil),          // 23: carbonpanel.v1.StartServerResponse
+	(*StopServerRequest)(nil),            // 24: carbonpanel.v1.StopServerRequest
+	(*StopServerResponse)(nil),           // 25: carbonpanel.v1.StopServerResponse
+	(*PauseServerRequest)(nil),           // 26: carbonpanel.v1.PauseServerRequest
+	(*PauseServerResponse)(nil),          // 27: carbonpanel.v1.PauseServerResponse
+	(*DeepSleepServerRequest)(nil),       // 28: carbonpanel.v1.DeepSleepServerRequest
+	(*DeepSleepServerResponse)(nil),      // 29: carbonpanel.v1.DeepSleepServerResponse
+	(*RestartServerRequest)(nil),         // 30: carbonpanel.v1.RestartServerRequest
+	(*RestartServerResponse)(nil),        // 31: carbonpanel.v1.RestartServerResponse
+	(*RecreateServerRequest)(nil),        // 32: carbonpanel.v1.RecreateServerRequest
+	(*RecreateServerResponse)(nil),       // 33: carbonpanel.v1.RecreateServerResponse
+	(*SendCommandRequest)(nil),           // 34: carbonpanel.v1.SendCommandRequest
+	(*SendCommandResponse)(nil),          // 35: carbonpanel.v1.SendCommandResponse
+	(*UploadToMCLogsRequest)(nil),        // 36: carbonpanel.v1.UploadToMCLogsRequest
+	(*UploadToMCLogsResponse)(nil),       // 37: carbonpanel.v1.UploadToMCLogsResponse
+	(*MigrateServerRequest)(nil),         // 38: carbonpanel.v1.MigrateServerRequest
+	(*MigrateServerResponse)(nil),        // 39: carbonpanel.v1.MigrateServerResponse
+	(*ListServerPlayersRequest)(nil),     // 40: carbonpanel.v1.ListServerPlayersRequest
+	(*ListServerPlayersResponse)(nil),    // 41: carbonpanel.v1.ListServerPlayersResponse
+	(*ExportServerArchiveRequest)(nil),   // 42: carbonpanel.v1.ExportServerArchiveRequest
+	(*ExportServerArchiveResponse)(nil),  // 43: carbonpanel.v1.ExportServerArchiveResponse
+	(*PreviewServerArchiveRequest)(nil),  // 44: carbonpanel.v1.PreviewServerArchiveRequest
+	(*ServerArchiveFinding)(nil),         // 45: carbonpanel.v1.ServerArchiveFinding
+	(*PreviewServerArchiveResponse)(nil), // 46: carbonpanel.v1.PreviewServerArchiveResponse
+	(*Server)(nil),                       // 47: carbonpanel.v1.Server
+	(*timestamppb.Timestamp)(nil),        // 48: google.protobuf.Timestamp
+	(ModLoader)(0),                       // 49: carbonpanel.v1.ModLoader
+	(*AdditionalPort)(nil),               // 50: carbonpanel.v1.AdditionalPort
+	(*DockerOverrides)(nil),              // 51: carbonpanel.v1.DockerOverrides
 }
 var file_carbonpanel_v1_server_proto_depIdxs = []int32{
-	38, // 0: carbonpanel.v1.ListServersResponse.servers:type_name -> carbonpanel.v1.Server
-	38, // 1: carbonpanel.v1.GetServerResponse.server:type_name -> carbonpanel.v1.Server
-	39, // 2: carbonpanel.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
-	5,  // 3: carbonpanel.v1.GetServerLogsResponse.logs:type_name -> carbonpanel.v1.LogEntry
-	10, // 4: carbonpanel.v1.GetNextAvailablePortResponse.used_ports:type_name -> carbonpanel.v1.UsedPort
-	40, // 5: carbonpanel.v1.CreateServerRequest.mod_loader:type_name -> carbonpanel.v1.ModLoader
-	41, // 6: carbonpanel.v1.CreateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
-	42, // 7: carbonpanel.v1.CreateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
-	38, // 8: carbonpanel.v1.CreateServerResponse.server:type_name -> carbonpanel.v1.Server
-	41, // 9: carbonpanel.v1.UpdateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
-	42, // 10: carbonpanel.v1.UpdateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
-	38, // 11: carbonpanel.v1.UpdateServerResponse.server:type_name -> carbonpanel.v1.Server
-	38, // 12: carbonpanel.v1.MigrateServerResponse.server:type_name -> carbonpanel.v1.Server
-	0,  // 13: carbonpanel.v1.ServerService.ListServers:input_type -> carbonpanel.v1.ListServersRequest
-	2,  // 14: carbonpanel.v1.ServerService.GetServer:input_type -> carbonpanel.v1.GetServerRequest
-	4,  // 15: carbonpanel.v1.ServerService.GetServerLogs:input_type -> carbonpanel.v1.GetServerLogsRequest
-	7,  // 16: carbonpanel.v1.ServerService.ClearServerLogs:input_type -> carbonpanel.v1.ClearServerLogsRequest
-	9,  // 17: carbonpanel.v1.ServerService.GetNextAvailablePort:input_type -> carbonpanel.v1.GetNextAvailablePortRequest
-	12, // 18: carbonpanel.v1.ServerService.CreateServer:input_type -> carbonpanel.v1.CreateServerRequest
-	14, // 19: carbonpanel.v1.ServerService.UpdateServer:input_type -> carbonpanel.v1.UpdateServerRequest
-	16, // 20: carbonpanel.v1.ServerService.DeleteServer:input_type -> carbonpanel.v1.DeleteServerRequest
-	18, // 21: carbonpanel.v1.ServerService.StartServer:input_type -> carbonpanel.v1.StartServerRequest
-	20, // 22: carbonpanel.v1.ServerService.StopServer:input_type -> carbonpanel.v1.StopServerRequest
-	22, // 23: carbonpanel.v1.ServerService.PauseServer:input_type -> carbonpanel.v1.PauseServerRequest
-	24, // 24: carbonpanel.v1.ServerService.DeepSleepServer:input_type -> carbonpanel.v1.DeepSleepServerRequest
-	26, // 25: carbonpanel.v1.ServerService.RestartServer:input_type -> carbonpanel.v1.RestartServerRequest
-	28, // 26: carbonpanel.v1.ServerService.RecreateServer:input_type -> carbonpanel.v1.RecreateServerRequest
-	30, // 27: carbonpanel.v1.ServerService.SendCommand:input_type -> carbonpanel.v1.SendCommandRequest
-	32, // 28: carbonpanel.v1.ServerService.UploadToMCLogs:input_type -> carbonpanel.v1.UploadToMCLogsRequest
-	34, // 29: carbonpanel.v1.ServerService.MigrateServer:input_type -> carbonpanel.v1.MigrateServerRequest
-	36, // 30: carbonpanel.v1.ServerService.ListServerPlayers:input_type -> carbonpanel.v1.ListServerPlayersRequest
-	1,  // 31: carbonpanel.v1.ServerService.ListServers:output_type -> carbonpanel.v1.ListServersResponse
-	3,  // 32: carbonpanel.v1.ServerService.GetServer:output_type -> carbonpanel.v1.GetServerResponse
-	6,  // 33: carbonpanel.v1.ServerService.GetServerLogs:output_type -> carbonpanel.v1.GetServerLogsResponse
-	8,  // 34: carbonpanel.v1.ServerService.ClearServerLogs:output_type -> carbonpanel.v1.ClearServerLogsResponse
-	11, // 35: carbonpanel.v1.ServerService.GetNextAvailablePort:output_type -> carbonpanel.v1.GetNextAvailablePortResponse
-	13, // 36: carbonpanel.v1.ServerService.CreateServer:output_type -> carbonpanel.v1.CreateServerResponse
-	15, // 37: carbonpanel.v1.ServerService.UpdateServer:output_type -> carbonpanel.v1.UpdateServerResponse
-	17, // 38: carbonpanel.v1.ServerService.DeleteServer:output_type -> carbonpanel.v1.DeleteServerResponse
-	19, // 39: carbonpanel.v1.ServerService.StartServer:output_type -> carbonpanel.v1.StartServerResponse
-	21, // 40: carbonpanel.v1.ServerService.StopServer:output_type -> carbonpanel.v1.StopServerResponse
-	23, // 41: carbonpanel.v1.ServerService.PauseServer:output_type -> carbonpanel.v1.PauseServerResponse
-	25, // 42: carbonpanel.v1.ServerService.DeepSleepServer:output_type -> carbonpanel.v1.DeepSleepServerResponse
-	27, // 43: carbonpanel.v1.ServerService.RestartServer:output_type -> carbonpanel.v1.RestartServerResponse
-	29, // 44: carbonpanel.v1.ServerService.RecreateServer:output_type -> carbonpanel.v1.RecreateServerResponse
-	31, // 45: carbonpanel.v1.ServerService.SendCommand:output_type -> carbonpanel.v1.SendCommandResponse
-	33, // 46: carbonpanel.v1.ServerService.UploadToMCLogs:output_type -> carbonpanel.v1.UploadToMCLogsResponse
-	35, // 47: carbonpanel.v1.ServerService.MigrateServer:output_type -> carbonpanel.v1.MigrateServerResponse
-	37, // 48: carbonpanel.v1.ServerService.ListServerPlayers:output_type -> carbonpanel.v1.ListServerPlayersResponse
-	31, // [31:49] is the sub-list for method output_type
-	13, // [13:31] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	47, // 0: carbonpanel.v1.ListServersResponse.servers:type_name -> carbonpanel.v1.Server
+	47, // 1: carbonpanel.v1.GetServerResponse.server:type_name -> carbonpanel.v1.Server
+	48, // 2: carbonpanel.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	9,  // 3: carbonpanel.v1.GetServerLogsResponse.logs:type_name -> carbonpanel.v1.LogEntry
+	14, // 4: carbonpanel.v1.GetNextAvailablePortResponse.used_ports:type_name -> carbonpanel.v1.UsedPort
+	49, // 5: carbonpanel.v1.CreateServerRequest.mod_loader:type_name -> carbonpanel.v1.ModLoader
+	50, // 6: carbonpanel.v1.CreateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
+	51, // 7: carbonpanel.v1.CreateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
+	47, // 8: carbonpanel.v1.CreateServerResponse.server:type_name -> carbonpanel.v1.Server
+	50, // 9: carbonpanel.v1.UpdateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
+	51, // 10: carbonpanel.v1.UpdateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
+	47, // 11: carbonpanel.v1.UpdateServerResponse.server:type_name -> carbonpanel.v1.Server
+	47, // 12: carbonpanel.v1.MigrateServerResponse.server:type_name -> carbonpanel.v1.Server
+	0,  // 13: carbonpanel.v1.ExportServerArchiveRequest.format:type_name -> carbonpanel.v1.ServerArchiveFormat
+	1,  // 14: carbonpanel.v1.ExportServerArchiveRequest.consistency:type_name -> carbonpanel.v1.ServerArchiveConsistency
+	2,  // 15: carbonpanel.v1.ServerArchiveFinding.severity:type_name -> carbonpanel.v1.ServerArchiveFindingSeverity
+	3,  // 16: carbonpanel.v1.ServerArchiveFinding.code:type_name -> carbonpanel.v1.ServerArchiveFindingCode
+	0,  // 17: carbonpanel.v1.PreviewServerArchiveResponse.format:type_name -> carbonpanel.v1.ServerArchiveFormat
+	49, // 18: carbonpanel.v1.PreviewServerArchiveResponse.mod_loader:type_name -> carbonpanel.v1.ModLoader
+	45, // 19: carbonpanel.v1.PreviewServerArchiveResponse.findings:type_name -> carbonpanel.v1.ServerArchiveFinding
+	4,  // 20: carbonpanel.v1.ServerService.ListServers:input_type -> carbonpanel.v1.ListServersRequest
+	6,  // 21: carbonpanel.v1.ServerService.GetServer:input_type -> carbonpanel.v1.GetServerRequest
+	8,  // 22: carbonpanel.v1.ServerService.GetServerLogs:input_type -> carbonpanel.v1.GetServerLogsRequest
+	11, // 23: carbonpanel.v1.ServerService.ClearServerLogs:input_type -> carbonpanel.v1.ClearServerLogsRequest
+	13, // 24: carbonpanel.v1.ServerService.GetNextAvailablePort:input_type -> carbonpanel.v1.GetNextAvailablePortRequest
+	16, // 25: carbonpanel.v1.ServerService.CreateServer:input_type -> carbonpanel.v1.CreateServerRequest
+	42, // 26: carbonpanel.v1.ServerService.ExportServerArchive:input_type -> carbonpanel.v1.ExportServerArchiveRequest
+	44, // 27: carbonpanel.v1.ServerService.PreviewServerArchive:input_type -> carbonpanel.v1.PreviewServerArchiveRequest
+	18, // 28: carbonpanel.v1.ServerService.UpdateServer:input_type -> carbonpanel.v1.UpdateServerRequest
+	20, // 29: carbonpanel.v1.ServerService.DeleteServer:input_type -> carbonpanel.v1.DeleteServerRequest
+	22, // 30: carbonpanel.v1.ServerService.StartServer:input_type -> carbonpanel.v1.StartServerRequest
+	24, // 31: carbonpanel.v1.ServerService.StopServer:input_type -> carbonpanel.v1.StopServerRequest
+	26, // 32: carbonpanel.v1.ServerService.PauseServer:input_type -> carbonpanel.v1.PauseServerRequest
+	28, // 33: carbonpanel.v1.ServerService.DeepSleepServer:input_type -> carbonpanel.v1.DeepSleepServerRequest
+	30, // 34: carbonpanel.v1.ServerService.RestartServer:input_type -> carbonpanel.v1.RestartServerRequest
+	32, // 35: carbonpanel.v1.ServerService.RecreateServer:input_type -> carbonpanel.v1.RecreateServerRequest
+	34, // 36: carbonpanel.v1.ServerService.SendCommand:input_type -> carbonpanel.v1.SendCommandRequest
+	36, // 37: carbonpanel.v1.ServerService.UploadToMCLogs:input_type -> carbonpanel.v1.UploadToMCLogsRequest
+	38, // 38: carbonpanel.v1.ServerService.MigrateServer:input_type -> carbonpanel.v1.MigrateServerRequest
+	40, // 39: carbonpanel.v1.ServerService.ListServerPlayers:input_type -> carbonpanel.v1.ListServerPlayersRequest
+	5,  // 40: carbonpanel.v1.ServerService.ListServers:output_type -> carbonpanel.v1.ListServersResponse
+	7,  // 41: carbonpanel.v1.ServerService.GetServer:output_type -> carbonpanel.v1.GetServerResponse
+	10, // 42: carbonpanel.v1.ServerService.GetServerLogs:output_type -> carbonpanel.v1.GetServerLogsResponse
+	12, // 43: carbonpanel.v1.ServerService.ClearServerLogs:output_type -> carbonpanel.v1.ClearServerLogsResponse
+	15, // 44: carbonpanel.v1.ServerService.GetNextAvailablePort:output_type -> carbonpanel.v1.GetNextAvailablePortResponse
+	17, // 45: carbonpanel.v1.ServerService.CreateServer:output_type -> carbonpanel.v1.CreateServerResponse
+	43, // 46: carbonpanel.v1.ServerService.ExportServerArchive:output_type -> carbonpanel.v1.ExportServerArchiveResponse
+	46, // 47: carbonpanel.v1.ServerService.PreviewServerArchive:output_type -> carbonpanel.v1.PreviewServerArchiveResponse
+	19, // 48: carbonpanel.v1.ServerService.UpdateServer:output_type -> carbonpanel.v1.UpdateServerResponse
+	21, // 49: carbonpanel.v1.ServerService.DeleteServer:output_type -> carbonpanel.v1.DeleteServerResponse
+	23, // 50: carbonpanel.v1.ServerService.StartServer:output_type -> carbonpanel.v1.StartServerResponse
+	25, // 51: carbonpanel.v1.ServerService.StopServer:output_type -> carbonpanel.v1.StopServerResponse
+	27, // 52: carbonpanel.v1.ServerService.PauseServer:output_type -> carbonpanel.v1.PauseServerResponse
+	29, // 53: carbonpanel.v1.ServerService.DeepSleepServer:output_type -> carbonpanel.v1.DeepSleepServerResponse
+	31, // 54: carbonpanel.v1.ServerService.RestartServer:output_type -> carbonpanel.v1.RestartServerResponse
+	33, // 55: carbonpanel.v1.ServerService.RecreateServer:output_type -> carbonpanel.v1.RecreateServerResponse
+	35, // 56: carbonpanel.v1.ServerService.SendCommand:output_type -> carbonpanel.v1.SendCommandResponse
+	37, // 57: carbonpanel.v1.ServerService.UploadToMCLogs:output_type -> carbonpanel.v1.UploadToMCLogsResponse
+	39, // 58: carbonpanel.v1.ServerService.MigrateServer:output_type -> carbonpanel.v1.MigrateServerResponse
+	41, // 59: carbonpanel.v1.ServerService.ListServerPlayers:output_type -> carbonpanel.v1.ListServerPlayersResponse
+	40, // [40:60] is the sub-list for method output_type
+	20, // [20:40] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_server_proto_init() }
@@ -2645,18 +3316,20 @@ func file_carbonpanel_v1_server_proto_init() {
 	file_carbonpanel_v1_server_proto_msgTypes[14].OneofWrappers = []any{}
 	file_carbonpanel_v1_server_proto_msgTypes[30].OneofWrappers = []any{}
 	file_carbonpanel_v1_server_proto_msgTypes[34].OneofWrappers = []any{}
+	file_carbonpanel_v1_server_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_server_proto_rawDesc), len(file_carbonpanel_v1_server_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   38,
+			NumEnums:      4,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_carbonpanel_v1_server_proto_goTypes,
 		DependencyIndexes: file_carbonpanel_v1_server_proto_depIdxs,
+		EnumInfos:         file_carbonpanel_v1_server_proto_enumTypes,
 		MessageInfos:      file_carbonpanel_v1_server_proto_msgTypes,
 	}.Build()
 	File_carbonpanel_v1_server_proto = out.File

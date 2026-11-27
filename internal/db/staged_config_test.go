@@ -624,3 +624,60 @@ func TestApplyStagedConfigChangeRefusesRuntimeChangeWithReviewedCandidate(t *tes
 }
 
 func stringPtr(s string) *string { return &s }
+
+func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
+	for field, value := range map[string]string{"level": "other", "customServerProperties": "level-name=other"} {
+		t.Run(field, func(t *testing.T) {
+			ctx := context.Background()
+			const serverID = "srv-staged-world-bind"
+			store := newStagedTestStore(t, serverID)
+			change, err := store.StageConfigChange(ctx, serverID, map[string]any{field: value}, StagedApplyOnRestart, "")
+			require.NoError(t, err)
+			motd, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "updated"}, StagedApplyOnRestart, "")
+			require.NoError(t, err)
+
+			begin := func(key string) *ServerOperation {
+				op, _, err := store.BeginServerOperation(ctx, serverID, "", "", key, "world-bind", key)
+				require.NoError(t, err)
+				return op
+			}
+			release := func(op *ServerOperation) {
+				require.NoError(t, store.AdvanceServerOperation(ctx, op.ID, ServerOperationPrepared, ServerOperationFailed, "fixture finished"))
+			}
+
+			op := begin("apply")
+			before, err := store.GetServerConfig(ctx, serverID)
+			require.NoError(t, err)
+			_, err = store.ApplyStagedConfigChange(ctx, change.ID)
+			require.ErrorIs(t, err, ErrActiveOperation)
+			after, err := store.GetServerConfig(ctx, serverID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			unapplied, err := store.GetStagedConfigChange(ctx, change.ID)
+			require.NoError(t, err)
+			require.Equal(t, StagedStatusStaged, unapplied.Status)
+			_, err = store.ApplyStagedConfigChange(ctx, motd.ID)
+			require.NoError(t, err)
+			release(op)
+			_, err = store.ApplyStagedConfigChange(ctx, change.ID)
+			require.NoError(t, err)
+
+			op = begin("rollback")
+			_, err = store.RollbackStagedConfigChange(ctx, change.ID)
+			require.ErrorIs(t, err, ErrActiveOperation)
+			current, err := store.GetServerConfig(ctx, serverID)
+			require.NoError(t, err)
+			fields, err := ServerConfigToMap(current)
+			require.NoError(t, err)
+			require.Equal(t, value, fields[field])
+			stillApplied, err := store.GetStagedConfigChange(ctx, change.ID)
+			require.NoError(t, err)
+			require.Equal(t, StagedStatusApplied, stillApplied.Status)
+			_, err = store.RollbackStagedConfigChange(ctx, motd.ID)
+			require.NoError(t, err)
+			release(op)
+			_, err = store.RollbackStagedConfigChange(ctx, change.ID)
+			require.NoError(t, err)
+		})
+	}
+}

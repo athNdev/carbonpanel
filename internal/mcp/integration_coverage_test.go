@@ -37,17 +37,17 @@ func isCapabilityTool(name string) bool {
 // artifact; LISTED/REACHABLE/VERIFIED are recomputed from live source.
 func TestIntegrationCombinedCatalog(t *testing.T) {
 	matrix := FamilyAudit()
-	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 253 {
-		t.Fatalf("declared RPCs: matrix=%d generated=%d want 253", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
+	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 255 {
+		t.Fatalf("declared RPCs: matrix=%d generated=%d want 255", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
 	}
-	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 243 {
-		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 243", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
+	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 245 {
+		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 245", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
 	}
 	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 76 {
 		t.Fatalf("excluded ops: matrix=%d generated=%d want 76", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
 	}
-	if IntegrationSupportedOps != 205 {
-		t.Fatalf("supported ops: got %d want 205", IntegrationSupportedOps)
+	if IntegrationSupportedOps != 207 {
+		t.Fatalf("supported ops: got %d want 207", IntegrationSupportedOps)
 	}
 	if len(exposedTools) != IntegrationCombinedTools {
 		t.Fatalf("generated tool count: got %d want %d", len(exposedTools), IntegrationCombinedTools)

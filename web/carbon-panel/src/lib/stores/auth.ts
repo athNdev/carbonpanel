@@ -241,7 +241,7 @@ function createAuthStore() {
 				const response = await rpcClient.auth.changePassword(request);
 				return response;
 			} catch (error) {
-				throw new Error(_.get(error, 'message') || 'Failed to change password');
+				throw new Error(_.get(error, 'message') || 'Failed to change password', { cause: error });
 			}
 		},
 

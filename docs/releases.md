@@ -16,6 +16,40 @@ early testing and never move a stable alias.
 - **Major:** incompatible operator or API changes that require migration.
 - **Prerelease:** append `-alpha.N`, `-beta.N` or `-rc.N`; increment N for each published build.
 
+## Release model
+
+Use [Stable](https://carbonpanel.dev/docs/) for regular installations and
+[Nightly](https://carbonpanel.dev/docs/nightly/) to try qualified builds from
+`main`. Use `latest` for Stable, including the legacy `1.0.40` publication.
+The product release workflow also publishes `stable` at the same tested image
+digest. Use a full version tag to select a release or a digest to pin its exact
+image. Nightly can advance between Stable releases. Its docs follow the exact
+commit and digest that passed promotion.
+
+Maintain the current Stable minor line. Keep earlier releases available for
+pinned installs and documented rollback. A previous line gets a maintenance
+branch when there is a specific support need and a maintainer can own its
+backports, validation and end date. An older-line exception must preserve the
+newer Stable aliases. The current publisher requires an ancestor of `main`
+with exact-commit main CI. A divergent branch needs an approved qualification
+path before it can publish.
+
+Review release readiness each month. Ship compatible fixes when they are
+qualified and prioritize urgent security or regression patches through the
+same gate. Group compatible features in a minor release. Use an optional
+version-specific `-rc.N` prerelease for changes that benefit from wider
+testing, especially an upgrade with data or configuration changes. An RC that
+embeds its version has different bytes from the final release. Qualify the
+final-version candidate before moving Stable.
+
+Record the exact stage run, commit, OCI digest, download checksums and
+qualification results before promotion. Use supported install paths and
+disposable copies of representative existing installations for upgrade
+and rollback evidence. Check GitHub Releases, both registries and the
+deployed docs before announcing the release. Recover a partial publication
+using the prior receipt and the pinned stage. See the [release model
+research](research/release-models.md) for the comparison behind this policy.
+
 ## UPGRADE NOTES (from v1.0.40)
 
 **2.0.1 is a MAJOR release.** An unchanged v1.0.40 configuration does not
@@ -28,11 +62,13 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
 runs two fail-closed cases on seeded disposable DB/world copies: the explicit
-`v1.0.40` legacy baseline (35 → 45 → 35 tables) and the current published
+`v1.0.40` legacy baseline (pinned 35-table stable baseline and rollback; the
+candidate count is derived from the real binary) and the current published
 stable derived from the authoritative release record by the product version
 contract, so the weekly check follows new stables without a hardcoded version.
-Both use real `carbon-panel` binaries and assert integrity, additive table
-growth, row/world preservation, forced-failure refusal and both restore paths.
+Both use real `carbon-panel` binaries, require the historical model and
+archive-import schema surfaces, and assert integrity, additive table growth,
+row/world preservation, forced-failure refusal and both restore paths.
 Exact artifact versions and SHA-256 digests are emitted in the job's evidence
 report. This check is not a release approval gate: it grants no write scope,
 touches no live world, host, tag, release or registry, and does not replace the
@@ -100,13 +136,13 @@ them in `scripts/test_release.py`.
 
 | Domain | Tag/naming | Immutable identity | Moving aliases |
 | --- | --- | --- | --- |
-| Panel release | `carbonpanel-vMAJOR.MINOR.PATCH` | Full SemVer, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest` |
+| Panel release | `carbonpanel-vMAJOR.MINOR.PATCH` | Full SemVer, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest`, `stable` |
 | Panel prerelease | `carbonpanel-vMAJOR.MINOR.PATCH-<alpha\|beta\|rc>.N` | Full prerelease version | None |
 | Plain Go version / inherited panel tag | `vMAJOR.MINOR.PATCH`, `origin`, `rm` | Existing Git/Go proxy history; never a new publication | None |
 | Module image | `mod-vMAJOR.MINOR.PATCH` | `mod-` version tag | `latest` |
 | Documentation version | `docsMAJOR.MINOR.PATCH` | Historical docs tag; no trigger | None |
 | Managed node runtime (reserved) | `runtime-vMAJOR.MINOR.PATCH` | Full version and digest; no workflow yet | `MAJOR.MINOR` only on explicit promotion |
-| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge`, `nightly` (Hub only) |
+| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge` (Docker Hub), `nightly` (both registries) |
 
 Prereleases keep their full immutable version and never move `latest` or a
 stable minor tag. A stable release publishes its immutable full version first,
@@ -121,15 +157,13 @@ alias promotion. This is the SAME shared lock used by the CD channel transaction
 and the docs-only publisher: every Pages write and every moving-alias write is
 serialized through it, so a stable alias cannot move while a docs/CD writer holds
 the Pages slot. The lock is not released between phases, so two versions cannot
-interleave phases or strand a run after immutable publication. `cancel-in-progress:
-false` protects the **running** run; with GitHub's default `queue: single` only
-one pending run is retained, and a later request **replaces** that pending run —
-this lane uses **single-operator dispatch**. Do not assume every queued publisher
-waits: after a replacement, the operator must verify the resulting run before
-retrying. Alias decisions are recomputed with live preflight inside the same
-locked run. Build-only rehearsals, tag pushes, pull requests and ordinary main
-CI get a distinct per-run key (`carbonpanel-stage-<run_id>`) and are not
-serialized.
+interleave phases. `queue: max` preserves up to 100 waiting jobs or runs, with
+one running publisher. When the queue is full, GitHub cancels additional
+requests. GitHub orders waiting work by lock arrival. Alias decisions still
+require live preflight inside the lock, including the checks for older or
+out-of-order candidates. Inspect the existing run before retrying a dispatch.
+Build-only rehearsals, tag pushes and pull requests use per-run staging keys.
+[GitHub Actions concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
 Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
 reproducible references. Consumers that need reproducible rollbacks pin the full
@@ -215,9 +249,10 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0.1-alpha.1` | An exact future prerelease; never moves a stable alias |
 | `2.0.1` | An exact stable release, immutable |
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
-| `latest` | Moving stable channel, promoted only with a stable release |
+| `latest` | Moving alias for the qualified Stable release, including legacy `1.0.40` |
+| `stable` | Additional moving alias published by the product release workflow |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
-| `nightly` | Development channel promoted on every successful trusted main CI on BOTH registries at one verified multiarch digest; never a GitHub Release or a stable version |
+| `nightly` | Development channel for qualified main builds on both registries at one verified multi-architecture digest |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
@@ -569,8 +604,11 @@ byte-bounded Docker-focused view generated from `README.md` sections and the
 published Stable identity in `docs/version-index.json`; the generator
 (`scripts/dockerhub_description.py`) fails rather than emit a body over Docker
 Hub's 25,000 UTF-8 byte limit. The workflow reconciles on affected main merges,
-once daily and on manual `workflow_dispatch` recovery, then verifies the public
-body by reading it back from the unauthenticated Docker Hub API.
+once daily, after a successful Stable release run and on manual
+`workflow_dispatch` recovery, then verifies the public body by reading it back
+from the unauthenticated Docker Hub API. It joins the same non-cancelling
+`pages-deploy` concurrency group as Stable/CD publication, so a description
+PATCH cannot interleave with a docs or moving-alias write.
 
 A Stable promotion only has to update the version contract
 (`docs/website-source.json`, regenerated `docs/version-index.json`). Do not add
@@ -578,7 +616,10 @@ a second Stable version to `docs/dockerhub-description.json`. Production
 generation reads the **live published** version index and fails closed if it is
 unavailable or older than the checked-in baseline: a temporary docs outage or a
 pre-promotion identity can never put an obsolete Stable on the public page.
-Offline fixtures may opt into the baseline explicitly. A main-head guard
+Offline fixtures may opt into the baseline explicitly. Before advertising a
+Stable, the generator also requires a non-draft Stable release manifest and the
+verified `:latest` digest/revision in both registries; a partial promotion or an
+unavailable provider leaves the last published body untouched. A main-head guard
 prevents an in-flight scheduled run from reverting a newly promoted Stable, and
 CD/release no longer write the description. Both the README and the derived Hub
 body describe the two channels: `:latest` follows controlled, tested Stable

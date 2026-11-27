@@ -37,20 +37,20 @@ OSS-370 remains open for supported families still missing.
 ### Current catalogue (superseding note, derived from the generator)
 
 The figures below are read from the checked-in generators and gates, not hand
-counted. `go run ./internal/mcp/cataloggen` reports `entries=243 services=27`
-and `combined tools=216`; `internal/mcp/family_audit_test.go` asserts 253
-declared proto RPCs and a 253/243/10 (declared/mounted/unmounted) matrix split,
-while `internal/mcp/drift_test.go` asserts 27 mounted services and 243 mounted
+counted. `go run ./internal/mcp/cataloggen` reports `entries=245 services=27`
+and `combined tools=218`; `internal/mcp/family_audit_test.go` asserts 255
+declared proto RPCs and a 255/245/10 (declared/mounted/unmounted) matrix split,
+while `internal/mcp/drift_test.go` asserts 27 mounted services and 245 mounted
 RPCs. `scripts/mcp-generated-artifacts-check.sh` reproduces the generated
 artifacts byte-for-byte from checked-in source.
 
-The gateway now mounts the **216-tool combined catalogue**: **253 declared
-RPCs**, of which **243 are mounted/reachable** across **27 mounted services**.
+The gateway now mounts the **218-tool combined catalogue**: **255 declared
+RPCs**, of which **245 are mounted/reachable** across **27 mounted services**.
 The 30-tool first slice is retained as the highest-precedence pinned subset
 inside that combined catalogue; it is not the total tool count. The three
 counts stay deliberately distinct: declared RPCs include 10 `NodeControlService`
 RPCs that are never mounted, and audit exclusions plus duplicate-name
-resolution reduce the 243 mounted reachable RPCs to 216 exposed tools. A `tools/list`
+resolution reduce the 245 mounted reachable RPCs to 218 exposed tools. A `tools/list`
 result is therefore evidence of the exposed tool catalogue, not of RPC
 coverage or of a panel build's capability (see the two compatibility concepts
 below). This note supersedes the historical counts above for present-tense

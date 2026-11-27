@@ -2321,6 +2321,12 @@ func loaderVersionEnv(server *models.Server) []string {
 	return []string{fmt.Sprintf("%s=%s", key, version)}
 }
 
+// BuildEnvFromConfig exposes the environment handed to the managed image so
+// restore tests can assert effective startup values without starting Docker.
+func BuildEnvFromConfig(config *models.ServerConfig) []string {
+	return buildEnvFromConfig(config)
+}
+
 func buildEnvFromConfig(config *models.ServerConfig) []string {
 	// Auto-assume CurseForge slug and file ID if CFPageURL is present
 	if config.CFPageURL != nil && *config.CFPageURL != "" {

@@ -110,6 +110,9 @@ func (s *Session) callOK(req Request) (Response, error) {
 		if res.ErrorCode == "not_exist" {
 			return res, &os.PathError{Op: "remote storage", Path: res.Error, Err: os.ErrNotExist}
 		}
+		if res.ErrorCode == "exists" {
+			return res, &os.PathError{Op: "remote storage", Path: res.Error, Err: os.ErrExist}
+		}
 		return res, errors.New(res.Error)
 	}
 	return res, nil
@@ -201,6 +204,16 @@ func (r *RemoteAccessor) MkdirAllMode(rel string, mode os.FileMode) error {
 	}
 	_, err := r.s.callOK(Request{Op: "mkdir", Path: rel, Perms: uint32(mode)})
 	return err
+}
+
+func (r *RemoteAccessor) MkdirExclusive(child string) error {
+	_, err := r.s.callOK(Request{Op: "mkdir_exclusive", Path: child})
+	return err
+}
+
+func (r *RemoteAccessor) FreeBytes() (int64, error) {
+	res, err := r.s.callOK(Request{Op: "free_bytes"})
+	return res.FreeBytes, err
 }
 
 func (r *RemoteAccessor) Remove(rel string) error {

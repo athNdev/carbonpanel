@@ -10,8 +10,8 @@
 // @generated from file carbonpanel/v1/server.proto (package carbonpanel.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from '@bufbuild/protobuf/codegenv2';
-import { fileDesc, messageDesc, serviceDesc } from '@bufbuild/protobuf/codegenv2';
+import type { GenEnum, GenFile, GenMessage, GenService } from '@bufbuild/protobuf/codegenv2';
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from '@bufbuild/protobuf/codegenv2';
 import type { AdditionalPort, DockerOverrides, ModLoader, Server } from './common_pb';
 import { file_carbonpanel_v1_common } from './common_pb';
 import type { Timestamp } from '@bufbuild/protobuf/wkt';
@@ -24,7 +24,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_server: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChtjYXJib25wYW5lbC92MS9zZXJ2ZXIucHJvdG8SDmNhcmJvbnBhbmVsLnYxIigKEkxpc3RTZXJ2ZXJzUmVxdWVzdBISCgpmdWxsX3N0YXRzGAEgASgIIj4KE0xpc3RTZXJ2ZXJzUmVzcG9uc2USJwoHc2VydmVycxgBIAMoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciIeChBHZXRTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJIjsKEUdldFNlcnZlclJlc3BvbnNlEiYKBnNlcnZlchgBIAEoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciIwChRHZXRTZXJ2ZXJMb2dzUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgR0YWlsGAIgASgFIo8BCghMb2dFbnRyeRItCgl0aW1lc3RhbXAYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB21lc3NhZ2UYAiABKAkSDQoFbGV2ZWwYAyABKAkSDgoGc291cmNlGAQgASgJEhIKCmlzX2NvbW1hbmQYBSABKAgSEAoIaXNfZXJyb3IYBiABKAgiTgoVR2V0U2VydmVyTG9nc1Jlc3BvbnNlEiYKBGxvZ3MYASADKAsyGC5jYXJib25wYW5lbC52MS5Mb2dFbnRyeRINCgV0b3RhbBgCIAEoBSIkChZDbGVhclNlcnZlckxvZ3NSZXF1ZXN0EgoKAmlkGAEgASgJIhkKF0NsZWFyU2VydmVyTG9nc1Jlc3BvbnNlIh0KG0dldE5leHRBdmFpbGFibGVQb3J0UmVxdWVzdCIoCghVc2VkUG9ydBIMCgRwb3J0GAEgASgFEg4KBmluX3VzZRgCIAEoCCJaChxHZXROZXh0QXZhaWxhYmxlUG9ydFJlc3BvbnNlEgwKBHBvcnQYASABKAUSLAoKdXNlZF9wb3J0cxgCIAMoCzIYLmNhcmJvbnBhbmVsLnYxLlVzZWRQb3J0Iv0EChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSLQoKbW9kX2xvYWRlchgDIAEoDjIZLmNhcmJvbnBhbmVsLnYxLk1vZExvYWRlchISCgptY192ZXJzaW9uGAQgASgJEgwKBHBvcnQYBSABKAUSEwoLbWF4X3BsYXllcnMYBiABKAUSDgoGbWVtb3J5GAcgASgFEhQKDGRvY2tlcl9pbWFnZRgIIAEoCRISCgphdXRvX3N0YXJ0GAkgASgIEhAKCGRldGFjaGVkGAogASgIEhkKEXN0YXJ0X2ltbWVkaWF0ZWx5GAsgASgIEhIKCm1vZHBhY2tfaWQYDCABKAkSGgoSbW9kcGFja192ZXJzaW9uX2lkGA0gASgJEhYKDnByb3h5X2hvc3RuYW1lGA4gASgJEhkKEXByb3h5X2xpc3RlbmVyX2lkGA8gASgJEhQKDHVzZV9iYXNlX3VybBgQIAEoCBI4ChBhZGRpdGlvbmFsX3BvcnRzGBEgAygLMh4uY2FyYm9ucGFuZWwudjEuQWRkaXRpb25hbFBvcnQSOQoQZG9ja2VyX292ZXJyaWRlcxgSIAEoCzIfLmNhcmJvbnBhbmVsLnYxLkRvY2tlck92ZXJyaWRlcxIPCgdub2RlX2lkGBMgASgJEhoKEnBsYWNlbWVudF9zdHJhdGVneRgUIAEoCRIWCg5hdXRvX2hpYmVybmF0ZRgVIAEoCBIXCg9hdXRvX2RlZXBfc2xlZXAYFiABKAgSEgoKcmVxdWVzdF9pZBgXIAEoCRIWCg5sb2FkZXJfdmVyc2lvbhgYIAEoCSI+ChRDcmVhdGVTZXJ2ZXJSZXNwb25zZRImCgZzZXJ2ZXIYASABKAsyFi5jYXJib25wYW5lbC52MS5TZXJ2ZXIi9AUKE1VwZGF0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIRCgRwb3J0GAQgASgFSACIAQESEwoLbWF4X3BsYXllcnMYBSABKAUSDgoGbWVtb3J5GAYgASgFEhIKCm1vZF9sb2FkZXIYByABKAkSEgoKbWNfdmVyc2lvbhgIIAEoCRIUCgxkb2NrZXJfaW1hZ2UYCSABKAkSFwoKYXV0b19zdGFydBgKIAEoCEgBiAEBEhUKCGRldGFjaGVkGAsgASgISAKIAQESGAoLdHBzX2NvbW1hbmQYDCABKAlIA4gBARISCgptb2RwYWNrX2lkGA0gASgJEhoKEm1vZHBhY2tfdmVyc2lvbl9pZBgOIAEoCRI4ChBhZGRpdGlvbmFsX3BvcnRzGA8gAygLMh4uY2FyYm9ucGFuZWwudjEuQWRkaXRpb25hbFBvcnQSOQoQZG9ja2VyX292ZXJyaWRlcxgQIAEoCzIfLmNhcmJvbnBhbmVsLnYxLkRvY2tlck92ZXJyaWRlcxIbCg5hdXRvX2hpYmVybmF0ZRgRIAEoCEgEiAEBEiEKFGlkbGVfdGltZW91dF9taW51dGVzGBIgASgFSAWIAQESHAoPYXV0b19kZWVwX3NsZWVwGBMgASgISAaIAQESJwoaZGVlcF9zbGVlcF90aW1lb3V0X21pbnV0ZXMYFCABKAVIB4gBARIbCg5sb2FkZXJfdmVyc2lvbhgVIAEoCUgIiAEBQgcKBV9wb3J0Qg0KC19hdXRvX3N0YXJ0QgsKCV9kZXRhY2hlZEIOCgxfdHBzX2NvbW1hbmRCEQoPX2F1dG9faGliZXJuYXRlQhcKFV9pZGxlX3RpbWVvdXRfbWludXRlc0ISChBfYXV0b19kZWVwX3NsZWVwQh0KG19kZWVwX3NsZWVwX3RpbWVvdXRfbWludXRlc0IRCg9fbG9hZGVyX3ZlcnNpb24iPgoUVXBkYXRlU2VydmVyUmVzcG9uc2USJgoGc2VydmVyGAEgASgLMhYuY2FyYm9ucGFuZWwudjEuU2VydmVyIlgKE0RlbGV0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRIRCglrZWVwX2RhdGEYAyABKAgSDgoGZGV0YWNoGAQgASgIIhYKFERlbGV0ZVNlcnZlclJlc3BvbnNlIjQKElN0YXJ0U2VydmVyUmVxdWVzdBIKCgJpZBgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJIiUKE1N0YXJ0U2VydmVyUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJIjMKEVN0b3BTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiJAoSU3RvcFNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSI0ChJQYXVzZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCSIlChNQYXVzZVNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSI4ChZEZWVwU2xlZXBTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiKQoXRGVlcFNsZWVwU2VydmVyUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJIjYKFFJlc3RhcnRTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiJwoVUmVzdGFydFNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSIjChVSZWNyZWF0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkiKAoWUmVjcmVhdGVTZXJ2ZXJSZXNwb25zZRIOCgZzdGF0dXMYASABKAkiUQoSU2VuZENvbW1hbmRSZXF1ZXN0EgoKAmlkGAEgASgJEg8KB2NvbW1hbmQYAiABKAkSEwoGc2lsZW50GAMgASgISACIAQFCCQoHX3NpbGVudCJFChNTZW5kQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgJEg0KBWVycm9yGAMgASgJIiMKFVVwbG9hZFRvTUNMb2dzUmVxdWVzdBIKCgJpZBgBIAEoCSIlChZVcGxvYWRUb01DTG9nc1Jlc3BvbnNlEgsKA3VybBgBIAEoCSJsChRNaWdyYXRlU2VydmVyUmVxdWVzdBIKCgJpZBgBIAEoCRIWCg50YXJnZXRfbm9kZV9pZBgCIAEoCRISCgVmb3JjZRgDIAEoCEgAiAEBEhIKCnJlcXVlc3RfaWQYBCABKAlCCAoGX2ZvcmNlIqYBChVNaWdyYXRlU2VydmVyUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhYKDnNvdXJjZV9ub2RlX2lkGAMgASgJEhYKDnRhcmdldF9ub2RlX2lkGAQgASgJEhMKC2R1cmF0aW9uX21zGAUgASgDEiYKBnNlcnZlchgGIAEoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciItChhMaXN0U2VydmVyUGxheWVyc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkIKGUxpc3RTZXJ2ZXJQbGF5ZXJzUmVzcG9uc2USDwoHcGxheWVycxgBIAMoCRIUCgxvbmxpbmVfY291bnQYAiABKAUyqA0KDVNlcnZlclNlcnZpY2USVgoLTGlzdFNlcnZlcnMSIi5jYXJib25wYW5lbC52MS5MaXN0U2VydmVyc1JlcXVlc3QaIy5jYXJib25wYW5lbC52MS5MaXN0U2VydmVyc1Jlc3BvbnNlElAKCUdldFNlcnZlchIgLmNhcmJvbnBhbmVsLnYxLkdldFNlcnZlclJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5HZXRTZXJ2ZXJSZXNwb25zZRJcCg1HZXRTZXJ2ZXJMb2dzEiQuY2FyYm9ucGFuZWwudjEuR2V0U2VydmVyTG9nc1JlcXVlc3QaJS5jYXJib25wYW5lbC52MS5HZXRTZXJ2ZXJMb2dzUmVzcG9uc2USYgoPQ2xlYXJTZXJ2ZXJMb2dzEiYuY2FyYm9ucGFuZWwudjEuQ2xlYXJTZXJ2ZXJMb2dzUmVxdWVzdBonLmNhcmJvbnBhbmVsLnYxLkNsZWFyU2VydmVyTG9nc1Jlc3BvbnNlEnEKFEdldE5leHRBdmFpbGFibGVQb3J0EisuY2FyYm9ucGFuZWwudjEuR2V0TmV4dEF2YWlsYWJsZVBvcnRSZXF1ZXN0GiwuY2FyYm9ucGFuZWwudjEuR2V0TmV4dEF2YWlsYWJsZVBvcnRSZXNwb25zZRJZCgxDcmVhdGVTZXJ2ZXISIy5jYXJib25wYW5lbC52MS5DcmVhdGVTZXJ2ZXJSZXF1ZXN0GiQuY2FyYm9ucGFuZWwudjEuQ3JlYXRlU2VydmVyUmVzcG9uc2USWQoMVXBkYXRlU2VydmVyEiMuY2FyYm9ucGFuZWwudjEuVXBkYXRlU2VydmVyUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZVNlcnZlclJlc3BvbnNlElkKDERlbGV0ZVNlcnZlchIjLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVNlcnZlclJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJWCgtTdGFydFNlcnZlchIiLmNhcmJvbnBhbmVsLnYxLlN0YXJ0U2VydmVyUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLlN0YXJ0U2VydmVyUmVzcG9uc2USUwoKU3RvcFNlcnZlchIhLmNhcmJvbnBhbmVsLnYxLlN0b3BTZXJ2ZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuU3RvcFNlcnZlclJlc3BvbnNlElYKC1BhdXNlU2VydmVyEiIuY2FyYm9ucGFuZWwudjEuUGF1c2VTZXJ2ZXJSZXF1ZXN0GiMuY2FyYm9ucGFuZWwudjEuUGF1c2VTZXJ2ZXJSZXNwb25zZRJiCg9EZWVwU2xlZXBTZXJ2ZXISJi5jYXJib25wYW5lbC52MS5EZWVwU2xlZXBTZXJ2ZXJSZXF1ZXN0GicuY2FyYm9ucGFuZWwudjEuRGVlcFNsZWVwU2VydmVyUmVzcG9uc2USXAoNUmVzdGFydFNlcnZlchIkLmNhcmJvbnBhbmVsLnYxLlJlc3RhcnRTZXJ2ZXJSZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuUmVzdGFydFNlcnZlclJlc3BvbnNlEl8KDlJlY3JlYXRlU2VydmVyEiUuY2FyYm9ucGFuZWwudjEuUmVjcmVhdGVTZXJ2ZXJSZXF1ZXN0GiYuY2FyYm9ucGFuZWwudjEuUmVjcmVhdGVTZXJ2ZXJSZXNwb25zZRJWCgtTZW5kQ29tbWFuZBIiLmNhcmJvbnBhbmVsLnYxLlNlbmRDb21tYW5kUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLlNlbmRDb21tYW5kUmVzcG9uc2USXwoOVXBsb2FkVG9NQ0xvZ3MSJS5jYXJib25wYW5lbC52MS5VcGxvYWRUb01DTG9nc1JlcXVlc3QaJi5jYXJib25wYW5lbC52MS5VcGxvYWRUb01DTG9nc1Jlc3BvbnNlElwKDU1pZ3JhdGVTZXJ2ZXISJC5jYXJib25wYW5lbC52MS5NaWdyYXRlU2VydmVyUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLk1pZ3JhdGVTZXJ2ZXJSZXNwb25zZRJoChFMaXN0U2VydmVyUGxheWVycxIoLmNhcmJvbnBhbmVsLnYxLkxpc3RTZXJ2ZXJQbGF5ZXJzUmVxdWVzdBopLmNhcmJvbnBhbmVsLnYxLkxpc3RTZXJ2ZXJQbGF5ZXJzUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
+		'ChtjYXJib25wYW5lbC92MS9zZXJ2ZXIucHJvdG8SDmNhcmJvbnBhbmVsLnYxIigKEkxpc3RTZXJ2ZXJzUmVxdWVzdBISCgpmdWxsX3N0YXRzGAEgASgIIj4KE0xpc3RTZXJ2ZXJzUmVzcG9uc2USJwoHc2VydmVycxgBIAMoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciIeChBHZXRTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJIjsKEUdldFNlcnZlclJlc3BvbnNlEiYKBnNlcnZlchgBIAEoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciIwChRHZXRTZXJ2ZXJMb2dzUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgR0YWlsGAIgASgFIo8BCghMb2dFbnRyeRItCgl0aW1lc3RhbXAYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB21lc3NhZ2UYAiABKAkSDQoFbGV2ZWwYAyABKAkSDgoGc291cmNlGAQgASgJEhIKCmlzX2NvbW1hbmQYBSABKAgSEAoIaXNfZXJyb3IYBiABKAgiTgoVR2V0U2VydmVyTG9nc1Jlc3BvbnNlEiYKBGxvZ3MYASADKAsyGC5jYXJib25wYW5lbC52MS5Mb2dFbnRyeRINCgV0b3RhbBgCIAEoBSIkChZDbGVhclNlcnZlckxvZ3NSZXF1ZXN0EgoKAmlkGAEgASgJIhkKF0NsZWFyU2VydmVyTG9nc1Jlc3BvbnNlIh0KG0dldE5leHRBdmFpbGFibGVQb3J0UmVxdWVzdCIoCghVc2VkUG9ydBIMCgRwb3J0GAEgASgFEg4KBmluX3VzZRgCIAEoCCJaChxHZXROZXh0QXZhaWxhYmxlUG9ydFJlc3BvbnNlEgwKBHBvcnQYASABKAUSLAoKdXNlZF9wb3J0cxgCIAMoCzIYLmNhcmJvbnBhbmVsLnYxLlVzZWRQb3J0IpgFChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSLQoKbW9kX2xvYWRlchgDIAEoDjIZLmNhcmJvbnBhbmVsLnYxLk1vZExvYWRlchISCgptY192ZXJzaW9uGAQgASgJEgwKBHBvcnQYBSABKAUSEwoLbWF4X3BsYXllcnMYBiABKAUSDgoGbWVtb3J5GAcgASgFEhQKDGRvY2tlcl9pbWFnZRgIIAEoCRISCgphdXRvX3N0YXJ0GAkgASgIEhAKCGRldGFjaGVkGAogASgIEhkKEXN0YXJ0X2ltbWVkaWF0ZWx5GAsgASgIEhIKCm1vZHBhY2tfaWQYDCABKAkSGgoSbW9kcGFja192ZXJzaW9uX2lkGA0gASgJEhYKDnByb3h5X2hvc3RuYW1lGA4gASgJEhkKEXByb3h5X2xpc3RlbmVyX2lkGA8gASgJEhQKDHVzZV9iYXNlX3VybBgQIAEoCBI4ChBhZGRpdGlvbmFsX3BvcnRzGBEgAygLMh4uY2FyYm9ucGFuZWwudjEuQWRkaXRpb25hbFBvcnQSOQoQZG9ja2VyX292ZXJyaWRlcxgSIAEoCzIfLmNhcmJvbnBhbmVsLnYxLkRvY2tlck92ZXJyaWRlcxIPCgdub2RlX2lkGBMgASgJEhoKEnBsYWNlbWVudF9zdHJhdGVneRgUIAEoCRIWCg5hdXRvX2hpYmVybmF0ZRgVIAEoCBIXCg9hdXRvX2RlZXBfc2xlZXAYFiABKAgSEgoKcmVxdWVzdF9pZBgXIAEoCRIWCg5sb2FkZXJfdmVyc2lvbhgYIAEoCRIZChFhcmNoaXZlX3VwbG9hZF9pZBgZIAEoCSI+ChRDcmVhdGVTZXJ2ZXJSZXNwb25zZRImCgZzZXJ2ZXIYASABKAsyFi5jYXJib25wYW5lbC52MS5TZXJ2ZXIi9AUKE1VwZGF0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIRCgRwb3J0GAQgASgFSACIAQESEwoLbWF4X3BsYXllcnMYBSABKAUSDgoGbWVtb3J5GAYgASgFEhIKCm1vZF9sb2FkZXIYByABKAkSEgoKbWNfdmVyc2lvbhgIIAEoCRIUCgxkb2NrZXJfaW1hZ2UYCSABKAkSFwoKYXV0b19zdGFydBgKIAEoCEgBiAEBEhUKCGRldGFjaGVkGAsgASgISAKIAQESGAoLdHBzX2NvbW1hbmQYDCABKAlIA4gBARISCgptb2RwYWNrX2lkGA0gASgJEhoKEm1vZHBhY2tfdmVyc2lvbl9pZBgOIAEoCRI4ChBhZGRpdGlvbmFsX3BvcnRzGA8gAygLMh4uY2FyYm9ucGFuZWwudjEuQWRkaXRpb25hbFBvcnQSOQoQZG9ja2VyX292ZXJyaWRlcxgQIAEoCzIfLmNhcmJvbnBhbmVsLnYxLkRvY2tlck92ZXJyaWRlcxIbCg5hdXRvX2hpYmVybmF0ZRgRIAEoCEgEiAEBEiEKFGlkbGVfdGltZW91dF9taW51dGVzGBIgASgFSAWIAQESHAoPYXV0b19kZWVwX3NsZWVwGBMgASgISAaIAQESJwoaZGVlcF9zbGVlcF90aW1lb3V0X21pbnV0ZXMYFCABKAVIB4gBARIbCg5sb2FkZXJfdmVyc2lvbhgVIAEoCUgIiAEBQgcKBV9wb3J0Qg0KC19hdXRvX3N0YXJ0QgsKCV9kZXRhY2hlZEIOCgxfdHBzX2NvbW1hbmRCEQoPX2F1dG9faGliZXJuYXRlQhcKFV9pZGxlX3RpbWVvdXRfbWludXRlc0ISChBfYXV0b19kZWVwX3NsZWVwQh0KG19kZWVwX3NsZWVwX3RpbWVvdXRfbWludXRlc0IRCg9fbG9hZGVyX3ZlcnNpb24iPgoUVXBkYXRlU2VydmVyUmVzcG9uc2USJgoGc2VydmVyGAEgASgLMhYuY2FyYm9ucGFuZWwudjEuU2VydmVyIlgKE0RlbGV0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCRIRCglrZWVwX2RhdGEYAyABKAgSDgoGZGV0YWNoGAQgASgIIhYKFERlbGV0ZVNlcnZlclJlc3BvbnNlIjQKElN0YXJ0U2VydmVyUmVxdWVzdBIKCgJpZBgBIAEoCRISCgpyZXF1ZXN0X2lkGAIgASgJIiUKE1N0YXJ0U2VydmVyUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJIjMKEVN0b3BTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiJAoSU3RvcFNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSI0ChJQYXVzZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCSIlChNQYXVzZVNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSI4ChZEZWVwU2xlZXBTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiKQoXRGVlcFNsZWVwU2VydmVyUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJIjYKFFJlc3RhcnRTZXJ2ZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkiJwoVUmVzdGFydFNlcnZlclJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCSIjChVSZWNyZWF0ZVNlcnZlclJlcXVlc3QSCgoCaWQYASABKAkiKAoWUmVjcmVhdGVTZXJ2ZXJSZXNwb25zZRIOCgZzdGF0dXMYASABKAkiUQoSU2VuZENvbW1hbmRSZXF1ZXN0EgoKAmlkGAEgASgJEg8KB2NvbW1hbmQYAiABKAkSEwoGc2lsZW50GAMgASgISACIAQFCCQoHX3NpbGVudCJFChNTZW5kQ29tbWFuZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgJEg0KBWVycm9yGAMgASgJIiMKFVVwbG9hZFRvTUNMb2dzUmVxdWVzdBIKCgJpZBgBIAEoCSIlChZVcGxvYWRUb01DTG9nc1Jlc3BvbnNlEgsKA3VybBgBIAEoCSJsChRNaWdyYXRlU2VydmVyUmVxdWVzdBIKCgJpZBgBIAEoCRIWCg50YXJnZXRfbm9kZV9pZBgCIAEoCRISCgVmb3JjZRgDIAEoCEgAiAEBEhIKCnJlcXVlc3RfaWQYBCABKAlCCAoGX2ZvcmNlIqYBChVNaWdyYXRlU2VydmVyUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhYKDnNvdXJjZV9ub2RlX2lkGAMgASgJEhYKDnRhcmdldF9ub2RlX2lkGAQgASgJEhMKC2R1cmF0aW9uX21zGAUgASgDEiYKBnNlcnZlchgGIAEoCzIWLmNhcmJvbnBhbmVsLnYxLlNlcnZlciItChhMaXN0U2VydmVyUGxheWVyc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkIKGUxpc3RTZXJ2ZXJQbGF5ZXJzUmVzcG9uc2USDwoHcGxheWVycxgBIAMoCRIUCgxvbmxpbmVfY291bnQYAiABKAUiowEKGkV4cG9ydFNlcnZlckFyY2hpdmVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIzCgZmb3JtYXQYAiABKA4yIy5jYXJib25wYW5lbC52MS5TZXJ2ZXJBcmNoaXZlRm9ybWF0Ej0KC2NvbnNpc3RlbmN5GAMgASgOMiguY2FyYm9ucGFuZWwudjEuU2VydmVyQXJjaGl2ZUNvbnNpc3RlbmN5IlcKG0V4cG9ydFNlcnZlckFyY2hpdmVSZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEhIKCnRvdGFsX3NpemUYAyABKAMiQQobUHJldmlld1NlcnZlckFyY2hpdmVSZXF1ZXN0EhEKCXVwbG9hZF9pZBgBIAEoCRIPCgdub2RlX2lkGAIgASgJIp8BChRTZXJ2ZXJBcmNoaXZlRmluZGluZxI+CghzZXZlcml0eRgBIAEoDjIsLmNhcmJvbnBhbmVsLnYxLlNlcnZlckFyY2hpdmVGaW5kaW5nU2V2ZXJpdHkSNgoEY29kZRgCIAEoDjIoLmNhcmJvbnBhbmVsLnYxLlNlcnZlckFyY2hpdmVGaW5kaW5nQ29kZRIPCgdtZXNzYWdlGAMgASgJIrMDChxQcmV2aWV3U2VydmVyQXJjaGl2ZVJlc3BvbnNlEjMKBmZvcm1hdBgBIAEoDjIjLmNhcmJvbnBhbmVsLnYxLlNlcnZlckFyY2hpdmVGb3JtYXQSFgoOc2NoZW1hX3ZlcnNpb24YAiABKAUSGAoQZXhwb3J0ZXJfdmVyc2lvbhgDIAEoCRISCgptY192ZXJzaW9uGAQgASgJEi0KCm1vZF9sb2FkZXIYBSABKA4yGS5jYXJib25wYW5lbC52MS5Nb2RMb2FkZXISFgoObG9hZGVyX3ZlcnNpb24YBiABKAkSDgoGbWVtb3J5GAcgASgFEhMKC21heF9wbGF5ZXJzGAggASgFEhIKCmZpbGVfY291bnQYCSABKAUSFgoOZXhwYW5kZWRfYnl0ZXMYCiABKAMSFgoOcmVxdWlyZWRfYnl0ZXMYCyABKAMSHAoPYXZhaWxhYmxlX2J5dGVzGAwgASgDSACIAQESNgoIZmluZGluZ3MYDSADKAsyJC5jYXJib25wYW5lbC52MS5TZXJ2ZXJBcmNoaXZlRmluZGluZ0ISChBfYXZhaWxhYmxlX2J5dGVzKn0KE1NlcnZlckFyY2hpdmVGb3JtYXQSJQohU0VSVkVSX0FSQ0hJVkVfRk9STUFUX1VOU1BFQ0lGSUVEEAASHQoZU0VSVkVSX0FSQ0hJVkVfRk9STUFUX1pJUBABEiAKHFNFUlZFUl9BUkNISVZFX0ZPUk1BVF9UQVJfR1oQAipuChhTZXJ2ZXJBcmNoaXZlQ29uc2lzdGVuY3kSKgomU0VSVkVSX0FSQ0hJVkVfQ09OU0lTVEVOQ1lfVU5TUEVDSUZJRUQQABImCiJTRVJWRVJfQVJDSElWRV9DT05TSVNURU5DWV9TVE9QUEVEEAEqqQEKHFNlcnZlckFyY2hpdmVGaW5kaW5nU2V2ZXJpdHkSLworU0VSVkVSX0FSQ0hJVkVfRklORElOR19TRVZFUklUWV9VTlNQRUNJRklFRBAAEisKJ1NFUlZFUl9BUkNISVZFX0ZJTkRJTkdfU0VWRVJJVFlfV0FSTklORxABEisKJ1NFUlZFUl9BUkNISVZFX0ZJTkRJTkdfU0VWRVJJVFlfQkxPQ0tFUhACKsQCChhTZXJ2ZXJBcmNoaXZlRmluZGluZ0NvZGUSKwonU0VSVkVSX0FSQ0hJVkVfRklORElOR19DT0RFX1VOU1BFQ0lGSUVEEAASLgoqU0VSVkVSX0FSQ0hJVkVfRklORElOR19DT0RFX0NVU1RPTV9SVU5USU1FEAESLgoqU0VSVkVSX0FSQ0hJVkVfRklORElOR19DT0RFX1BST1ZJREVSX1NFVFVQEAISMgouU0VSVkVSX0FSQ0hJVkVfRklORElOR19DT0RFX0lOU1VGRklDSUVOVF9TUEFDRRADEjMKL1NFUlZFUl9BUkNISVZFX0ZJTkRJTkdfQ09ERV9TVE9SQUdFX1VOQVZBSUxBQkxFEAQSMgouU0VSVkVSX0FSQ0hJVkVfRklORElOR19DT0RFX1VOU1VQUE9SVEVEX0xPQURFUhAFMosPCg1TZXJ2ZXJTZXJ2aWNlElYKC0xpc3RTZXJ2ZXJzEiIuY2FyYm9ucGFuZWwudjEuTGlzdFNlcnZlcnNSZXF1ZXN0GiMuY2FyYm9ucGFuZWwudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJQCglHZXRTZXJ2ZXISIC5jYXJib25wYW5lbC52MS5HZXRTZXJ2ZXJSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuR2V0U2VydmVyUmVzcG9uc2USXAoNR2V0U2VydmVyTG9ncxIkLmNhcmJvbnBhbmVsLnYxLkdldFNlcnZlckxvZ3NSZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuR2V0U2VydmVyTG9nc1Jlc3BvbnNlEmIKD0NsZWFyU2VydmVyTG9ncxImLmNhcmJvbnBhbmVsLnYxLkNsZWFyU2VydmVyTG9nc1JlcXVlc3QaJy5jYXJib25wYW5lbC52MS5DbGVhclNlcnZlckxvZ3NSZXNwb25zZRJxChRHZXROZXh0QXZhaWxhYmxlUG9ydBIrLmNhcmJvbnBhbmVsLnYxLkdldE5leHRBdmFpbGFibGVQb3J0UmVxdWVzdBosLmNhcmJvbnBhbmVsLnYxLkdldE5leHRBdmFpbGFibGVQb3J0UmVzcG9uc2USWQoMQ3JlYXRlU2VydmVyEiMuY2FyYm9ucGFuZWwudjEuQ3JlYXRlU2VydmVyUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEm4KE0V4cG9ydFNlcnZlckFyY2hpdmUSKi5jYXJib25wYW5lbC52MS5FeHBvcnRTZXJ2ZXJBcmNoaXZlUmVxdWVzdBorLmNhcmJvbnBhbmVsLnYxLkV4cG9ydFNlcnZlckFyY2hpdmVSZXNwb25zZRJxChRQcmV2aWV3U2VydmVyQXJjaGl2ZRIrLmNhcmJvbnBhbmVsLnYxLlByZXZpZXdTZXJ2ZXJBcmNoaXZlUmVxdWVzdBosLmNhcmJvbnBhbmVsLnYxLlByZXZpZXdTZXJ2ZXJBcmNoaXZlUmVzcG9uc2USWQoMVXBkYXRlU2VydmVyEiMuY2FyYm9ucGFuZWwudjEuVXBkYXRlU2VydmVyUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZVNlcnZlclJlc3BvbnNlElkKDERlbGV0ZVNlcnZlchIjLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVNlcnZlclJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJWCgtTdGFydFNlcnZlchIiLmNhcmJvbnBhbmVsLnYxLlN0YXJ0U2VydmVyUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLlN0YXJ0U2VydmVyUmVzcG9uc2USUwoKU3RvcFNlcnZlchIhLmNhcmJvbnBhbmVsLnYxLlN0b3BTZXJ2ZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuU3RvcFNlcnZlclJlc3BvbnNlElYKC1BhdXNlU2VydmVyEiIuY2FyYm9ucGFuZWwudjEuUGF1c2VTZXJ2ZXJSZXF1ZXN0GiMuY2FyYm9ucGFuZWwudjEuUGF1c2VTZXJ2ZXJSZXNwb25zZRJiCg9EZWVwU2xlZXBTZXJ2ZXISJi5jYXJib25wYW5lbC52MS5EZWVwU2xlZXBTZXJ2ZXJSZXF1ZXN0GicuY2FyYm9ucGFuZWwudjEuRGVlcFNsZWVwU2VydmVyUmVzcG9uc2USXAoNUmVzdGFydFNlcnZlchIkLmNhcmJvbnBhbmVsLnYxLlJlc3RhcnRTZXJ2ZXJSZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuUmVzdGFydFNlcnZlclJlc3BvbnNlEl8KDlJlY3JlYXRlU2VydmVyEiUuY2FyYm9ucGFuZWwudjEuUmVjcmVhdGVTZXJ2ZXJSZXF1ZXN0GiYuY2FyYm9ucGFuZWwudjEuUmVjcmVhdGVTZXJ2ZXJSZXNwb25zZRJWCgtTZW5kQ29tbWFuZBIiLmNhcmJvbnBhbmVsLnYxLlNlbmRDb21tYW5kUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLlNlbmRDb21tYW5kUmVzcG9uc2USXwoOVXBsb2FkVG9NQ0xvZ3MSJS5jYXJib25wYW5lbC52MS5VcGxvYWRUb01DTG9nc1JlcXVlc3QaJi5jYXJib25wYW5lbC52MS5VcGxvYWRUb01DTG9nc1Jlc3BvbnNlElwKDU1pZ3JhdGVTZXJ2ZXISJC5jYXJib25wYW5lbC52MS5NaWdyYXRlU2VydmVyUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLk1pZ3JhdGVTZXJ2ZXJSZXNwb25zZRJoChFMaXN0U2VydmVyUGxheWVycxIoLmNhcmJvbnBhbmVsLnYxLkxpc3RTZXJ2ZXJQbGF5ZXJzUmVxdWVzdBopLmNhcmJvbnBhbmVsLnYxLkxpc3RTZXJ2ZXJQbGF5ZXJzUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
 		[file_carbonpanel_v1_common, file_google_protobuf_timestamp]
 	);
 
@@ -434,6 +434,13 @@ export type CreateServerRequest = Message<'carbonpanel.v1.CreateServerRequest'> 
 	 * @generated from field: string loader_version = 24;
 	 */
 	loaderVersion: string;
+
+	/**
+	 * Completed upload owned by the caller. Required request_id when importing.
+	 *
+	 * @generated from field: string archive_upload_id = 25;
+	 */
+	archiveUploadId: string;
 };
 
 /**
@@ -1165,6 +1172,328 @@ export const ListServerPlayersResponseSchema: GenMessage<ListServerPlayersRespon
 	messageDesc(file_carbonpanel_v1_server, 37);
 
 /**
+ * ExportServerArchiveRequest requests a consistent export of one stopped server.
+ *
+ * @generated from message carbonpanel.v1.ExportServerArchiveRequest
+ */
+export type ExportServerArchiveRequest = Message<'carbonpanel.v1.ExportServerArchiveRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
+
+	/**
+	 * @generated from field: carbonpanel.v1.ServerArchiveFormat format = 2;
+	 */
+	format: ServerArchiveFormat;
+
+	/**
+	 * @generated from field: carbonpanel.v1.ServerArchiveConsistency consistency = 3;
+	 */
+	consistency: ServerArchiveConsistency;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ExportServerArchiveRequest.
+ * Use `create(ExportServerArchiveRequestSchema)` to create a new message.
+ */
+export const ExportServerArchiveRequestSchema: GenMessage<ExportServerArchiveRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_server, 38);
+
+/**
+ * ExportServerArchiveResponse identifies the authorized download session for a prepared archive.
+ *
+ * @generated from message carbonpanel.v1.ExportServerArchiveResponse
+ */
+export type ExportServerArchiveResponse = Message<'carbonpanel.v1.ExportServerArchiveResponse'> & {
+	/**
+	 * @generated from field: string session_id = 1;
+	 */
+	sessionId: string;
+
+	/**
+	 * @generated from field: string filename = 2;
+	 */
+	filename: string;
+
+	/**
+	 * @generated from field: int64 total_size = 3;
+	 */
+	totalSize: bigint;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ExportServerArchiveResponse.
+ * Use `create(ExportServerArchiveResponseSchema)` to create a new message.
+ */
+export const ExportServerArchiveResponseSchema: GenMessage<ExportServerArchiveResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_server, 39);
+
+/**
+ * PreviewServerArchiveRequest validates a caller-owned completed upload without creating a server.
+ *
+ * @generated from message carbonpanel.v1.PreviewServerArchiveRequest
+ */
+export type PreviewServerArchiveRequest = Message<'carbonpanel.v1.PreviewServerArchiveRequest'> & {
+	/**
+	 * @generated from field: string upload_id = 1;
+	 */
+	uploadId: string;
+
+	/**
+	 * @generated from field: string node_id = 2;
+	 */
+	nodeId: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.PreviewServerArchiveRequest.
+ * Use `create(PreviewServerArchiveRequestSchema)` to create a new message.
+ */
+export const PreviewServerArchiveRequestSchema: GenMessage<PreviewServerArchiveRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_server, 40);
+
+/**
+ * ServerArchiveFinding is a typed compatibility or capacity finding from preview.
+ *
+ * @generated from message carbonpanel.v1.ServerArchiveFinding
+ */
+export type ServerArchiveFinding = Message<'carbonpanel.v1.ServerArchiveFinding'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.ServerArchiveFindingSeverity severity = 1;
+	 */
+	severity: ServerArchiveFindingSeverity;
+
+	/**
+	 * @generated from field: carbonpanel.v1.ServerArchiveFindingCode code = 2;
+	 */
+	code: ServerArchiveFindingCode;
+
+	/**
+	 * @generated from field: string message = 3;
+	 */
+	message: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ServerArchiveFinding.
+ * Use `create(ServerArchiveFindingSchema)` to create a new message.
+ */
+export const ServerArchiveFindingSchema: GenMessage<ServerArchiveFinding> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_server, 41);
+
+/**
+ * PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
+ *
+ * @generated from message carbonpanel.v1.PreviewServerArchiveResponse
+ */
+export type PreviewServerArchiveResponse =
+	Message<'carbonpanel.v1.PreviewServerArchiveResponse'> & {
+		/**
+		 * @generated from field: carbonpanel.v1.ServerArchiveFormat format = 1;
+		 */
+		format: ServerArchiveFormat;
+
+		/**
+		 * @generated from field: int32 schema_version = 2;
+		 */
+		schemaVersion: number;
+
+		/**
+		 * @generated from field: string exporter_version = 3;
+		 */
+		exporterVersion: string;
+
+		/**
+		 * @generated from field: string mc_version = 4;
+		 */
+		mcVersion: string;
+
+		/**
+		 * @generated from field: carbonpanel.v1.ModLoader mod_loader = 5;
+		 */
+		modLoader: ModLoader;
+
+		/**
+		 * @generated from field: string loader_version = 6;
+		 */
+		loaderVersion: string;
+
+		/**
+		 * @generated from field: int32 memory = 7;
+		 */
+		memory: number;
+
+		/**
+		 * @generated from field: int32 max_players = 8;
+		 */
+		maxPlayers: number;
+
+		/**
+		 * @generated from field: int32 file_count = 9;
+		 */
+		fileCount: number;
+
+		/**
+		 * @generated from field: int64 expanded_bytes = 10;
+		 */
+		expandedBytes: bigint;
+
+		/**
+		 * @generated from field: int64 required_bytes = 11;
+		 */
+		requiredBytes: bigint;
+
+		/**
+		 * @generated from field: optional int64 available_bytes = 12;
+		 */
+		availableBytes?: bigint | undefined;
+
+		/**
+		 * @generated from field: repeated carbonpanel.v1.ServerArchiveFinding findings = 13;
+		 */
+		findings: ServerArchiveFinding[];
+	};
+
+/**
+ * Describes the message carbonpanel.v1.PreviewServerArchiveResponse.
+ * Use `create(PreviewServerArchiveResponseSchema)` to create a new message.
+ */
+export const PreviewServerArchiveResponseSchema: GenMessage<PreviewServerArchiveResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_server, 42);
+
+/**
+ * ServerArchiveFormat selects the container encoding for a native server archive.
+ *
+ * @generated from enum carbonpanel.v1.ServerArchiveFormat
+ */
+export enum ServerArchiveFormat {
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FORMAT_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FORMAT_ZIP = 1;
+	 */
+	ZIP = 1,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FORMAT_TAR_GZ = 2;
+	 */
+	TAR_GZ = 2
+}
+
+/**
+ * Describes the enum carbonpanel.v1.ServerArchiveFormat.
+ */
+export const ServerArchiveFormatSchema: GenEnum<ServerArchiveFormat> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_server, 0);
+
+/**
+ * ServerArchiveConsistency declares the consistency policy used during export.
+ *
+ * @generated from enum carbonpanel.v1.ServerArchiveConsistency
+ */
+export enum ServerArchiveConsistency {
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_CONSISTENCY_STOPPED = 1;
+	 */
+	STOPPED = 1
+}
+
+/**
+ * Describes the enum carbonpanel.v1.ServerArchiveConsistency.
+ */
+export const ServerArchiveConsistencySchema: GenEnum<ServerArchiveConsistency> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_server, 1);
+
+/**
+ * ServerArchiveFindingSeverity ranks a preview finding as advisory or blocking.
+ *
+ * @generated from enum carbonpanel.v1.ServerArchiveFindingSeverity
+ */
+export enum ServerArchiveFindingSeverity {
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_SEVERITY_WARNING = 1;
+	 */
+	WARNING = 1,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER = 2;
+	 */
+	BLOCKER = 2
+}
+
+/**
+ * Describes the enum carbonpanel.v1.ServerArchiveFindingSeverity.
+ */
+export const ServerArchiveFindingSeveritySchema: GenEnum<ServerArchiveFindingSeverity> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_server, 2);
+
+/**
+ * ServerArchiveFindingCode identifies the reason a preview finding was reported.
+ *
+ * @generated from enum carbonpanel.v1.ServerArchiveFindingCode
+ */
+export enum ServerArchiveFindingCode {
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME = 1;
+	 */
+	CUSTOM_RUNTIME = 1,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP = 2;
+	 */
+	PROVIDER_SETUP = 2,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE = 3;
+	 */
+	INSUFFICIENT_SPACE = 3,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE = 4;
+	 */
+	STORAGE_UNAVAILABLE = 4,
+
+	/**
+	 * @generated from enum value: SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER = 5;
+	 */
+	UNSUPPORTED_LOADER = 5
+}
+
+/**
+ * Describes the enum carbonpanel.v1.ServerArchiveFindingCode.
+ */
+export const ServerArchiveFindingCodeSchema: GenEnum<ServerArchiveFindingCode> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_server, 3);
+
+/**
  * Minecraft server management
  *
  * @generated from service carbonpanel.v1.ServerService
@@ -1229,6 +1558,26 @@ export const ServerService: GenService<{
 		methodKind: 'unary';
 		input: typeof CreateServerRequestSchema;
 		output: typeof CreateServerResponseSchema;
+	};
+	/**
+	 * Export a stopped server using its owning node storage.
+	 *
+	 * @generated from rpc carbonpanel.v1.ServerService.ExportServerArchive
+	 */
+	exportServerArchive: {
+		methodKind: 'unary';
+		input: typeof ExportServerArchiveRequestSchema;
+		output: typeof ExportServerArchiveResponseSchema;
+	};
+	/**
+	 * Validate a completed caller-owned upload without creating a server.
+	 *
+	 * @generated from rpc carbonpanel.v1.ServerService.PreviewServerArchive
+	 */
+	previewServerArchive: {
+		methodKind: 'unary';
+		input: typeof PreviewServerArchiveRequestSchema;
+		output: typeof PreviewServerArchiveResponseSchema;
 	};
 	/**
 	 * Modify server settings

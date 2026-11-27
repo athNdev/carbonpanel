@@ -43,13 +43,16 @@ import (
 	"github.com/athNdev/carbon-panel/internal/scheduler"
 	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/staging"
+	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -73,6 +76,8 @@ type ServerService struct {
 	store            *storage.Store
 	docker           *docker.Client
 	storageResolver  *nodestorage.Resolver
+	archiveDownloads *download.Manager
+	archiveUploads   *upload.Manager
 	hostMemoryMB     func(context.Context, string) (int64, error)
 	hostPortBound    func(int) bool
 	removeData       func(string) error
@@ -104,6 +109,17 @@ type ServerService struct {
 
 	daemonInfoMu sync.Mutex
 	daemonInfo   map[string]daemonEnforcementCache
+
+	// inspectArchiveContainer is the stopped-export observation seam. It
+	// returns the live container status and effective bind mounts from the
+	// owning node; tests replace it so archive verification never needs a real
+	// Docker daemon.
+	inspectArchiveContainer func(ctx context.Context, nodeID, containerID string) (archiveContainerObservation, error)
+
+	// archiveSubmissionMu serializes same-request archive submissions in this
+	// controller so two retries cannot both reclaim and re-place one durable
+	// destination.
+	archiveSubmissionMu keyedMutex
 }
 
 // beginServerLifecycleTransition claims the lifecycle transition for a server
@@ -1074,6 +1090,152 @@ func validateModpackServerSupport(pack *storage.IndexedModpack) error {
 func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
 	msg := req.Msg
 
+	serverUUID := uuid.New().String()
+	var imported *archiveImport
+	var archiveIntent *storage.ArchiveImport
+	var archiveCleanup func() error
+	var archiveRelease func()
+	var archiveCleanupNeeded bool
+	var archiveCommitted bool
+	var archivePath string
+	if msg.GetArchiveUploadId() != "" {
+		archiveCtx, cancel := s.beginArchiveRequest(ctx)
+		defer cancel()
+		ctx = archiveCtx
+		// Defaults derived from an archive belong to this invocation.
+		msg = proto.CloneOf(msg)
+		releaseSubmission := s.archiveSubmissionMu.Lock(uploadOwnerID(ctx) + "\x00" + strings.TrimSpace(msg.GetRequestId()))
+		defer releaseSubmission()
+
+		var prior *storage.Server
+		var err error
+		imported, prior, err = s.prepareArchiveImport(ctx, msg)
+		if err != nil {
+			return nil, err
+		}
+		if prior != nil {
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, prior)}), nil
+		}
+		defer func() {
+			if imported.file != nil {
+				_ = imported.file.Close()
+			}
+		}()
+
+		if imported.claim == nil {
+			// New submission: record the destination and the verified content
+			// identity in the same transaction as the idempotency claim.
+			archivePath = s.archiveDataPath(msg.Name, serverUUID)
+			intent, claimed, err := s.store.ClaimArchiveImport(ctx, imported.replayKey, imported.replayKind, serverUUID, archivePath, imported.digest, imported.uploadID)
+			if err != nil {
+				if errors.Is(err, storage.ErrArchiveImportUnproven) {
+					return nil, connect.NewError(connect.CodeFailedPrecondition,
+						errors.New("an earlier submission was interrupted before its destination was recorded; use a new request id and inspect the destination node's server storage"))
+				}
+				return nil, archiveReplayError(err)
+			}
+			if claimed {
+				archiveIntent = intent
+				imported.claim = intent
+			} else {
+				// Another attempt won the claim between the read-only prepare
+				// and this transaction. Adopt its durable intent and validate
+				// the current upload against the recorded content identity.
+				serverUUID = intent.ServerID
+				archiveIntent = intent
+				imported.claim = intent
+			}
+		} else {
+			serverUUID = imported.claim.ServerID
+			archiveIntent = imported.claim
+		}
+
+		// A committed server always wins: answer idempotently before requiring
+		// the upload that may already have expired.
+		committed, exists, getErr := s.committedArchiveServer(ctx, archiveIntent.ServerID)
+		if getErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
+		}
+		if exists {
+			if err := s.verifyCommittedArchiveReplay(ctx, msg.GetArchiveUploadId(), committed.ID, imported.replayKey, imported.replayKind, ""); err != nil {
+				return nil, err
+			}
+			s.settleCommittedArchiveImport(ctx, imported.replayKey)
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
+		}
+		// Validate the supplied upload against the durable content identity
+		// before any destination is reclaimed. A restart may use a fresh upload
+		// id only for identical verified content.
+		if imported.file == nil {
+			resumed, err := s.openServerArchive(ctx, msg.GetArchiveUploadId())
+			if err != nil {
+				return nil, err
+			}
+			imported.file = resumed.file
+			imported.verified = resumed.verified
+			imported.digest = resumed.digest
+			imported.uploadID = resumed.uploadID
+		}
+		if err := verifyArchiveClaimIdentity(imported, archiveIntent); err != nil {
+			return nil, err
+		}
+		if err := applyArchiveDefaults(msg, imported.verified.Manifest.Runtime); err != nil {
+			return nil, err
+		}
+		// Only now reclaim the destination this durable intent proves this
+		// submission created.
+		archiveCleanupNeeded = true
+		if err := s.recoverArchiveImport(ctx, archiveIntent); err != nil {
+			return nil, err
+		}
+		archiveCleanupNeeded = false
+		committed, exists, getErr = s.committedArchiveServer(ctx, archiveIntent.ServerID)
+		if getErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("could not verify the archive destination state"))
+		}
+		if exists {
+			if err := s.verifyCommittedArchiveReplay(ctx, msg.GetArchiveUploadId(), committed.ID, imported.replayKey, imported.replayKind, ""); err != nil {
+				return nil, err
+			}
+			s.settleCommittedArchiveImport(ctx, imported.replayKey)
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, committed)}), nil
+		}
+		// A failed attempt releases the request claim only after its own
+		// destination is gone. If cleanup cannot prove and remove it, the
+		// durable claim and intent stay so the next retry can recover them.
+		defer func() {
+			// The exact allocation opened for this request is always closed,
+			// whether the request committed or is rolling back.
+			if archiveRelease != nil {
+				defer archiveRelease()
+			}
+			if archiveCommitted {
+				return
+			}
+			if archiveCleanupNeeded {
+				if archiveCleanup == nil {
+					return
+				}
+				if err := archiveCleanup(); err != nil {
+					s.log.Error("Cleanup interrupted archive import %s: %v", serverUUID, err)
+					return
+				}
+			}
+			// Release the durable claim and intent atomically, and only while
+			// this attempt still owns the recorded intent.
+			if archiveIntent == nil {
+				return
+			}
+			if _, err := s.store.ReleaseArchiveImportClaim(context.WithoutCancel(ctx),
+				imported.replayKey, imported.replayKind, archiveIntent.ClaimToken); err != nil {
+				s.log.Error("Release interrupted archive import %s: %v", serverUUID, err)
+			}
+		}()
+		if err := s.store.CheckArchiveServerName(ctx, msg.Name); err != nil {
+			return nil, archiveNameError(err)
+		}
+	}
+
 	if err := s.checkDockerPrivilegedOverrides(ctx, msg.DockerOverrides); err != nil {
 		return nil, err
 	}
@@ -1295,10 +1457,23 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	serverUUID := uuid.New().String()
-	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(msg.Name), serverUUID)
-	serverDataPath := filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
+	serverDataPath := archivePath
+	if archiveIntent != nil {
+		serverDataPath = archiveIntent.DataPath
+	}
+	if serverDataPath == "" {
+		serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(msg.Name), serverUUID)
+		serverDataPath = filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
+	}
 
+	// Persist the requested provisioning intent with publication. A server
+	// that was explicitly created stopped must be recorded stopped, so a crash
+	// before the asynchronous container provision cannot make the reconciler
+	// recreate and start it behind the operator's back.
+	initialStatus := storage.StatusCreating
+	if !msg.StartImmediately {
+		initialStatus = storage.StatusStopped
+	}
 	server := &storage.Server{
 		ID:              serverUUID,
 		Name:            msg.Name,
@@ -1307,7 +1482,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		ModpackLoader:   modpackLoader,
 		MCVersion:       msg.McVersion,
 		LoaderVersion:   loaderVersion,
-		Status:          storage.StatusCreating,
+		Status:          initialStatus,
 		Port:            port,
 		ProxyHostname:   proxyHostname,
 		ProxyListenerID: proxyListenerID,
@@ -1387,7 +1562,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	releaseClaim := false
-	if requestID != "" {
+	if requestID != "" && imported == nil {
 		owner, claimed, claimErr := s.store.ClaimIdempotencyKey(ctx, requestID, server.ID, "create")
 		if claimErr != nil {
 			code := connect.CodeInternal
@@ -1475,6 +1650,16 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
+	if imported != nil {
+		cleanup, release, err := s.placeArchive(ctx, imported, server)
+		archiveCleanup = cleanup
+		archiveRelease = release
+		archiveCleanupNeeded = cleanup != nil
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Serialize capacity check and DB reservation so concurrent create
 	// requests cannot both observe the same free memory and overcommit a node.
 	s.capacityMu.Lock()
@@ -1486,13 +1671,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Create the world on the node's storage. A remote node with no reachable
 	// mount is refused before a controller-local directory can be mistaken for
 	// the world the remote daemon will use.
-	if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
-		s.capacityMu.Unlock()
-		if nodestorage.IsUnavailable(err) {
-			return nil, connect.NewError(connect.CodeUnavailable, err)
+	if imported == nil {
+		if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
+			s.capacityMu.Unlock()
+			if nodestorage.IsUnavailable(err) {
+				return nil, connect.NewError(connect.CodeUnavailable, err)
+			}
+			s.log.Error("Failed to create data directory: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
 		}
-		s.log.Error("Failed to create data directory: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
 	}
 
 	// A manual server pack is written through ForNode before the row is kept,
@@ -1512,14 +1699,30 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	// Save to database
-	if err := s.store.CreateServer(ctx, server); err != nil {
+	createRecord := s.store.CreateServer
+	if imported != nil {
+		createRecord = func(ctx context.Context, server *storage.Server) error {
+			return s.store.CreateArchiveServer(ctx, server, archiveGameplaySeed(imported.verified.Gameplay),
+				archiveIntent.RequestKey, imported.digest, imported.uploadID)
+		}
+	}
+	if err := createRecord(ctx, server); err != nil {
 		s.capacityMu.Unlock()
+		if imported != nil {
+			return nil, archiveNameError(err)
+		}
 		s.log.Error("Failed to create server: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server"))
+	}
+	if imported != nil {
+		archiveCommitted = true
 	}
 	keepLease = true
 	releaseClaim = false
 	s.capacityMu.Unlock()
+	if imported != nil {
+		s.finishArchiveImport(ctx, archiveIntent)
+	}
 
 	// Get the server config
 	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
@@ -1673,7 +1876,8 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		s.auditPrivilegedOverrides(ctx, peerIP, server.ID, msg.DockerOverrides)
 	}
 
-	// Return immediately with the server in "creating" state
+	// Return immediately with the server in its recorded provisioning state:
+	// creating when a start was requested, otherwise the safe stopped state.
 	return connect.NewResponse(&v1.CreateServerResponse{
 		Server: s.toProtoServer(ctx, server),
 	}), nil

@@ -181,7 +181,7 @@ that matches where the MCP process runs:
    process location**. Report `healthy`, `degraded`/`unavailable` and `unknown`
    separately; a stored `Running` status is not playable evidence.
 2. Call `tools/list`; retain the tool list. It enumerates the generated
-   combined catalogue of 216 tools (253 declared RPCs, 243 mounted/reachable).
+   combined catalogue of 218 tools (255 declared RPCs, 245 mounted/reachable).
 3. On stable `v1.0.40` (`f88748be…`) call only the verified-by-contract
    read-only set matching the core lane's stable smoke path: `list_servers`,
    `get_server`, `list_files`, `get_file`, `list_backups`. Record request/response

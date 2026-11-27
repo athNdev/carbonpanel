@@ -15,7 +15,7 @@ package mcp
 // FamilyServerToolCount is the number of executable coverage-gap tools. It is
 // pinned by TestFamilyServerDescriptorInventory so the exported list cannot
 // drift silently.
-const FamilyServerToolCount = 53
+const FamilyServerToolCount = 55
 
 // FamilyServerExcludedRPCCount is the single mounted RPC in these families that
 // stays out of the tool set: automatic Docker daemon discovery. Its exact
@@ -99,6 +99,9 @@ type FamilyServerToolDescriptor struct {
 // compact declaration so the exported list stays mechanically consistent.
 func famDesc(service, name, method, scope string, class Class, mutation, confirm bool, description string, args ...FamilyServerArg) FamilyServerToolDescriptor {
 	build := PanelBuildStableV140
+	if service == "ServerService" && (method == "ExportServerArchive" || method == "PreviewServerArchive") {
+		build = PanelBuildServerPortability
+	}
 	return FamilyServerToolDescriptor{
 		Name: name, Procedure: "/carbonpanel.v1." + service + "/" + method,
 		Service: "carbonpanel.v1." + service, Method: method,
@@ -159,6 +162,13 @@ func buildFamilyServerDescriptors() []FamilyServerToolDescriptor {
 			famIDArg("id", "exact server id"), famBoolArg("confirm", "must be true to clear logs")),
 		famDesc("ServerService", "get_next_available_port", "GetNextAvailablePort", "servers/read", ClassSafe, false, false,
 			"Report the next free host port and current port usage. Read-only."),
+		famDesc("ServerService", "export_server_archive", "ExportServerArchive", "files/read[server_id]", ClassReview, false, false,
+			"Prepare a verified ZIP or tar.gz export of one stopped server. Returns a scoped download session.",
+			famIDArg("server_id", "exact stopped server id"),
+			FamilyServerArg{Name: "format", Kind: FamilyArgEnum, Required: true, Allowed: []string{"zip", "tar.gz"}}),
+		famDesc("ServerService", "preview_server_archive", "PreviewServerArchive", "servers/create", ClassSafe, false, false,
+			"Validate one caller-owned server archive and report destination requirements.",
+			famIDArg("upload_id", "caller-owned completed archive upload"), famOptIDArg("node_id", "known destination node")),
 		famDesc("ServerService", "create_server", "CreateServer", "servers/create", ClassReview, true, true,
 			"Create one server from bounded scalar options. Requires confirm=true and a request_id.",
 			famTextArg("name", maxIDLen, true, "exact server name"),
@@ -168,7 +178,8 @@ func buildFamilyServerDescriptors() []FamilyServerToolDescriptor {
 			famIntArg("max_players", 1, 200, false, 0, "player cap"),
 			famIntArg("memory", 256, 65536, false, 0, "memory in MiB"),
 			famOptIDArg("node_id", "known configured node id only; no discovery"),
-			famOptIDArg("request_id", "idempotency key"),
+			famOptIDArg("request_id", "idempotency key, required with archive_upload_id"),
+			famOptIDArg("archive_upload_id", "caller-owned completed archive upload"),
 			famBoolArg("start_immediately", "start after creation"),
 			famBoolArg("confirm", "must be true to create a server")),
 		famDesc("ServerService", "update_server", "UpdateServer", "servers/update[id]", ClassReview, true, true,
@@ -418,6 +429,8 @@ var familyServerSources = map[string]string{
 	"/carbonpanel.v1.ServerService/GetServerLogs":               "internal/rbac/mapping.go:52; proto/carbonpanel/v1/server.proto:26",
 	"/carbonpanel.v1.ServerService/ClearServerLogs":             "internal/rbac/mapping.go:53; proto/carbonpanel/v1/server.proto:28",
 	"/carbonpanel.v1.ServerService/GetNextAvailablePort":        "internal/rbac/mapping.go:54; proto/carbonpanel/v1/server.proto:30",
+	"/carbonpanel.v1.ServerService/ExportServerArchive":         "internal/rbac/mapping.go:67; proto/carbonpanel/v1/server.proto:34",
+	"/carbonpanel.v1.ServerService/PreviewServerArchive":        "internal/rbac/mapping.go:68; proto/carbonpanel/v1/server.proto:36",
 	"/carbonpanel.v1.ServerService/CreateServer":                "internal/rbac/mapping.go:55; proto/carbonpanel/v1/server.proto:32",
 	"/carbonpanel.v1.ServerService/UpdateServer":                "internal/rbac/mapping.go:56; proto/carbonpanel/v1/server.proto:34",
 	"/carbonpanel.v1.ServerService/DeleteServer":                "internal/rbac/mapping.go:57; proto/carbonpanel/v1/server.proto:36",
