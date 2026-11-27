@@ -22,6 +22,12 @@ Already merged into main and not re-added: `#680` installed-mod update preview,
 | --- | --- | --- |
 | `8b8202b2d` | removed | The competing reviewed mod-update apply/scheduler stack: apply service, policy, fetcher test, staging candidate metadata and admission fields, scheduler mod-update task/claim, `TaskService` policy hunks, proto `ModUpdateSelection`/`StagedModUpdate`/`UpdateModRequest` fields 6-9/`UpdateModResponse` fields 2-3 and `TASK_TYPE_MOD_UPDATE`, regenerated Go/TS protobufs, and the review/stage UI (`mod-update-ui*.ts`, `server-mods-update.test.ts`, the server-mods update panel and automatic-policy accordion). |
 | `66c946cd8` | removed | ADR 0053 and the `mod-update-apply` decision concept. Rewrote `mod-update-panel-safety` as `Mod browser dependency planning guards`, keeping only the dependency-plan and install-context checks that remain. Removed the stale scheduler "policy revision claim" rule. |
+| `b84a3aaf3` | kept | Formatting-only follow-up: `gofmt` on the restored `TaskService`. |
+| `da3fc578d` | kept | Removed the last policy reference from the installed-mod preview comment. |
+
+This plan file is updated by the final docs commit after the four code commits
+above; the remaining changes in that commit are documentation and knowledge
+only.
 
 Primary sources removed: `a46a91da7`, `c8d8a476c`, the apply-specific hunks in
 `582aa1c17`, `95627a7ad` and `710491538`, and the server-mods update panel from
