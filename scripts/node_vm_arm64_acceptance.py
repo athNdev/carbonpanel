@@ -9,6 +9,12 @@ public node identity marker, and asserts that the two node IDs differ. The guest
 uses QEMU user-mode networking with ``restrict=on`` and no host forward; the
 driver asserts that effective argv before accepting a boot.
 
+An optional ``--disk-size`` (for example ``20G``) exercises the expanded-disk
+profile. Each boot disk is flattened from the pinned base, its GPT backup header
+is relocated to the new end before the guest boots, and the instance is accepted
+only when the helper reports that normalization, a matching virtual size, an
+unchanged base image and no stale-GPT/label/emergency marker in the serial log.
+
 It deliberately covers first-boot identity only. It does not mount the
 production controller listener, does not enroll against a live controller, and
 does not claim reboot persistence. The only uploaded output is a small,
@@ -28,6 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from scripts import node_vm_gpt as gpt  # noqa: E402
+
 NODE_ID_RE = re.compile(r"^node-[0-9a-f]{32}$")
 FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 SEED_INSTANCE_RE = re.compile(r"(?m)^instance-id:\s*([^\s#]+)\s*$")
@@ -140,10 +148,57 @@ def assert_restricted_user_network(command, label):
     return True
 
 
-def validate_instance_report(report, label, seed_evidence):
+def expanded_disk_evidence(gates, label, requested_size):
+    """Require the pre-boot GPT normalization and guest observation gates."""
+    expected = gpt.parse_disk_size(requested_size)
+    disk = gates.get("boot_disk") or {}
+    if disk.get("status") != "PASS":
+        raise AcceptanceError(
+            "%s: boot disk gate is %s" % (label, disk.get("status")))
+    if disk.get("mode") != "expanded-gpt":
+        raise AcceptanceError("%s: boot disk was not GPT-normalized" % label)
+    if disk.get("base_image_unchanged") is not True:
+        raise AcceptanceError("%s: base image was not proven unchanged" % label)
+    if disk.get("virtual_size") != expected:
+        raise AcceptanceError(
+            "%s: expanded disk virtual size is not the requested size" % label)
+    expansion = disk.get("gpt") or {}
+    if expansion.get("status") not in ("EXPANDED", "ALREADY_EXPANDED"):
+        raise AcceptanceError(
+            "%s: GPT normalization is %s" % (label, expansion.get("status")))
+    expected_last = expected // gpt.SECTOR_SIZE - 1
+    if expansion.get("new_last_lba") != expected_last:
+        raise AcceptanceError(
+            "%s: GPT backup header is not at the expanded disk end" % label)
+    guest = gates.get("expanded_disk_guest") or {}
+    if guest.get("status") != "PASS":
+        raise AcceptanceError(
+            "%s: expanded-disk guest observation is %s"
+            % (label, guest.get("status")))
+    if guest.get("failure_markers"):
+        raise AcceptanceError(
+            "%s: expanded-disk guest reported failure markers" % label)
+    return {
+        "mode": "expanded-gpt",
+        "requested_size": requested_size,
+        "virtual_size": expected,
+        "base_virtual_size": disk.get("base_virtual_size"),
+        "base_image_unchanged": True,
+        "gpt_status": expansion.get("status"),
+        "old_last_lba": expansion.get("old_last_lba"),
+        "new_last_lba": expansion.get("new_last_lba"),
+        "partition_count": expansion.get("partition_count"),
+        "guest_observation": guest.get("status"),
+    }
+
+
+def validate_instance_report(report, label, seed_evidence, disk_size=None):
     """Require the gate shapes this acceptance path depends on."""
     gates = report.get("gates") or {}
-    missing = [name for name in REQUIRED_GATES if name not in gates]
+    required = list(REQUIRED_GATES)
+    if disk_size:
+        required.append("expanded_disk_guest")
+    missing = [name for name in required if name not in gates]
     if missing:
         raise AcceptanceError("%s: missing gates: %s" % (label, ", ".join(missing)))
     for name in ("image_bytes_verified", "seed", "seed_iso", "firmware",
@@ -151,6 +206,7 @@ def validate_instance_report(report, label, seed_evidence):
         if gates[name].get("status") != "PASS":
             raise AcceptanceError(
                 "%s: gate %s is %s" % (label, name, gates[name].get("status")))
+    expanded = expanded_disk_evidence(gates, label, disk_size) if disk_size else None
     attempt = gates["boot_attempt"]
     if attempt.get("status") != "COMPLETED" or attempt.get("returncode") != 0:
         raise AcceptanceError(
@@ -212,21 +268,50 @@ def validate_instance_report(report, label, seed_evidence):
             "network_host_forward": False,
         },
         "serial_secret_scan": scan.get("status"),
+        "expanded_disk": expanded,
     }
 
 
-def build_receipt(head, arch, image, firmware, instances, toolchain=None, failed_phase=None):
+def build_receipt(head, arch, image, firmware, instances, toolchain=None,
+                  failed_phase=None, disk_size=None):
     both_booted = len(instances) == 2
     first_boot_identity = "PASS" if both_booted else "NOT_RUN"
     if failed_phase in ("first_boot_1", "first_boot_2"):
         first_boot_identity = "FAIL"
+    expanded_instances = [item.get("expanded_disk") for item in instances]
+    expanded_requested = disk_size is not None
+    expanded_pass = bool(
+        expanded_requested and both_booted
+        and all(isinstance(item, dict) and item.get("guest_observation") == "PASS"
+                and item.get("gpt_status") in ("EXPANDED", "ALREADY_EXPANDED")
+                for item in expanded_instances))
+    if expanded_requested:
+        limits = [
+            "expanded %s virtual disk; the backup GPT is relocated before boot, "
+            "but the guest's growpart/resize2fs result is not independently "
+            "inspected" % disk_size,
+        ]
+    else:
+        limits = [
+            "base 3.5 GiB virtual disk; the expanded 20 GiB arm64 profile is not qualified",
+        ]
+    limits.extend([
+        "first boots only; the guest may restart at the first-boot boundary, so no second boot or reboot-persistence claim",
+        "no production controller listener, live enrollment, mTLS or heartbeat",
+        "QEMU user-mode netdev used restrict=on with no host forward; effective network isolation is not proven",
+        "serial logs, seed ISOs, overlays, keys and secrets stay in the ephemeral runner",
+    ])
     receipt = {
-        "schema_version": 2,
+        "schema_version": 3,
         "purpose": "disposable arm64 UEFI/TCG first-boot identity acceptance",
         "head": head,
         "arch": arch,
         "image": image,
         "firmware": firmware,
+        "disk": {
+            "profile": "expanded" if expanded_requested else "base",
+            "requested_size": disk_size,
+        },
         "toolchain": toolchain or {},
         "instances": instances,
         "checks": {
@@ -244,16 +329,12 @@ def build_receipt(head, arch, image, firmware, instances, toolchain=None, failed
                 FINGERPRINT_RE.fullmatch(item.get("seed_iso", {}).get("sha256", "")) for item in instances),
             "distinct_node_ids": both_booted and len({item.get("node_id") for item in instances}) == 2,
             "distinct_instance_ids": both_booted and len({item.get("instance_id") for item in instances}) == 2,
+            "expanded_disk_gpt": ("PASS" if expanded_pass else "FAIL")
+            if expanded_requested else "NOT_RUN",
             "reboot_persistence": "NOT_RUN",
             "live_controller_enrollment": "NOT_RUN",
         },
-        "limits": [
-            "base 3.5 GiB virtual disk; the expanded 20 GiB arm64 profile is not qualified",
-            "first boots only; the guest may restart at the first-boot boundary, so no second boot or reboot-persistence claim",
-            "no production controller listener, live enrollment, mTLS or heartbeat",
-            "QEMU user-mode netdev used restrict=on with no host forward; effective network isolation is not proven",
-            "serial logs, seed ISOs, overlays, keys and secrets stay in the ephemeral runner",
-        ],
+        "limits": limits,
     }
     if failed_phase:
         receipt["failed_phase"] = failed_phase
@@ -282,6 +363,8 @@ def run_instance(args, instance_id, index):
         "--timeout", str(args.boot_timeout),
         "--restrict-user-network",
     ]
+    if args.disk_size:
+        cmd.extend(["--disk-size", args.disk_size])
     proc = subprocess.run(
         cmd, cwd=str(ROOT), capture_output=True, text=True,
         timeout=args.boot_timeout + 300, check=False)
@@ -300,7 +383,8 @@ def run_instance(args, instance_id, index):
     if report is None:
         raise AcceptanceError("%s: helper emitted no report" % label)
     seed_evidence = collect_seed_evidence(work_dir, instance_id)
-    result = validate_instance_report(report, label, seed_evidence)
+    result = validate_instance_report(
+        report, label, seed_evidence, disk_size=args.disk_size)
     serial = work_dir / "serial-console.log"
     if not serial.is_file():
         raise AcceptanceError("%s: serial log is missing" % label)
@@ -318,9 +402,21 @@ def main(argv=None):
     parser.add_argument("--workspace", required=True, type=Path)
     parser.add_argument("--head", required=True)
     parser.add_argument("--receipt", required=True, type=Path)
+    parser.add_argument(
+        "--disk-size",
+        help="optional expanded overlay virtual size (for example 20G); the "
+             "default keeps the base 3.5 GiB disk, and an empty value is ignored")
     parser.add_argument("--instance-id", action="append", dest="instance_ids")
     parser.add_argument("--boot-timeout", type=int, default=3000)
     args = parser.parse_args(argv)
+
+    disk_size = (args.disk_size or "").strip() or None
+    if disk_size:
+        try:
+            gpt.parse_disk_size(disk_size)
+        except gpt.GptError as exc:
+            parser.error(str(exc))
+    args.disk_size = disk_size
 
     instance_ids = tuple(args.instance_ids or DEFAULT_INSTANCE_IDS)
     if len(instance_ids) != 2:
@@ -389,7 +485,7 @@ def main(argv=None):
 
     receipt = build_receipt(
         args.head, "aarch64", image, firmware, instances,
-        toolchain=toolchain, failed_phase=failed_phase)
+        toolchain=toolchain, failed_phase=failed_phase, disk_size=disk_size)
     args.receipt.write_text(receipt, encoding="utf-8")
     print(receipt, end="")
     return 1 if failed_phase else 0

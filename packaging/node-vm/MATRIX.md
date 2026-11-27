@@ -5,9 +5,9 @@ Design targets only. No live host VM has been built or qualified in this lane.
 actual qualification requires the disposable owned-VM runs in
 `qualification/QUALIFICATION.md`. Disposable QEMU UEFI/TCG guest evidence exists
 for amd64 and for arm64 at the base 3.5 GiB disk size; the arm64 20 GiB
-expansion and every Proxmox/libvirt host remain unqualified. Upstream
-documentation claims are dated; this matrix does not assert tested
-compatibility.
+expansion (offline GPT normalization added, hosted boot pending) and every
+Proxmox/libvirt host remain unqualified. Upstream documentation claims are
+dated; this matrix does not assert tested compatibility.
 
 | Axis | Declared build target | Not supported / unknown |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ compatibility.
 | Guest distro | Ubuntu 24.04 LTS (Noble) released 20261017 cloud image, amd64 + arm64 (immutable dated URL) | Other distros and the moving `/release/` or `/current/` paths (never pins) |
 | Arch | amd64, arm64 (release targets per ADR0010) | s390x, riscv64, others |
 | Firmware | UEFI (OVMF/EFI) | Legacy BIOS (without an explicit separate target) |
-| Disposable QEMU guest | amd64 UEFI/TCG on i440fx and q35; arm64 UEFI/TCG on `virt` at the base 3.5 GiB size | arm64 20 GiB expansion, Secure Boot, Proxmox/libvirt host qualification |
+| Disposable QEMU guest | amd64 UEFI/TCG on i440fx and q35; arm64 UEFI/TCG on `virt` at the base 3.5 GiB size | arm64 20 GiB expansion (offline GPT correction only), Secure Boot, Proxmox/libvirt host qualification |
 | Disk format | QCOW2, 20 GiB sparse default | Raw, VMDK (out of scope) |
 | cloud-init datasource | NoCloud seed ISO (CIDATA) | ConfigDrive/other datasources until separately pinned |
 | qemu-img toolchain | 8.2.0 (pinned in build config) | Unpinned host qemu-img output is not claimed reproducible |

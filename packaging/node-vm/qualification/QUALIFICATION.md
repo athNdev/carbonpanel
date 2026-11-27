@@ -36,7 +36,7 @@ used only by offline tests; artifact mode fails closed on them.
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids + observed first-boot bundle for the qualified instance | Two concurrently live VMs with completed out-of-band registration |
 | Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
 | Controller mTLS, heartbeat and health | Linux-only controller/agent fixture: real production enrollment authority + real `agent.Run`, TLS 1.3 channel binding, scoped certificate, preflight/heartbeat, restart reuse, anonymous/unenrolled/cross-node/revoked refusals, fake-daemon pin | Guest-to-controller claim over a real VM network, a production-mounted control RPC and a real dockerd |
-| Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. Disposable arm64 QEMU `virt`/UEFI boots wrote root-only enrollment files, retained them across a QMP-driven clean reboot, and produced a different node ID for a second instance-id. | arm64 20 GiB expansion, Proxmox/libvirt host deployment and live standby recovery |
+| Clean boot and identity persistence | Disposable amd64 UEFI/TCG boots on both the base 3.5 GiB i440fx disk and a 20 GiB q35 overlay. The expanded profile resized ext4 and retained the enrollment bundle across a clean second boot. Disposable arm64 QEMU `virt`/UEFI boots wrote root-only enrollment files, retained them across a QMP-driven clean reboot, and produced a different node ID for a second instance-id. | arm64 20 GiB expansion (GPT normalization corrected offline; no hosted boot yet), Proxmox/libvirt host deployment and live standby recovery |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
 ## Current disposable-run evidence (2026-11-19 through 2026-11-26)
@@ -70,7 +70,10 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   instance with a distinct instance-id emitted the different node ID
   `node-8bd7872baf90ee073c7238d87d4f8730`. The 20 GiB arm64 expansion is not
   qualified because the guest did not find its BOOT/UEFI labels before
-  `growpart`; the amd64 20 GiB evidence is separate.
+  `growpart`; the amd64 20 GiB evidence is separate. The harness now expands a
+  read-only flattened copy and relocates the GPT backup header to the new end
+  before boot; that correction is offline-fixture-tested only and still needs a
+  hosted expanded boot (sections 19.3-19.4 of the boot report).
 - A Linux-only controller/agent fixture ran the real shared enrollment
   authority and `agent.Run` over loopback TLS 1.3. It passed challenge,
   TLS-bound claim, scoped mTLS, preflight/heartbeat, persisted-credential reuse
@@ -94,7 +97,8 @@ Summarised from [`VM-BOOT-QUALIFICATION.md`](VM-BOOT-QUALIFICATION.md) sections
   dispatched for this evidence.
 - `scripts/node_vm_boot_qual.py` now resolves OVMF/edk2 for UEFI (failing closed
   instead of falling back to BIOS), copies a fresh private variable store per
-  run, and can request an expanded qcow2 overlay. Each attempt requires a fresh
+  run, and prepares an expanded disk by flattening the base read-only and
+  relocating the GPT backup header before boot. Each attempt requires a fresh
   work directory: the helper reserves its outputs before writing a seed, overlay
   or report, refuses reuse without changing prior bytes, rejects unsupported
   target combinations before outputs, and persists launch-failure evidence.
@@ -113,8 +117,9 @@ worlds/backups from other installations are never touched.
    unique `node_id` for two VMs with different instance-ids. *Disposable amd64
    tests cover identity persistence across second boots in both disk profiles.
    Disposable arm64 tests cover a first boot, a clean reboot and a distinct
-   second instance-id at the base disk size. Concurrent VMs and the arm64 20 GiB
-   expansion remain open.*
+   second instance-id at the base disk size. The arm64 20 GiB expansion has an
+   offline GPT correction and a prepared hosted profile, but no expanded boot
+   yet. Concurrent VMs remain open.*
 2. **Enrollment refusal.** With the SHARED ADR0019 contract, verify a valid
    operator-approved key + fresh post-challenge signature enrolls; a mismatched
    key, replayed nonce, caller-declared fingerprint or CSR_PRE-as-proof is

@@ -195,9 +195,15 @@ test('node VM arm64 acceptance runs at exact same-repo PR heads without secrets'
   assert.match(source, /EVENT_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
   assert.match(source, /persist-credentials: false/);
   assert.match(source, /permissions:\n  contents: read/);
+  assert.match(source, /disk_size:\n/);
+  assert.match(source, /--disk-size "\$DISK_SIZE"/);
   assert.match(
     readFileSync(join(root, 'scripts', 'node_vm_arm64_acceptance.py'), 'utf8'),
     /--restrict-user-network/
+  );
+  assert.match(
+    readFileSync(join(root, 'scripts', 'node_vm_arm64_acceptance.py'), 'utf8'),
+    /--disk-size/
   );
   assert.equal((source.match(/secrets\./g) ?? []).length, 0);
 });

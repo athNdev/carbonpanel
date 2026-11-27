@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts import node_vm_arm64_acceptance as acceptance
@@ -63,6 +64,30 @@ def report(instance_id=INSTANCE_A, node_id=None, status="PASS"):
             "reboot_boundary": {"status": "OBSERVED"},
         },
     }
+
+
+def expanded_report(instance_id=INSTANCE_A, disk_size="20G"):
+    payload = report(instance_id=instance_id)
+    size = acceptance.gpt.parse_disk_size(disk_size)
+    payload["gates"]["boot_disk"] = {
+        "status": "PASS",
+        "mode": "expanded-gpt",
+        "size": disk_size,
+        "virtual_size": size,
+        "base_virtual_size": 3_758_096_384,
+        "base_image_unchanged": True,
+        "gpt": {
+            "status": "EXPANDED",
+            "old_last_lba": 7_340_031,
+            "new_last_lba": size // acceptance.gpt.SECTOR_SIZE - 1,
+            "new_last_usable_lba": size // acceptance.gpt.SECTOR_SIZE - 34,
+            "partition_count": 4,
+        },
+    }
+    payload["gates"]["expanded_disk_guest"] = {
+        "status": "PASS", "disk_size": disk_size, "failure_markers": [],
+    }
+    return payload
 
 
 class ParseTests(unittest.TestCase):
@@ -199,6 +224,59 @@ class ValidationTests(unittest.TestCase):
             acceptance.validate_instance_report(
                 payload, "instance-1", seed_evidence())
 
+    def test_accepts_expanded_profile_with_normalized_gpt(self):
+        result = acceptance.validate_instance_report(
+            expanded_report(), "instance-1", seed_evidence(), disk_size="20G")
+        self.assertEqual(result["expanded_disk"]["mode"], "expanded-gpt")
+        self.assertEqual(result["expanded_disk"]["gpt_status"], "EXPANDED")
+        self.assertEqual(result["expanded_disk"]["new_last_lba"], 41_943_039)
+        self.assertEqual(result["expanded_disk"]["guest_observation"], "PASS")
+        self.assertTrue(result["expanded_disk"]["base_image_unchanged"])
+
+    def test_rejects_expanded_profile_without_the_guest_gate(self):
+        payload = expanded_report()
+        del payload["gates"]["expanded_disk_guest"]
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "missing gates"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
+    def test_rejects_an_unnormalized_expanded_boot_disk(self):
+        payload = expanded_report()
+        payload["gates"]["boot_disk"] = {"status": "PASS", "mode": "backing"}
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "not GPT-normalized"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
+    def test_rejects_an_expanded_disk_whose_base_changed(self):
+        payload = expanded_report()
+        payload["gates"]["boot_disk"]["base_image_unchanged"] = False
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "proven unchanged"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
+    def test_rejects_an_expanded_disk_with_the_wrong_virtual_size(self):
+        payload = expanded_report()
+        payload["gates"]["boot_disk"]["virtual_size"] = 3_758_096_384
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "virtual size"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
+    def test_rejects_a_gpt_backup_header_that_is_not_at_the_end(self):
+        payload = expanded_report()
+        payload["gates"]["boot_disk"]["gpt"]["new_last_lba"] = 7_340_031
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "expanded disk end"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
+    def test_rejects_expanded_guest_failure_markers(self):
+        payload = expanded_report()
+        payload["gates"]["expanded_disk_guest"] = {
+            "status": "FAIL", "failure_markers": ["boot_label_failure"]}
+        with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "expanded-disk guest observation"):
+            acceptance.validate_instance_report(
+                payload, "instance-1", seed_evidence(), disk_size="20G")
+
 
 class ReceiptTests(unittest.TestCase):
     def _instance(self, instance_id=INSTANCE_A):
@@ -259,6 +337,27 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(receipt["checks"]["first_boot_identity"], "FAIL")
         self.assertFalse(receipt["checks"]["first_boot_completed"])
         self.assertFalse(receipt["checks"]["restricted_user_network"])
+        self.assertEqual(receipt["disk"]["profile"], "base")
+        self.assertEqual(receipt["checks"]["expanded_disk_gpt"], "NOT_RUN")
+
+    def test_expanded_receipt_records_the_gpt_profile_and_limits(self):
+        first = acceptance.validate_instance_report(
+            expanded_report(INSTANCE_A), "instance", seed_evidence(INSTANCE_A),
+            disk_size="20G")
+        second = acceptance.validate_instance_report(
+            expanded_report(INSTANCE_B), "instance", seed_evidence(INSTANCE_B),
+            disk_size="20G")
+        receipt = json.loads(acceptance.build_receipt(
+            "a" * 40, "aarch64", {"sha256": "b" * 64, "verified": True},
+            {}, [first, second], disk_size="20G"))
+        self.assertEqual(receipt["disk"],
+                         {"profile": "expanded", "requested_size": "20G"})
+        self.assertEqual(receipt["checks"]["expanded_disk_gpt"], "PASS")
+        self.assertIn("growpart", receipt["limits"][0])
+        self.assertEqual(receipt["instances"][0]["expanded_disk"]["new_last_lba"],
+                         41_943_039)
+        self.assertNotIn("serial-console.log", json.dumps(receipt))
+        self.assertNotIn("PRIVATE KEY", json.dumps(receipt))
 
 class ShaTests(unittest.TestCase):
     def test_sha256_file(self):
@@ -268,6 +367,42 @@ class ShaTests(unittest.TestCase):
             self.assertEqual(
                 acceptance.sha256_file(path),
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+
+
+class InstanceCommandTests(unittest.TestCase):
+    def _run(self, disk_size):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "run" / "instance-1"
+            work.mkdir(parents=True)
+            (work / "serial-console.log").write_bytes(b"serial evidence")
+            args = SimpleNamespace(
+                image=root / "image", sha256sums=root / "sums",
+                workspace=root / "run", head="a" * 40,
+                receipt=root / "receipt.json", boot_timeout=30,
+                disk_size=disk_size)
+            proc = subprocess.CompletedProcess(
+                [], 0, json.dumps(report()) + "\n", "")
+            with patch.object(acceptance.subprocess, "run",
+                              return_value=proc) as run, \
+                    patch.object(acceptance, "collect_seed_evidence",
+                                 return_value=seed_evidence()), \
+                    patch.object(acceptance, "validate_instance_report",
+                                 return_value={"node_id": node_id_for(INSTANCE_A)}) as validate:
+                result = acceptance.run_instance(args, INSTANCE_A, 1)
+            return run.call_args.args[0], validate.call_args, result
+
+    def test_base_profile_does_not_pass_a_disk_size(self):
+        command, validate, result = self._run(None)
+        self.assertNotIn("--disk-size", command)
+        self.assertIsNone(validate.kwargs["disk_size"])
+        self.assertIn("serial_console", result)
+
+    def test_expanded_profile_forwards_the_disk_size(self):
+        command, validate, _result = self._run("20G")
+        self.assertIn("--disk-size", command)
+        self.assertEqual(command[command.index("--disk-size") + 1], "20G")
+        self.assertEqual(validate.kwargs["disk_size"], "20G")
 
 
 class CliTests(unittest.TestCase):

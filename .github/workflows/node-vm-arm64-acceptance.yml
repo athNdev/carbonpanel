@@ -17,6 +17,11 @@ on:
         description: Optional full commit SHA that must match the dispatched event SHA
         required: false
         type: string
+      disk_size:
+        description: Optional expanded overlay size (for example 20G); empty keeps the base 3.5 GiB disk
+        required: false
+        default: ""
+        type: string
   # A same-repository draft can collect hosted evidence at its exact PR head
   # before merge; workflow_dispatch alone would require this file on the default
   # branch. The job guard below refuses fork PRs, and no secret is used.
@@ -27,6 +32,8 @@ on:
       - 'scripts/test_node_vm_arm64_acceptance.py'
       - 'scripts/node_vm_boot_qual.py'
       - 'scripts/test_node_vm_boot_qual.py'
+      - 'scripts/node_vm_gpt.py'
+      - 'scripts/test_node_vm_gpt.py'
       - 'scripts/node_vm_build.py'
       - 'scripts/node_vm_verify_image.py'
       - 'packaging/node-vm/**'
@@ -98,6 +105,7 @@ jobs:
         env:
           WORK: ${{ runner.temp }}/node-vm-arm64
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DISK_SIZE: ${{ inputs.disk_size }}
         run: |
           set -euo pipefail
           python3 scripts/node_vm_arm64_acceptance.py \
@@ -105,6 +113,7 @@ jobs:
             --sha256sums "$WORK/inputs/SHA256SUMS" \
             --workspace "$WORK/run" \
             --head "$HEAD_SHA" \
+            --disk-size "$DISK_SIZE" \
             --receipt "$WORK/receipt.json"
 
       - name: Upload the redacted receipt only

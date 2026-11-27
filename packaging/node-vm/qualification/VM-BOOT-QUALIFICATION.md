@@ -5,7 +5,9 @@ available. Sections 12 onward record the later QEMU results. The runtime
 publication entry point still emits an offline plan. These boots use disposable
 overlays of the pinned upstream image and a generated NoCloud seed. Section 18
 adds the arm64 `virt`/UEFI run; it does not replace the amd64 evidence. Section
-18.7 records the exact-PR-head hosted path prepared for this evidence.
+18.7 records the exact-PR-head hosted path prepared for this evidence. Section
+19 records the later offline correction for the expanded arm64 disk and the
+prepared expanded acceptance profile; it adds no boot evidence.
 
 The shipped `carbon-node` command is a preflight/doctor CLI, and the Panel's
 `NodeControlService` is deliberately unmounted. Managed-node mTLS enrollment,
@@ -615,7 +617,8 @@ The kernel reported the original GPT alternate header at the base image end
 enrollment completed. That attempt's serial SHA256 was
 `b8f064df9164436cc3700713a11d15ba6b65e5a14c9e59e40da79770d8236681`. The
 successful arm64 runs therefore use the base 3.5 GiB virtual size. The expanded
-20 GiB path remains qualified on amd64 only (section 16), not on arm64.
+20 GiB path remains qualified on amd64 only (section 16), not on arm64. Section
+19 records the later harness correction; this failure result stands as recorded.
 
 ### 18.2 First-boot identity and root-only enrollment files
 
@@ -764,3 +767,77 @@ it is a prepared path, not hosted CI evidence.
 The local base-sized arm64 evidence in 18.1-18.5 remains local evidence. The
 expanded 20 GiB arm64 profile (18.1), the deployed controller listener, a real
 private daemon, Proxmox VE and the generic libvirt/KVM host matrix remain open.
+
+## 19. 2026-11-27 harness correction for the expanded arm64 disk (no guest run)
+
+No image, guest, host, registry or release was touched. This section diagnoses
+the failure recorded in 18.1 and narrows it to a reproducible input defect.
+
+### 19.1 What the retained run shows
+
+The expanded arm64 attempt presented a 20 GiB QCOW2 virtual size whose GPT still
+described the pinned 3.5 GiB base image: the primary header kept
+`alternate_lba=7340031` and the base image's usable-range end, and the backup
+header stayed at LBA 7,340,031, while the disk end was LBA 41,943,039. The
+serial log recorded that mismatch and then `/dev/disk/by-label/BOOT` and
+`/dev/disk/by-label/UEFI` timeouts before `growpart`, ending in emergency mode.
+`qemu-img create -b base.qcow2 overlay.qcow2 20G` changes only the virtual size;
+it does not rewrite the guest partition table. Base-sized runs never present a
+mismatch, and the previously qualified amd64 20 GiB run used the same
+unnormalized input. The retained text does not fully explain why arm64 surfaced
+the failure while amd64 tolerated the same table; the correction removes the
+inconsistent geometry on both architectures instead of relying on that
+tolerance.
+
+### 19.2 Correction
+
+`prepare_overlay(..., size=...)` in `scripts/node_vm_boot_qual.py` now:
+
+1. reads the base virtual size and format with `qemu-img info`;
+2. converts the pinned base **read-only** to a raw copy in the owned attempt
+   directory;
+3. validates the protective MBR, both GPT headers, entry CRCs and existing
+   partition bounds, then rewrites only the protective MBR size, the primary
+   `alternate_lba`/`last_usable_lba`, the relocated backup entry array and the
+   relocated backup header at the new end (`scripts/node_vm_gpt.py`);
+4. converts the raw copy to a standalone qcow2, runs `qemu-img check`, confirms
+   the virtual size, and refuses if the base image's size or mtime changed;
+5. deletes the raw intermediate and records the geometry in `boot_disk.gpt` in
+   the attempt report.
+
+The guest still runs `growpart`/`resize2fs`; the helper does not mount, inspect
+or resize a host device. The base 3.5 GiB path is unchanged (same backing
+overlay). The serial scan now records `gpt_backup_header_mismatch`,
+`boot_label_failure` and `emergency_mode`; an expanded attempt whose log has any
+of them fails the `expanded_disk_guest` gate and exits non-zero.
+
+### 19.3 Offline evidence only
+
+`python -m unittest discover -s scripts -p 'test_node_vm_*.py'` covers GPT
+expansion and refusal cases (shrink, non-GPT, MBR/GPT CRC or entry mismatch,
+header at the wrong LBA, unaligned size), base-image preservation, the serial
+gates, and the expanded acceptance receipt. Those fixtures are synthetic: **no
+boot was performed in this lane, and the arm64 20 GiB profile remains
+unqualified.** The new code path has not been exercised against a real qcow2.
+
+### 19.4 Exact-head hosted experiment (prepared, not dispatched)
+
+The arm64 workflow now takes an optional `disk_size` dispatch input and passes
+it to the acceptance driver. The base profile stays the default, and an expanded
+receipt is accepted only when the helper reports the normalization, a matching
+virtual size, an unchanged base image and no stale-GPT/label/emergency marker:
+
+```sh
+python3 scripts/node_vm_arm64_acceptance.py \
+  --image <pinned arm64 image> --sha256sums <pinned SHA256SUMS> \
+  --workspace <owned dir> --head <full lowercase head> \
+  --disk-size 20G --receipt <owned>/receipt.json
+```
+
+An accepted expanded receipt must show `disk.profile=expanded`,
+`checks.expanded_disk_gpt=PASS`, `expanded_disk.new_last_lba=41943039`,
+`base_image_unchanged=true` for both instances, plus the normal first-boot
+identity checks. The same profile can be dispatched against the PR branch with
+`-f disk_size=20G -f expected_sha=<head>`; the job already asserts that the
+checked-out head is the event SHA. Until such a receipt exists at an exact head,
+only the base 3.5 GiB arm64 evidence in 18.1-18.5 is qualified.
