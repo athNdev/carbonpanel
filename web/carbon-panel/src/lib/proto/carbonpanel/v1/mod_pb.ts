@@ -255,7 +255,9 @@ export type StagedModUpdate = Message<'carbonpanel.v1.StagedModUpdate'> & {
 	stagedId: string;
 
 	/**
-	 * staged, refused_drift, refused_provider, refused_download, refused_checksum, error
+	 * staged, already_staged, already_selected, retryable, transient_download,
+	 * refused_drift, refused_provider, refused_download, refused_checksum,
+	 * refused_stale_preview, refused_limit, error
 	 *
 	 * @generated from field: string outcome = 4;
 	 */

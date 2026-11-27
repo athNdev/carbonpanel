@@ -393,12 +393,15 @@ func (x *ModUpdateSelection) GetCandidateFilename() string {
 
 // Per-selection outcome of a staging request.
 type StagedModUpdate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModId         string                 `protobuf:"bytes,1,opt,name=mod_id,json=modId,proto3" json:"mod_id,omitempty"`
-	FileName      string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
-	StagedId      string                 `protobuf:"bytes,3,opt,name=staged_id,json=stagedId,proto3" json:"staged_id,omitempty"`
-	Outcome       string                 `protobuf:"bytes,4,opt,name=outcome,proto3" json:"outcome,omitempty"` // staged, refused_drift, refused_provider, refused_download, refused_checksum, error
-	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	ModId    string                 `protobuf:"bytes,1,opt,name=mod_id,json=modId,proto3" json:"mod_id,omitempty"`
+	FileName string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	StagedId string                 `protobuf:"bytes,3,opt,name=staged_id,json=stagedId,proto3" json:"staged_id,omitempty"`
+	// staged, already_staged, already_selected, retryable, transient_download,
+	// refused_drift, refused_provider, refused_download, refused_checksum,
+	// refused_stale_preview, refused_limit, error
+	Outcome       string `protobuf:"bytes,4,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Reason        string `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
