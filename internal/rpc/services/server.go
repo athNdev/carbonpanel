@@ -452,21 +452,34 @@ func (s *ServerService) auditServerDelete(ctx context.Context, ip string, server
 }
 
 func (s *ServerService) auditServerLifecycle(ctx context.Context, ip, event, serverID, requestID string) {
-	actorID, actorName := "", ""
-	if u := auth.GetUserFromContext(ctx); u != nil {
-		actorID, actorName = u.ID, u.Username
-	}
-	if err := activity.Log(s.store.DB(), activity.Entry{
-		ActorID:    actorID,
-		ActorName:  actorName,
+	s.audit(ctx, auditFields{
 		IP:         ip,
 		Event:      event,
 		SubjectTyp: "server",
 		SubjectID:  serverID,
-		RequestID:  strings.TrimSpace(requestID),
-	}); err != nil {
-		s.log.Error("Audit log failed for %s: %v", event, err)
+		RequestID:  requestID,
+	}, nil)
+}
+
+// auditServerCommand records one attempted console command. It is called only
+// after the request passed lookup, running-state and argument validation, and
+// covers both a successful and a failed send.
+func (s *ServerService) auditServerCommand(ctx context.Context, ip, serverID, command string, silent, success bool, sendErr error) {
+	properties := map[string]any{
+		"command": command,
+		"silent":  silent,
+		"success": success,
 	}
+	if sendErr != nil {
+		properties["error"] = sendErr.Error()
+	}
+	s.audit(ctx, auditFields{
+		IP:         ip,
+		Event:      activity.EventServerCommand,
+		SubjectTyp: "server",
+		SubjectID:  serverID,
+		ServerID:   serverID,
+	}, properties)
 }
 
 // auditPrivilegedOverrides records an immutable audit log entry whenever privileged
@@ -475,26 +488,15 @@ func (s *ServerService) auditPrivilegedOverrides(ctx context.Context, ip, server
 	if !docker.IsPrivilegedDockerOverride(overrides) {
 		return
 	}
-	actorID, actorName := "", ""
-	if u := auth.GetUserFromContext(ctx); u != nil {
-		actorID, actorName = u.ID, u.Username
-	}
-	fields := docker.PrivilegedOverrideFields(overrides)
-	propsJSON, _ := json.Marshal(map[string]any{
-		"action":          "grant_docker_privileged_overrides",
-		"override_fields": fields,
-	})
-	if err := activity.Log(s.store.DB(), activity.Entry{
-		ActorID:    actorID,
-		ActorName:  actorName,
+	s.audit(ctx, auditFields{
 		IP:         ip,
 		Event:      activity.EventServerPrivilegedOverrides,
 		SubjectTyp: "server",
 		SubjectID:  serverID,
-		Properties: string(propsJSON),
-	}); err != nil {
-		s.log.Error("Audit log failed for %s: %v", activity.EventServerPrivilegedOverrides, err)
-	}
+	}, map[string]any{
+		"action":          "grant_docker_privileged_overrides",
+		"override_fields": docker.PrivilegedOverrideFields(overrides),
+	})
 }
 
 // auditServerImage records a requested image change and whether the daemon
@@ -3299,6 +3301,7 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 	// Send command
 	output, err := s.sender.SendCommand(ctx, server.ID, req.Msg.Command)
 	success := err == nil
+	s.auditServerCommand(ctx, req.Peer().Addr, server.ID, req.Msg.Command, silent, success, err)
 
 	// Add command output to log stream if available
 	if !silent && s.logStreamer != nil && (output != "" || !success) {

@@ -27,6 +27,13 @@ response. Clearing stored credentials is a separate named, confirmed,
 ordinary edits never clear. The daemon pool reads stored material from the
 database. See [ADR 0018](../../docs/adr/0018-node-response-redaction.md).
 
+Server console commands are audited only after the server lookup, running-state
+check and non-empty command validation, so an invalid lookup or argument writes
+no row. One `server.command` activity row records the actor, the server id, the
+silent flag and the send outcome, with an error string only when sending failed.
+The command text is capped at 512 bytes; an audit write failure is logged and
+never changes the RPC response or the log stream.
+
 Node discovery is the first compatibility migration: both transports use the
 same twelve-second scan and best-effort known-node count. ScanNodes requires
 nodes/read globally; the compatibility route preserves numeric JSON fields and
