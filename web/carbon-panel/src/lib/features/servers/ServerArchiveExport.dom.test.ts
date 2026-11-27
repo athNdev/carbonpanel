@@ -29,10 +29,11 @@ mock.module('$app/state', () => ({
 	page: { url: new URL('http://localhost/'), params: {}, data: {} }
 }));
 const toasts: string[] = [];
+const successToasts: string[] = [];
 mock.module('svelte-sonner', () => ({
 	toast: {
 		error: (message: unknown) => toasts.push(String(message)),
-		success: () => {}
+		success: (message: unknown) => successToasts.push(String(message))
 	}
 }));
 
@@ -111,6 +112,71 @@ async function prepare() {
 	assert.ok(button, 'prepare is available');
 	button.click();
 	await flush();
+}
+
+async function readyArchive(sessionId = 'server-a-session', filename = 'alpha.zip') {
+	(rpcClient.server as unknown as Record<string, unknown>).exportServerArchive = () =>
+		Promise.resolve({ sessionId, filename, totalSize: 2n });
+	await prepare();
+	assert.ok(
+		document.querySelector('[data-testid="archive-export-ready"]'),
+		'the archive is ready before the download is attempted'
+	);
+}
+
+async function acknowledgeDisclosure() {
+	const checkbox = document.querySelector<HTMLInputElement>(
+		'[data-testid="archive-disclosure"] input[type="checkbox"]'
+	);
+	assert.ok(checkbox, 'the disclosure checkbox is rendered');
+	checkbox.click();
+	await flush();
+	assert.equal(checkbox.checked, true, 'the disclosure is acknowledged');
+}
+
+function clickDownload() {
+	const button = document.querySelector<HTMLButtonElement>('[data-testid="archive-download"]');
+	assert.ok(button, 'download is available');
+	assert.equal(button.disabled, false, 'an acknowledged download is enabled');
+	button.click();
+}
+
+function headResponse(status: number) {
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		return Promise.resolve(new Response(null, { status }));
+	}) as typeof fetch;
+	return calls;
+}
+
+function deferredHead() {
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	let respond!: (status: number) => void;
+	globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		return new Promise<Response>((resolve) => {
+			respond = (status: number) => resolve(new Response(null, { status }));
+		});
+	}) as typeof fetch;
+	return { calls, respond: (status: number) => respond(status) };
+}
+
+function spyAnchorClicks() {
+	const clicks: Array<{ href: string; download: string }> = [];
+	const original = HTMLAnchorElement.prototype.click;
+	HTMLAnchorElement.prototype.click = function () {
+		clicks.push({
+			href: this.getAttribute('href') ?? '',
+			download: this.getAttribute('download') ?? ''
+		});
+	};
+	return {
+		clicks,
+		restore() {
+			HTMLAnchorElement.prototype.click = original;
+		}
+	};
 }
 
 test('close/reopen fences a stale success and keeps the current tar.gz session', async () => {
@@ -390,4 +456,122 @@ test('unmounting fences a preparation that settles after teardown', async () => 
 	calls[0].resolve({ sessionId: 'late-session', filename: 'late.zip', totalSize: 1n });
 	await flush();
 	assert.equal(document.querySelector('[data-testid="archive-export-ready"]'), null);
+});
+
+test('a refused download preflight reports the status and keeps the modal open', async () => {
+	toasts.length = 0;
+	successToasts.length = 0;
+	const anchor = spyAnchorClicks();
+	const fetchCalls = headResponse(403);
+	const ui = mountExport();
+	try {
+		await openExport();
+		await readyArchive();
+		await acknowledgeDisclosure();
+		clickDownload();
+		await flush();
+
+		assert.equal(fetchCalls.length, 1, 'the download is preflighted once');
+		assert.equal(fetchCalls[0].url, '/api/v1/download/server-a-session');
+		assert.equal(fetchCalls[0].init?.method, 'HEAD');
+		assert.equal(fetchCalls[0].init?.credentials, 'same-origin');
+		assert.deepEqual(toasts, ['Archive download was refused (HTTP 403).']);
+		assert.deepEqual(successToasts, [], 'a refused download never claims it started');
+		assert.equal(anchor.clicks.length, 0, 'a refused download must not click the anchor');
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-panel"]'),
+			'the modal stays open for a refusal'
+		);
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-ready"]'),
+			'the ready archive stays available to retry'
+		);
+		const checkbox = document.querySelector<HTMLInputElement>(
+			'[data-testid="archive-disclosure"] input[type="checkbox"]'
+		);
+		assert.equal(checkbox?.checked, true, 'the acknowledgement survives the refusal');
+		const button = document.querySelector<HTMLButtonElement>('[data-testid="archive-download"]');
+		assert.equal(button?.disabled, false, 'the operator can retry after a refusal');
+	} finally {
+		ui.unmount();
+		anchor.restore();
+		globalThis.fetch = realFetch;
+	}
+});
+
+test('an accepted download preflight starts the download once and closes the modal', async () => {
+	toasts.length = 0;
+	successToasts.length = 0;
+	const anchor = spyAnchorClicks();
+	const fetchCalls = headResponse(200);
+	const ui = mountExport();
+	try {
+		await openExport();
+		await readyArchive();
+		await acknowledgeDisclosure();
+		clickDownload();
+		await flush();
+
+		assert.equal(fetchCalls.length, 1, 'the download is preflighted once');
+		assert.equal(fetchCalls[0].init?.method, 'HEAD');
+		assert.deepEqual(toasts, []);
+		assert.deepEqual(successToasts, ['Archive download started.']);
+		assert.deepEqual(anchor.clicks, [
+			{ href: '/api/v1/download/server-a-session', download: 'alpha.zip' }
+		]);
+		assert.equal(
+			document.querySelector('[data-testid="archive-export-panel"]'),
+			null,
+			'an accepted download closes the modal'
+		);
+	} finally {
+		ui.unmount();
+		anchor.restore();
+		globalThis.fetch = realFetch;
+	}
+});
+
+test('a stale refused preflight cannot toast or close a reopened dialog', async () => {
+	toasts.length = 0;
+	successToasts.length = 0;
+	const anchor = spyAnchorClicks();
+	const pending = deferredHead();
+	const ui = mountExport();
+	try {
+		await openExport();
+		await readyArchive();
+		await acknowledgeDisclosure();
+		clickDownload();
+		await flush();
+		assert.equal(pending.calls.length, 1, 'the download preflight is in flight');
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await flush();
+		assert.equal(document.querySelector('[data-testid="archive-export-panel"]'), null);
+
+		await openExport();
+		await readyArchive();
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-ready"]'),
+			'the reopened dialog is ready'
+		);
+
+		pending.respond(403);
+		await flush();
+		assert.deepEqual(toasts, [], 'a stale refusal must not toast');
+		assert.deepEqual(successToasts, [], 'a stale refusal must not claim success');
+		assert.equal(anchor.clicks.length, 0);
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-panel"]'),
+			'a stale refusal must not close the new dialog'
+		);
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-ready"]'),
+			'the new dialog keeps its own ready archive'
+		);
+	} finally {
+		ui.unmount();
+		anchor.restore();
+		globalThis.fetch = realFetch;
+	}
 });

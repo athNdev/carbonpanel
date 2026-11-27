@@ -212,6 +212,16 @@ export const rpcClient = {
 				totalSize: 1048576n
 			};
 			const mode = globalThis.__exportMode || 'success';
+			if (mode === 'refused') {
+				// A ready archive whose scoped download is refused by the fixture
+				// download handler (HTTP 403), so the UI must preflight before
+				// claiming the download started.
+				return Promise.resolve({
+					sessionId: 'export-session-refused',
+					filename: 'fixture-server-refused.zip',
+					totalSize: 1048576n
+				});
+			}
 			if (mode === 'fail') {
 				return Promise.reject(
 					new ConnectError('fixture export preparation refusal', Code.Internal)

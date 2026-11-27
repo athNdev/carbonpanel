@@ -131,7 +131,8 @@ const evidence = {
   previews: [],
   network: {
     pageXhrOrFetch: [],
-    note: "No browser XHR/fetch request is issued for archive preview or create: both go through the seeded in-process rpc-client, so no preview HTTP status can be recorded. Archive downloads are the only HTTP transfers and are recorded in downloads/downloadRefusals.",
+    downloadPreflights: [],
+    note: "No browser XHR/fetch request is issued for archive preview or create: both go through the seeded in-process rpc-client, so no preview HTTP status can be recorded. Archive downloads are the only HTTP transfers: each authorized or refused download now starts with a same-origin HEAD preflight, recorded here, and successful preflights are followed by the ordinary browser GET recorded in downloads/downloadRefusals.",
   },
   downloads: [],
   unacknowledged: [],
@@ -140,6 +141,7 @@ const evidence = {
   checks: {
     pageErrors: [],
     consoleErrors: [],
+    expectedRefusalConsoleErrors: [],
     overflow: [],
     contrast: [],
     clipping: [],
@@ -152,6 +154,7 @@ const evidence = {
 const artifacts = [];
 const downloadRequests = [];
 const pageRequests = [];
+const preflightRequests = [];
 let base = "";
 let server;
 let browser;
@@ -745,6 +748,7 @@ async function recordRefusedDownload(page, view, label) {
   const record = {
     view: view.name,
     label,
+    source: "page.context().request.get(...) outside the UI",
     url: `${base}/api/v1/download/export-session-refused`.replace(
       base,
       "<review-base>",
@@ -913,6 +917,89 @@ async function exerciseDetail(page, view) {
   await page.getByTestId("archive-download").click();
   await recordDownload(page, await zipDownload, view, "zip");
   await panel.waitFor({ state: "hidden" });
+
+  // The fixture prepares a real ready archive but its download handler refuses
+  // export-session-refused with HTTP 403. The UI must preflight that scoped
+  // download, report the refusal and keep the modal open instead of toasting a
+  // started transfer. No 403 is faked in the browser. Reloading first clears the
+  // earlier success toasts so "no success toast" is measured from an empty tray.
+  await page.goto(`${base}/detail.html`, { waitUntil: "domcontentloaded" });
+  await waitForDetail(page);
+  await applyTheme(page, view.theme, `detail ${view.name} refused download`);
+  await page.evaluate(() => {
+    globalThis.__exportMode = "refused";
+  });
+  await openExportWithKeyboard(page, `detail ${view.name} refused download`);
+  await page.getByTestId("archive-prepare").click();
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await page
+    .getByLabel("I have reviewed this notice before downloading.")
+    .check();
+  const refusalBefore = downloadRequests.length;
+  await page.getByTestId("archive-download").click();
+  const refusalToast = page.getByText(
+    "Archive download was refused (HTTP 403).",
+  );
+  await refusalToast.waitFor({ timeout: 15_000 });
+  assert.ok(
+    await refusalToast.isVisible(),
+    "the refused download must show its HTTP status",
+  );
+  assert.ok(
+    await panel.isVisible(),
+    "a refused download must keep the export modal open",
+  );
+  assert.ok(
+    await page.getByTestId("archive-export-ready").isVisible(),
+    "a refused download must keep the ready archive available to retry",
+  );
+  assert.equal(
+    await page
+      .getByLabel("I have reviewed this notice before downloading.")
+      .isChecked(),
+    true,
+    "a refused download must keep the disclosure acknowledged",
+  );
+  assert.equal(
+    await page.getByTestId("archive-download").isDisabled(),
+    false,
+    "the operator can retry the refused download",
+  );
+  assert.equal(
+    await page.getByText("Archive download started.").count(),
+    0,
+    "a refused download must not claim it started",
+  );
+  const refusedRequests = downloadRequests.slice(refusalBefore);
+  assert.deepEqual(
+    refusedRequests,
+    [
+      {
+        sessionId: "export-session-refused",
+        method: "HEAD",
+        status: 403,
+        bytes: 0,
+      },
+    ],
+    "the refusal is preflighted with HEAD and never triggers the GET download",
+  );
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-download-refused",
+    view,
+    target: panel,
+  });
+  evidence.downloadRefusals.push({
+    view: view.name,
+    label: `detail ${view.name} refused download`,
+    source: "page HEAD preflight from the real ServerArchiveExport component",
+    requests: refusedRequests,
+    toast: "Archive download was refused (HTTP 403).",
+    modalOpen: true,
+    acknowledged: true,
+    successToast: false,
+  });
+  await closeExportWithKeyboard(page, `detail ${view.name} refused download`);
 
   await openExportWithKeyboard(page, `detail ${view.name} error`);
   await page.evaluate(() => {
@@ -1577,14 +1664,39 @@ try {
       page.setDefaultTimeout(60_000);
       const pageErrors = [];
       const consoleErrors = [];
+      const expectedRefusalErrors = [];
       const viewRequests = [];
+      const viewPreflights = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("console", (message) => {
-        if (message.type() === "error") consoleErrors.push(message.text());
+        if (message.type() !== "error") return;
+        // Chromium logs every non-2xx fetch as a resource error. The refused
+        // preflight is the intended 403 under test, so record it separately
+        // instead of either hiding it or failing the unexpected-error check.
+        const url = (message.location()?.url ?? "").replace(
+          base,
+          "<review-base>",
+        );
+        const text = message.text();
+        if (
+          url.endsWith("/api/v1/download/export-session-refused") &&
+          /status of 403/.test(text)
+        ) {
+          expectedRefusalErrors.push({
+            view: view.name,
+            message: text,
+            url,
+            expected:
+              "the fixture refuses export-session-refused with HTTP 403",
+          });
+          return;
+        }
+        consoleErrors.push(text);
       });
       // The fixture replaces the RPC transport, so archive preview and create
-      // must not issue any browser XHR/fetch. Recording it keeps the "no HTTP
-      // status at this seam" statement checkable instead of assumed.
+      // must not issue any browser XHR/fetch. The download preflight is the one
+      // intended browser fetch: record it separately so the "no HTTP status at
+      // this seam" statement for preview/create stays checkable.
       page.on("request", (request) => {
         const type = request.resourceType();
         if (type !== "xhr" && type !== "fetch") return;
@@ -1594,6 +1706,11 @@ try {
           url: request.url().replace(base, "<review-base>"),
           resourceType: type,
         };
+        if (entry.url.startsWith("<review-base>/api/v1/download/")) {
+          viewPreflights.push(entry);
+          preflightRequests.push(entry);
+          return;
+        }
         viewRequests.push(entry);
         pageRequests.push(entry);
       });
@@ -1613,6 +1730,9 @@ try {
         for (const message of consoleErrors) {
           evidence.checks.consoleErrors.push({ view: view.name, message });
         }
+        for (const entry of expectedRefusalErrors) {
+          evidence.checks.expectedRefusalConsoleErrors.push(entry);
+        }
         await page.close();
       }
       assert.deepEqual(
@@ -1627,14 +1747,37 @@ try {
         [],
         `${view.name}: console errors`,
       );
+      assert.equal(
+        expectedRefusalErrors.length,
+        1,
+        `${view.name}: the refused preflight logs exactly one expected 403 resource error`,
+      );
       assert.deepEqual(
         viewRequests,
         [],
         `${view.name}: the fixture must not issue browser XHR/fetch for preview or create`,
       );
+      assert.deepEqual(
+        viewPreflights.filter((entry) => entry.method !== "HEAD"),
+        [],
+        `${view.name}: every download preflight must be a HEAD`,
+      );
+      assert.ok(
+        viewPreflights.length >= 3,
+        `${view.name}: the tar.gz, ZIP and refused downloads must preflight`,
+      );
     }
     evidence.downloadRequests = downloadRequests;
     evidence.network.pageXhrOrFetch = pageRequests;
+    evidence.network.downloadPreflights = preflightRequests;
+    assert.ok(
+      preflightRequests.some(
+        (entry) =>
+          entry.method === "HEAD" &&
+          entry.url.endsWith("/api/v1/download/export-session-refused"),
+      ),
+      "the refused download must be preflighted through the UI",
+    );
     assert.deepEqual(
       pageRequests,
       [],
@@ -1652,13 +1795,13 @@ try {
   );
   await assertArtifactsComplete();
   console.log(
-    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, measured 40px Carbon md export actions, authenticated ZIP and tar.gz downloads, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks",
+    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, measured 40px Carbon md export actions, authenticated ZIP and tar.gz downloads, HEAD-preflighted refused download that keeps the modal open, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks; the only console entry is the expected Chromium 403 resource log for the refused preflight",
   );
   console.log(
     `CONTROLS: ${evidence.controls.map((control) => `${control.label}=${control.height}px`).join("; ")}`,
   );
   console.log(
-    `PREVIEWS: ${evidence.previews.length} previewServerArchive outcomes recorded from the seeded in-process rpc-client (resolved/failed + Connect error code); no preview HTTP status exists at this seam and none is claimed. Browser XHR/fetch requests: ${pageRequests.length}.`,
+    `PREVIEWS: ${evidence.previews.length} previewServerArchive outcomes recorded from the seeded in-process rpc-client (resolved/failed + Connect error code); no preview HTTP status exists at this seam and none is claimed. Non-download browser XHR/fetch requests: ${pageRequests.length}; download preflights: ${preflightRequests.length}.`,
   );
 } catch (error) {
   await fs.mkdir(out, { recursive: true }).catch(() => {});

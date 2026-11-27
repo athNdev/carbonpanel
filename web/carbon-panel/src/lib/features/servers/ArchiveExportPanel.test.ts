@@ -45,6 +45,7 @@ function baseProps() {
 		disclosureDetail: ARCHIVE_CREDENTIAL_DISCLOSURE_DETAIL,
 		consistencyText: archiveConsistencyLabel(ServerArchiveConsistency.STOPPED),
 		acknowledged: false,
+		downloading: false,
 		onacknowledge: () => {},
 		onprepare: () => {},
 		ondownload: () => {}
@@ -81,6 +82,13 @@ test('acknowledging the disclosure enables the download', async () => {
 	const html = await renderPanel({ phase: 'ready', acknowledged: true });
 	const download = html.match(/<button[^>]*data-testid="archive-download"[^>]*>/)?.[0] ?? '';
 	assert.doesNotMatch(download, /\sdisabled(?:=""|\s|>)/);
+});
+
+test('the download action is disabled while its preflight is in flight', async () => {
+	const html = await renderPanel({ phase: 'ready', acknowledged: true, downloading: true });
+	const download = html.match(/<button[^>]*data-testid="archive-download"[^>]*>/)?.[0] ?? '';
+	assert.match(download, /\sdisabled(?:=""|\s|>)/);
+	assert.match(download, /aria-busy="true"/);
 });
 
 test('the preparation phase reports a longer-running operation', async () => {

@@ -10,7 +10,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
-	import { triggerStreamDownload } from '$lib/api/stream-download';
+	import { triggerStreamDownload, verifyStreamDownload } from '$lib/api/stream-download';
 	import { CarbonButton, CarbonModal } from '$lib/components/carbon';
 	import { ServerStatus, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
@@ -46,6 +46,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let totalSize = $state(0);
 	let error = $state<string | null>(null);
 	let acknowledged = $state(false);
+	let downloading = $state(false);
 
 	// Export requires a stopped server. A live server is refused here and again
 	// on the controller; this control never issues a stop.
@@ -70,6 +71,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		totalSize = 0;
 		error = null;
 		acknowledged = false;
+		downloading = false;
 	}
 
 	function show() {
@@ -125,8 +127,30 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function download() {
+	async function download() {
 		if (!acknowledged || !sessionId || !filename || phase !== 'ready') return;
+		if (downloading) return;
+		const generation = attempt;
+		const requestedServerId = server.id;
+		downloading = true;
+		let status: number;
+		try {
+			status = await verifyStreamDownload(sessionId);
+		} catch {
+			// A transport failure cannot prove the download is authorised, so it is
+			// reported as a refusal rather than a started transfer.
+			if (generation !== attempt || !open || server.id !== requestedServerId) return;
+			downloading = false;
+			toast.error('Archive download was refused: the download check could not be completed.');
+			return;
+		}
+		if (generation !== attempt || !open || server.id !== requestedServerId) return;
+		if (status < 200 || status >= 300) {
+			downloading = false;
+			toast.error(`Archive download was refused (HTTP ${status}).`);
+			return;
+		}
+		downloading = false;
 		invalidate();
 		triggerStreamDownload(sessionId, filename);
 		toast.success('Archive download started.');
@@ -168,6 +192,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		disclosureDetail={ARCHIVE_CREDENTIAL_DISCLOSURE_DETAIL}
 		consistencyText={archiveConsistencyLabel(ServerArchiveConsistency.STOPPED)}
 		{acknowledged}
+		{downloading}
 		onacknowledge={(value) => (acknowledged = value)}
 		onprepare={prepare}
 		ondownload={download}

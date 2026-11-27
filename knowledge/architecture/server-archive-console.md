@@ -10,6 +10,7 @@ code_refs:
   - web/carbon-panel/src/lib/features/servers/ServerArchiveExport.svelte
   - web/carbon-panel/src/lib/features/servers/ArchiveExportPanel.svelte
   - web/carbon-panel/src/lib/features/servers/ArchivePreviewPanel.svelte
+  - web/carbon-panel/src/lib/api/stream-download.ts
   - web/carbon-panel/src/routes/servers/new/+page.svelte
   - web/carbon-panel/src/routes/servers
 sources:
@@ -35,7 +36,10 @@ sources:
   replace the active session, filename or phase. The download action requires
   the current ready session. Export preparation is a silent RPC call: the shared
   interceptor must not toast for a stale attempt, and only the fenced current
-  attempt reports its failure.
+  attempt reports its failure. A download is success-shaped only after a
+  same-origin `HEAD` preflight of the scoped session returns 2xx; a refusal or
+  transport failure reports its status and keeps the modal, ready archive and
+  acknowledgement in place. The preflight cannot prove the later `GET` succeeds.
 - Create-from-Archive binds preview and create to the same concrete node and
   renders typed findings plus that node's capacity. The current upload's
   successful preflight outranks cached inventory, including newly enabled,

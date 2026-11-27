@@ -10,11 +10,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	and notifications; every string that states a contract (formats, disclosure,
 	consistency) is passed in from archive-presentation.ts. No runtime imports.
 
-	The actions therefore repeat CarbonButton's md geometry instead of importing
-	it: `h-[var(--carbon-control-md)]` and the primary/secondary class sets below
-	match CarbonButton.svelte so the dialog's own actions stay 40 px like the
-	CarbonButton that opens it. ArchiveExportPanel.test.ts pins these class sets
-	against CarbonButton.svelte's source.
+	The actions therefore repeat CarbonButton's md control height instead of
+	importing it: `h-[var(--carbon-control-md)]`, so the dialog's own actions stay
+	40 px like the CarbonButton that opens it. Only that height is matched for
+	"Try again"; it keeps its own compact secondary/mono treatment and does not
+	claim CarbonButton's secondary colour or spacing. ArchiveExportPanel.test.ts
+	pins the height and the primary action class set against CarbonButton.svelte's
+	source.
 -->
 <script lang="ts">
 	type ArchivePhase = 'idle' | 'preparing' | 'ready' | 'error';
@@ -34,6 +36,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		disclosureDetail: string;
 		consistencyText: string;
 		acknowledged: boolean;
+		downloading?: boolean;
 		onacknowledge: (value: boolean) => void;
 		onprepare: () => void;
 		ondownload: () => void;
@@ -53,6 +56,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		disclosureDetail,
 		consistencyText,
 		acknowledged,
+		downloading = false,
 		onacknowledge,
 		onprepare,
 		ondownload
@@ -141,7 +145,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="flex justify-end">
 				<button
 					type="button"
-					disabled={!acknowledged}
+					disabled={!acknowledged || downloading}
+					aria-busy={downloading ? 'true' : undefined}
 					onclick={ondownload}
 					class="focus-ring motion-press inline-flex h-[var(--carbon-control-md)] cursor-pointer items-center justify-center border border-transparent bg-primary px-4 font-sans text-sm font-normal tracking-[0.16px] whitespace-nowrap text-primary-foreground transition-[color,background-color,border-color,transform] select-none hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] disabled:cursor-not-allowed disabled:opacity-50"
 					data-testid="archive-download"
