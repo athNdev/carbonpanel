@@ -4,7 +4,7 @@ title: Native map assets use scoped World View sessions
 description: Native terrain uses the existing authenticated World View session with a server-validated world binding.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/worldview/native_map.go, internal/worldview/native_end.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go]
+code_refs: [internal/worldview/native_map.go, internal/worldview/native_end.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go, web/carbon-panel/src/lib/features/worldview/native-map-loader.ts]
 sources:
   - title: Native terrain format and access
     resource: ../../docs/world-terrain.md
@@ -42,3 +42,16 @@ Configured and discoverable adapters retain their current precedence. Native
 terrain covers supported controller-local saves. It uses bounded workers and
 private no-store responses. Tiles show saved observations rather than live
 game state. World changes invalidate the key and require a new session.
+The viewport queues only visible tiles, nearest first, with two concurrent reads.
+Map span covers 32–1,024 blocks along the longer viewport edge. Automatic span
+widens from 256 to 512 blocks when the initial tiles have full coverage.
+Panning and coordinate jumps load saved tiles across the Java Overworld bounds.
+Empty, incomplete and transiently unavailable tiles recheck every 30 seconds
+while visible. Missing tiles for a new view take priority over refreshes.
+
+The saved End profile is offered only for a controller-local Vanilla Java
+1.21.9 level that uses the built-in generator and End biome source, the vanilla
+datapack and a saved `DIM1/region` directory. End tiles use the same scoped
+session. A manifest that cannot qualify End omits the dimension and keeps the
+Overworld available; an End deep link then shows the Overworld spawn without
+requesting End assets or using the link's coordinates.

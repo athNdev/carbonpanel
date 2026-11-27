@@ -75,6 +75,8 @@ func registerFamilyRPCHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFu
 	registerOK[v1.GetServerLogsRequest, v1.GetServerLogsResponse](mux, "/carbonpanel.v1.ServerService/GetServerLogs", ic, "")
 	registerOK[v1.ClearServerLogsRequest, v1.ClearServerLogsResponse](mux, "/carbonpanel.v1.ServerService/ClearServerLogs", ic, "")
 	registerOK[v1.GetNextAvailablePortRequest, v1.GetNextAvailablePortResponse](mux, "/carbonpanel.v1.ServerService/GetNextAvailablePort", ic, "")
+	registerOK[v1.ExportServerArchiveRequest, v1.ExportServerArchiveResponse](mux, "/carbonpanel.v1.ServerService/ExportServerArchive", ic, "")
+	registerOK[v1.PreviewServerArchiveRequest, v1.PreviewServerArchiveResponse](mux, "/carbonpanel.v1.ServerService/PreviewServerArchive", ic, "")
 	registerOK[v1.CreateServerRequest, v1.CreateServerResponse](mux, "/carbonpanel.v1.ServerService/CreateServer", ic, "")
 	registerOK[v1.UpdateServerRequest, v1.UpdateServerResponse](mux, "/carbonpanel.v1.ServerService/UpdateServer", ic, "")
 	registerOK[v1.DeleteServerRequest, v1.DeleteServerResponse](mux, "/carbonpanel.v1.ServerService/DeleteServer", ic, "")
@@ -226,7 +228,7 @@ func newFamilyFixture(t *testing.T) *famFixture {
 		role  string
 		perms []rbac.Permission
 	}{
-		"serverOps": {"u-server-ops", "server-ops", append(globalPerms("servers", "read", "start", "stop", "restart", "update", "create", "delete", "command"), globalPerms("servers", "read")...)},
+		"serverOps": {"u-server-ops", "server-ops", append(globalPerms("servers", "read", "start", "stop", "restart", "update", "create", "delete", "command"), globalPerms("files", "read")...)},
 		"configOps": {"u-config-ops", "config-ops", append(globalPerms("server_config", "read", "update"), globalPerms("settings", "read", "update")...)},
 		"taskOps":   {"u-task-ops", "task-ops", globalPerms("tasks", "read", "create", "update", "delete")},
 		"observer":  {"u-observer", "observer", append(append(globalPerms("activity", "read"), globalPerms("support", "read", "create")...), append(globalPerms("servers", "read"), globalPerms("nodes", "read")...)...)},
@@ -270,6 +272,8 @@ func famCases() []famCase {
 		{"server", "get_server_logs", map[string]any{"id": "srv-1", "tail": 10}, "serverOps", true},
 		{"server", "clear_server_logs", map[string]any{"id": "srv-1", "confirm": true}, "serverOps", true},
 		{"server", "get_next_available_port", map[string]any{}, "serverOps", true},
+		{"server", "export_server_archive", map[string]any{"server_id": "srv-1", "format": "zip"}, "serverOps", true},
+		{"server", "preview_server_archive", map[string]any{"upload_id": "upload-1"}, "serverOps", true},
 		{"server", "create_server", map[string]any{"name": "srv-2", "mc_version": "1.21.4", "mod_loader": "fabric", "request_id": "req-1", "confirm": true}, "serverOps", true},
 		{"server", "update_server", map[string]any{"id": "srv-1", "name": "renamed", "confirm": true}, "serverOps", true},
 		{"server", "delete_server", map[string]any{"id": "srv-1", "keep_data": true, "confirm": true}, "serverOps", true},
@@ -330,12 +334,12 @@ func famCases() []famCase {
 }
 
 func TestFamilyServerDescriptorInventory(t *testing.T) {
-	if len(FamilyServerDescriptors) != 52 {
-		t.Fatalf("listed RPC descriptors = %d, want 52", len(FamilyServerDescriptors))
+	if len(FamilyServerDescriptors) != 54 {
+		t.Fatalf("listed RPC descriptors = %d, want 54", len(FamilyServerDescriptors))
 	}
 	included := FamilyServerIncludedDescriptors()
-	if len(included) != FamilyServerToolCount || FamilyServerReachableCount() != 51 {
-		t.Fatalf("included=%d count=%d reachable=%d, want 51 each", len(included), FamilyServerToolCount, FamilyServerReachableCount())
+	if len(included) != FamilyServerToolCount || FamilyServerReachableCount() != 53 {
+		t.Fatalf("included=%d count=%d reachable=%d, want 53 each", len(included), FamilyServerToolCount, FamilyServerReachableCount())
 	}
 	excluded := FamilyServerExcludedDescriptors()
 	if len(excluded) != FamilyServerExcludedRPCCount || excluded[0].Name != "scan_nodes" {
@@ -347,8 +351,8 @@ func TestFamilyServerDescriptorInventory(t *testing.T) {
 	if len(FamilyServerExcludedSurfaces) != 11 {
 		t.Fatalf("excluded surfaces = %d, want 11", len(FamilyServerExcludedSurfaces))
 	}
-	if got := FamilyServerListedCount(); got != 63 {
-		t.Fatalf("listed count = %d, want 63", got)
+	if got := FamilyServerListedCount(); got != 65 {
+		t.Fatalf("listed count = %d, want 65", got)
 	}
 	if len(famCases()) != FamilyServerReachableCount() {
 		t.Fatalf("test cases = %d, reachable tools = %d", len(famCases()), FamilyServerReachableCount())

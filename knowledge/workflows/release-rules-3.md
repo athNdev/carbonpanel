@@ -18,20 +18,20 @@ sources:
   release or provisions a host. Only formats with real clean import/boot
   evidence are publishable; see the format decision concept.
 - The upgrade rehearsal is a separate read-only CI job, not a publication gate.
-  `upgrade-rehearsal.yml` runs weekly, on path-gated PRs and on dispatch. It
-  builds a candidate and runs two fail-closed cases on seeded disposable
-  DB/world copies with real `carbon-panel` binaries: the explicit v1.0.40 legacy
-  baseline (35 → 45 → 35) and the current published stable derived from the
-  authoritative release record via the OSS-395 product version contract (no
-  hardcoded stable literal; no hardcoded count for the current case). Both
-  assert integrity, additive table growth, row/world preservation, forced-
-  failure refusal and both rollback paths. Rollback restores the exact Stable
-  table set and removes only tables observed in the candidate delta. Disposable artifacts
-  stay under `$RUNNER_TEMP` (build caches excepted); a missing or mismatched
-  fixture, or any failed check, fails closed with no silent skip and still
-  writes a failing evidence report. It grants no write scope and never touches
-  a registry, tag, release, host or live world. See ADR 0044; it does not
-  replace gameplay/OIDC/PROXY go/no-go gates or the OSS-366 stable publisher.
+  `upgrade-rehearsal.yml` runs weekly, on path-gated PRs and on dispatch, with
+  two fail-closed cases on seeded disposable DB/world copies using real
+  `carbon-panel` binaries: the explicit v1.0.40 legacy baseline (pinned 35-table
+  stable and rollback) and the current published stable derived from the
+  authoritative release record via the OSS-395 contract (no hardcoded literal).
+  Both derive the candidate count from the real candidate and require the
+  historical model, archive-import table and replay receipt columns. They
+  assert integrity, additive growth, row/world preservation, forced-failure
+  refusal and both rollback paths; rollback restores the exact Stable table set
+  and removes only tables observed in the candidate delta. Disposable artifacts
+  stay under `$RUNNER_TEMP` (build caches excepted); a missing fixture or failed
+  check fails closed with no silent skip and still writes a failing evidence
+  report. It grants no write scope and never touches a registry, tag, release,
+  host or live world; see ADR 0044 (not a substitute for OIDC/PROXY or OSS-366 gates).
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The

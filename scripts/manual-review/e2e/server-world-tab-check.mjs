@@ -168,6 +168,8 @@ try {
     if (method === "GetProxyStatus") return reply({ enabled: false, baseUrl: "" });
     if (method === "GetServerConfig") return reply({ categories: configCategories });
     if (method === "ListWorldViewTargets") return reply({ targets });
+    if (method === "GetWorldViewStatus")
+      return reply({ target: targets.find((target) => target.serverId === payload.serverId) });
     if (method === "ListBindings") return reply({ bindings: binding ? [binding] : [] });
     if (method === "ListWorldEntries") return reply({ entries: [entryA, entryB] });
     if (method === "GetRevision") return reply({ revision: revision(payload.revisionId) });
@@ -247,20 +249,32 @@ try {
     await page.getByRole("button", { name: "Confirm swap" }).click();
     await page.waitForTimeout(300);
   }
+  const worldTab = page.getByRole("tabpanel");
+  const openMap = worldTab.getByRole("button", { name: "Open map", exact: true });
+  async function checkMapDialog(expectedKey) {
+    await openMap.click();
+    const dialog = page.getByRole("dialog", { name: "World map", exact: true });
+    await dialog.waitFor();
+    const url = new URL(page.url());
+    assert.equal(url.pathname, "/servers/srv-1");
+    assert.match(url.searchParams.get("map") ?? "", expectedKey);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  }
 
   // 1. Bound desktop state.
   await gotoWorldTab();
   await page.getByText("LIBRARY BOUND", { exact: true }).first().waitFor();
-  assert.ok(await page.getByText("Active world / level", { exact: true }).count());
+  assert.ok(await worldTab.getByText("Active level", { exact: true }).count());
+  assert.equal(await worldTab.locator("dd").filter({ hasText: /^world$/ }).count(), 1);
   assert.ok(await page.getByText("Binding & revision", { exact: true }).count());
   assert.ok(await page.getByText("VERIFIED STOPPED", { exact: true }).count());
   assert.ok(await page.getByText("minecraft:flat", { exact: true }).count());
-  const mapHref = await page.getByRole("link", { name: /Open map/ }).getAttribute("href");
-  assert.match(mapHref ?? "", /^\/worlds\/srv-1\/w1\./);
+  await checkMapDialog(/^w1\./);
   const libHref = await page.getByRole("link", { name: /Open World Library/ }).getAttribute("href");
   assert.ok(libHref?.includes("/library"), "library deep link");
   await shot("01-bound-desktop-1440");
-  results.push("bound state: active level, binding/revision, config, honest status and deep links");
+  results.push("bound state groups active level and config, shows binding details and opens the scoped map dialog");
 
   // 2. Denied scope.
   permissions = [
@@ -270,14 +284,13 @@ try {
   await gotoWorldTab();
   await page.getByText("No world access on this server", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: /library world/i }).count(), 0);
-  const scopedMaps = page.getByRole("link", { name: "Open map", exact: true });
-  assert.equal(await scopedMaps.getAttribute("href"), "/worlds?server=srv-1");
+  await checkMapDialog(/^$/);
   await shot("02-denied-scope-1440");
-  results.push("without worlds/read the server still links to its scoped maps when world_view/read is allowed");
+  results.push("without worlds/read the server can still open its map when world_view/read is allowed");
   permissions = [{ resource: "servers", action: "read", objectId: "*" }];
   await gotoWorldTab();
   await page.getByText("No world access on this server", { exact: true }).waitFor();
-  assert.equal(await scopedMaps.count(), 0, "Open map needs world_view/read on this server");
+  assert.equal(await openMap.count(), 0, "Open map needs world_view/read on this server");
   await page.getByText("Opening a map requires World View read access on this server.").waitFor();
   permissions = [{ resource: "*", action: "*", objectId: "*" }];
 
@@ -286,7 +299,8 @@ try {
   targets = [];
   await gotoWorldTab();
   await page.getByText("UNBOUND LEVEL", { exact: true }).first().waitFor();
-  assert.ok(await page.getByText("No active binding", { exact: true }).count());
+  assert.equal(await worldTab.getByText("Configured level", { exact: true }).count(), 1);
+  assert.equal(await worldTab.getByText("Binding & revision", { exact: true }).count(), 0);
   await shot("03-unbound-1440");
   results.push("unbound level is reported without a fabricated binding");
 
@@ -301,8 +315,14 @@ try {
   ];
   await gotoWorldTab();
   await page.getByText("UNMANAGED WORLD", { exact: true }).first().waitFor();
-  assert.ok(await page.getByText("survival", { exact: true }).first().count());
+  assert.equal(await worldTab.locator("dd").filter({ hasText: /^survival$/ }).count(), 1);
+  assert.equal(await worldTab.getByText("Configured level", { exact: true }).count(), 1);
+  assert.equal(await worldTab.getByText("Binding & revision", { exact: true }).count(), 0);
   await shot("04-unmanaged-1440");
+  await worldTab.screenshot({ path: path.join(evidence, "04-unmanaged-tab-1440.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await worldTab.screenshot({ path: path.join(evidence, "04-unmanaged-tab-390.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   results.push("observed server-local world is honestly unmanaged, not bound");
 
   // 5. Required race case: revision A's delayed report must not unlock revision B.

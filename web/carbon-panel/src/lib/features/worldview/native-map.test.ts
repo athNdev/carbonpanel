@@ -6,8 +6,10 @@ import {
 	blockScale,
 	loadNativeManifest,
 	loadNativeTile,
+	nativeDimensionLabel,
 	nativeSessionRoot,
 	parseNativeCoordinate,
+	resolveNativeDimension,
 	tileKey,
 	visibleNativeTiles,
 	type TileResult
@@ -42,11 +44,60 @@ test('visible tiles use floor for negative coordinates, exclude seam neighbors, 
 	assert.deepEqual(oneTile, [{ x: -1, z: -1 }]);
 	const size = { width: 3840, height: 2160 };
 	const wide = visibleNativeTiles({ x: 112, z: -33 }, size, blockScale(size, 0));
-	assert.ok(wide.length <= 36);
+	assert.ok(wide.length > 36 && wide.length <= 81);
 	assert.deepEqual(wide[0], { x: 0, z: -1 });
 	const corner = visibleNativeTiles({ x: -30_000_000, z: 29_999_999 }, size, blockScale(size, 0));
-	assert.ok(corner.length > 0 && corner.length <= 36);
+	assert.ok(corner.length > 0 && corner.length <= 81);
 	assert.ok(corner.every((tile) => tile.x >= -234375 && tile.z <= 234374));
+});
+
+test('the widest span covers every visible tile on both sides of an offset square viewport', () => {
+	const size = { width: 500, height: 500 };
+	const center = { x: 17, z: -21 };
+	const scale = blockScale(size, 0);
+	assert.equal(size.width / scale, 1024);
+	const tiles = visibleNativeTiles(center, size, scale);
+	assert.equal(tiles.length, 81);
+	assert.ok(tiles.some((t) => t.x === -4 && t.z === -5));
+	assert.ok(tiles.some((t) => t.x === 4 && t.z === 3));
+});
+
+test('the manifest dimension list is sanitized and always offers the overworld', async () => {
+	const payload = (dimensions: unknown) =>
+		new Response(
+			JSON.stringify({ tileBlocks: 128, dimension: 'overworld', spawn: null, dimensions }),
+			{ headers: { 'Content-Type': 'application/json' } }
+		);
+	const originalFetch = globalThis.fetch;
+	for (const [dimensions, expected] of [
+		[['overworld', 'end'], ['overworld', 'end']],
+		[['end'], ['overworld']],
+		[['overworld', 'nether'], ['overworld']],
+		[['overworld', 'end', 'nether'], ['overworld', 'end']],
+		[null, ['overworld']],
+		['end', ['overworld']]
+	] as const) {
+		globalThis.fetch = (async () => payload(dimensions)) as typeof fetch;
+		try {
+			const result = await loadNativeManifest(session, new AbortController().signal);
+			assert.deepEqual(
+				result.status === 'ready' ? result.manifest.dimensions : null,
+				expected
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	}
+});
+
+test('a manifest-backed dimension request falls back to the overworld when unavailable', () => {
+	assert.equal(resolveNativeDimension('end', ['overworld', 'end']), 'end');
+	assert.equal(resolveNativeDimension('end', ['overworld']), 'overworld');
+	assert.equal(resolveNativeDimension('nether', ['overworld', 'end']), 'overworld');
+	assert.equal(resolveNativeDimension(undefined, ['overworld', 'end']), 'overworld');
+	assert.equal(resolveNativeDimension('overworld', []), 'overworld');
+	assert.equal(nativeDimensionLabel('overworld'), 'Overworld');
+	assert.equal(nativeDimensionLabel('end'), 'The End');
 });
 
 test('invalid request paths and out-of-range tiles are rejected before fetch', async () => {

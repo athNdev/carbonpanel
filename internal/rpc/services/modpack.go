@@ -401,6 +401,7 @@ func (s *ModpackService) GetModpackVersions(ctx context.Context, req *connect.Re
 			FileDate:      timestamppb.New(file.FileDate),
 			SortIndex:     int32(file.SortIndex),
 			VersionNumber: file.VersionNumber,
+			GameVersions:  file.GameVersions,
 		})
 	}
 

@@ -1,1 +1,7 @@
-export const authStore = { subscribe(fn) { fn({ token: '' }); return () => {}; } };
+export const authStore = {
+  subscribe(fn) {
+    fn({ token: '' });
+    return () => {};
+  },
+  refreshBrowserSessionCookie() {},
+};

@@ -63,7 +63,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{disabled}
 		{onkeydown}
 		aria-label={restProps['aria-label'] ?? placeholder ?? 'Search'}
-		class="focus-ring w-full rounded-none border-b border-input bg-card text-foreground transition-colors placeholder:text-muted-foreground focus:border-b-2 focus:border-ring focus:bg-accent focus:outline-none disabled:border-border disabled:bg-background disabled:text-muted-foreground {sizeClasses[
+		class="focus-ring w-full rounded-none text-foreground transition-colors placeholder:text-muted-foreground focus:outline-none {sizeClasses[
 			size
 		]}"
 		{...restProps}

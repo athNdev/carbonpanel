@@ -11,14 +11,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { ResolvedPathname } from '$app/types';
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
-	import { Lock, Map as MapIcon, RefreshCw, X } from '@lucide/svelte';
+	import { ArrowRight, Lock, Map as MapIcon, RefreshCw, X } from '@lucide/svelte';
 	import {
 		CarbonPageHeader,
 		CarbonTag,
 		CarbonButton,
 		CarbonSearch,
 		CarbonSelect,
-		CarbonDataTable,
 		CarbonInlineLoading,
 		CarbonEmptyState,
 		CarbonErrorState
@@ -171,9 +170,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function rendererLabel(target: WorldViewTarget): string {
-		return deriveViewState(target) === 'onboarding'
-			? 'Not configured'
-			: rendererName(target.renderer?.type ?? target.rendererType, 'Unknown renderer');
+		return rendererName(target.renderer?.type ?? target.rendererType, '');
 	}
 
 	function clearFilters() {
@@ -263,34 +260,39 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 		<div
-			class="flex flex-col items-stretch gap-3 border border-border bg-card p-3 sm:flex-row sm:items-end"
+			class={[
+				'grid gap-3 border border-border bg-card p-3 sm:p-4',
+				scopedServerId
+					? 'sm:grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)]'
+					: 'sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)_minmax(8rem,12rem)]'
+			]}
 		>
-			<div class="min-w-0 flex-1">
+			<div class={['min-w-0 space-y-1', !scopedServerId && 'sm:col-span-2 lg:col-span-1']}>
+				<label
+					for="world-map-search"
+					class="block text-xs font-normal tracking-[0.32px] text-foreground">Search maps</label
+				>
 				<CarbonSearch
+					id="world-map-search"
 					bind:value={search}
-					placeholder="Search worlds, levels or servers"
-					aria-label="Search viewable worlds"
-					size="sm"
+					placeholder="World, level or server name"
+					aria-label="Search maps"
 				/>
 			</div>
 			{#if !scopedServerId}
-				<div class="w-full sm:w-52">
-					<CarbonSelect bind:value={serverFilter} label="Server">
-						<option value="all">All servers ({servers.length})</option>
-						{#each servers as server (server)}
-							<option value={server}>{serverLabel(server)}</option>
-						{/each}
-					</CarbonSelect>
-				</div>
-			{/if}
-			<div class="w-full sm:w-52">
-				<CarbonSelect bind:value={stateFilter} label="State">
-					<option value="all">All states</option>
-					{#each stateOptions as option (option)}
-						<option value={option}>{VIEW_STATE_LABEL[option]}</option>
+				<CarbonSelect bind:value={serverFilter} label="Server">
+					<option value="all">All servers ({servers.length})</option>
+					{#each servers as server (server)}
+						<option value={server}>{serverLabel(server)}</option>
 					{/each}
 				</CarbonSelect>
-			</div>
+			{/if}
+			<CarbonSelect bind:value={stateFilter} label="Map status">
+				<option value="all">All statuses</option>
+				{#each stateOptions as option (option)}
+					<option value={option}>{VIEW_STATE_LABEL[option]}</option>
+				{/each}
+			</CarbonSelect>
 		</div>
 
 		{#if filtered.length === 0}
@@ -301,93 +303,93 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				onaction={clearFilters}
 			/>
 		{:else}
-			{#snippet worldLink(target: WorldViewTarget)}
-				<a
-					href={targetHref(target)}
-					class="focus-ring font-medium break-words text-foreground underline-offset-2 hover:text-accent-text hover:underline"
+			<section class="border border-border bg-card" aria-labelledby="world-maps-heading">
+				<div
+					class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"
 				>
-					{target.name || target.worldRef?.levelName || 'Untitled world'}
-				</a>
-			{/snippet}
-			{#snippet stateTag(target: WorldViewTarget)}
-				{@const view = deriveViewState(target)}
-				<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
-				{#if (view === 'unknown' || view === 'unsupported') && target.error}
-					<p class="mt-1 max-w-xs text-xs break-words text-muted-foreground">{target.error}</p>
-				{/if}
-			{/snippet}
-			{#snippet observation(target: WorldViewTarget)}
-				{deriveViewState(target) === 'saved'
-					? 'Saved chunks'
-					: formatAge(target.freshness?.observedAt ?? target.lastRender)}
-			{/snippet}
-
-			<section class="border border-border bg-card xl:hidden" aria-label="Viewable worlds">
-				<h2 class="border-b border-border p-3 text-sm font-semibold">
-					{filtered.length} of {targets.length} worlds shown
-				</h2>
+					<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+						<h2 id="world-maps-heading" class="text-base font-semibold">World maps</h2>
+						<p role="status" class="text-xs text-muted-foreground">
+							{filtered.length === targets.length
+								? filtered.length
+								: `${filtered.length} of ${targets.length}`}
+							{targets.length === 1 ? 'map' : 'maps'}
+						</p>
+					</div>
+					{#if search.trim() || serverFilter !== 'all' || stateFilter !== 'all'}
+						<CarbonButton kind="tertiary" size="sm" onclick={clearFilters}
+							>Reset filters</CarbonButton
+						>
+					{/if}
+				</div>
 				<ul class="divide-y divide-border">
 					{#each filtered as target (targetHref(target))}
-						<li class="flex min-w-0 flex-col gap-2 p-3 text-sm">
-							<div class="grid items-start gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-								{@render worldLink(target)}
-								<div>{@render stateTag(target)}</div>
-							</div>
-							<dl
-								class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs text-muted-foreground"
+						{@const name = target.name || target.worldRef?.levelName || 'Untitled world'}
+						{@const serverName = serverLabel(target.serverId)}
+						{@const view = deriveViewState(target)}
+						{@const action =
+							view === 'onboarding'
+								? 'Set up map'
+								: ['ready', 'saved', 'stale'].includes(view)
+									? 'Open map'
+									: 'View details'}
+						{@const renderer = rendererLabel(target)}
+						<li class="min-w-0">
+							<a
+								href={targetHref(target)}
+								aria-label={`${action} for ${name}${serverName === name ? '' : ` on ${serverName}`}`}
+								class="focus-ring group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 px-4 py-4 text-sm text-foreground transition-colors hover:bg-accent focus-visible:bg-accent lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]"
 							>
-								<dt>Server</dt>
-								<dd class="break-words">{serverLabel(target.serverId)}</dd>
-								<dt>Renderer</dt>
-								<dd>{rendererLabel(target)}</dd>
-								<dt>Last observation</dt>
-								<dd>{@render observation(target)}</dd>
-							</dl>
+								<div class="col-span-2 flex min-w-0 items-center gap-3 lg:col-span-1">
+									<span
+										class="grid h-10 w-10 shrink-0 place-items-center border border-border bg-background text-accent-text"
+									>
+										<MapIcon class="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+									</span>
+									<div class="min-w-0">
+										<p class="font-semibold break-words">{name}</p>
+										{#if serverName !== name || target.dimension}
+											<p class="mt-0.5 text-xs break-words text-muted-foreground">
+												{[serverName !== name ? serverName : '', target.dimension]
+													.filter(Boolean)
+													.join(' · ')}
+											</p>
+										{/if}
+									</div>
+								</div>
+								<div class="min-w-0 space-y-1">
+									<CarbonTag type={VIEW_STATE_TONE[view]} size="sm"
+										>{VIEW_STATE_LABEL[view]}</CarbonTag
+									>
+									{#if renderer || target.freshness?.observedAt || target.lastRender}
+										<p class="text-xs break-words text-muted-foreground">
+											{[
+												renderer,
+												target.freshness?.observedAt
+													? `Checked ${formatAge(target.freshness.observedAt)}`
+													: target.lastRender
+														? `Rendered ${formatAge(target.lastRender)}`
+														: ''
+											]
+												.filter(Boolean)
+												.join(' · ')}
+										</p>
+									{/if}
+								</div>
+								<span
+									class="inline-flex items-center gap-2 font-medium whitespace-nowrap text-accent-text group-hover:underline"
+								>
+									{action}<ArrowRight
+										class="h-4 w-4 shrink-0"
+										strokeWidth={1.5}
+										aria-hidden="true"
+									/>
+								</span>
+							</a>
 						</li>
 					{/each}
 				</ul>
 			</section>
-
-			<CarbonDataTable
-				class="hidden xl:block"
-				title="Viewable worlds"
-				description="{filtered.length} of {targets.length} worlds shown"
-			>
-				{#snippet header()}
-					<tr>
-						<th scope="col" class="px-3 py-3">World</th>
-						<th scope="col" class="px-3 py-3">Server</th>
-						<th scope="col" class="px-3 py-3">Renderer</th>
-						<th scope="col" class="px-3 py-3">State</th>
-						<th scope="col" class="px-3 py-3">Last observation</th>
-					</tr>
-				{/snippet}
-				{#each filtered as target (targetHref(target))}
-					<tr class="transition-colors hover:bg-accent">
-						<td class="min-w-[180px] px-3 py-3">
-							{@render worldLink(target)}
-							<p class="font-mono text-xs break-all text-muted-foreground">
-								{target.worldRef?.levelName ||
-									target.worldRef?.bindingId ||
-									target.worldRef?.snapshotId ||
-									'—'}
-							</p>
-						</td>
-						<td class="px-3 py-3 text-xs break-words text-muted-foreground">
-							{serverLabel(target.serverId)}
-						</td>
-						<td class="px-3 py-3 text-xs text-muted-foreground">
-							{rendererLabel(target)}
-						</td>
-						<td class="px-3 py-3">
-							{@render stateTag(target)}
-						</td>
-						<td class="px-3 py-3 font-mono text-xs text-muted-foreground">
-							{@render observation(target)}
-						</td>
-					</tr>
-				{/each}
-			</CarbonDataTable>
 		{/if}
 	{/if}
 </div>

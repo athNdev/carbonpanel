@@ -19,6 +19,7 @@ import (
 	"github.com/containerd/errdefs"
 	stdcopy "github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
 
@@ -28,6 +29,8 @@ const (
 	storageWorkerNameLabel     = "com.carbonpanel.storage-worker"
 	storageWorkerShutdownGrace = time.Second
 )
+
+var errStorageAllocationEndpointChanged = fmt.Errorf("%w: allocation Docker endpoint changed", nodestorage.ErrUnavailable)
 
 // StorageTransport runs the carbon-storage accessor worker on remote daemons
 // through a one-shot attached container (OSS-281).
@@ -66,7 +69,60 @@ func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, 
 	return storageworker.NewRemoteAccessor(sess), nil
 }
 
+func (t *StorageTransport) OpenExisting(ctx context.Context, node nodestorage.NodeInfo, dataRoot string) (nodestorage.Accessor, error) {
+	if t == nil || t.pool == nil || t.workerImage == "" {
+		return nil, nodestorage.ErrUnavailable
+	}
+	cli, err := t.pool.GetClientStrictContext(ctx, node.ID)
+	if err != nil {
+		return nil, err
+	}
+	root := nodestorage.NodePath(node, dataRoot, dataRoot)
+	sess, err := cli.startStorageWorkerAt(ctx, t.workerImage, root, true, true)
+	if err != nil {
+		return nil, err
+	}
+	return storageworker.NewRemoteAccessor(sess), nil
+}
+
+func (t *StorageTransport) OpenStorageRoot(ctx context.Context, node nodestorage.NodeInfo) (nodestorage.AllocationRoot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if t == nil || t.pool == nil || t.workerImage == "" || node.StorageRoot == "" {
+		return nil, nodestorage.ErrUnavailable
+	}
+	expectedHost := nodeDockerHost(node.Endpoint, node.IsLocal)
+	if expectedHost == "" {
+		return nil, fmt.Errorf("%w: allocation node has no configured Docker endpoint", nodestorage.ErrUnavailable)
+	}
+	cli, err := t.pool.getClientStrictContext(ctx, node.ID, expectedHost)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if errors.Is(err, errStorageAllocationEndpointChanged) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: could not resolve the allocation Docker client", nodestorage.ErrUnavailable)
+	}
+	// The pool can observe a newer node row than the allocation caller did.
+	// Check the host bound to this exact client before starting a worker.
+	if cli == nil || cli.docker == nil || cli.docker.DaemonHost() != expectedHost {
+		return nil, errStorageAllocationEndpointChanged
+	}
+	sess, err := cli.startStorageWorkerAt(ctx, t.workerImage, node.StorageRoot, true, false)
+	if err != nil {
+		return nil, err
+	}
+	return storageworker.NewRemoteAccessor(sess), nil
+}
+
 func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot string) (*storageworker.Session, error) {
+	return c.startStorageWorkerAt(ctx, image, hostDataRoot, false, false)
+}
+
+func (c *Client) startStorageWorkerAt(ctx context.Context, image, hostDataRoot string, mustExist, readOnly bool) (*storageworker.Session, error) {
 	if c == nil || c.docker == nil {
 		return nil, fmt.Errorf("docker client is not available")
 	}
@@ -90,6 +146,10 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 	hostConfig := &container.HostConfig{
 		Binds:      []string{fmt.Sprintf("%s:%s:rw", hostDataRoot, storageWorkerMount)},
 		AutoRemove: true,
+	}
+	if mustExist {
+		hostConfig.Binds = nil
+		hostConfig.Mounts = []mount.Mount{{Type: mount.TypeBind, Source: hostDataRoot, Target: storageWorkerMount, ReadOnly: readOnly}}
 	}
 	resp, err := c.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     config,

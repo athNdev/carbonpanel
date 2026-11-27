@@ -1,7 +1,7 @@
 ---
 type: Decision
-title: Release staging keeps the raw image build context
-description: The trusted staging run publishes both the OCI archive and the raw build context because the Compose matrix consumes the context.
+title: Release qualification uses the retained OCI archive
+description: The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 status: stable
 owners: [oss-runtime]
 code_refs:
@@ -16,15 +16,14 @@ sources:
 
 # Decision
 
-- The `image` job of the trusted release workflow publishes `verified-release-oci`
-  (OCI archive plus digest) AND `release-image-context` (the raw `dist/image`
-  Docker build context) from the same successful staging run.
-- `scripts/qualify-compose-artifacts.sh` builds the candidate image from the raw
-  context and byte-compares its binaries with the release bundle. Replacing that
-  context with only the OCI archive breaks the final Compose upgrade/rollback
-  matrix, which pins a staging run by ID, SHA and digest.
-- This is a compatibility contract between two owned surfaces, not a second
-  publication path: no registry, tag, alias or Pages write is added.
+- `scripts/qualify-compose-artifacts.sh` validates the trusted staging receipt
+  and compares the OCI index hash with its recorded digest. The loopback registry
+  receives the complete index without changing its digest. Compare its raw index
+  to the archive before exercising clean install, upgrade and rollback.
+- A legacy stage without a receipt can supply the raw `release-image-context`.
+  Byte-compare both Linux binaries with the release bundle and record the rebuilt
+  candidate as a separate image.
+- The fixture writes only to the disposable runner's loopback registry.
 
 # Read next
 

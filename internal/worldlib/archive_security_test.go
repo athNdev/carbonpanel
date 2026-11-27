@@ -8,8 +8,10 @@ package worldlib
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,6 +145,30 @@ func assertRejected(t *testing.T, err error) {
 	}
 	if !errors.Is(err, ErrArchiveRejected) {
 		t.Fatalf("expected ErrArchiveRejected, got %v", err)
+	}
+}
+
+func TestInspectArchivePreservesCancellationDuringEntryCopy(t *testing.T) {
+	for _, name := range []string{"world/level.dat", "world/companion.zip"} {
+		t.Run(name, func(t *testing.T) {
+			data := makeZipBytes(t, zipEntry{name: name, data: []byte("payload")})
+			archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Opening the entry happens after the inspection loop checks
+			// ctx.Err, just before the bounded copy starts reading.
+			archive.RegisterDecompressor(zip.Store, func(r io.Reader) io.ReadCloser {
+				cancel()
+				return io.NopCloser(r)
+			})
+			err = inspectZipCtx(ctx, archive, 1, &ArchiveReport{})
+			if !errors.Is(err, context.Canceled) || errors.Is(err, ErrArchiveRejected) {
+				t.Fatalf("inspect canceled entry = %v, want cancellation", err)
+			}
+		})
 	}
 }
 

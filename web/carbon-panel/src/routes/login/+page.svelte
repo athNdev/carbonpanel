@@ -14,7 +14,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { goto } from '$app/navigation';
 	import { asset, resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
-	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
+	import { theme } from '$lib/display-preferences.svelte';
 	import { authStore } from '$lib/stores/auth';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { silentCallOptions } from '$lib/api/rpc-client';
@@ -74,9 +74,6 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	async function initializeSignIn() {
-		// The login route renders outside CarbonShell, so hydrate the shared
-		// preference owner here before choosing a theme-aware brand mark.
-		displayPreferences.hydrate();
 		const urlParams = new URLSearchParams(window.location.search);
 
 		// Canonical OIDC error states from the callback. Never render raw IdP text.

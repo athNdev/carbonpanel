@@ -45,6 +45,8 @@ let holdSession;
 let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
+const survivalMapLink = { name: "Open map for Fixture Overworld on Fixture Survival Server", exact: true };
+const creativeMapLink = { name: "Set up map for Fixture Creative on Fixture Creative Server", exact: true };
 const target = {
   serverId: "srv-1",
   worldRef,
@@ -86,12 +88,19 @@ try {
   base = base.replace(/\/$/, "");
   ({ browser } = await launchReviewBrowser());
 
+  const fixtureSession = "fixture-worldview-session";
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     reducedMotion: "reduce",
+    storageState: {
+      cookies: [],
+      origins: [{ origin: new URL(base).origin, localStorage: [{ name: "auth_token", value: fixtureSession }] }],
+    },
   });
   const page = await context.newPage();
   const errors = [];
+  let createModuleMode = "failure";
+  const recoveryRequests = [];
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
@@ -110,7 +119,7 @@ try {
       reply({ code: "permission_denied", message: "insufficient scope for this write" }, 403);
 
     if (method === "GetAuthStatus")
-      return reply({ localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false });
+      return reply({ localAuthEnabled: true, oidcEnabled: false, anonymousAccessEnabled: false });
     if (method === "GetCurrentUser")
       return reply({
         user: { id: "fixture", username: "Fixture" },
@@ -164,6 +173,22 @@ try {
     if (method === "ListModules") return reply({ modules: [] });
     if (method === "CreateModule") {
       createModuleCalls += 1;
+      if (createModuleMode !== "failure") {
+        const reuse = payload.metadata?.bluemap_reuse_config;
+        recoveryRequests.push({ reuse: reuse === "true", consent: payload.metadata?.bluemap_consent_accepted });
+        if (createModuleMode === "reuse-ready" && reuse === "true") {
+          statusMode = "ready";
+          return reply({ module: { id: "recovered-bluemap", serverId: "srv-1", templateId: "builtin-bluemap" } });
+        }
+        return route.fulfill({
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Carbonpanel-Bluemap-Setup": reuse === "true" ? "download-consent" : "retained-config",
+          },
+          json: { code: "failed_precondition", message: "Retained BlueMap configuration" },
+        });
+      }
       return reply({ code: "failed_precondition", message: "Fixture install failure" }, 400);
     }
     if (method === "ListCapabilities")
@@ -205,13 +230,14 @@ try {
     return reply({});
   });
   // Same-origin map assets: harmless document so the sandbox iframe has no live dependency.
-  await page.route("**/api/v1/**", (route) =>
-    route.fulfill({
-      status: 200,
+  await page.route("**/api/v1/worldview/map/**", async (route) => {
+    const cookie = (await route.request().headerValue("cookie")) ?? "";
+    return route.fulfill({
+      status: cookie.split(/;\s*/).includes(`cp_session=${fixtureSession}`) ? 200 : 401,
       contentType: "text/html",
       body: "<!doctype html><html><body>fixture map</body></html>",
-    }),
-  );
+    });
+  });
 
   // encodeWorldKey packs [kind, serverId, levelName, bindingId, snapshotId];
   // KIND_SERVER_LOCAL = 2 (worldview_pb.ts).
@@ -222,6 +248,9 @@ try {
   // Warm route dependencies; Vite's initial optimization reloads the page.
   await page.goto(base);
   await page.waitForLoadState("networkidle");
+  const cookie = (await context.cookies(base)).find((entry) => entry.name === "cp_session");
+  assert.equal(cookie?.value, fixtureSession, "restored auth must set the cookie before the viewer loads");
+  assert.equal(cookie?.sameSite, "Strict");
 
   async function load() {
     await page.goto(url);
@@ -311,6 +340,15 @@ try {
   await dumpOnFailure("command-denial", async () => {
     const admin = page.getByRole("button", { name: /^Administration/ });
     if ((await admin.getAttribute("aria-expanded")) !== "true") await admin.click();
+    await page.getByRole("button", { name: /Teleport player to marker/ }).click();
+    const adminPanelId = await admin.getAttribute("aria-controls");
+    const validation = page.locator(`[id="${adminPanelId}"]`).getByRole("alert");
+    await validation.filter({ hasText: "Set both map coordinates" }).waitFor();
+    assert.equal(writeCalls.length, baseline, "missing coordinates must not send a command");
+    const alertBox = await validation.boundingBox();
+    const headingBox = await admin.boundingBox();
+    assert.ok(alertBox && headingBox && alertBox.y >= headingBox.y + headingBox.height,
+      "the validation message belongs below the Administration heading");
     await page.getByRole("button", { name: /Save world now/i }).click();
     await page.getByRole("button", { name: /Run command/i }).click();
     await page.waitForTimeout(700);
@@ -346,15 +384,15 @@ try {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate((mode) => {
         localStorage.setItem("carbon-theme", mode);
-        localStorage.setItem("mode-watcher-mode", mode);
       }, theme);
       await page.goto(base + "/worlds");
       const content = page.getByTestId("showcase-worlds-content");
-      const mapLink = content.getByRole("link", { name: "Fixture Overworld" });
+      const mapLink = content.getByRole("link", survivalMapLink);
       await mapLink.waitFor();
-      await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
-      await content.getByText("Not reported", { exact: true }).filter({ visible: true }).first().waitFor();
+      await mapLink.getByText(/Fixture Survival Server · overworld/).waitFor();
+      const setupLink = content.getByRole("link", creativeMapLink);
+      await setupLink.getByText("SETUP NEEDED", { exact: true }).waitFor();
+      assert.doesNotMatch(await setupLink.innerText(), /Checked |Rendered /);
       assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
       const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
       assert.equal(overflow, false, "World View fits at width " + width);
@@ -368,10 +406,10 @@ try {
       await page.getByRole("region", { name: /World map/i }).waitFor();
     }
     await page.goto(base + "/worlds?server=srv-1");
-    await page.getByRole("link", { name: "Fixture Overworld" }).waitFor();
-    assert.equal(await page.getByRole("link", { name: "Fixture Creative" }).count(), 0);
+    await page.getByRole("link", survivalMapLink).waitFor();
+    assert.equal(await page.getByRole("link", creativeMapLink).count(), 0);
     await page.getByRole("link", { name: "All servers" }).click();
-    await page.getByRole("link", { name: "Fixture Creative" }).waitFor();
+    await page.getByRole("link", creativeMapLink).waitFor();
   });
   results.push("inventory presents names, setup and unknown freshness at 360, 768 and 1440, supports keyboard navigation and preserves server scoping");
 
@@ -381,7 +419,7 @@ try {
     const scopedBaseline = scopedCalls;
     const scopedUrl = base + "/worlds?server=srv-1";
     await page.goto(scopedUrl);
-    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).waitFor();
+    await page.getByRole("link", survivalMapLink).waitFor();
     assert.equal(await page.getByRole("link", { name: "All servers" }).count(), 0);
     assert.equal(fleetCalls, globalBaseline, "concrete server access must not call the fleet RPC");
     assert.ok(scopedCalls > scopedBaseline);
@@ -389,13 +427,13 @@ try {
     statusMode = "error";
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "World inventory refresh failed" }).waitFor();
-    assert.equal(await page.getByRole("link", { name: "Fixture Overworld", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", survivalMapLink).count(), 1);
     await page.reload();
     await page.getByRole("heading", { name: "Could not load worlds" }).waitFor();
 
     statusMode = "ready";
     await page.getByRole("button", { name: "Retry", exact: true }).click();
-    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).click();
+    await page.getByRole("link", survivalMapLink).click();
     await page.getByRole("region", { name: /World map/i }).waitFor();
     assert.equal(await page.getByRole("link", { name: "Server maps", exact: true }).getAttribute("href"), "/worlds?server=srv-1");
     scopedPermission = false;
@@ -537,6 +575,30 @@ try {
     await page.screenshot({ path: path.join(evidence, "setup-error-360.png"), animations: "disabled" });
   });
   results.push("remote setup stays guarded and local consented install failure is shown once inline");
+
+  await dumpOnFailure("renderer-recovery", async () => {
+    statusMode = "setup";
+    createModuleMode = "retained";
+    await page.goto(url);
+    await page.getByRole("button", { name: "Install BlueMap", exact: true }).click();
+    await page.getByRole("checkbox", { name: /I explicitly accept/ }).check();
+    await page.getByRole("button", { name: "Accept and install" }).click();
+    await page.getByText("BlueMap configuration found", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Use existing configuration" }).click();
+    await page.getByText("accept-download: true", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Open server files" }).getAttribute("href"), "/servers/srv-1?tab=files");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: path.join(evidence, "setup-recovery-360.png"), animations: "disabled" });
+    createModuleMode = "reuse-ready";
+    await page.getByRole("button", { name: "Check and start" }).click();
+    await page.getByRole("region", { name: /World map/i }).waitFor();
+    assert.deepEqual(recoveryRequests, [
+      { reuse: false, consent: "true" },
+      { reuse: true, consent: "true" },
+      { reuse: true, consent: "true" },
+    ]);
+  });
+  results.push("retained BlueMap setup shows file guidance, reuses only after consent, and opens the verified renderer");
 
   assert.deepEqual(errors, [], `page errors: ${errors.join("; ")}`);
   await fs.writeFile(

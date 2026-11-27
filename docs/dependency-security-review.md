@@ -43,6 +43,12 @@ peer is `^6.0.0`. Both cases need maintainer review before attempting an update.
 - `@sveltejs/kit` — **resolved**. The four 2.x alerts were fixed by the narrow
   Kit 3.4.0 migration in PR #565 (ADR 0042); no SvelteKit alert remains open.
   Keep at least Kit 3.4.0 when qualifying the routine bundle.
+- `github.com/gorilla/websocket` — **resolved** by the routine bundle. GO-2026-6278
+  (GHSA-w67g-5rqw-f597, weak PRNG for the client mask key) affects v1.5.3 and
+  has no tagged fixed release; the first fixed version is the
+  `v1.5.4-0.20240701034025-d67f41855da4` pseudo-version. That pseudo-version
+  adds the `golang.org/x/net/proxy` requirement, so keep the indirect
+  `golang.org/x/net` entry in `go.mod` until a tagged release supersedes it.
 
 ## Routine toolchain constraints
 

@@ -159,7 +159,7 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 	body, header := asset(granted, tileAsset, http.StatusOK)
 	info, err := png.DecodeConfig(bytes.NewReader(body))
 	if err != nil || info.Width != 128 || info.Height != 128 || header.Get("Content-Type") != "image/png" ||
-		header.Get("X-CarbonPanel-Rendered-Chunks") != "1" || header.Get("X-CarbonPanel-Tile-Saved-At") == "" ||
+		header.Get("X-CarbonPanel-Rendered-Chunks") != "1" || header.Get("X-CarbonPanel-Provisional-Chunks") != "0" || header.Get("X-CarbonPanel-Tile-Saved-At") == "" ||
 		header.Get("Cache-Control") != "private, no-store, no-cache, must-revalidate, max-age=0" {
 		t.Fatalf("protected tile response invalid: %+v, %v, %v", info, header, err)
 	}

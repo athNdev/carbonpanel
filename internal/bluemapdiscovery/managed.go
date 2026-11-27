@@ -142,6 +142,34 @@ const managedConfigMarker = "# Managed by Carbon Panel (OSS-388)."
 // preserved verbatim; the managed installer never overwrites it.
 var ErrManagedConfigExists = errors.New("bluemap managed install: existing BlueMap config is preserved; do not overwrite")
 
+var (
+	ErrReuseConfigMissing   = errors.New("the server has no existing BlueMap core.conf")
+	ErrReuseDownloadConsent = errors.New("the existing BlueMap configuration requires download acknowledgement in core.conf")
+	ErrReuseWorldConfig     = errors.New("the existing BlueMap configuration needs an Overworld map pointing to /app/world")
+)
+
+// CheckRetainedConfig verifies the existing configuration without rewriting it.
+// The managed container still uses its own private port and read-only world bind.
+func CheckRetainedConfig(ctx context.Context, resolver *nodestorage.Resolver, node nodestorage.NodeInfo, server *storage.Server) error {
+	accessor, err := resolver.ForNode(ctx, node, server.DataPath)
+	if err != nil {
+		return fmt.Errorf("open saved BlueMap configuration: %w", err)
+	}
+	defer func() { _ = accessor.Close() }()
+	if _, err := accessor.Stat("modules/bluemap/config/core.conf"); errors.Is(err, os.ErrNotExist) {
+		return ErrReuseConfigMissing
+	} else if err != nil {
+		return fmt.Errorf("inspect saved BlueMap configuration: %w", err)
+	}
+	if !readAcceptDownload(accessor) {
+		return ErrReuseDownloadConsent
+	}
+	if _, ok := readMapConfig(accessor); !ok {
+		return ErrReuseWorldConfig
+	}
+	return nil
+}
+
 // managedAccessor is the confined, bounded, node-owned write seam.
 type managedAccessor interface {
 	Stat(rel string) (os.FileInfo, error)

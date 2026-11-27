@@ -51,9 +51,9 @@ for (const [name, source] of [
 test('library list has grouped controls and distinct loading, empty, no-match and error states', () => {
 	assert.match(list, /<CarbonSearch/);
 	assert.match(list, /<CarbonSelect[\s\S]*Edition/);
-	assert.match(list, /<CarbonSelect[\s\S]*Sort by/);
+	assert.match(list, /<CarbonSelect[\s\S]*Sort library entries/);
 	assert.match(list, /role="alert"|CarbonErrorState/);
-	assert.match(list, /No worlds in the library yet/);
+	assert.match(list, /No saved library revisions yet/);
 	assert.match(list, /No matching worlds/);
 	assert.match(list, /aria-label=\{?["']Loading world library/);
 	assert.match(list, /\{#each filtered as entry \(entry\.id\)\}/);

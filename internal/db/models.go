@@ -712,8 +712,8 @@ type ScheduledTask struct {
 	Server *Server `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
-// ActivityLog is an append-only audit trail (MINE-141) for mutating ops:
-// auth, power, file, backup, subuser and schedule actions.
+// ActivityLog is an append-only audit trail. A server-scoped action can have
+// a different subject, such as the target of a moderation action.
 type ActivityLog struct {
 	ID         string `json:"id" gorm:"primaryKey"`
 	ActorID    string `json:"actor_id" gorm:"index;column:actor_id"`
@@ -722,6 +722,7 @@ type ActivityLog struct {
 	Event      string `json:"event" gorm:"not null;index"`
 	SubjectTyp string `json:"subject_type" gorm:"index;column:subject_type"` // e.g. "server", "user"
 	SubjectID  string `json:"subject_id" gorm:"index;column:subject_id"`
+	ServerID   string `json:"server_id" gorm:"index;column:server_id"`
 	Properties string `json:"properties" gorm:"type:text"` // JSON details
 	// RequestID is the client request id of a journaled lifecycle operation,
 	// so an activity row can be joined to the matching journal row. Empty
@@ -1064,5 +1065,6 @@ func (n *Node) StorageInfo() nodestorage.NodeInfo {
 		IsLocal:               n.IsLocal,
 		StorageRoot:           n.StorageRoot,
 		ControllerStorageRoot: n.ControllerStorageRoot,
+		Endpoint:              n.Host,
 	}
 }

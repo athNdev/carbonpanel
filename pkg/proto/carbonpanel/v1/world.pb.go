@@ -1938,10 +1938,13 @@ func (x *ListBindingsRequest) GetRevisionId() string {
 
 // ListBindingsResponse Active bindings matching the filters.
 type ListBindingsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Bindings      []*WorldBinding        `protobuf:"bytes,1,rep,name=bindings,proto3" json:"bindings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Bindings []*WorldBinding        `protobuf:"bytes,1,rep,name=bindings,proto3" json:"bindings,omitempty"`
+	// For a specific server, its configured save folder, including unbound worlds.
+	// Empty for fleet queries and when the configuration cannot identify the level.
+	ConfiguredLevelName string `protobuf:"bytes,2,opt,name=configured_level_name,json=configuredLevelName,proto3" json:"configured_level_name,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ListBindingsResponse) Reset() {
@@ -1979,6 +1982,13 @@ func (x *ListBindingsResponse) GetBindings() []*WorldBinding {
 		return x.Bindings
 	}
 	return nil
+}
+
+func (x *ListBindingsResponse) GetConfiguredLevelName() string {
+	if x != nil {
+		return x.ConfiguredLevelName
+	}
+	return ""
 }
 
 // GetBindingRequest Server and level of the binding.
@@ -3742,9 +3752,10 @@ const file_carbonpanel_v1_world_proto_rawDesc = "" +
 	"\x13ListBindingsRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1f\n" +
 	"\vrevision_id\x18\x02 \x01(\tR\n" +
-	"revisionId\"P\n" +
+	"revisionId\"\x84\x01\n" +
 	"\x14ListBindingsResponse\x128\n" +
-	"\bbindings\x18\x01 \x03(\v2\x1c.carbonpanel.v1.WorldBindingR\bbindings\"O\n" +
+	"\bbindings\x18\x01 \x03(\v2\x1c.carbonpanel.v1.WorldBindingR\bbindings\x122\n" +
+	"\x15configured_level_name\x18\x02 \x01(\tR\x13configuredLevelName\"O\n" +
 	"\x11GetBindingRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1d\n" +
 	"\n" +

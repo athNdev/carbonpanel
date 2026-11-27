@@ -12,7 +12,7 @@
  */
 
 import { create } from '@bufbuild/protobuf';
-import type { CallOptions } from '@connectrpc/connect';
+import { Code, ConnectError, type CallOptions } from '@connectrpc/connect';
 import {
 	CreateModuleRequestSchema,
 	ListModulesRequestSchema,
@@ -31,6 +31,23 @@ export const BLUEMAP_TEMPLATE_ID = 'builtin-bluemap';
  * time are added by the backend, not supplied by the browser. */
 export interface BlueMapConsent {
 	accepted: boolean;
+	reuseConfiguration?: boolean;
+}
+
+export function retainedBlueMapSetup(error: unknown) {
+	if (!(error instanceof ConnectError) || error.code !== Code.FailedPrecondition) return null;
+	switch (error.metadata.get('Carbonpanel-Bluemap-Setup')) {
+		case 'retained-config':
+			return 'retained-config';
+		case 'config-missing':
+			return 'config-missing';
+		case 'download-consent':
+			return 'download-consent';
+		case 'world-config':
+			return 'world-config';
+		default:
+			return null;
+	}
 }
 
 export interface BlueMapInstallRpc {
@@ -107,7 +124,7 @@ export function blueMapInstallEligibility(
 	return { eligible: true, reason: '' };
 }
 
-export type InstallOutcome = 'installed' | 'adopted';
+export type InstallOutcome = 'installed' | 'adopted' | 'reused';
 
 export interface InstallResult {
 	outcome: InstallOutcome;
@@ -155,9 +172,10 @@ export async function installBlueMap(
 				// ModuleService from the authenticated principal and clock.
 				bluemap_managed: 'true',
 				bluemap_consent_accepted: 'true',
+				...(consent.reuseConfiguration && { bluemap_reuse_config: 'true' }),
 				bluemap_version: 'v5.29'
 			}
 		})
 	);
-	return { outcome: 'installed', module: created.module };
+	return { outcome: consent.reuseConfiguration ? 'reused' : 'installed', module: created.module };
 }

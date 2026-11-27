@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
@@ -22,6 +23,7 @@ import (
 	models "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/files"
+	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -172,42 +174,18 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		return "", err
 	}
 
-	// Pre-create bind mounts, confined to the validated safe roots. Creating
-	// host directories outside the server data path / backup dir as a side
-	// effect of a module create is itself a host-write primitive, so mounts
-	// that fail the gate are skipped (they cannot reach ContainerCreate
-	// either, per the check above).
+	// Prepare explicitly requested bind sources on the controller's view of
+	// storage. A read-only mount stays read-only after its source exists.
 	for _, vol := range vols {
-		if vol.CreateDir && !vol.ReadOnly && (vol.Type == "" || vol.Type == "bind") {
+		if vol.CreateDir && (vol.Type == "" || vol.Type == "bind") {
 			if vol.Source == "" || vol.Target == "" {
 				continue
 			}
-			allowed := false
-			for _, root := range mkdirRoots {
-				if files.Within(root, vol.Source) {
-					allowed = true
-					break
+			if err := c.prepareModuleMountSource(server.DataPath, vol.Source, mkdirRoots); err != nil {
+				if vol.ReadOnly {
+					return "", fmt.Errorf("prepare read-only module bind source %q: %w", vol.Source, err)
 				}
-			}
-			if !allowed {
-				c.log.Warn("Skipping pre-create of mount directory outside safe roots: %q", vol.Source)
-				continue
-			}
-			// Pre-create on the filesystem that backs the bind: the
-			// controller's view of the node's storage (ADR 0005). A node that
-			// declares its own layout gets the mapped path; others keep the
-			// identical-path contract.
-			target := vol.Source
-			if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
-				target = nodestorage.MapPath(c.nodeStorage, server.DataPath, vol.Source)
-				if target == vol.Source {
-					continue
-				}
-			}
-			if _, err := os.Stat(target); os.IsNotExist(err) {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					c.log.Warn("Failed to pre-create mount directory %s: %v", target, err)
-				}
+				c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
 			}
 		}
 	}
@@ -376,16 +354,37 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 		c.log.Warn("Failed to parse volume configuration: %v", err)
 		return nil, nil
 	}
+	return resolveModuleVolumeMounts(volumes, aliasCtx, c.log)
+}
 
+// resolveModuleVolumeMounts substitutes aliases and validates the resolved
+// mounts. Container creation and the stopped-export writer check share it so
+// both reason about the same effective bind set.
+func resolveModuleVolumeMounts(volumes []ModuleVolumeMount, aliasCtx *alias.Context, log *logger.Logger) ([]ModuleVolumeMount, error) {
 	// Sub aliases in paths
 	for i := range volumes {
-		volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
-		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
-		if alias.HasUnresolvedVariables(volumes[i].Source) {
-			c.log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)
+		// Older Modules forms persist this exact template source. Resolve it
+		// to the actual level so an unset Level cannot mount the data root.
+		// A source explicitly chosen by the operator follows normal alias rules.
+		if aliasCtx != nil && aliasCtx.Module != nil && aliasCtx.Module.TemplateID == "builtin-bluemap" &&
+			volumes[i].Source == "{{server.data_path}}/{{server.config.level}}" && volumes[i].Target == "/app/world" {
+			level := ""
+			if aliasCtx.ServerConfig != nil {
+				level = aliasCtx.ServerConfig.ActualLevelName()
+			}
+			if aliasCtx.Server == nil || level == "" {
+				return nil, fmt.Errorf("cannot resolve BlueMap world volume without a valid configured level")
+			}
+			volumes[i].Source = filepath.Join(aliasCtx.Server.DataPath, level)
+		} else {
+			volumes[i].Source = alias.Substitute(volumes[i].Source, aliasCtx)
 		}
-		if alias.HasUnresolvedVariables(volumes[i].Target) {
-			c.log.Warn("Module volume target path contains unresolved template variable: %s", volumes[i].Target)
+		volumes[i].Target = alias.Substitute(volumes[i].Target, aliasCtx)
+		if log != nil && alias.HasUnresolvedVariables(volumes[i].Source) {
+			log.Warn("Module volume source path contains unresolved template variable: %s", volumes[i].Source)
+		}
+		if log != nil && alias.HasUnresolvedVariables(volumes[i].Target) {
+			log.Warn("Module volume target path contains unresolved template variable: %s", volumes[i].Target)
 		}
 	}
 
@@ -405,6 +404,139 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 	return volumes, nil
 }
 
+// WritableModuleDataSources resolves a module's bind mounts and reports the
+// writable sources inside the owning server's data directory. Stopped export
+// refuses those modules: a stopped container is not writer process-death
+// qualification, and the archive read must not overlap a writable mount.
+func WritableModuleDataSources(module *models.Module, server *models.Server, serverConfig *models.ServerConfig, cfg *config.Config) ([]string, error) {
+	if module == nil || server == nil || server.DataPath == "" ||
+		module.VolumeOverrides == "" || module.VolumeOverrides == "[]" {
+		return nil, nil
+	}
+	var volumes []ModuleVolumeMount
+	if err := json.Unmarshal([]byte(module.VolumeOverrides), &volumes); err != nil {
+		return nil, fmt.Errorf("invalid module volume overrides: %w", err)
+	}
+	resolved, err := resolveModuleVolumeMounts(volumes, &alias.Context{
+		Server: server, ServerConfig: serverConfig, Module: module, Config: cfg,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var sources []string
+	for _, volume := range resolved {
+		if volume.ReadOnly || volume.Source == "" || (volume.Type != "" && volume.Type != "bind") {
+			continue
+		}
+		if DataPathOverlaps(server.DataPath, volume.Source) {
+			sources = append(sources, volume.Source)
+		}
+	}
+	return sources, nil
+}
+
+func (c *Client) prepareModuleMountSource(serverDataPath, source string, safeRoots []string) error {
+	for _, root := range safeRoots {
+		if !files.Within(root, source) {
+			continue
+		}
+		if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
+			rel, ok := relativeBindSource(serverDataPath, source)
+			if !ok {
+				return fmt.Errorf("source is outside the server's node storage mapping")
+			}
+			// A shared mount may have the same path on both hosts. MapDataPath
+			// checks storage availability; NewLocal opens the existing shared
+			// parent and confines directory creation to the mapped server root.
+			mapped, err := c.sharedModuleBindRoot(serverDataPath, root, source)
+			if err != nil {
+				return err
+			}
+			storage, err := nodestorage.NewLocal(mapped)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = storage.Close() }()
+			return storage.MkdirAll(rel)
+		}
+		if files.WithinReal(root, source) {
+			return os.MkdirAll(source, 0755)
+		}
+	}
+	return fmt.Errorf("source resolves outside the server data and backup directories")
+}
+
+// Verify the controller's view before either creating a directory or handing
+// its node-side path to Docker, which can itself create writable bind sources.
+func (c *Client) sharedModuleBindRoot(serverDataPath, safeRoot, source string) (string, error) {
+	mapped, err := nodestorage.MapDataPath(c.nodeStorage, serverDataPath)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(filepath.Dir(mapped)); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("shared storage mount is unavailable")
+	}
+	info, err := os.Lstat(mapped)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if info != nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("mapped server data directory is a symlink")
+	}
+	mappedSafeRoot := nodestorage.MapPath(c.nodeStorage, serverDataPath, safeRoot)
+	mappedSource := nodestorage.MapPath(c.nodeStorage, serverDataPath, source)
+	if !files.WithinReal(mappedSafeRoot, mappedSource) {
+		return "", fmt.Errorf("source resolves outside its shared storage root")
+	}
+	return mapped, nil
+}
+
+// moduleVolumeMount converts one resolved module volume into the Docker mount
+// that container creation uses. ok=false means the entry is unusable and
+// creation skips it; an error is a source that cannot be represented on this
+// node. The archive verification path treats both as a refusal.
+func (c *Client) moduleVolumeMount(vol ModuleVolumeMount, serverDataPath string, safeRoots ...string) (mount.Mount, bool, error) {
+	mountType := mount.TypeBind
+	if vol.Type == "volume" {
+		mountType = mount.TypeVolume
+	}
+
+	if vol.Source == "" || vol.Target == "" {
+		return mount.Mount{}, false, nil
+	}
+
+	source := vol.Source
+	if mountType == mount.TypeBind {
+		// Validate in the panel's own filesystem view first; the translation
+		// to the daemon's view follows the containment check, so a host path
+		// can never turn into a mount.
+		if err := ValidateVolumeSource(source, "bind", safeRoots...); err != nil {
+			return mount.Mount{}, false, err
+		}
+		mapped, ok := c.bindSource(serverDataPath, source)
+		if !ok {
+			return mount.Mount{}, false, fmt.Errorf("bind source %q is outside the node's storage mapping", source)
+		}
+		// Identical paths qualify as a shared mapping only when the controller
+		// can verify the storage it would hand to Docker.
+		if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" &&
+			(filepath.Clean(mapped) == filepath.Clean(source) || !nodestorage.RequiresRemoteTransport(c.nodeStorage)) {
+			if _, err := c.sharedModuleBindRoot(serverDataPath, serverDataPath, source); err != nil {
+				return mount.Mount{}, false, err
+			}
+		}
+		source = mapped
+	}
+
+	return mount.Mount{
+		Type:        mountType,
+		Source:      source,
+		Target:      vol.Target,
+		ReadOnly:    vol.ReadOnly,
+		BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},
+	}, true, nil
+}
+
 // Module volumes to Docker mount specs. safeRoots is the already-validated
 // confinement set; entries that fail it are skipped defensively so a caller
 // that bypassed parseModuleVolumes can never turn a host path into a mount.
@@ -412,44 +544,139 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount, serverDataPa
 	var mounts []mount.Mount
 
 	for _, vol := range volumes {
-		mountType := mount.TypeBind
-		if vol.Type == "volume" {
-			mountType = mount.TypeVolume
+		mountSpec, ok, err := c.moduleVolumeMount(vol, serverDataPath, safeRoots...)
+		if err != nil {
+			c.log.Warn("Skipping volume mount that cannot be represented on this node: source=%q, target=%q: %v", vol.Source, vol.Target, err)
+			continue
 		}
-
-		// Skip mounts with empty source or target
-		if vol.Source == "" || vol.Target == "" {
+		if !ok {
 			c.log.Warn("Skipping volume mount with empty source or target: source=%q, target=%q", vol.Source, vol.Target)
 			continue
 		}
-
-		source := vol.Source
-		if mountType == mount.TypeBind {
-			// Validate in the panel's own filesystem view first; the
-			// translation to the daemon's view follows the containment check,
-			// so a host path can never turn into a mount.
-			if err := ValidateVolumeSource(source, "bind", safeRoots...); err != nil {
-				c.log.Warn("Skipping volume mount outside safe roots: source=%q, target=%q: %v", vol.Source, vol.Target, err)
-				continue
-			}
-			mapped, ok := c.bindSource(serverDataPath, source)
-			if !ok {
-				c.log.Warn("Skipping volume mount that cannot be mapped onto the node's storage layout: source=%q, target=%q", vol.Source, vol.Target)
-				continue
-			}
-			source = mapped
-		}
-
-		mounts = append(mounts, mount.Mount{
-			Type:        mountType,
-			Source:      source,
-			Target:      vol.Target,
-			ReadOnly:    vol.ReadOnly,
-			BindOptions: &mount.BindOptions{CreateMountpoint: !vol.ReadOnly},
-		})
+		mounts = append(mounts, mountSpec)
 	}
 
 	return mounts
+}
+
+// ModuleBindMount is one bind mount that touches the server data directory in
+// the daemon's own path vocabulary.
+type ModuleBindMount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
+}
+
+// ContainerBindMount is one live bind mount reported by the daemon.
+type ContainerBindMount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
+}
+
+// ServerDataHostPath reports the daemon-side path of a server data root for
+// this node. ok=false means the storage layout cannot be represented there.
+func (c *Client) ServerDataHostPath(serverDataPath string) (string, bool) {
+	if serverDataPath == "" {
+		return "", false
+	}
+	root, ok := c.bindSource(serverDataPath, serverDataPath)
+	return filepath.Clean(root), ok
+}
+
+// ModuleDataMounts resolves a module's configured bind mounts exactly as
+// container creation does and returns the subset that intersects the owning
+// server's data directory on the daemon. It fails closed when a configured
+// mount cannot be resolved or mapped, because an unverifiable mount is not a
+// safe attachment state for a stopped export.
+func (c *Client) ModuleDataMounts(module *models.Module, server *models.Server, serverConfig *models.ServerConfig, cfg *config.Config, siblingModules map[string]*models.Module) ([]ModuleBindMount, error) {
+	if module == nil || server == nil || server.DataPath == "" {
+		return nil, fmt.Errorf("module and owning server are required to resolve data mounts")
+	}
+	volumes, err := c.resolvedModuleVolumes(module, server, serverConfig, cfg, siblingModules)
+	if err != nil {
+		return nil, err
+	}
+	dataRoot, ok := c.ServerDataHostPath(server.DataPath)
+	if !ok {
+		return nil, fmt.Errorf("server data directory cannot be mapped onto the module node")
+	}
+	mountRoots := expandWithHostTranslation(ModuleSafeRoots(server.DataPath, backupDirOf(cfg)))
+	var out []ModuleBindMount
+	for _, vol := range volumes {
+		mountSpec, ok, err := c.moduleVolumeMount(vol, server.DataPath, mountRoots...)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || mountSpec.Type != mount.TypeBind {
+			continue
+		}
+		if DataPathOverlaps(dataRoot, mountSpec.Source) {
+			out = append(out, ModuleBindMount{
+				Source:   filepath.Clean(mountSpec.Source),
+				Target:   mountSpec.Target,
+				ReadOnly: mountSpec.ReadOnly,
+			})
+		}
+	}
+	return out, nil
+}
+
+// resolvedModuleVolumes is the verification-side parser: unlike
+// parseModuleVolumes it returns invalid JSON and unresolved aliases as errors
+// instead of silently treating them as an empty mount set.
+func (c *Client) resolvedModuleVolumes(module *models.Module, server *models.Server, serverConfig *models.ServerConfig, cfg *config.Config, siblingModules map[string]*models.Module) ([]ModuleVolumeMount, error) {
+	if module.VolumeOverrides == "" || module.VolumeOverrides == "[]" {
+		return nil, nil
+	}
+	var volumes []ModuleVolumeMount
+	if err := json.Unmarshal([]byte(module.VolumeOverrides), &volumes); err != nil {
+		return nil, fmt.Errorf("invalid module volume overrides: %w", err)
+	}
+	aliasCtx := &alias.Context{
+		Server: server, ServerConfig: serverConfig, Module: module, Config: cfg,
+		Modules: siblingModules,
+	}
+	resolved, err := resolveModuleVolumeMounts(volumes, aliasCtx, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, vol := range resolved {
+		if alias.HasUnresolvedVariables(vol.Source) || alias.HasUnresolvedVariables(vol.Target) {
+			return nil, fmt.Errorf("module volume mount contains an unresolved template variable")
+		}
+	}
+	return resolved, nil
+}
+
+// ContainerBindMounts returns the live bind mounts of a container. The daemon's
+// effective mounts are authoritative even when the stored configuration has
+// already moved to a newer, not-yet-applied mount set.
+func (c *Client) ContainerBindMounts(ctx context.Context, containerID string) ([]ContainerBindMount, error) {
+	if c == nil || c.docker == nil {
+		return nil, fmt.Errorf("docker client is not available")
+	}
+	if containerID == "" {
+		return nil, fmt.Errorf("container id is required")
+	}
+	ctx, cancel := boundedCall(ctx)
+	defer cancel()
+	inspectResult, err := c.docker.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var mounts []ContainerBindMount
+	for _, m := range inspectResult.Container.Mounts {
+		if m.Type != mount.TypeBind {
+			continue
+		}
+		mounts = append(mounts, ContainerBindMount{
+			Source:   filepath.Clean(m.Source),
+			Target:   m.Destination,
+			ReadOnly: !m.RW,
+		})
+	}
+	return mounts, nil
 }
 
 // applyModuleConfinement applies the game-container baseline to a sidecar's

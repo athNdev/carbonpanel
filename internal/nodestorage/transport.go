@@ -75,6 +75,32 @@ func (p *ProcessTransport) Open(ctx context.Context, node NodeInfo, dataRoot str
 	return storageworker.NewRemoteAccessor(sess), nil
 }
 
+func (p *ProcessTransport) OpenExisting(ctx context.Context, node NodeInfo, dataRoot string) (Accessor, error) {
+	if p == nil || p.Bin == "" {
+		return nil, ErrUnavailable
+	}
+	root := nodeDataRoot(node, dataRoot)
+	stat, err := os.Lstat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !stat.IsDir() {
+		return nil, ErrUnavailable
+	}
+	return p.Open(ctx, node, dataRoot)
+}
+
+func (p *ProcessTransport) OpenStorageRoot(ctx context.Context, node NodeInfo) (AllocationRoot, error) {
+	if p == nil || p.Bin == "" || node.StorageRoot == "" {
+		return nil, ErrUnavailable
+	}
+	sess, err := startProcessWorker(ctx, p.Bin, node.StorageRoot)
+	if err != nil {
+		return nil, err
+	}
+	return storageworker.NewRemoteAccessor(sess), nil
+}
+
 func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storageworker.Session, error) {
 	pr, pw, err := os.Pipe()
 	if err != nil {

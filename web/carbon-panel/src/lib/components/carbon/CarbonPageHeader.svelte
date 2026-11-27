@@ -9,7 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		/** Page title. Rendered at Carbon's 2xl light scale. */
+		/** Primary heading for the page. */
 		title: string;
 		/** Optional supporting sentence, rendered as small secondary text. */
 		description?: string;
@@ -28,7 +28,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 >
 	<div class="min-w-0">
 		<div class="flex min-w-0 flex-wrap items-center gap-2">
-			<h1 class="font-sans text-2xl font-light tracking-tight text-foreground">
+			<h1
+				class="min-w-0 font-sans text-3xl font-semibold tracking-tight [overflow-wrap:anywhere] text-foreground sm:text-4xl"
+			>
 				{title}
 			</h1>
 			{@render tag?.()}

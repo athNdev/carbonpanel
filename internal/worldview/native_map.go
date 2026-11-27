@@ -255,6 +255,7 @@ func writeNativeTile(w http.ResponseWriter, r *http.Request, tile worldterrain.T
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.Itoa(len(tile.PNG)))
 	w.Header().Set("X-CarbonPanel-Rendered-Chunks", strconv.Itoa(tile.RenderedChunks))
+	w.Header().Set("X-CarbonPanel-Provisional-Chunks", strconv.Itoa(tile.ProvisionalChunks))
 	if !tile.NewestSavedAt.IsZero() {
 		w.Header().Set("X-CarbonPanel-Tile-Saved-At", tile.NewestSavedAt.UTC().Format(time.RFC3339))
 	}

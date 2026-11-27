@@ -7,7 +7,7 @@ work=$1
 product=$2
 : "${GITHUB_REPOSITORY:?}" "${GITHUB_OUTPUT:?}" "${STAGED_RUN:?}" "${STAGED_SHA:?}" "${BASELINE_TAG:?}"
 [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$STAGED_SHA" =~ ^[0-9a-f]{40}$ ]]
-[[ "$BASELINE_TAG" =~ ^(mod-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$BASELINE_TAG" =~ ^(carbonpanel-|mod-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]]
 [[ "$(git -C "$product" rev-parse HEAD)" == "$STAGED_SHA" ]]
 mkdir -p "$work/evidence"
@@ -35,6 +35,11 @@ if (( primary_count > 1 )); then
   echo "ambiguous unexpired release-image-context artifacts: $primary_count" >&2
   exit 1
 fi
+stage_count=$(artifact_count qualified-stable-stage)
+if (( stage_count > 1 )); then
+  echo "ambiguous unexpired qualified-stable-stage artifacts: $stage_count" >&2
+  exit 1
+fi
 
 fetch_artifact() {
   local name=$1 record id digest zip
@@ -56,43 +61,40 @@ bundle="${bundles[0]}"
 mkdir "$work/bundle"
 tar -xzf "$bundle" -C "$work/bundle"
 
-# The older release workflow retained a ready-made image context. Newer
-# publish=false staging retains the verified downloads, the assembled OCI
-# inputs and stage.json instead. Accept both, but bind the new path to the
-# exact stage identity and the OCI index digest before using it.
-context="$work/release-image-context"
-if (( primary_count == 1 )); then
-  fetch_artifact release-image-context
-else
-  fetch_artifact qualified-stable-stage
-  stage_commit=$(jq -er '.commit | select(test("^[0-9a-f]{40}$"))' "$work/qualified-stable-stage/stage.json")
-  stage_sha=$(jq -er '.commit' "$work/qualified-stable-stage/stage.json")
-  [[ "$stage_commit" == "$STAGED_SHA" ]]
-  stage_digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' "$work/qualified-stable-stage/stage.json")
-  fetch_artifact verified-release-oci
-  oci_tar=$(find "$work/verified-release-oci" -maxdepth 1 -name 'image.oci.tar' -type f | head -n1)
-  [[ -n "$oci_tar" ]]
-  tar -tf "$oci_tar" | grep -qx "blobs/sha256/${stage_digest#sha256:}"
-  # A matching blob name in the archive is provenance evidence only. The
-  # Compose leg below builds from the verified Linux bundle, so do not claim
-  # that it ran the staged OCI image digest.
-  printf 'stage_commit=%s\nstage_digest=%s\noci_index_blob_present=true\n' \
-    "$stage_sha" "$stage_digest" | tee -a "$evidence"
-  # The shipped Dockerfile only needs the exact Linux binaries and the sample
-  # config; reconstruct the context from the verified bundle rather than
-  # inventing inputs. The comparison below still guards those bytes.
-  mkdir -p "$context/linux_amd64"
-  cp "$work/bundle/carbon-panel" "$work/bundle/carbon-storage" \
-    "$context/linux_amd64/"
-  cp "$work/bundle/config.example.yaml" "$context/"
-fi
-
-for program in carbon-panel carbon-storage; do
-  cmp "$work/bundle/$program" "$context/linux_amd64/$program"
-done
 candidate_version=$(jq -er --arg sha "$STAGED_SHA" '
   select(.commit == $sha and .os == "linux" and .arch == "amd64") |
   .version | sub("^v";"") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"))' "$work/bundle/BUILD-INFO.json")
+
+# Current build-only stages retain an OCI archive with an identity receipt.
+# Earlier hosted qualification runs can replay a raw context when no receipt
+# was generated. Record the distinction in the evidence.
+context="$work/release-image-context"
+stage_digest=
+if (( stage_count == 1 )); then
+  fetch_artifact qualified-stable-stage
+  stage="$work/qualified-stable-stage/stage.json"
+  stage_digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' "$stage")
+  RELEASE_VERSION="carbonpanel-v$candidate_version" RELEASE_COMMIT="$STAGED_SHA" \
+    EXPECTED_DIGEST="$stage_digest" python3 -m scripts.stable_recovery verify-stage \
+    --source-run "$work/run.json" --journal "$stage"
+  fetch_artifact verified-release-oci
+  oci_tar="$work/verified-release-oci/image.oci.tar"
+  test -s "$oci_tar"
+  test "$(cat "$work/verified-release-oci/distribution-digest.txt")" = "$stage_digest"
+  command -v skopeo >/dev/null || { sudo apt-get update && sudo apt-get install -y skopeo; }
+  skopeo inspect --raw "oci-archive:$oci_tar" > "$work/staged-index.json"
+  test "sha256:$(sha256sum "$work/staged-index.json" | cut -d' ' -f1)" = "$stage_digest"
+  printf 'stage_commit=%s\nstage_digest=%s\n' "$STAGED_SHA" "$stage_digest" | tee -a "$evidence"
+elif (( primary_count == 1 )); then
+  fetch_artifact release-image-context
+  for program in carbon-panel carbon-storage; do
+    cmp "$work/bundle/$program" "$context/linux_amd64/$program"
+  done
+else
+  echo "stage has no qualified OCI receipt or legacy release-image-context" >&2
+  exit 1
+fi
+
 printf 'candidate_version=%s\n' "$candidate_version" | tee -a "$evidence"
 sha256sum "$bundle" "$work/bundle/carbon-panel" "$work/bundle/carbon-storage" \
   "$product/docker/Dockerfile.release" "$product/docker-compose.yml" \
@@ -108,7 +110,7 @@ printf 'baseline_tag=%s\nbaseline_commit=%s\nbaseline_image=%s\n' \
 sha256sum "$work/release-manifest.json" | tee -a "$evidence"
 
 # A loopback-only registry makes the shipped --pull always path usable without
-# a registry publication. The staged job retains its inputs, not the OCI tar.
+# publishing an image outside the disposable runner.
 docker run -d --name compose-qualification-registry -p 127.0.0.1:5000:5000 registry:2
 for ((i=0; i<30; i++)); do
   if curl --silent --fail http://127.0.0.1:5000/v2/ >/dev/null; then break; fi
@@ -116,25 +118,28 @@ for ((i=0; i<30; i++)); do
 done
 curl --silent --show-error --fail http://127.0.0.1:5000/v2/ >/dev/null
 tag="127.0.0.1:5000/carbonpanel:candidate"
-docker buildx build --platform linux/amd64 --load --progress plain \
-  -f "$product/docker/Dockerfile.release" -t "$tag" \
-  --label "org.opencontainers.image.version=$candidate_version" \
-  --label "org.opencontainers.image.revision=$STAGED_SHA" \
-  --build-arg "APP_VERSION=$candidate_version" "$context" 2>&1 | tee "$work/evidence/image-build.txt"
-docker push "$tag"
-candidate=$(docker image inspect "$tag" --format '{{json .RepoDigests}}' |
-  jq -er '.[] | select(test("^127\\.0\\.0\\.1:5000/carbonpanel@sha256:[0-9a-f]{64}$"))')
-printf 'candidate_image=%s\n' "$candidate" | tee -a "$evidence"
-# The matrix image is rebuilt by the shipped Dockerfile from verified release
-# binaries. This qualifies the exact packaged binaries and operator scripts;
-# it is not an assertion that Compose ran the staged OCI image digest. That
-# digest needs its own exact-image evidence and is recorded separately by the
-# release qualification ledger.
-if (( primary_count == 1 )); then
-  printf 'candidate_image_provenance=local-build-from-release-image-context\n' | tee -a "$evidence"
+if [[ -n "$stage_digest" ]]; then
+  skopeo copy --all --preserve-digests --dest-tls-verify=false \
+    --digestfile "$work/copied-digest" "oci-archive:$oci_tar" "docker://$tag"
+  test "$(cat "$work/copied-digest")" = "$stage_digest"
+  candidate="${tag%:*}@$stage_digest"
+  skopeo inspect --raw --tls-verify=false "docker://$candidate" > "$work/copied-index.json"
+  cmp "$work/staged-index.json" "$work/copied-index.json"
+  provenance=staged-oci-archive
+  exact=true
 else
-  printf 'candidate_image_provenance=local-build-from-verified-linux-bundle\n' | tee -a "$evidence"
+  docker buildx build --platform linux/amd64 --load --progress plain \
+    -f "$product/docker/Dockerfile.release" -t "$tag" \
+    --label "org.opencontainers.image.version=$candidate_version" \
+    --label "org.opencontainers.image.revision=$STAGED_SHA" \
+    --build-arg "APP_VERSION=$candidate_version" "$context" 2>&1 | tee "$work/evidence/image-build.txt"
+  docker push "$tag"
+  candidate=$(docker image inspect "$tag" --format '{{json .RepoDigests}}' |
+    jq -er '.[] | select(test("^127\\.0\\.0\\.1:5000/carbonpanel@sha256:[0-9a-f]{64}$"))')
+  provenance=local-build-from-release-image-context
+  exact=false
 fi
-printf 'staged_oci_image_digest_exercised_by_compose=false\n' | tee -a "$evidence"
+printf 'candidate_image=%s\ncandidate_image_provenance=%s\ncandidate_image_matches_staged_oci=%s\n' \
+  "$candidate" "$provenance" "$exact" | tee -a "$evidence"
 printf 'baseline_image=%s\nbaseline_commit=%s\ncandidate_image=%s\ncandidate_version=%s\n' \
   "$baseline" "$baseline_commit" "$candidate" "$candidate_version" >> "$GITHUB_OUTPUT"

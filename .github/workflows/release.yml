@@ -69,14 +69,13 @@ permissions:
 # publication: every phase (immutable image -> GitHub release -> moving aliases)
 # holds the SAME lock as the CD channel transaction and the docs-only publisher.
 # A stable/latest alias can never move while a Pages or Nightly writer is active.
-# cancel-in-progress:false protects the RUNNING run; with default queue:single only
-# one pending run is retained and a later request REPLACES it. This lane is
-# SINGLE-OPERATOR DISPATCH: do not assume every queued publisher waits; verify
-# the resulting run before retry. Build-only rehearsals, tag pushes, PRs and
-# automatic main events get a per-run key instead, so ordinary CI is not serialized.
+# Preserve pending publishers under the same lock. When a run acquires it,
+# existing live-source checks still decide whether its candidate can publish.
+# Rehearsals, tag pushes and PRs use per-run keys.
 concurrency:
   group: ${{ inputs.publish == true && 'pages-deploy' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   plan:
@@ -246,7 +245,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -414,7 +413,7 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -701,7 +700,7 @@ jobs:
       # All privileged gates run from the trusted checkout, including their
       # openapi_version and docs_publication_gate imports. Candidate artifact
       # and doc paths stay explicit in the arguments below.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -938,7 +937,7 @@ jobs:
           path: .website-build/probe-site
       - name: Deploy the off-path Stable candidate probe
         id: deploy_probe
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-stable-probe
       - name: Observe the candidate marker publicly before changing the canonical docs
@@ -950,7 +949,7 @@ jobs:
             '.channel == "stable" and .canonical == false and .candidate_commit == $revision and .candidate_digest == $digest'
       - name: Deploy the synchronized stable docs marker once
         id: deploy
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
       - name: Verify the deployed public stable marker matches the exact revision
         id: marker
         env:
@@ -1015,7 +1014,7 @@ jobs:
            steps.transaction.outputs.action == 'rollback' ||
            steps.transaction.outputs.action == 'reconcile' ||
            steps.transaction.outputs.action == '')
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-prior-stable
       - name: Verify the restored prior stable docs marker
@@ -1274,7 +1273,7 @@ jobs:
       - name: Deploy the exact prior stable docs bytes
         id: stable_compensate_docs
         if: always() && steps.stable_compensate.outcome == 'success'
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: github-pages-prior-stable
       - name: Verify the compensated stable aliases and docs marker

@@ -26,6 +26,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
@@ -47,7 +48,7 @@ type SearchModResult struct {
 type ModDependencyItem struct {
 	ProjectID      string `json:"project_id"`
 	VersionID      string `json:"version_id,omitempty"`
-	DependencyType string `json:"dependency_type"` // "required", "optional"
+	DependencyType string `json:"dependency_type"` // "required", "optional", "incompatible"
 	Title          string `json:"title,omitempty"`
 }
 
@@ -687,18 +688,6 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			vType = "alpha"
 		}
 
-		var deps []ModDependencyItem
-		for _, d := range f.Dependencies {
-			depType := "optional"
-			if d.RelationType == 3 {
-				depType = "required"
-			}
-			deps = append(deps, ModDependencyItem{
-				ProjectID:      fmt.Sprintf("%d", d.ModID),
-				DependencyType: depType,
-			})
-		}
-
 		downloadURL := f.DownloadURL
 
 		versions = append(versions, ModVersionItem{
@@ -709,7 +698,7 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			FileName:      f.FileName,
 			DownloadURL:   downloadURL,
 			FileSize:      f.FileLength,
-			Dependencies:  deps,
+			Dependencies:  curseForgeModDependencies(f.Dependencies),
 		})
 	}
 
@@ -723,17 +712,6 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			case 3:
 				vType = "alpha"
 			}
-			var deps []ModDependencyItem
-			for _, d := range f.Dependencies {
-				depType := "optional"
-				if d.RelationType == 3 {
-					depType = "required"
-				}
-				deps = append(deps, ModDependencyItem{
-					ProjectID:      fmt.Sprintf("%d", d.ModID),
-					DependencyType: depType,
-				})
-			}
 			downloadURL := f.DownloadURL
 			versions = append(versions, ModVersionItem{
 				ID:            fmt.Sprintf("%d", f.ID),
@@ -743,7 +721,7 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 				FileName:      f.FileName,
 				DownloadURL:   downloadURL,
 				FileSize:      f.FileLength,
-				Dependencies:  deps,
+				Dependencies:  curseForgeModDependencies(f.Dependencies),
 			})
 		}
 	}
@@ -751,6 +729,24 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 	m.enrichCurseForgeDependencyTitles(ctx, apiKey, versions)
 
 	return versions, nil
+}
+
+func curseForgeModDependencies(dependencies []fuego.Dependency) []ModDependencyItem {
+	var items []ModDependencyItem
+	for _, dependency := range dependencies {
+		kind := "optional"
+		switch dependency.RelationType {
+		case 3: // RequiredDependency
+			kind = "required"
+		case 5: // Incompatible
+			kind = "incompatible"
+		}
+		items = append(items, ModDependencyItem{
+			ProjectID:      strconv.Itoa(dependency.ModID),
+			DependencyType: kind,
+		})
+	}
+	return items
 }
 
 // auditModInstall records an online mod install in the Activity tab, failures
@@ -829,6 +825,15 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 	if len(items) == 0 {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "no mods specified to install"}
 	}
+	storageRoot, err := nodestorage.NewLocal(modsDir)
+	if err != nil {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("failed to open mods directory: %v", err)}
+	}
+	defer func() {
+		if closeErr := storageRoot.Close(); closeErr != nil {
+			m.log.Warn("closing mod install directory: %v", closeErr)
+		}
+	}()
 
 	resp := InstallModsResponse{
 		Success:   true,
@@ -850,10 +855,12 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 			continue
 		}
 
-		targetPath := filepath.Join(modsDir, fileName)
-
-		// Download directly to target file
-		res, err := m.httpClient.Get(item.DownloadURL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, item.DownloadURL, nil)
+		if err != nil {
+			resp.Errors = append(resp.Errors, fmt.Sprintf("invalid download for %s: %v", item.Name, err))
+			continue
+		}
+		res, err := m.httpClient.Do(req)
 		if err != nil {
 			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to download %s: %v", item.Name, err))
 			continue
@@ -865,7 +872,11 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 			continue
 		}
 
-		out, err := os.Create(targetPath)
+		limit := res.ContentLength
+		if limit <= 0 || limit > storageworker.MaxStreamBytes {
+			limit = storageworker.MaxStreamBytes
+		}
+		out, err := storageRoot.BeginWrite(ctx, fileName, limit)
 		if err != nil {
 			res.Body.Close()
 			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to save %s: %v", item.Name, err))
@@ -874,11 +885,14 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 
 		_, copyErr := io.Copy(out, res.Body)
 		res.Body.Close()
-		out.Close()
-
 		if copyErr != nil {
-			_ = os.Remove(targetPath)
+			_ = out.Close()
 			resp.Errors = append(resp.Errors, fmt.Sprintf("incomplete download for %s: %v", item.Name, copyErr))
+			continue
+		}
+		if err := out.Commit(); err != nil {
+			_ = out.Close()
+			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to publish %s: %v", item.Name, err))
 			continue
 		}
 

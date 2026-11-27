@@ -27,6 +27,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -168,6 +169,13 @@ func (s *WorldService) ListBindings(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list bindings"))
 	}
 	out := &v1.ListBindingsResponse{}
+	if id := req.Msg.GetServerId(); id != "" {
+		// Level identity is supplemental. Older callers still receive their
+		// bindings if this separate configuration observation is unavailable.
+		if cfg, err := s.store.GetServerConfig(ctx, id); err == nil {
+			out.ConfiguredLevelName = worldview.ActualLevelName(cfg)
+		}
+	}
 	for _, b := range bindings {
 		out.Bindings = append(out.Bindings, bindingProto(b))
 	}
@@ -237,7 +245,7 @@ func (s *WorldService) ImportWorld(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source must be url or upload"))
 	}
 	if err != nil {
-		return nil, importError(err)
+		return nil, worldError(err)
 	}
 	out := &v1.ImportWorldResponse{Job: importJobProto(*result.Job)}
 	if result.Revision != nil {
@@ -253,7 +261,11 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, notFoundOrInternal(err, "revision not found")
 	}
-	targetMC := msg.GetTargetMcVersion()
+	// Keep the caller's explicit target separate from the fallbacks below:
+	// a version-only preview must name its target, and the revision's own
+	// version must not silently satisfy that requirement.
+	requestedMC := strings.TrimSpace(msg.GetTargetMcVersion())
+	targetMC := requestedMC
 	edition := "java"
 	loader := ""
 	if msg.GetServerId() != "" {
@@ -272,6 +284,29 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	archivePath, err := worldlib.ResolveRevisionArchive(s.libraryRoot, revision.StoragePath)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	// Preview must refuse the same layouts and target mismatch bind refuses,
+	// including revisions stored before this gate existed. A version-only
+	// request has no server scope, so it applies the archive layout policy but
+	// does not require a configured level (proto allows either target form).
+	var levelName string
+	if msg.GetServerId() != "" {
+		levelName, err = authoritativeLevelName(ctx, s.store, msg.GetServerId())
+		if err != nil {
+			return nil, err
+		}
+	} else if requestedMC == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("target_mc_version is required when server_id is omitted"))
+	}
+	layout, err := worldlib.ValidateRevisionArchive(ctx, archivePath)
+	if err != nil {
+		return nil, worldError(err)
+	}
+	if levelName != "" {
+		if _, err := layout.SelectFamilies(levelName); err != nil {
+			return nil, worldError(err)
+		}
 	}
 	report, err := s.compat.Check(ctx, archivePath, worldlib.Target{
 		ServerID: msg.GetServerId(), MCVersion: targetMC, Edition: edition,
@@ -335,20 +370,14 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 			}
 			return connect.NewResponse(out), nil
 		}
+		if isRecordNotFound(err) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
 		return nil, worldError(err)
 	}
-	if result != nil && result.Outcome == "success" {
-		requestID := strings.TrimSpace(result.RequestID)
-		if requestID == "" {
-			requestID = strings.TrimSpace(msg.GetRequestId())
-		}
-		operationID := result.OperationID
-		if operationID != "" && requestID != "" {
-			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, msg.GetLevelName(), msg.GetRevisionId(), operationID)
-		}
-		if operationID != "" {
-			result.OperationID = operationID
-		}
+	if result.Outcome == "success" && result.Binding != nil && result.OperationID != "" && result.RequestID != "" {
+		binding := result.Binding
+		s.auditWorldOperation(ctx, req, activity.EventWorldBind, binding.ServerID, result.RequestID, binding.LevelName, binding.RevisionID, result.OperationID)
 	}
 	out := &v1.BindWorldResponse{
 		OperationId: result.OperationID, Outcome: result.Outcome,
@@ -651,7 +680,31 @@ func notFoundOrInternal(err error, message string) error {
 	if isRecordNotFound(err) {
 		return connect.NewError(connect.CodeNotFound, errors.New(message))
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return worldError(err)
+	}
 	return connect.NewError(connect.CodeInternal, errors.New(message))
+}
+
+// authoritativeLevelName is the single target-level policy for preview and
+// bind. A missing config or unknown level fails closed instead of silently
+// disabling target-family checks.
+func authoritativeLevelName(ctx context.Context, store *storage.Store, serverID string) (string, error) {
+	if strings.TrimSpace(serverID) == "" {
+		return "", connect.NewError(connect.CodeInvalidArgument, errors.New("server_id is required"))
+	}
+	cfg, err := store.GetServerConfig(ctx, serverID)
+	if errors.Is(err, storage.ErrServerConfigNotFound) || (err == nil && cfg == nil) {
+		return "", worldError(storage.ErrServerConfigNotFound)
+	}
+	if err != nil {
+		return "", notFoundOrInternal(err, "server world configuration not found")
+	}
+	level := worldview.ActualLevelName(cfg)
+	if level == "" {
+		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("server actual level name is unknown"))
+	}
+	return level, nil
 }
 
 func worldError(err error) error {
@@ -660,10 +713,17 @@ func worldError(err error) error {
 		return rpcErr
 	}
 	switch {
+	case errors.Is(err, context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	case errors.Is(err, storage.ErrServerConfigNotFound):
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("server world configuration is missing"))
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
-		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, operation.ErrAlreadyFailed),
+		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, worldlib.ErrBindLevelUnknown),
+		errors.Is(err, operation.ErrAlreadyFailed),
 		errors.Is(err, worldlib.ErrUncertainOutcome), errors.Is(err, worldlib.ErrDiskBudget),
 		errors.Is(err, storage.ErrWorldRevisionBound), errors.Is(err, storage.ErrWorldBindingStale),
 		errors.Is(err, storage.ErrWorldRevisionImmutable):
@@ -674,21 +734,13 @@ func worldError(err error) error {
 		return connect.NewError(connect.CodeResourceExhausted, err)
 	case errors.Is(err, providers.ErrCategoryUnavailable):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
-	case errors.Is(err, worldlib.ErrArchiveRejected), errors.Is(err, worldlib.ErrChecksumMismatch),
+	case errors.Is(err, worldlib.ErrInvalidImportRequest),
+		errors.Is(err, worldlib.ErrArchiveRejected), errors.Is(err, worldlib.ErrChecksumMismatch),
 		errors.Is(err, worldlib.ErrCredentialBoundary), errors.Is(err, providers.ErrCredentialBoundary):
 		return connect.NewError(connect.CodeInvalidArgument, err)
-	case errors.Is(err, context.Canceled):
-		return connect.NewError(connect.CodeCanceled, err)
 	default:
 		return connect.NewError(connect.CodeInternal, err)
 	}
-}
-
-func importError(err error) error {
-	if errors.Is(err, worldlib.ErrChecksumMismatch) || errors.Is(err, worldlib.ErrArchiveRejected) || errors.Is(err, worldlib.ErrCredentialBoundary) {
-		return connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	return worldError(err)
 }
 
 func sha256Hex(data []byte) string {
@@ -697,7 +749,7 @@ func sha256Hex(data []byte) string {
 }
 
 func isRecordNotFound(err error) bool {
-	return errors.Is(err, gorm.ErrRecordNotFound)
+	return errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, storage.ErrServerNotFound)
 }
 
 // nodeGenerationForServer reads the real endpoint generation from the owning

@@ -17,27 +17,30 @@ test('server detail exposes a World tab using CarbonTabs and ServerTabPanel', ()
 	assert.match(detail, /import ServerWorld from/);
 	assert.match(detail, /\{ id: 'world', label: 'World', icon: Globe2 \}/);
 	assert.match(detail, /activeTab === 'world'/);
-	assert.match(detail, /<ServerWorld \{server\} active=\{activeTab === 'world'\} \/>/);
+	assert.match(
+		detail,
+		/<ServerWorld \{server\} active=\{activeTab === 'world'\} onopenmap=\{openMap\} \/>/
+	);
 });
 
 test('world tab shows honest management, binding and configuration facts', () => {
 	assert.match(component, /describeServerWorld/);
 	assert.match(worldState, /MANAGEMENT_PRESENTATION/);
-	assert.match(worldState, /'unmanaged'|'unbound'/);
-	assert.match(component, /Active world \/ level/);
+	assert.match(worldState, /'unmanaged'/);
+	assert.match(worldState, /'unbound'/);
+	assert.match(component, /'Configured level' : 'Active level'/);
 	assert.match(component, /Binding & revision/);
-	assert.match(component, /Relevant configuration/);
-	assert.match(component, /Unlink2/);
+	assert.match(component, /relevantWorldConfig\(configCategories\)/);
+	assert.doesNotMatch(component, /No active binding|WORLD VIEW OBSERVED/);
 });
 
-test('world tab deep-links through resolve() with an opaque world key', () => {
+test('world tab opens the server map dialog with an opaque world key', () => {
 	assert.match(component, /encodeWorldKey/);
 	assert.match(component, /WorldRef_Kind\.LIBRARY_BINDING/);
 	assert.match(component, /WorldRef_Kind\.SERVER_LOCAL/);
-	assert.match(
-		component,
-		/resolve\('\/worlds\/\[server\]\/\[world\]', \{ server: server\.id, world: encodeWorldKey\(ref\) \}\)/
-	);
+	assert.match(component, /onopenmap\(activeMapKey\)/);
+	assert.match(detail, /url.searchParams.set\('map', worldKey\)/);
+	assert.match(detail, /presentation="dialog"/);
 	assert.match(component, /resolve\('\/library'\)/);
 	assert.doesNotMatch(component, /href="\/(?!\/)/);
 });

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// Regression coverage for explicit malformed persisted JSON handling: valid
-// values are byte-for-byte equivalent to the legacy JSON.parse result, blank
-// fields stay "absent", and non-blank invalid JSON is reported while retaining
-// the historical empty-array interpretation.
+// Stored catalogue metadata must remain safe to render even if its shape changed.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -30,10 +27,9 @@ describe('indexed modpack persisted JSON', () => {
 		assert.deepEqual(parsePersistedStringArray('{bad}'), { values: [], malformed: true });
 	});
 
-	test('preserves a valid non-array JSON value exactly as legacy did', () => {
-		assert.deepEqual(parsePersistedStringArray('{"a":1}'), {
-			values: { a: 1 } as unknown as string[],
-			malformed: false
-		});
+	test('reports parseable metadata with an invalid shape', () => {
+		for (const raw of ['null', '{"a":1}', '"fabric"', '["fabric",42]']) {
+			assert.deepEqual(parsePersistedStringArray(raw), { values: [], malformed: true });
+		}
 	});
 });

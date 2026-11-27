@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: MPL-2.0
+# CI-only backend acceptance rehearsal for native server portability archives
+# (OSS-426 export, OSS-427 preview/import).
+#
+# One disposable GitHub-hosted Linux job builds the exact candidate with an
+# empty frontend embed, starts an isolated controller container and a SECOND
+# privileged Docker-in-Docker engine on its own bridge with a private storage
+# mount, then exports and re-imports a managed Vanilla server as both native ZIP
+# and tar.gz over RPC. It verifies the downloaded archive and destination hashes,
+# proves the imports are stopped before start, and joins both imported Minecraft
+# servers with the pinned protocol client.
+#
+# OSS-428 create-from-archive browser acceptance belongs to #686. This job does
+# not build or exercise the UI, does not publish, deploy or contact a live panel,
+# and keeps repository permissions read-only with no credentials.
+name: Server archive acceptance rehearsal
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # Same exact candidate SHA as STAGED_SHA below.
+    paths:
+      - '.github/workflows/server-archive-rehearsal.yml'
+      - 'scripts/server_archive_rehearsal_ci.py'
+      - 'scripts/test_server_archive_rehearsal_ci.py'
+      - 'scripts/qualify-server-archive-hosted.sh'
+      - 'scripts/qualify-archive-player.mjs'
+      - 'scripts/qualify-compose-client/**'
+      - 'internal/serverarchive/**'
+      - 'internal/nodestorage/**'
+      - 'internal/rpc/services/server_archive*.go'
+      - 'internal/rpc/services/server.go'
+      - 'internal/rpc/handlers/upload.go'
+      - 'internal/rpc/handlers/download.go'
+      - 'internal/rpc/server.go'
+      - 'internal/db/archive_import.go'
+      - 'internal/db/store.go'
+      - 'internal/docker/**'
+      - 'internal/scheduler/**'
+      - 'internal/module/**'
+      - 'internal/config/**'
+      - 'internal/buildinfo/**'
+      - 'cmd/carbon-panel/**'
+      - 'cmd/carbon-storage/**'
+      - 'proto/carbonpanel/v1/server.proto'
+      - 'proto/carbonpanel/v1/common.proto'
+      - 'docker/Dockerfile.release'
+      - 'config.example.yaml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docs/server-portability.md'
+      - 'docs/adr/0057-disposable-server-archive-acceptance.md'
+      - 'knowledge/testing/server-archive-rehearsal.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-archive-rehearsal-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  rehearsal:
+    name: Native ZIP + tar.gz portability round trip
+    # Privileged Docker-in-Docker runs only for repository-owned pull requests
+    # or an explicit dispatch; fork PRs and untrusted callers are refused.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # STAGED_SHA is the PR head (or dispatched commit), not the merge ref.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # This job builds and runs PR-contributed code.
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node for the pinned Minecraft client
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install the pinned readiness client
+        run: npm ci --prefix scripts/qualify-compose-client --ignore-scripts --no-audit --no-fund
+
+      - name: Validate the harness offline
+        run: |
+          set -euo pipefail
+          python3 -m unittest scripts.test_server_archive_rehearsal_ci
+          bash -n scripts/qualify-server-archive-hosted.sh
+          node --check scripts/qualify-archive-player.mjs
+
+      - name: Run the disposable controller and second Docker engine
+        env:
+          STAGED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CANDIDATE_VERSION: 2.0.1-verify.ci
+        run: |
+          bash scripts/qualify-server-archive-hosted.sh "$RUNNER_TEMP/server-archive-rehearsal"
+
+      - name: Print evidence summary
+        if: always()
+        run: |
+          evidence="$RUNNER_TEMP/server-archive-rehearsal/evidence"
+          if [[ -f "$evidence/run-status.txt" ]]; then
+            cat "$evidence/run-status.txt"
+          fi
+          if [[ -f "$evidence/cleanup.txt" ]]; then
+            cat "$evidence/cleanup.txt"
+          fi
+          report="$evidence/server-archive-rehearsal.json"
+          if [[ -f "$report" ]]; then
+            python3 - "$report" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("server archive RPC rehearsal pass:", report.get("pass"))
+          scope = report.get("scope") or {}
+          print("scope:", scope.get("surface"), scope.get("browser_acceptance"))
+          if report.get("error"):
+              print("error:", report["error"])
+          if report.get("cleanup_error"):
+              print("cleanup error:", report["cleanup_error"])
+          candidate = report.get("candidate") or {}
+          print("candidate:", candidate.get("version"), candidate.get("commit"),
+                (candidate.get("provenance") or {}).get("image_revision"))
+          for name, detail in (report.get("formats") or {}).items():
+              print(name, "archive:", detail.get("archive_sha256"),
+                    "files:", detail.get("file_count"),
+                    "expanded:", detail.get("expanded_bytes"))
+          for name, detail in (report.get("imports") or {}).items():
+              print(name, "import:", detail.get("server_id"), "node:", detail.get("node_id"),
+                    "status-before-start:", detail.get("status_before_start"),
+                    "readiness:", (detail.get("readiness") or {}).get("joined"))
+          cleanup = report.get("cleanup") or {}
+          print("cleanup pass:", cleanup.get("pass"),
+                "failures:", cleanup.get("failures") or [])
+          print("failed checks:", report.get("failed_checks") or [])
+          PY
+          fi
+
+      - name: Upload disposable evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-archive-rehearsal-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/server-archive-rehearsal/evidence
+          if-no-files-found: error
+          retention-days: 14

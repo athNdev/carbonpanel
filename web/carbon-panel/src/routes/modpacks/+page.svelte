@@ -14,8 +14,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { resolve } from '$app/paths';
 	import {
 		CarbonButton,
-		CarbonTile,
-		CarbonTag,
+		CarbonDataTable,
 		CarbonSearch,
 		CarbonSelect,
 		CarbonModal,
@@ -30,11 +29,9 @@ one at https://mozilla.org/MPL/2.0/.
 		Heart,
 		Download,
 		RefreshCw,
-		ExternalLink,
 		Settings,
 		Upload,
 		Package,
-		Trash2,
 		X,
 		Globe,
 		Loader2,
@@ -58,6 +55,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import { formatBytes } from '$lib/utils';
 	import { parsePersistedStringArray } from '$lib/features/modpacks/persisted-json';
+	import ModpackDetails from '$lib/features/modpacks/ModpackDetails.svelte';
 
 	let searchParams = $state<SearchModpacksRequest>(
 		create(SearchModpacksRequestSchema, {
@@ -92,6 +90,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let uploadAbortController = $state<AbortController | null>(null);
 	let selectedIndexer = $state('modrinth'); // Default Modrinth
 	let indexerName = $derived(selectedIndexer === 'fuego' ? 'CurseForge' : 'Modrinth');
+	let detailPack = $state<IndexedModpack | null>(null);
+	let showDetails = $state(false);
+	const downloadCount = new Intl.NumberFormat(undefined, { notation: 'compact' });
 
 	let libraryTabs = $derived([
 		{ id: 'browse', label: 'Browse' },
@@ -269,27 +270,16 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function formatNumber(num: number): string {
-		if (num >= 1000000) {
-			return `${(num / 1000000).toFixed(1)}M`;
-		} else if (num >= 1000) {
-			return `${(num / 1000).toFixed(1)}K`;
-		}
-		return num.toString();
+	function providerName(indexer: string): string {
+		if (indexer === 'manual') return 'Imported';
+		if (indexer === 'modrinth') return 'Modrinth';
+		if (indexer === 'fuego') return 'CurseForge';
+		return indexer || 'Unknown provider';
 	}
 
-	function parseJsonArray(jsonStr: string): string[] {
-		return parsePersistedStringArray(jsonStr).values;
-	}
-
-	// Malformed persisted metadata is no longer silent: valid values render
-	// exactly as before, but an unparseable loader/version field is reported on
-	// the card. This is explicit tolerant decoding, not validation or repair.
-	function hasMalformedMetadata(modpack: IndexedModpack): boolean {
-		return (
-			parsePersistedStringArray(modpack.modLoaders).malformed ||
-			parsePersistedStringArray(modpack.gameVersions).malformed
-		);
+	function openModpackDetails(modpack: IndexedModpack) {
+		detailPack = modpack;
+		showDetails = true;
 	}
 
 	async function handleModpackUpload(event: Event) {
@@ -409,7 +399,8 @@ one at https://mozilla.org/MPL/2.0/.
 	let pendingDelete = $state<IndexedModpack | null>(null);
 	let confirmOpen = $state(false);
 
-	async function deleteModpack(modpack: IndexedModpack) {
+	function deleteModpack(modpack: IndexedModpack) {
+		showDetails = false;
 		pendingDelete = modpack;
 		confirmOpen = true;
 	}
@@ -656,127 +647,125 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 
-		<!-- Modpack Packages Grid with CarbonTiles -->
-		<div
-			class="motion-stagger grid gap-4 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0"
-			data-testid="showcase-modpack-grid"
-		>
-			{#each displayModpacks as modpack, i (modpack.id)}
-				<CarbonTile
-					class="group flex flex-col justify-between rounded-none border-border p-5 transition-colors hover:border-foreground/30"
-					data-testid={i === 0 ? 'showcase-modpack-card' : undefined}
-				>
-					<div class="space-y-3">
-						<!-- Tile Header -->
-						<div class="flex items-start gap-3">
-							{#if modpack.logoUrl}
-								<img
-									src={modpack.logoUrl}
-									alt={modpack.name}
-									class="h-14 w-14 shrink-0 rounded-none border border-border bg-background object-cover"
-								/>
-							{:else}
-								<div
-									class="flex h-14 w-14 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
-								>
-									<Package class="h-7 w-7" />
-								</div>
-							{/if}
-
-							<div class="min-w-0 flex-1">
-								<h3 class="truncate text-base font-semibold text-foreground" title={modpack.name}>
-									{modpack.name}
-								</h3>
-								<div class="mt-1 flex flex-wrap items-center gap-2">
-									<CarbonTag type={modpack.indexer === 'manual' ? 'purple' : 'blue'} size="sm">
-										{modpack.indexer === 'manual' ? 'Imported' : modpack.indexer}
-									</CarbonTag>
-									<span class="flex items-center gap-1 font-mono text-xs text-muted-foreground">
-										<Download class="inline h-3 w-3" />
-										{formatNumber(modpack.downloadCount)}
-									</span>
-								</div>
-							</div>
-
+		{#if displayModpacks.length > 0}
+			<CarbonDataTable>
+				{#snippet header()}
+					<tr>
+						<th scope="col" class="px-3 py-2.5 text-xs font-semibold sm:px-4">Modpack</th>
+						<th scope="col" class="hidden px-3 py-2.5 text-xs font-semibold xl:table-cell"
+							>Provider</th
+						>
+						<th scope="col" class="hidden px-3 py-2.5 text-xs font-semibold lg:table-cell"
+							>Compatibility</th
+						>
+						<th
+							scope="col"
+							class="hidden px-3 py-2.5 text-right text-xs font-semibold xl:table-cell"
+							>Downloads</th
+						>
+						<th scope="col" class="px-2 py-2.5 text-right text-xs font-semibold sm:px-4">Actions</th
+						>
+					</tr>
+				{/snippet}
+				{#each displayModpacks as modpack, i (modpack.id)}
+					{@const versions = parsePersistedStringArray(modpack.gameVersions)}
+					{@const loaders = parsePersistedStringArray(modpack.modLoaders)}
+					<tr
+						class="hover:bg-accent/40"
+						data-testid={i === 0 ? 'showcase-modpack-card' : undefined}
+					>
+						<th scope="row" class="w-full px-2 py-1 sm:px-3">
 							<button
 								type="button"
-								onclick={() => toggleFavorite(modpack)}
-								class="cursor-pointer rounded-none p-2 text-muted-foreground transition-colors hover:text-destructive-text"
-								title={modpack.isFavorited ? 'Remove favorite' : 'Add favorite'}
-								aria-label={modpack.isFavorited
-									? `Remove ${modpack.name} from favorites`
-									: `Add ${modpack.name} to favorites`}
+								class="focus-ring flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2.5 px-1.5 py-1.5 text-left hover:text-accent-text sm:gap-3"
+								onclick={() => openModpackDetails(modpack)}
+								aria-label={`View details for ${modpack.name}`}
 							>
-								<Heart
-									class={`h-4 w-4 ${modpack.isFavorited ? 'fill-destructive text-destructive-text' : ''}`}
-								/>
+								{#if modpack.logoUrl}
+									<img
+										src={modpack.logoUrl}
+										alt=""
+										loading="lazy"
+										class="size-9 shrink-0 border border-border bg-background object-cover"
+									/>
+								{:else}
+									<span
+										class="grid size-9 shrink-0 place-items-center border border-border bg-background text-muted-foreground"
+									>
+										<Package class="size-4" aria-hidden="true" />
+									</span>
+								{/if}
+								<span class="min-w-0">
+									<span class="block text-sm leading-snug font-semibold [overflow-wrap:anywhere]"
+										>{modpack.name}</span
+									>
+									<span class="mt-0.5 block text-xs font-normal text-muted-foreground xl:hidden"
+										>{providerName(modpack.indexer)}</span
+									>
+								</span>
 							</button>
-						</div>
-
-						<!-- Description -->
-						<p class="line-clamp-2 min-h-8 text-xs text-muted-foreground">
-							{modpack.summary || 'No summary available for this modpack.'}
-						</p>
-
-						{#if hasMalformedMetadata(modpack)}
-							<p
-								class="font-mono text-xs text-destructive-text"
-								data-testid="modpack-metadata-malformed"
-								title="Stored loader/version metadata is not valid JSON and cannot be displayed. The entry was not changed."
-							>
-								Metadata unreadable
-							</p>
-						{/if}
-
-						<!-- Loaders & Versions -->
-						<div class="space-y-1.5 pt-1">
-							{#if parseJsonArray(modpack.modLoaders).length > 0}
-								<div class="flex flex-wrap gap-1">
-									{#each parseJsonArray(modpack.modLoaders) as loader (loader)}
-										<CarbonTag type="cyan" size="sm">{loader}</CarbonTag>
-									{/each}
+						</th>
+						<td
+							class="hidden px-3 py-2 text-xs whitespace-nowrap text-muted-foreground xl:table-cell"
+						>
+							{providerName(modpack.indexer)}
+						</td>
+						<td class="hidden min-w-40 px-3 py-2 text-xs lg:table-cell">
+							{#if versions.malformed || loaders.malformed}
+								<span class="text-warning-text" data-testid="modpack-metadata-malformed"
+									>Metadata unreadable</span
+								>
+							{:else}
+								<div class="text-muted-foreground">
+									{loaders.values.slice(0, 2).join(', ') || 'Loader not listed'}
+									{#if loaders.values.length > 2}
+										+{loaders.values.length - 2}{/if}
 								</div>
+								{#if versions.values.length || modpack.mcVersion}
+									<div class="mt-0.5 whitespace-nowrap">
+										{versions.values.slice(0, 2).join(', ') || modpack.mcVersion}
+										{#if versions.values.length > 2}
+											+{versions.values.length - 2}{/if}
+									</div>
+								{/if}
 							{/if}
-
-							{#if parseJsonArray(modpack.gameVersions).length > 0}
-								<div class="truncate font-mono text-xs text-muted-foreground">
-									MC: {parseJsonArray(modpack.gameVersions).slice(0, 3).join(', ')}
-									{#if parseJsonArray(modpack.gameVersions).length > 3}
-										+{parseJsonArray(modpack.gameVersions).length - 3} more
-									{/if}
-								</div>
-							{/if}
-						</div>
-					</div>
-
-					<!-- Tile Actions -->
-					<div class="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3">
-						<div class="flex items-center gap-1">
-							{#if modpack.websiteUrl}
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external modpack homepage URL used directly; resolve() throws on non-absolute pathnames -->
-								<a href={modpack.websiteUrl} target="_blank" rel="noopener noreferrer">
-									<!-- eslint-enable svelte/no-navigation-without-resolve -->
-									<CarbonButton kind="ghost" size="sm">
-										<ExternalLink class="mr-1 h-3 w-3" />
-										View
-									</CarbonButton>
-								</a>
-							{/if}
-							{#if modpack.indexer === 'manual'}
-								<CarbonButton kind="danger" size="sm" onclick={() => deleteModpack(modpack)}>
-									<Trash2 class="mr-1 h-3 w-3" />
-									Delete
+						</td>
+						<td
+							class="hidden px-3 py-2 text-right text-xs text-muted-foreground tabular-nums xl:table-cell"
+						>
+							{modpack.indexer === 'manual' ? '—' : downloadCount.format(modpack.downloadCount)}
+						</td>
+						<td class="px-2 py-1 pr-2 sm:px-4">
+							<div class="flex items-center justify-end gap-1">
+								<CarbonButton
+									kind="ghost"
+									size="md"
+									iconOnly
+									onclick={() => toggleFavorite(modpack)}
+									aria-pressed={modpack.isFavorited}
+									aria-label={`Favorite ${modpack.name}`}
+									title={modpack.isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+								>
+									<Heart
+										class={`size-4 ${modpack.isFavorited ? 'fill-destructive text-destructive-text' : ''}`}
+										aria-hidden="true"
+									/>
 								</CarbonButton>
-							{/if}
-						</div>
-
-						<CarbonButton kind="primary" size="sm" onclick={() => handleUseInServer(modpack)}>
-							Use in Server
-						</CarbonButton>
-					</div>
-				</CarbonTile>
-			{/each}
-		</div>
+								<span class="hidden xl:inline-flex">
+									<CarbonButton
+										kind="secondary"
+										size="sm"
+										onclick={() => handleUseInServer(modpack)}
+									>
+										Use in Server
+									</CarbonButton>
+								</span>
+							</div>
+						</td>
+					</tr>
+				{/each}
+			</CarbonDataTable>
+		{/if}
 
 		<!-- Empty state -->
 		{#if displayModpacks.length === 0}
@@ -1007,6 +996,13 @@ one at https://mozilla.org/MPL/2.0/.
 	<ManifestInspectorDialog
 		bind:open={showManifestInspector}
 		onOpenChange={(v) => (showManifestInspector = v)}
+	/>
+	<ModpackDetails
+		bind:open={showDetails}
+		pack={detailPack}
+		provider={providerName(detailPack?.indexer ?? '')}
+		onUse={handleUseInServer}
+		onDelete={deleteModpack}
 	/>
 	<CarbonConfirm
 		bind:open={confirmOpen}
