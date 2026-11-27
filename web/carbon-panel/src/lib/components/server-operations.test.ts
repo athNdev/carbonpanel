@@ -8,9 +8,12 @@ import assert from 'node:assert/strict';
 
 import {
 	canReleaseLock,
+	correlationTagType,
 	countOperationsByOutcome,
 	operationActionLabel,
-	outcomeTagType
+	outcomeTagType,
+	requestKeyTitle,
+	requiresManualCheck
 } from './server-operations';
 
 test('an unknown outcome is amber, never red', () => {
@@ -49,6 +52,47 @@ test('the lock is only offered for release when the server is actually blocked',
 	assert.equal(canReleaseLock({ holdsLock: true, nextAction: 'wait' }), false);
 });
 
+test('a stale or uncertain unknown row says do not retry blindly', () => {
+	assert.equal(requiresManualCheck({ outcome: 'unknown', reasonCode: 'executing_stale' }), true);
+	assert.equal(
+		requiresManualCheck({ outcome: 'unknown', reasonCode: 'uncertain_external_effect' }),
+		true
+	);
+	// A definite failure is safe to retry with a new request id; a recovered
+	// row has already been resolved and needs no warning.
+	assert.equal(requiresManualCheck({ outcome: 'failed', reasonCode: 'attempt_failed' }), false);
+	assert.equal(
+		requiresManualCheck({ outcome: 'unknown', reasonCode: 'recovered_without_confirmation' }),
+		false
+	);
+	assert.equal(requiresManualCheck({ outcome: 'success', reasonCode: 'completed' }), false);
+});
+
+test('correlation never renders a daemon match when the state is unknown', () => {
+	assert.equal(correlationTagType('matched'), 'green');
+	assert.equal(correlationTagType('unmatched'), 'red');
+	// Unknown is neutral, not a success and not a failure.
+	assert.equal(correlationTagType('unknown'), 'gray');
+	assert.equal(correlationTagType(undefined as unknown as string), 'gray');
+});
+
+test('the request key tooltip names the value that is on screen', () => {
+	assert.equal(
+		requestKeyTitle({ requestKey: 'req-9f21-start', requestId: 'req-9f21-start' }),
+		'request key: req-9f21-start'
+	);
+	// A generated key is a journal request key, not a request id.
+	assert.equal(
+		requestKeyTitle({ requestKey: 'generated:7d3c-migrate', requestId: '' }),
+		'request key: generated:7d3c-migrate'
+	);
+	assert.equal(
+		requestKeyTitle({ requestKey: '', requestId: 'req-77ab-migrate' }),
+		'request id: req-77ab-migrate'
+	);
+	assert.equal(requestKeyTitle({ requestKey: '', requestId: '' }), undefined);
+});
+
 test('counts add up to the number of rows', () => {
 	const counts = countOperationsByOutcome([
 		{ outcome: 'success' },
@@ -82,4 +126,49 @@ test('journal copy is trimmed to the approved sentences', () => {
 		'empty state must use the trimmed copy'
 	);
 	assert.ok(content.includes('op.requestId'), 'journal rows must show the request id for joining');
+	assert.ok(content.includes('op.requestKey'), 'journal rows must show the stored request key');
+	assert.ok(content.includes('op.nodeId'), 'journal rows must join to a node without a daemon id');
+	assert.ok(
+		content.includes('op.correlation'),
+		'journal rows must show the derived correlation state'
+	);
+	assert.ok(content.includes('op.reasonCode'), 'journal rows must show the stable reason code');
+	assert.ok(
+		content.includes('requiresManualCheck(op)'),
+		'stale and uncertain rows must warn against a blind retry'
+	);
+});
+
+test('the journal has one keyboard-operable horizontal scroll region', () => {
+	const markup = fs.readFileSync(
+		path.resolve(import.meta.dirname, 'server-operations.svelte'),
+		'utf-8'
+	);
+	const css = fs
+		.readFileSync(path.resolve(import.meta.dirname, '../../app.css'), 'utf-8')
+		.replace(/\r\n/g, '\n');
+
+	assert.match(markup, /role="region"/);
+	assert.match(markup, /aria-label="Operations table"/);
+	assert.match(markup, /tabindex="0"/);
+	assert.match(markup, /class="[^"]*focus-ring[^"]*"/);
+	assert.match(markup, /class="[^"]*overflow-x-auto[^"]*"/);
+
+	// The narrow-width table safety net turns a table into a block scroller.
+	// This class keeps the wrapper the only horizontal scroll surface, so a long
+	// cell cannot hide the right-hand columns behind a second scrollbar.
+	assert.match(markup, /operation-journal-table/);
+	assert.match(
+		css,
+		/\.operation-journal-table\s*\{[^}]*display:\s*table;[^}]*overflow:\s*visible;/
+	);
+});
+
+test('a long node id truncates while keeping its full value available', () => {
+	const markup = fs.readFileSync(
+		path.resolve(import.meta.dirname, 'server-operations.svelte'),
+		'utf-8'
+	);
+	assert.match(markup, /max-w-\[18rem\] truncate font-mono/);
+	assert.match(markup, /title=\{op\.nodeId \|\| undefined\}/);
 });

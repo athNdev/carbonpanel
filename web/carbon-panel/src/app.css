@@ -753,3 +753,11 @@ one at https://mozilla.org/MPL/2.0/.
 	display: table;
 	overflow: visible;
 }
+
+/* The operation journal's wrapper is its only horizontal scroll region. The
+ * narrow-width table safety net above turns a table into a block scroller; undo
+ * that here so a long cell can never hide columns behind a second scroll. */
+.operation-journal-table {
+	display: table;
+	overflow: visible;
+}

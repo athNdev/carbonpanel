@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -77,7 +78,7 @@ func (s *OperationService) ListOperations(ctx context.Context, req *connect.Requ
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list server operations"))
 	}
 
-	views := operation.DescribeAll(rows)
+	views := operation.DescribeAllAtForNodes(rows, s.nodesFor(ctx, rows), time.Now())
 	if outcome != "" {
 		views = operation.FilterOutcome(views, operation.Outcome(outcome))
 	}
@@ -97,7 +98,7 @@ func (s *OperationService) GetOperation(ctx context.Context, req *connect.Reques
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&v1.GetOperationResponse{Operation: operationMessage(operation.Describe(op))}), nil
+	return connect.NewResponse(&v1.GetOperationResponse{Operation: operationMessage(s.describe(ctx, op))}), nil
 }
 
 // ResolveOperation releases a lifecycle lock without touching Docker. It is
@@ -129,7 +130,41 @@ func (s *OperationService) ResolveOperation(ctx context.Context, req *connect.Re
 		}
 	}
 
-	return connect.NewResponse(&v1.ResolveOperationResponse{Operation: operationMessage(operation.Describe(op))}), nil
+	return connect.NewResponse(&v1.ResolveOperationResponse{Operation: operationMessage(s.describe(ctx, op))}), nil
+}
+
+// nodesFor loads the current identity of every node referenced by the rows.
+// A missing node leaves that row's correlation unknown; it does not hide the
+// operation.
+func (s *OperationService) nodesFor(ctx context.Context, rows []storage.ServerOperation) map[string]*storage.Node {
+	nodes := make(map[string]*storage.Node)
+	for i := range rows {
+		nodeID := strings.TrimSpace(rows[i].NodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, seen := nodes[nodeID]; seen {
+			continue
+		}
+		node, err := s.store.GetNode(ctx, nodeID)
+		if err != nil {
+			nodes[nodeID] = nil
+			continue
+		}
+		nodes[nodeID] = node
+	}
+	return nodes
+}
+
+// describe projects one row with its node correlation.
+func (s *OperationService) describe(ctx context.Context, op *storage.ServerOperation) operation.View {
+	var node *storage.Node
+	if op != nil && strings.TrimSpace(op.NodeID) != "" {
+		if current, err := s.store.GetNode(ctx, op.NodeID); err == nil {
+			node = current
+		}
+	}
+	return operation.DescribeAtForNode(op, node, time.Now())
 }
 
 // lookup loads an operation and enforces that serverID owns it. A mismatch is
@@ -187,16 +222,20 @@ func operationMessage(v operation.View) *v1.LifecycleOperation {
 	msg := &v1.LifecycleOperation{
 		Id:                 v.ID,
 		ServerId:           v.ServerID,
+		NodeId:             v.NodeID,
 		Kind:               v.Kind,
 		Phase:              v.Phase,
 		Outcome:            string(v.Outcome),
 		NextAction:         string(v.NextAction),
+		ReasonCode:         string(v.ReasonCode),
 		Reason:             v.Reason,
+		Correlation:        string(v.Correlation),
 		HoldsLock:          v.HoldsLock,
 		HasContainer:       v.HasContainer,
 		EndpointGeneration: v.EndpointGeneration,
 		LastError:          v.LastError,
 		RequestId:          v.RequestID,
+		RequestKey:         v.RequestKey,
 	}
 	if !v.StartedAt.IsZero() {
 		msg.StartedAt = timestamppb.New(v.StartedAt)

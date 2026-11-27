@@ -17,6 +17,19 @@ result. The log includes server-scoped player activity written after the
 server ID was added to those audit records. Older player audit entries with
 no server ID remain in the global audit API.
 
+Each lifecycle row also shows its node, endpoint generation, request key and
+durable phase, so it can be joined to a server or node. Where daemon identity
+matters the row shows a derived correlation state: **matched**, **unmatched**
+or **unknown**. A raw Docker daemon id is never shown. Recorded error text can
+include a host or socket as evidence; credentials in it are still redacted. An
+**unknown** correlation means the panel could not compare daemon identity, not
+that the operation failed.
+
+An **unknown** outcome with reason code `executing_stale` or
+`uncertain_external_effect` may already have changed the world. Do not retry it
+blindly. Check the container and world on the node first, then use **Release
+lock** (or `-operations resolve`) if the lock still needs releasing.
+
 ## When a server stays locked
 
 If the panel restarts while a mutation is in progress, startup reads the
@@ -33,6 +46,9 @@ they do not change containers.
 carbon-panel -config config.yaml -operations list
 carbon-panel -config config.yaml -operations resolve -operation-id <id> -operation-note "container was already stopped"
 ```
+
+`list` prints the node, generation, request key and derived correlation state.
+It never prints the Docker daemon id.
 
 `resolve` is the operator escape hatch when the daemon will not return and the
 container has been checked by hand. It records the note, marks the row

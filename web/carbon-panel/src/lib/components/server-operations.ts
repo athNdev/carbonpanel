@@ -28,6 +28,36 @@ export function outcomeTagType(outcome: string): OutcomeTagType {
 	}
 }
 
+/**
+ * Correlation is derived by the backend and never contains a daemon id. Green
+ * means the recorded node endpoint still matches; red means it does not; grey
+ * means the panel could not compare daemon identity either way.
+ */
+export function correlationTagType(correlation: string): OutcomeTagType {
+	switch (correlation) {
+		case 'matched':
+			return 'green';
+		case 'unmatched':
+			return 'red';
+		default:
+			return 'gray';
+	}
+}
+
+/**
+ * A stale attempt and an uncertain external effect are both unknown outcomes:
+ * the mutation may already have happened. Retrying blindly can repeat it, so
+ * the UI has to say so instead of treating the row as a failure.
+ */
+export function requiresManualCheck(
+	op: Pick<LifecycleOperation, 'outcome' | 'reasonCode'>
+): boolean {
+	return (
+		op.outcome === 'unknown' &&
+		(op.reasonCode === 'executing_stale' || op.reasonCode === 'uncertain_external_effect')
+	);
+}
+
 /** The sentence shown in the "next step" column. */
 export function operationActionLabel(action: string): string {
 	switch (action) {
@@ -62,4 +92,17 @@ export function countOperationsByOutcome(
 		counts[op.outcome] = (counts[op.outcome] ?? 0) + 1;
 	}
 	return counts;
+}
+
+/**
+ * The request key column shows the journal key and falls back to the client
+ * request id on partial rows. The tooltip has to name the value that is on
+ * screen: a generated key is a request key, not a request id.
+ */
+export function requestKeyTitle(
+	op: Pick<LifecycleOperation, 'requestKey' | 'requestId'>
+): string | undefined {
+	if (op.requestKey) return `request key: ${op.requestKey}`;
+	if (op.requestId) return `request id: ${op.requestId}`;
+	return undefined;
 }

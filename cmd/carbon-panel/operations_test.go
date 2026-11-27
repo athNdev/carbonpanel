@@ -67,6 +67,47 @@ func TestOperationsListAndResolveDoNotRequireDocker(t *testing.T) {
 	}
 }
 
+func TestOperationListProjectsCorrelationWithoutTheDaemonID(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.NewSQLiteStore(&config.Config{
+		Database: config.DatabaseConfig{
+			Path:        filepath.Join(t.TempDir(), "ops.db"),
+			AutoMigrate: true,
+		},
+		Docker: config.DockerConfig{Host: "unix:///var/run/docker.sock"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const rawDaemon = "raw-daemon-fingerprint-for-cli"
+	node := &storage.Node{
+		ID: "node-1", Name: "Node 1", Host: "tcp://127.0.0.1:2375",
+		Enabled: true, Status: storage.NodeStatusOnline, DaemonID: rawDaemon,
+	}
+	if err := store.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.BeginServerOperation(ctx, "srv-1", node.ID, "cont-1", "key-1", "start", "digest"); err != nil {
+		t.Fatal(err)
+	}
+
+	var listed bytes.Buffer
+	if err := runOperationsCommand(ctx, store, "list", "", "", "", &listed); err != nil {
+		t.Fatal(err)
+	}
+	out := listed.String()
+	for _, want := range []string{node.ID, "matched", "key-1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("list = %q, want %q", out, want)
+		}
+	}
+	if strings.Contains(out, rawDaemon) {
+		t.Fatalf("list leaked the raw daemon id: %q", out)
+	}
+}
+
 func TestReleasePortKeepsALiveServerAndItsWorld(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.NewSQLiteStore(&config.Config{

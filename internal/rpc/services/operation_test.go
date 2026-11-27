@@ -39,6 +39,25 @@ func newJournalTestService(t *testing.T) (*OperationService, *storage.Store) {
 	return NewOperationService(store, logger.New()), store
 }
 
+// createJournalNode records the node identity an operation is bound to. The
+// daemon id is deliberately non-empty so the projection has to derive a
+// correlation state instead of forwarding it.
+func createJournalNode(t *testing.T, store *storage.Store, id, daemonID string) *storage.Node {
+	t.Helper()
+	node := &storage.Node{
+		ID:       id,
+		Name:     "Node " + id,
+		Host:     "tcp://127.0.0.1:2375",
+		Enabled:  true,
+		Status:   storage.NodeStatusOnline,
+		DaemonID: daemonID,
+	}
+	if err := store.CreateNode(context.Background(), node); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	return node
+}
+
 // beginInterrupted records an intent that was never finalized, which is what an
 // interrupted mutation leaves behind.
 func beginInterrupted(t *testing.T, store *storage.Store, serverID, kind string) *storage.ServerOperation {
@@ -130,6 +149,96 @@ func TestListOperationsSeparatesInFlightFromUnknown(t *testing.T) {
 	}
 	if len(success.Msg.Operations) != 0 {
 		t.Fatalf("success operations = %d, want 0", len(success.Msg.Operations))
+	}
+}
+
+func TestStaleExecutingOperationProjectsAsUnknownDoNotRetry(t *testing.T) {
+	service, store := newJournalTestService(t)
+	node := createJournalNode(t, store, "node-1", "raw-daemon-fingerprint-stale")
+	op := beginInterrupted(t, store, "srv-1", "start")
+	backdate(t, store, op.ID, operation.ExecutionStaleAfter+time.Minute)
+
+	res, err := service.GetOperation(context.Background(), connect.NewRequest(&v1.GetOperationRequest{
+		ServerId:    "srv-1",
+		OperationId: op.ID,
+	}))
+	if err != nil {
+		t.Fatalf("GetOperation: %v", err)
+	}
+	got := res.Msg.Operation
+	if got.GetOutcome() != "unknown" {
+		t.Fatalf("outcome = %q, want unknown for an attempt that stopped reporting", got.GetOutcome())
+	}
+	if got.GetNextAction() != "resolve_operation" {
+		t.Fatalf("next action = %q, want resolve_operation, not a blind retry", got.GetNextAction())
+	}
+	if got.GetReasonCode() != string(operation.ReasonExecutingStale) {
+		t.Fatalf("reason code = %q, want %q", got.GetReasonCode(), operation.ReasonExecutingStale)
+	}
+	if got.GetPhase() != storage.ServerOperationExecuting {
+		t.Fatalf("phase = %q, want executing", got.GetPhase())
+	}
+	if got.GetNodeId() != node.ID {
+		t.Fatalf("node id = %q, want %q", got.GetNodeId(), node.ID)
+	}
+	if got.GetEndpointGeneration() != node.EndpointGeneration {
+		t.Fatalf("endpoint generation = %d, want %d", got.GetEndpointGeneration(), node.EndpointGeneration)
+	}
+	if got.GetRequestKey() != "req-srv-1-start" {
+		t.Fatalf("request key = %q, want the stored journal key", got.GetRequestKey())
+	}
+	if got.GetRequestId() != "req-srv-1-start" {
+		t.Fatalf("request id = %q, want the client request id", got.GetRequestId())
+	}
+	if got.GetCorrelation() != string(operation.CorrelationMatched) {
+		t.Fatalf("correlation = %q, want matched for the recorded endpoint", got.GetCorrelation())
+	}
+	if strings.Contains(got.String(), "raw-daemon-fingerprint-stale") {
+		t.Fatal("raw daemon id leaked into the operation wire projection")
+	}
+}
+
+func TestUncertainOperationKeepsCorrelationWithoutDaemonID(t *testing.T) {
+	service, store := newJournalTestService(t)
+	node := createJournalNode(t, store, "node-1", "raw-daemon-fingerprint-uncertain")
+	op := beginInterrupted(t, store, "srv-1", "start")
+	note := operation.UncertainOutcomeMarker + "; confirm the live world on the node before starting the server"
+	if err := store.NoteActiveServerOperation(context.Background(), op.ID, note); err != nil {
+		t.Fatalf("NoteActiveServerOperation: %v", err)
+	}
+
+	res, err := service.GetOperation(context.Background(), connect.NewRequest(&v1.GetOperationRequest{
+		ServerId:    "srv-1",
+		OperationId: op.ID,
+	}))
+	if err != nil {
+		t.Fatalf("GetOperation: %v", err)
+	}
+	got := res.Msg.Operation
+	if got.GetOutcome() != "unknown" {
+		t.Fatalf("outcome = %q, want unknown for an uncertain external effect", got.GetOutcome())
+	}
+	if got.GetNextAction() != "resolve_operation" {
+		t.Fatalf("next action = %q, want resolve_operation", got.GetNextAction())
+	}
+	if got.GetReasonCode() != string(operation.ReasonUncertainEffect) {
+		t.Fatalf("reason code = %q, want %q", got.GetReasonCode(), operation.ReasonUncertainEffect)
+	}
+	if got.GetNodeId() != node.ID || got.GetEndpointGeneration() != node.EndpointGeneration {
+		t.Fatalf("node correlation fields = (%q, %d), want (%q, %d)",
+			got.GetNodeId(), got.GetEndpointGeneration(), node.ID, node.EndpointGeneration)
+	}
+	if got.GetCorrelation() != string(operation.CorrelationMatched) {
+		t.Fatalf("correlation = %q, want matched", got.GetCorrelation())
+	}
+	if got.GetRequestKey() == "" || got.GetRequestId() == "" {
+		t.Fatalf("request key/id = (%q, %q), want the journal join keys", got.GetRequestKey(), got.GetRequestId())
+	}
+	if got.GetPhase() != storage.ServerOperationExecuting {
+		t.Fatalf("phase = %q, want executing", got.GetPhase())
+	}
+	if strings.Contains(got.String(), "raw-daemon-fingerprint-uncertain") {
+		t.Fatal("raw daemon id leaked into the operation wire projection")
 	}
 }
 
