@@ -3,6 +3,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/serverarchive"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/download"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -436,6 +438,116 @@ func writeArchiveFixture(t *testing.T, destination, content string) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(destination), 0o755))
 	require.NoError(t, os.WriteFile(destination, []byte(content), 0o644))
 }
+
+func newArchiveUpload(t *testing.T, ctx context.Context, svc *ServerService) (*upload.Manager, string) {
+	t.Helper()
+	source := t.TempDir()
+	writeArchiveFixture(t, filepath.Join(source, "server.properties"), "level-name=fixture-world\nmotd=fixture\n")
+	accessor, err := nodestorage.NewLocal(source)
+	require.NoError(t, err)
+	defer func() { _ = accessor.Close() }()
+	var archive bytes.Buffer
+	require.NoError(t, serverarchive.Write(ctx, accessor, &archive, serverarchive.ZIP, serverarchive.Runtime{
+		MinecraftVersion: "1.21.1",
+		ModLoader:        string(db.ModLoaderPaper),
+		MemoryMB:         1024,
+		MaxPlayers:       8,
+	}, "fixture-exporter"))
+	uploads := upload.NewManager(t.TempDir(), time.Hour, 32<<20, svc.log)
+	t.Cleanup(uploads.Stop)
+	svc.SetServerArchiveUploads(uploads)
+	session, err := uploads.InitSessionFor("fixture.zip", int64(archive.Len()), int32(archive.Len()), uploadOwnerID(ctx))
+	require.NoError(t, err)
+	done, err := uploads.WriteChunkFor(session.ID, uploadOwnerID(ctx), 0, archive.Bytes())
+	require.NoError(t, err)
+	require.True(t, done)
+	return uploads, session.ID
+}
+
+func TestPreviewServerArchiveExposesOnlyEnabledDestinations(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	svc.hostPortBound = func(int) bool { return false }
+	registerRemoteCreateNode(t, svc, "archive-enabled", filepath.Join(t.TempDir(), "remote-storage"))
+	require.NoError(t, svc.store.CreateNode(context.Background(), &db.Node{
+		ID: "archive-disabled", Name: "Disabled Node", Host: "tcp://198.51.100.7:2375",
+		Enabled: true, Status: db.NodeStatusOnline,
+	}))
+	disabled := &db.Node{
+		ID: "archive-disabled", Name: "Disabled Node", Host: "tcp://198.51.100.7:2375",
+		Enabled: false, Status: db.NodeStatusOnline,
+	}
+	require.NoError(t, svc.store.UpdateNode(context.Background(), disabled))
+	ctx := ctxWithRole("operator")
+	_, uploadID := newArchiveUpload(t, ctx, svc)
+
+	report, err := svc.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{UploadId: uploadID}))
+	require.NoError(t, err)
+	require.Nil(t, report.Msg.AvailableBytes, "capacity is only checked for a concrete node")
+
+	destinations := map[string]string{}
+	for _, destination := range report.Msg.Destinations {
+		destinations[destination.Id] = destination.Name
+	}
+	require.Contains(t, destinations, "archive-enabled")
+	require.Equal(t, "archive-enabled", destinations["archive-enabled"])
+	require.NotContains(t, destinations, "archive-disabled", "disabled nodes must not be offered")
+	require.Len(t, destinations, 2, "only the fixture local node and the enabled remote node qualify")
+}
+
+func TestPreviewAndCreateRefuseArchiveOnInsufficientDestinationSpace(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	svc.hostPortBound = func(int) bool { return false }
+	registerRemoteCreateNode(t, svc, "archive-small", filepath.Join(t.TempDir(), "remote-storage"))
+	svc.SetStorageResolver(nodestorage.NewResolver(&lowSpaceTransport{free: 1 << 20}))
+	ctx := ctxWithRole("operator")
+	_, uploadID := newArchiveUpload(t, ctx, svc)
+
+	preview, err := svc.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{
+		UploadId: uploadID,
+		NodeId:   "archive-small",
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, preview.Msg.AvailableBytes)
+	require.Less(t, preview.Msg.GetAvailableBytes(), preview.Msg.RequiredBytes)
+	require.True(t, hasArchiveFinding(preview.Msg.Findings, v1.ServerArchiveFindingCode_SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE))
+
+	_, err = svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
+		Name: "Too Large", NodeId: "archive-small", Port: 25691,
+		ArchiveUploadId: uploadID, RequestId: "archive-low-space",
+	}))
+	require.Equal(t, connect.CodeResourceExhausted, connect.CodeOf(err), err)
+}
+
+func hasArchiveFinding(findings []*v1.ServerArchiveFinding, code v1.ServerArchiveFindingCode) bool {
+	for _, finding := range findings {
+		if finding.Code == code && finding.Severity == v1.ServerArchiveFindingSeverity_SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER {
+			return true
+		}
+	}
+	return false
+}
+
+// lowSpaceTransport serves the allocation preflight for a transport-only node
+// without touching a real daemon or a controller-local path.
+type lowSpaceTransport struct {
+	free int64
+}
+
+func (l *lowSpaceTransport) Open(context.Context, nodestorage.NodeInfo, string) (nodestorage.Accessor, error) {
+	return nil, errors.New("unexpected data open")
+}
+
+func (l *lowSpaceTransport) OpenStorageRoot(context.Context, nodestorage.NodeInfo) (nodestorage.AllocationRoot, error) {
+	return lowSpaceRoot{free: l.free}, nil
+}
+
+type lowSpaceRoot struct {
+	nodestorage.AllocationRoot
+	free int64
+}
+
+func (l lowSpaceRoot) FreeBytes() (int64, error) { return l.free, nil }
+func (l lowSpaceRoot) Close() error              { return nil }
 
 // The fixture uses the real storage worker protocol without mounting any
 // controller path as the remote daemon's declared storage root.

@@ -135,6 +135,11 @@ func (s *ServerService) PreviewServerArchive(ctx context.Context, req *connect.R
 		RequiredBytes:   imported.requiredBytes(),
 		Findings:        archiveRuntimeFindings(runtime),
 	}
+	destinations, err := s.archiveDestinations(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("could not list archive destinations"))
+	}
+	out.Destinations = destinations
 	if nodeID := req.Msg.GetNodeId(); nodeID != "" {
 		free, err := s.archiveAvailableSpace(ctx, nodeID)
 		switch {
@@ -349,6 +354,27 @@ func (s *ServerService) archiveNode(ctx context.Context, nodeID string) (nodesto
 		return nodestorage.NodeInfo{}, errors.New("destination node is disabled or unavailable")
 	}
 	return node.StorageInfo(), nil
+}
+
+// archiveDestinations exposes only the identity of enabled nodes. Archive
+// preview/create is authorized by servers/create, so this must not require
+// nodes/read or leak addresses, credentials or runtime statistics.
+func (s *ServerService) archiveDestinations(ctx context.Context) ([]*v1.ServerArchiveDestination, error) {
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	destinations := make([]*v1.ServerArchiveDestination, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || !node.Enabled {
+			continue
+		}
+		destinations = append(destinations, &v1.ServerArchiveDestination{
+			Id:   node.ID,
+			Name: node.Name,
+		})
+	}
+	return destinations, nil
 }
 
 // prepareArchiveImport is read-only with respect to the destination. It

@@ -1009,6 +1009,272 @@ class CleanupTests(unittest.TestCase):
         self.assertIn("invalid", result["failures"][0]["reason"])
 
 
+class UiAcceptanceEvidenceTests(unittest.TestCase):
+    HEAD = "a" * 40
+    BASE = "http://127.0.0.1:18080"
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.evidence = Path(self.directory.name)
+        (self.evidence / "shot.png").write_bytes(b"png")
+        (self.evidence / "source.zip").write_bytes(b"zip-bytes")
+        (self.evidence / "source.tar.gz").write_bytes(b"tar-bytes")
+
+    def refusal_plan(self):
+        return rehearsal.ui_plan(
+            "refusal", head=self.HEAD, base=self.BASE, source_id="srv-1")
+
+    def export_plan(self):
+        return rehearsal.ui_plan(
+            "export", head=self.HEAD, base=self.BASE, source_id="srv-1",
+            exports=[{"format": "zip", "expectedLabel": "ZIP (.zip)"},
+                     {"format": "tar.gz", "expectedLabel": "TAR.GZ (.tar.gz)"}])
+
+    def import_plan(self):
+        return rehearsal.ui_plan(
+            "import", head=self.HEAD, base=self.BASE, source_id="srv-1",
+            remote_node={"id": "node-remote", "name": "archive-rehearsal-remote"},
+            imports=[
+                {"format": "zip", "file": "source.zip",
+                 "expectedLabel": "ZIP (.zip)", "name": "archive-ui-zip",
+                 "port": 25586},
+                {"format": "tar.gz", "file": "source.tar.gz",
+                 "expectedLabel": "TAR.GZ (.tar.gz)", "name": "archive-ui-tar-gz",
+                 "port": 25587},
+            ])
+
+    def record(self, phase):
+        record = {
+            "schema": rehearsal.UI_RUN_SCHEMA,
+            "phase": phase,
+            "head": {"expected": self.HEAD, "observed": self.HEAD,
+                     "match": True, "worktreeClean": True},
+            "base": self.BASE,
+            "source": {"serverId": "srv-1"},
+            "browser": {"driver": "playwright", "driverVersion": "1.61.0",
+                        "browserVersion": "140.0"},
+            "screenshots": [{"name": "state", "file": "shot.png"}],
+            "refusal": None,
+            "exports": [],
+            "imports": [],
+            "error": None,
+        }
+        if phase == "refusal":
+            record["refusal"] = {
+                "warningVisible": True, "prepareDisabled": True,
+                "formatCount": 2, "formatsDisabled": [True, True],
+                "exportRequests": 0, "readyVisible": False,
+            }
+        if phase == "export":
+            for name in ("source.zip", "source.tar.gz"):
+                body = (self.evidence / name).read_bytes()
+                record["exports"].append({
+                    "format": "zip" if name.endswith(".zip") else "tar.gz",
+                    "file": name, "filename": name, "bytes": len(body),
+                    "sha256": rehearsal.sha256_bytes(body),
+                    "preflightStatus": 200,
+                })
+        if phase == "import":
+            for name, port, server_id in (
+                    ("source.zip", 25586, "srv-zip"),
+                    ("source.tar.gz", 25587, "srv-tar")):
+                record["imports"].append({
+                    "format": "zip" if name.endswith(".zip") else "tar.gz",
+                    "file": name, "name": "archive-ui-zip"
+                    if name.endswith(".zip") else "archive-ui-tar-gz",
+                    "port": port,
+                    "preview": {"text": "Archive preview %s. No compatibility findings."
+                                % ("ZIP (.zip)" if name.endswith(".zip")
+                                   else "TAR.GZ (.tar.gz)"),
+                                "saysNoFindings": True},
+                    "destinationNodeId": "node-remote",
+                    "createdServerId": server_id,
+                    "createdRoute": "/servers/" + server_id,
+                })
+        return record
+
+    def test_ui_plan_requires_a_full_head_and_known_phase(self):
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "candidate commit"):
+            rehearsal.ui_plan("refusal", head="abc", base=self.BASE,
+                              source_id="srv-1")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "unknown"):
+            rehearsal.ui_plan("boot", head=self.HEAD, base=self.BASE,
+                              source_id="srv-1")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "source server"):
+            rehearsal.ui_plan("refusal", head=self.HEAD, base=self.BASE,
+                              source_id="")
+
+    def test_ui_plan_binds_remote_node_and_both_formats(self):
+        plan = self.import_plan()
+        self.assertEqual(plan["remoteNode"]["id"], "node-remote")
+        self.assertEqual([entry["format"] for entry in plan["imports"]],
+                         ["zip", "tar.gz"])
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "remote destination"):
+            rehearsal.ui_plan("import", head=self.HEAD, base=self.BASE,
+                              source_id="srv-1", imports=[])
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "ZIP then tar.gz"):
+            rehearsal.ui_plan("export", head=self.HEAD, base=self.BASE,
+                              source_id="srv-1",
+                              exports=[{"format": "zip",
+                                        "expectedLabel": "ZIP (.zip)"}])
+
+    def test_ui_driver_command_never_carries_the_password(self):
+        command = rehearsal.ui_driver_command(
+            rehearsal.UI_DRIVER, Path("/tmp/plan.json"), Path("/tmp/ui"), "export")
+        self.assertEqual(command[-1], "export")
+        self.assertNotIn("password", " ".join(command).lower())
+        self.assertNotIn("secret", " ".join(command))
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "unknown"):
+            rehearsal.ui_driver_command(
+                rehearsal.UI_DRIVER, Path("/tmp/plan.json"), Path("/tmp/ui"), "boot")
+
+    def test_write_ui_plan_refuses_to_reuse_an_existing_plan(self):
+        path = self.evidence / "plan.json"
+        rehearsal.write_ui_plan(path, self.refusal_plan())
+        with self.assertRaises(FileExistsError):
+            rehearsal.write_ui_plan(path, self.refusal_plan())
+        self.assertEqual(json.loads(path.read_text())["phase"], "refusal")
+
+    def test_refusal_evidence_requires_disabled_controls_and_no_rpc(self):
+        facts = rehearsal.verify_ui_evidence(
+            self.record("refusal"), self.refusal_plan(), self.evidence)
+        self.assertEqual(facts["phase"], "refusal")
+        for key, value, reason in (
+                ("warningVisible", False, "warning"),
+                ("prepareDisabled", False, "Prepare"),
+                ("formatCount", 1, "formats"),
+                ("formatsDisabled", [True, False], "format"),
+                ("exportRequests", 1, "ExportServerArchive"),
+                ("readyVisible", True, "ready")):
+            record = self.record("refusal")
+            record["refusal"][key] = value
+            with self.assertRaisesRegex(rehearsal.RehearsalError, reason):
+                rehearsal.verify_ui_evidence(
+                    record, self.refusal_plan(), self.evidence)
+
+    def test_export_evidence_binds_download_hashes_and_preflight(self):
+        facts = rehearsal.verify_ui_evidence(
+            self.record("export"), self.export_plan(), self.evidence)
+        self.assertEqual(set(facts["exports"]), {"zip", "tar.gz"})
+        tampered = self.record("export")
+        tampered["exports"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "SHA-256"):
+            rehearsal.verify_ui_evidence(
+                tampered, self.export_plan(), self.evidence)
+        missing = self.record("export")
+        missing["exports"][0]["file"] = "../outside.zip"
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "escapes"):
+            rehearsal.verify_ui_evidence(
+                missing, self.export_plan(), self.evidence)
+
+    def test_export_evidence_refuses_a_failed_preflight_or_wrong_head(self):
+        refused = self.record("export")
+        refused["exports"][1]["preflightStatus"] = 302
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "HTTP 200"):
+            rehearsal.verify_ui_evidence(
+                refused, self.export_plan(), self.evidence)
+        moved = self.record("export")
+        moved["head"]["observed"] = "b" * 40
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "head"):
+            rehearsal.verify_ui_evidence(
+                moved, self.export_plan(), self.evidence)
+        errored = self.record("export")
+        errored["error"] = "navigation failed"
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "records an error"):
+            rehearsal.verify_ui_evidence(
+                errored, self.export_plan(), self.evidence)
+
+    def test_import_evidence_binds_remote_node_and_created_ids(self):
+        facts = rehearsal.verify_ui_evidence(
+            self.record("import"), self.import_plan(), self.evidence)
+        self.assertEqual(facts["created_server_ids"], ["srv-zip", "srv-tar"])
+        wrong_node = self.record("import")
+        wrong_node["imports"][0]["destinationNodeId"] = "node-local"
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "remote node"):
+            rehearsal.verify_ui_evidence(
+                wrong_node, self.import_plan(), self.evidence)
+        duplicate = self.record("import")
+        duplicate["imports"][1]["createdServerId"] = "srv-zip"
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "reused"):
+            rehearsal.verify_ui_evidence(
+                duplicate, self.import_plan(), self.evidence)
+        findings = self.record("import")
+        findings["imports"][0]["preview"]["saysNoFindings"] = False
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "findings"):
+            rehearsal.verify_ui_evidence(
+                findings, self.import_plan(), self.evidence)
+
+    def test_run_ui_phase_keeps_the_password_out_of_argv_and_record(self):
+        plan = self.refusal_plan()
+        captured = {}
+
+        def fake_run(command, env=None, **kwargs):
+            captured["command"] = command
+            captured["env"] = env
+            ui_dir = Path(command[command.index("--out") + 1])
+            (ui_dir / "shot.png").write_bytes(b"png")
+            (ui_dir / "refusal-run.json").write_text(
+                json.dumps(self.record("refusal")), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(rehearsal.subprocess, "run", side_effect=fake_run):
+            facts = rehearsal.run_ui_phase(
+                self.evidence, self.evidence, plan, "admin", "throwaway-secret",
+                driver=rehearsal.UI_DRIVER)
+
+        self.assertNotIn("throwaway-secret", " ".join(captured["command"]))
+        self.assertEqual(captured["env"]["ARCHIVE_UI_USER"], "admin")
+        self.assertEqual(captured["env"]["ARCHIVE_UI_PASSWORD"], "throwaway-secret")
+        self.assertEqual(facts["phase"], "refusal")
+        self.assertTrue((self.evidence / "ui" / "refusal-run.json").is_file())
+        self.assertTrue((self.evidence / "ui" / "refusal-driver.log").is_file())
+
+    def test_run_ui_phase_fails_closed_on_a_driver_error_and_keeps_owned_ids(self):
+        def fake_run(command, env=None, **kwargs):
+            ui_dir = Path(command[command.index("--out") + 1])
+            partial = self.record("import")
+            del partial["imports"][1]
+            partial["error"] = "wizard failed"
+            (ui_dir / "import-run.json").write_text(
+                json.dumps(partial), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1, "", "browser failed")
+
+        with mock.patch.object(rehearsal.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(rehearsal.RehearsalError,
+                                        "phase failed") as raised:
+                rehearsal.run_ui_phase(
+                    self.evidence, self.evidence, self.import_plan(),
+                    "admin", "throwaway-secret", driver=rehearsal.UI_DRIVER)
+        self.assertEqual(raised.exception.created_server_ids, ["srv-zip"])
+
+    def test_download_custody_refuses_bytes_changed_before_import(self):
+        facts = rehearsal.verify_ui_evidence(
+            self.record("export"), self.export_plan(), self.evidence)
+        rehearsal.assert_ui_download_custody(self.evidence, facts)
+        (self.evidence / "source.zip").write_bytes(b"altered-after-verification")
+        with self.assertRaisesRegex(rehearsal.RehearsalError, "changed before"):
+            rehearsal.assert_ui_download_custody(self.evidence, facts)
+
+    def test_verification_failure_still_exposes_created_ids_for_cleanup(self):
+        def fake_run(command, env=None, **kwargs):
+            ui_dir = Path(command[command.index("--out") + 1])
+            record = self.record("import")
+            record["imports"][0]["destinationNodeId"] = "node-local"
+            (ui_dir / "shot.png").write_bytes(b"png")
+            (ui_dir / "import-run.json").write_text(
+                json.dumps(record), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(rehearsal.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(rehearsal.RehearsalError,
+                                        "remote node") as raised:
+                rehearsal.run_ui_phase(
+                    self.evidence, self.evidence, self.import_plan(),
+                    "admin", "throwaway-secret", driver=rehearsal.UI_DRIVER)
+        self.assertEqual(raised.exception.created_server_ids, ["srv-zip", "srv-tar"])
+
+
 class RedirectTests(unittest.TestCase):
     def test_controller_refuses_redirects(self):
         hits = []
