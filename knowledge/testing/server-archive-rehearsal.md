@@ -39,11 +39,11 @@ The UI job runs `scripts/qualify-archive-ui-hosted.mjs`: refuse export while the
 source runs (warning visible, both controls disabled, no `ExportServerArchive`
 call), download ZIP and tar.gz through the real `/servers/[id]` panel with its
 disclosure and `HEAD` preflight, then upload each download through the real
-`/servers/new` archive wizard onto the remote node. The Python harness
-re-verifies each download, hashes destination bytes through `FileService`, and
-requires the engine container stopped. The UI job does not start imports;
-boot/join continuity stays with the RPC receipt. Cleanup gates on resource IDs
-and the run label; a partial browser record still contributes its created ids.
+`/servers/new` archive wizard onto the remote node. Create navigates to `/servers/<id>`;
+the driver records and persists that id before screenshots or theme work, so a later failure
+still leaves it in the partial import record for ownership-gated cleanup. The Python harness
+re-verifies each download, hashes destination bytes through `FileService`, and requires the
+engine stopped; the UI job does not start imports and boot/join stays with the RPC receipt.
 
 # Rules
 

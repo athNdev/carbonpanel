@@ -44,7 +44,9 @@ harness. The Python harness then executes three browser phases through
 3. `import` — upload each verified download through the real
    `/servers/new` archive tile, inspect the rendered preview, choose the remote
    destination, confirm capacity, apply the archive runtime defaults, submit
-   create, and record the created server id from the result link.
+   create, and record the created server id from the post-create
+   `/servers/<id>` navigation; this path renders no stable result link. The id
+   is persisted to the import record before any screenshot or theme evaluation.
 
 The browser driver records the exact head, browser version, plan, download
 hashes, preflight status and screenshots; it receives no credential on its
@@ -53,7 +55,9 @@ hashes disagree, re-verifies the downloaded archive independently, verifies the
 created server's destination bytes through the server-scoped FileService and
 the remote engine container state, and binds every created id to the same
 ownership-gated cleanup as the RPC job. A partial browser record still
-contributes its created ids so a mid-wizard failure cannot leak a server.
+contributes its created ids so a mid-wizard failure cannot leak a server; the
+driver persists each id from the post-create navigation before it takes the
+next screenshot.
 
 The hosted shell owns two isolated engines inside `$RUNNER_TEMP`:
 
