@@ -37,9 +37,10 @@ sources:
   the current ready session. Export preparation is a silent RPC call: the shared
   interceptor must not toast for a stale attempt, and only the fenced current
   attempt reports its failure. A download is success-shaped only after a
-  same-origin `HEAD` preflight of the scoped session returns 2xx; a refusal or
-  transport failure reports its status and keeps the modal, ready archive and
-  acknowledgement in place. The preflight cannot prove the later `GET` succeeds.
+  same-origin `HEAD` preflight returns a non-redirected 2xx; `redirect: 'error'`
+  refuses a proxy or SSO login redirect. Refusals report their HTTP status, while
+  transport failures, including a rejected redirect, report that the check could
+  not be completed and claim no success, keeping the modal, ready archive and acknowledgement; the later `GET` is unproven.
 - Create-from-Archive binds preview and create to the same concrete node and
   renders typed findings plus that node's capacity. The current upload's
   successful preflight outranks cached inventory, including newly enabled,

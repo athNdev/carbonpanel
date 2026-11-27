@@ -150,6 +150,29 @@ function headResponse(status: number) {
 	return calls;
 }
 
+function redirectErrorFetch() {
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		// fetch with redirect: 'error' rejects when the response is a redirect.
+		return Promise.reject(new TypeError('Failed to fetch'));
+	}) as typeof fetch;
+	return calls;
+}
+
+function redirectedHeadResponse() {
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		const response = new Response(null, { status: 200 });
+		// Some transports can still resolve a redirected response; the preflight
+		// must refuse it even though it carries a 2xx status.
+		Object.defineProperty(response, 'redirected', { value: true });
+		return Promise.resolve(response);
+	}) as typeof fetch;
+	return calls;
+}
+
 function deferredHead() {
 	const calls: Array<{ url: string; init?: RequestInit }> = [];
 	let respond!: (status: number) => void;
@@ -475,6 +498,11 @@ test('a refused download preflight reports the status and keeps the modal open',
 		assert.equal(fetchCalls[0].url, '/api/v1/download/server-a-session');
 		assert.equal(fetchCalls[0].init?.method, 'HEAD');
 		assert.equal(fetchCalls[0].init?.credentials, 'same-origin');
+		assert.equal(
+			fetchCalls[0].init?.redirect,
+			'error',
+			'a redirect to a login page must reject instead of being followed'
+		);
 		assert.deepEqual(toasts, ['Archive download was refused (HTTP 403).']);
 		assert.deepEqual(successToasts, [], 'a refused download never claims it started');
 		assert.equal(anchor.clicks.length, 0, 'a refused download must not click the anchor');
@@ -499,6 +527,94 @@ test('a refused download preflight reports the status and keeps the modal open',
 	}
 });
 
+test('a preflight transport rejection is refused and keeps the modal to retry', async () => {
+	toasts.length = 0;
+	successToasts.length = 0;
+	const anchor = spyAnchorClicks();
+	const fetchCalls = redirectErrorFetch();
+	const ui = mountExport();
+	try {
+		await openExport();
+		await readyArchive();
+		await acknowledgeDisclosure();
+		clickDownload();
+		await flush();
+
+		assert.equal(fetchCalls.length, 1, 'the download is preflighted once');
+		assert.equal(fetchCalls[0].init?.method, 'HEAD');
+		assert.equal(fetchCalls[0].init?.credentials, 'same-origin');
+		assert.equal(
+			fetchCalls[0].init?.redirect,
+			'error',
+			'a followed redirect must reject rather than return the login page'
+		);
+		assert.deepEqual(toasts, [
+			'Archive download was refused: the download check could not be completed.'
+		]);
+		assert.deepEqual(successToasts, [], 'a transport refusal never claims it started');
+		assert.equal(anchor.clicks.length, 0, 'a transport refusal must not click the anchor');
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-panel"]'),
+			'the modal stays open when the check cannot be completed'
+		);
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-ready"]'),
+			'the ready archive stays available to retry'
+		);
+		const checkbox = document.querySelector<HTMLInputElement>(
+			'[data-testid="archive-disclosure"] input[type="checkbox"]'
+		);
+		assert.equal(checkbox?.checked, true, 'the acknowledgement survives the refusal');
+		const button = document.querySelector<HTMLButtonElement>('[data-testid="archive-download"]');
+		assert.equal(button?.disabled, false, 'the operator can retry after the refusal');
+	} finally {
+		ui.unmount();
+		anchor.restore();
+		globalThis.fetch = realFetch;
+	}
+});
+
+test('a redirected 200 preflight is refused instead of claiming a download', async () => {
+	toasts.length = 0;
+	successToasts.length = 0;
+	const anchor = spyAnchorClicks();
+	const fetchCalls = redirectedHeadResponse();
+	const ui = mountExport();
+	try {
+		await openExport();
+		await readyArchive();
+		await acknowledgeDisclosure();
+		clickDownload();
+		await flush();
+
+		assert.equal(fetchCalls.length, 1, 'the download is preflighted once');
+		assert.equal(fetchCalls[0].init?.redirect, 'error');
+		assert.deepEqual(toasts, [
+			'Archive download was refused: the download check could not be completed.'
+		]);
+		assert.deepEqual(successToasts, [], 'a redirected preflight never claims it started');
+		assert.equal(anchor.clicks.length, 0, 'a redirected preflight must not click the anchor');
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-panel"]'),
+			'a redirected preflight keeps the modal open'
+		);
+		assert.ok(
+			document.querySelector('[data-testid="archive-export-ready"]'),
+			'a redirected preflight keeps the ready archive'
+		);
+		const checkbox = document.querySelector<HTMLInputElement>(
+			'[data-testid="archive-disclosure"] input[type="checkbox"]'
+		);
+		assert.equal(checkbox?.checked, true, 'the acknowledgement survives the redirect refusal');
+		const button = document.querySelector<HTMLButtonElement>('[data-testid="archive-download"]');
+		assert.equal(button?.disabled, false, 'the operator can retry after the redirect refusal');
+	} finally {
+		ui.unmount();
+		anchor.restore();
+		globalThis.fetch = realFetch;
+	}
+});
+
 test('an accepted download preflight starts the download once and closes the modal', async () => {
 	toasts.length = 0;
 	successToasts.length = 0;
@@ -514,6 +630,7 @@ test('an accepted download preflight starts the download once and closes the mod
 
 		assert.equal(fetchCalls.length, 1, 'the download is preflighted once');
 		assert.equal(fetchCalls[0].init?.method, 'HEAD');
+		assert.equal(fetchCalls[0].init?.redirect, 'error');
 		assert.deepEqual(toasts, []);
 		assert.deepEqual(successToasts, ['Archive download started.']);
 		assert.deepEqual(anchor.clicks, [

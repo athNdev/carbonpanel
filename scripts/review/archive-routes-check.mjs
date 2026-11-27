@@ -135,6 +135,7 @@ const evidence = {
     note: "No browser XHR/fetch request is issued for archive preview or create: both go through the seeded in-process rpc-client, so no preview HTTP status can be recorded. Archive downloads are the only HTTP transfers: each authorized or refused download now starts with a same-origin HEAD preflight, recorded here, and successful preflights are followed by the ordinary browser GET recorded in downloads/downloadRefusals.",
   },
   downloads: [],
+  downloadSuccessToasts: [],
   unacknowledged: [],
   downloadRefusals: [],
   keyboard: [],
@@ -677,6 +678,31 @@ async function closeExportWithKeyboard(page, label) {
   );
 }
 
+// The success toast is the UI's own claim, so assert it by text rather than
+// inferring success from the download event or the modal closing.
+async function recordDownloadStartedToast(page, label) {
+  const text = "Archive download started.";
+  const toast = page.getByText(text, { exact: true }).first();
+  await toast.waitFor({ timeout: 15_000 });
+  assert.ok(
+    await toast.isVisible(),
+    `${label}: the UI must state the download started`,
+  );
+  evidence.downloadSuccessToasts.push({ label, text });
+}
+
+async function waitForDownloadRequestCount(expected, label, timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  while (downloadRequests.length < expected) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `timed out waiting for ${label} (recorded ${downloadRequests.length}/${expected})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 async function recordDownload(page, download, view, format) {
   const suggested = download.suggestedFilename();
   const savedName = `download-${view.name}-${format}-${suggested}`;
@@ -872,6 +898,7 @@ async function exerciseDetail(page, view) {
   evidence.keyboard.push(
     `detail ${view.name}: Enter authorized the tar.gz download`,
   );
+  await recordDownloadStartedToast(page, `detail ${view.name} tar.gz`);
   await recordDownload(page, await tarDownload, view, "tar.gz");
   await panel.waitFor({ state: "hidden" });
 
@@ -915,6 +942,7 @@ async function exerciseDetail(page, view) {
     .check();
   const zipDownload = page.waitForEvent("download", { timeout: 30_000 });
   await page.getByTestId("archive-download").click();
+  await recordDownloadStartedToast(page, `detail ${view.name} zip`);
   await recordDownload(page, await zipDownload, view, "zip");
   await panel.waitFor({ state: "hidden" });
 
@@ -983,6 +1011,50 @@ async function exerciseDetail(page, view) {
     ],
     "the refusal is preflighted with HEAD and never triggers the GET download",
   );
+
+  // Retry the re-enabled action for real instead of only asserting that the
+  // button is enabled: a second preflight must refuse the same way, still
+  // without a browser GET and without a success toast.
+  const retryBefore = downloadRequests.length;
+  await page.getByTestId("archive-download").focus();
+  await page.keyboard.press("Enter");
+  evidence.keyboard.push(
+    `detail ${view.name}: Enter retried the refused download`,
+  );
+  await waitForDownloadRequestCount(
+    retryBefore + 1,
+    `detail ${view.name} retried refused download`,
+  );
+  await page
+    .getByText("Archive download was refused (HTTP 403).")
+    .first()
+    .waitFor({ timeout: 15_000 });
+  const retriedRequests = downloadRequests.slice(retryBefore);
+  assert.deepEqual(
+    retriedRequests,
+    [
+      {
+        sessionId: "export-session-refused",
+        method: "HEAD",
+        status: 403,
+        bytes: 0,
+      },
+    ],
+    "retrying must preflight with HEAD again and still never trigger the GET download",
+  );
+  assert.ok(
+    await panel.isVisible(),
+    "a retried refusal must keep the export modal open",
+  );
+  assert.ok(
+    await page.getByTestId("archive-export-ready").isVisible(),
+    "a retried refusal must keep the ready archive available",
+  );
+  assert.equal(
+    await page.getByText("Archive download started.").count(),
+    0,
+    "a retried refusal must not claim it started",
+  );
   await captureState(page, {
     route: "/servers/[id]",
     state: "export-download-refused",
@@ -998,6 +1070,9 @@ async function exerciseDetail(page, view) {
     modalOpen: true,
     acknowledged: true,
     successToast: false,
+    retryRequests: retriedRequests,
+    retryToast: "Archive download was refused (HTTP 403).",
+    retrySuccessToast: false,
   });
   await closeExportWithKeyboard(page, `detail ${view.name} refused download`);
 
@@ -1670,9 +1745,10 @@ try {
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("console", (message) => {
         if (message.type() !== "error") return;
-        // Chromium logs every non-2xx fetch as a resource error. The refused
-        // preflight is the intended 403 under test, so record it separately
-        // instead of either hiding it or failing the unexpected-error check.
+        // Chromium logs every non-2xx fetch as a resource error. Each refused
+        // preflight (the first attempt and the retry) is the intended 403 under
+        // test, so record those separately instead of either hiding them or
+        // failing the unexpected-error check.
         const url = (message.location()?.url ?? "").replace(
           base,
           "<review-base>",
@@ -1749,8 +1825,8 @@ try {
       );
       assert.equal(
         expectedRefusalErrors.length,
-        1,
-        `${view.name}: the refused preflight logs exactly one expected 403 resource error`,
+        2,
+        `${view.name}: the first refused preflight and its retry log exactly two expected 403 resource errors`,
       );
       assert.deepEqual(
         viewRequests,
@@ -1763,8 +1839,8 @@ try {
         `${view.name}: every download preflight must be a HEAD`,
       );
       assert.ok(
-        viewPreflights.length >= 3,
-        `${view.name}: the tar.gz, ZIP and refused downloads must preflight`,
+        viewPreflights.length >= 4,
+        `${view.name}: the tar.gz, ZIP and first/retried refused downloads must preflight`,
       );
     }
     evidence.downloadRequests = downloadRequests;
@@ -1795,7 +1871,7 @@ try {
   );
   await assertArtifactsComplete();
   console.log(
-    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, measured 40px Carbon md export actions, authenticated ZIP and tar.gz downloads, HEAD-preflighted refused download that keeps the modal open, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks; the only console entry is the expected Chromium 403 resource log for the refused preflight",
+    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, measured 40px Carbon md export actions, authenticated ZIP and tar.gz downloads with their success toasts, a HEAD-preflighted refused download plus a real retry that refuses identically and keeps the modal open, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks; the only console entries are the expected Chromium 403 resource logs for the first refused preflight and its retry",
   );
   console.log(
     `CONTROLS: ${evidence.controls.map((control) => `${control.label}=${control.height}px`).join("; ")}`,
