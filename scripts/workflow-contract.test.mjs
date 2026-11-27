@@ -4,7 +4,7 @@
 // env / run). See the "Context availability" table in the Actions docs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -231,4 +231,27 @@ test('server archive UI rehearsal keeps the RPC job and adds a read-only disposa
   assert.match(ui, /if: always\(\)[\s\S]*actions\/upload-artifact/);
   assert.doesNotMatch(ui, /secrets\./);
   assert.doesNotMatch(ui, /contents: write|packages: write|id-token: write/);
+});
+
+test('server archive UI path filters cover the frontend surfaces the job builds', () => {
+  const source = read('server-archive-rehearsal.yml');
+  const filterStart = source.indexOf('    paths:\n');
+  const permissions = source.indexOf('\npermissions:');
+  assert.ok(filterStart >= 0 && permissions > filterStart, 'PR path filters are missing');
+  const filters = source.slice(filterStart, permissions);
+  const required = [
+    'web/carbon-panel/src/routes/login/**',
+    'web/carbon-panel/src/lib/components/carbon/**',
+    'web/carbon-panel/src/lib/api/rpc-client.ts',
+    'web/carbon-panel/src/lib/stores/auth.ts',
+    // Login and the archive wizard import both config files at build time.
+    'web/carbon-panel/sveltekit.config.js',
+    'web/carbon-panel/vite.config.ts',
+  ];
+  for (const filter of required) {
+    assert.ok(filters.includes(`      - '${filter}'\n`), `missing path filter: ${filter}`);
+    if (!filter.includes('*')) {
+      assert.ok(existsSync(join(root, filter)), `path filter does not exist: ${filter}`);
+    }
+  }
 });

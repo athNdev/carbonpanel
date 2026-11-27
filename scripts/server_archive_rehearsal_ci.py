@@ -86,7 +86,10 @@ REPORT_NAME = "server-archive-rehearsal.json"
 UI_PLAN_SCHEMA = "archive-ui-acceptance-plan-v1"
 UI_RUN_SCHEMA = "archive-ui-acceptance-run-v1"
 UI_DRIVER = ROOT / "scripts" / "qualify-archive-ui-hosted.mjs"
-UI_DRIVER_TIMEOUT_SECONDS = 3600
+# The UI job is capped at 50 minutes. A driver phase must stay well below that
+# cap so the wrapper's EXIT trap still removes its owned containers/networks if
+# the browser hangs; a 3600-second phase could outlive the job and skip cleanup.
+UI_DRIVER_TIMEOUT_SECONDS = 1200
 UI_FORMATS = (
     ("zip", "ZIP (.zip)", ".zip"),
     ("tar.gz", "TAR.GZ (.tar.gz)", ".tar.gz"),
