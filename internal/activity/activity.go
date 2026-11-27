@@ -36,6 +36,12 @@ const (
 	EventModUpdate                 = "mod.update"
 	EventModRemove                 = "mod.remove"
 
+	// EventServerCommand records one attempted console command, including a
+	// failed send. Properties carry only the command verb (bounded to 64
+	// bytes), the original command's byte length, the silent flag and the
+	// send outcome; arguments are never stored.
+	EventServerCommand = "server.command"
+
 	// Player management actions (OSS-345). Each typed moderation action, its
 	// undo and each bulk job carries a request id linking it to the player
 	// action journal. Subject type is "player" and subject id is the opaque

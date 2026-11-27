@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Disposable server-portability backend rehearsal (OSS-426 and OSS-427).
+"""Disposable server-portability acceptance rehearsal (OSS-426 to OSS-428).
 
 This harness drives a real Carbon Panel controller through one complete native
 archive round trip. It never creates, changes or publishes a release, image tag,
@@ -17,6 +17,13 @@ world, host service or repository:
   hashes and stopped lifecycle *before* starting it;
 * start both imports and confirm Minecraft readiness with the pinned
   minecraft-protocol client plus a live console roster request.
+
+With ``--ui-driver`` the export/preview/import/start half is replaced by three
+production-UI phases driven by ``scripts/qualify-archive-ui-hosted.mjs``: the
+running refusal, the real download of both formats, and the real
+create-from-archive wizard upload. The harness still verifies the downloaded
+bytes, destination bytes and stopped engine container independently; the UI
+mode deliberately leaves boot/join to the RPC rehearsal.
 
 The job that calls this script owns the disposable controller and Docker
 engines. The direct entry point is hosted-only: it requires a GitHub-hosted
@@ -76,6 +83,18 @@ READ_SAFE_RPCS = {
 }
 ARCHIVE_TIMEOUT_SECONDS = 3600
 REPORT_NAME = "server-archive-rehearsal.json"
+UI_PLAN_SCHEMA = "archive-ui-acceptance-plan-v1"
+UI_RUN_SCHEMA = "archive-ui-acceptance-run-v1"
+UI_DRIVER = ROOT / "scripts" / "qualify-archive-ui-hosted.mjs"
+# The UI job is capped at 50 minutes. A driver phase must stay well below that
+# cap so the wrapper's EXIT trap still removes its owned containers/networks if
+# the browser hangs; a 3600-second phase could outlive the job and skip cleanup.
+UI_DRIVER_TIMEOUT_SECONDS = 1200
+UI_FORMATS = (
+    ("zip", "ZIP (.zip)", ".zip"),
+    ("tar.gz", "TAR.GZ (.tar.gz)", ".tar.gz"),
+)
+UI_IMPORT_NAMES = {"zip": "archive-ui-zip", "tar.gz": "archive-ui-tar-gz"}
 MAX_ARCHIVE_FILES = 50000
 MAX_ARCHIVE_BYTES = 32 << 30
 # FileService.GetFile refuses content above storageworker.SmallFileBytes (8 MiB).
@@ -872,11 +891,336 @@ def assert_no_docker_overrides(server, label):
         raise RehearsalError("%s unexpectedly carries Docker overrides" % label)
 
 
+# --- Production-UI acceptance evidence ---------------------------------------
+#
+# The browser driver records what it observed; it never claims that destination
+# bytes, engine state or cleanup are verified. Those checks stay here, where the
+# downloaded file can be read and hashed independently and the created server
+# ids can be bound to the same ownership and cleanup path as the RPC rehearsal.
+
+def ui_plan(phase, *, head, base, source_id, remote_node=None,
+            exports=None, imports=None):
+    if phase not in ("refusal", "export", "import"):
+        raise RehearsalError("unknown UI acceptance phase: %s" % phase)
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise RehearsalError("UI acceptance plan needs the full candidate commit")
+    if phase in ("refusal", "export", "import") and not source_id:
+        raise RehearsalError("UI acceptance plan needs the source server id")
+    plan = {
+        "schema": UI_PLAN_SCHEMA,
+        "phase": phase,
+        "head": head,
+        "base": base,
+        "source": {"serverId": source_id},
+    }
+    if phase == "export":
+        plan["exports"] = list(exports or [])
+        if [entry.get("format") for entry in plan["exports"]] != \
+                [entry[0] for entry in UI_FORMATS]:
+            raise RehearsalError("UI export plan must name ZIP then tar.gz")
+    if phase == "import":
+        if not remote_node or not remote_node.get("id") or not remote_node.get("name"):
+            raise RehearsalError("UI import plan needs the remote destination node")
+        plan["remoteNode"] = {
+            "id": remote_node["id"],
+            "name": remote_node["name"],
+        }
+        plan["imports"] = list(imports or [])
+        if [entry.get("format") for entry in plan["imports"]] != \
+                [entry[0] for entry in UI_FORMATS]:
+            raise RehearsalError("UI import plan must name ZIP then tar.gz")
+    return plan
+
+
+def write_ui_plan(path, plan):
+    """Create a phase plan exclusively, so a resumed run cannot reuse old input."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(plan, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def ui_driver_command(driver, plan_path, out_dir, phase):
+    """The browser command carries no credential; those travel in the environment."""
+    if phase not in ("refusal", "export", "import"):
+        raise RehearsalError("unknown UI acceptance phase: %s" % phase)
+    return [
+        "node", str(driver),
+        "--plan", str(plan_path),
+        "--out", str(out_dir),
+        "--phase", phase,
+    ]
+
+
+def _ui_artifact(directory, name):
+    if not isinstance(name, str) or name in ("", ".", ".."):
+        raise RehearsalError("UI evidence file name is invalid: %r" % (name,))
+    if "/" in name or "\\" in name or Path(name).name != name:
+        raise RehearsalError("UI evidence file escapes its directory: %r" % (name,))
+    path = Path(directory) / name
+    if not path.is_file():
+        raise RehearsalError("UI evidence file is missing: %s" % path)
+    return path
+
+
+def _ui_created_server_ids(record):
+    """Best-effort ids from a complete or partial record, for owned cleanup."""
+    ids = []
+    if not isinstance(record, dict):
+        return ids
+    for entry in record.get("imports") or []:
+        if isinstance(entry, dict):
+            server_id = entry.get("createdServerId")
+            if isinstance(server_id, str) and server_id:
+                ids.append(server_id)
+    return ids
+
+
+def assert_ui_download_custody(ui_dir, export_facts):
+    """The wizard must upload the same bytes the Python verifier accepted."""
+    for archive_format in ("zip", "tar.gz"):
+        exported = (export_facts.get("exports") or {}).get(archive_format)
+        if not exported:
+            raise RehearsalError("UI export evidence is missing %s" % archive_format)
+        path = _ui_artifact(ui_dir, exported.get("file"))
+        if sha256_file(path) != exported.get("sha256"):
+            raise RehearsalError(
+                "UI export %s changed before the import phase" % archive_format)
+
+
+def _ui_string(value, label):
+    if not isinstance(value, str) or value.strip() == "":
+        raise RehearsalError("UI evidence %s is empty" % label)
+    return value.strip()
+
+
+def verify_ui_evidence(record, plan, evidence_dir):
+    """Refuse any browser record that disagrees with the phase plan or disk."""
+    if not isinstance(record, dict) or record.get("schema") != UI_RUN_SCHEMA:
+        raise RehearsalError("UI evidence has the wrong schema")
+    if record.get("phase") != plan["phase"]:
+        raise RehearsalError("UI evidence phase is %s, want %s"
+                             % (record.get("phase"), plan["phase"]))
+    if record.get("error"):
+        raise RehearsalError("UI evidence records an error: %s" % record["error"])
+    head = record.get("head") or {}
+    if head.get("expected") != plan["head"] or head.get("observed") != plan["head"]:
+        raise RehearsalError("UI evidence head does not match the candidate")
+    if head.get("match") is not True or head.get("worktreeClean") is not True:
+        raise RehearsalError("UI evidence was not produced from the clean exact head")
+    if record.get("base") != plan["base"]:
+        raise RehearsalError("UI evidence base is not the fixture controller")
+    if (record.get("source") or {}).get("serverId") != plan["source"]["serverId"]:
+        raise RehearsalError("UI evidence names a different source server")
+    browser = record.get("browser") or {}
+    for key in ("driver", "driverVersion", "browserVersion"):
+        _ui_string(browser.get(key), "browser.%s" % key)
+
+    screenshots = record.get("screenshots")
+    if not isinstance(screenshots, list) or not screenshots:
+        raise RehearsalError("UI evidence carries no screenshots")
+    for shot in screenshots:
+        _ui_artifact(evidence_dir, (shot or {}).get("file"))
+        _ui_string(shot.get("name"), "screenshot.name")
+
+    facts = {
+        "phase": plan["phase"],
+        "head": head,
+        "browser": browser,
+        "screenshots": screenshots,
+        "exports": {},
+        "imports": {},
+        "created_server_ids": [],
+    }
+
+    if plan["phase"] == "refusal":
+        refusal = record.get("refusal") or {}
+        if refusal.get("warningVisible") is not True:
+            raise RehearsalError("UI refusal did not show the running-state warning")
+        if refusal.get("prepareDisabled") is not True:
+            raise RehearsalError("UI refusal left Prepare export enabled")
+        if refusal.get("formatCount") != 2:
+            raise RehearsalError("UI refusal did not expose both formats")
+        if refusal.get("formatsDisabled") != [True, True]:
+            raise RehearsalError("UI refusal left an archive format enabled")
+        if refusal.get("exportRequests") != 0:
+            raise RehearsalError("UI refusal still called ExportServerArchive")
+        if refusal.get("readyVisible") is not False:
+            raise RehearsalError("UI refusal produced a ready archive")
+        facts["refusal"] = refusal
+        return facts
+
+    if plan["phase"] == "export":
+        expected = {entry["format"]: entry for entry in plan["exports"]}
+        seen = {}
+        for entry in record.get("exports") or []:
+            archive_format = entry.get("format")
+            if archive_format not in expected or archive_format in seen:
+                raise RehearsalError("UI export names an unexpected format: %r"
+                                     % (archive_format,))
+            suffix = dict((fmt, suffix) for fmt, _, suffix in UI_FORMATS)[archive_format]
+            filename = _ui_string(entry.get("filename"), "export.filename")
+            if not filename.endswith(suffix):
+                raise RehearsalError("UI export filename %s does not end in %s"
+                                     % (filename, suffix))
+            if entry.get("preflightStatus") != 200:
+                raise RehearsalError("UI export preflight for %s was not HTTP 200"
+                                     % archive_format)
+            path = _ui_artifact(evidence_dir, entry.get("file"))
+            size = path.stat().st_size
+            if size <= 0 or as_int(entry.get("bytes"), "UI export bytes") != size:
+                raise RehearsalError("UI export %s size disagrees with disk" % archive_format)
+            digest = _ui_string(entry.get("sha256"), "export.sha256")
+            if not re.fullmatch(r"[0-9a-f]{64}", digest) or sha256_file(path) != digest:
+                raise RehearsalError("UI export %s SHA-256 disagrees with disk"
+                                     % archive_format)
+            seen[archive_format] = entry
+        if set(seen) != set(expected):
+            raise RehearsalError("UI evidence did not record both archive downloads")
+        facts["exports"] = seen
+        return facts
+
+    expected = {entry["format"]: entry for entry in plan["imports"]}
+    seen = {}
+    created = []
+    for entry in record.get("imports") or []:
+        archive_format = entry.get("format")
+        if archive_format not in expected or archive_format in seen:
+            raise RehearsalError("UI import names an unexpected format: %r"
+                                 % (archive_format,))
+        planned = expected[archive_format]
+        if entry.get("name") != planned["name"]:
+            raise RehearsalError("UI import %s used the wrong server name" % archive_format)
+        if entry.get("port") != planned["port"]:
+            raise RehearsalError("UI import %s used the wrong game port" % archive_format)
+        if entry.get("file") != planned["file"]:
+            raise RehearsalError("UI import %s uploaded a different file" % archive_format)
+        if entry.get("destinationNodeId") != plan["remoteNode"]["id"]:
+            raise RehearsalError("UI import %s was not bound to the remote node"
+                                 % archive_format)
+        preview = entry.get("preview") or {}
+        if preview.get("saysNoFindings") is not True:
+            raise RehearsalError("UI preview %s reported findings" % archive_format)
+        if planned["expectedLabel"] not in (preview.get("text") or ""):
+            raise RehearsalError("UI preview %s did not name its format" % archive_format)
+        server_id = _ui_string(entry.get("createdServerId"), "import.createdServerId")
+        if server_id in created:
+            raise RehearsalError("UI import reused a server id")
+        _ui_string(entry.get("createdRoute"), "import.createdRoute")
+        created.append(server_id)
+        seen[archive_format] = entry
+    if set(seen) != set(expected):
+        raise RehearsalError("UI evidence did not record both archive imports")
+    facts["imports"] = seen
+    facts["created_server_ids"] = created
+    return facts
+
+
+def run_ui_phase(workspace, evidence_dir, plan, username, password, driver=UI_DRIVER):
+    """Run one browser phase inside the disposable controller and keep its logs."""
+    ui_dir = Path(evidence_dir) / "ui"
+    phase = plan["phase"]
+    plan_path = ui_dir / ("%s-plan.json" % phase)
+    write_ui_plan(plan_path, plan)
+    command = ui_driver_command(driver, plan_path, ui_dir, phase)
+    env = dict(os.environ)
+    env["ARCHIVE_UI_USER"] = username
+    env["ARCHIVE_UI_PASSWORD"] = password
+    log_path = ui_dir / ("%s-driver.log" % phase)
+    try:
+        completed = subprocess.run(
+            command, env=env, capture_output=True, text=True,
+            timeout=UI_DRIVER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise RehearsalError("UI %s phase exceeded its bounded timeout" % phase)
+    log_path.write_text(
+        "stdout:\n%s\nstderr:\n%s\n" % (completed.stdout, completed.stderr),
+        encoding="utf-8")
+    record_path = ui_dir / ("%s-run.json" % phase)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip().splitlines()
+        error = RehearsalError(
+            "UI %s phase failed (exit %s): %s"
+            % (phase, completed.returncode, detail[-1] if detail else "no diagnostic"))
+        try:
+            partial = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            partial = None
+        error.created_server_ids = _ui_created_server_ids(partial)
+        raise error
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RehearsalError("UI %s evidence is unreadable: %s" % (phase, error))
+    try:
+        facts = verify_ui_evidence(record, plan, ui_dir)
+    except RehearsalError as error:
+        # A complete record whose checks disagree still names its created
+        # servers; keep them in the owned cleanup set.
+        error.created_server_ids = _ui_created_server_ids(record)
+        raise
+    facts["record_file"] = str(record_path.relative_to(Path(workspace)))
+    facts["driver"] = str(Path(driver).relative_to(ROOT))
+    return facts
+
+
 def remote_destination(controller_storage_root, data_path):
     base = Path(data_path).name
     if not base or not portable_relative_path(base):
         raise RehearsalError("server data path has no portable directory name")
     return Path(controller_storage_root) / base
+
+
+def verify_import_destination(controller, imported, verified, archive_format, *,
+                              mc_version, remote_docker, controller_storage):
+    """Common pre-start verification for an RPC- or production-UI-created import.
+
+    Both transports must end with the same stopped server on the remote engine,
+    the same assigned port, the archive runtime and byte-identical files read
+    through the imported server's own FileService scope.
+    """
+    assert_not_started(imported, "%s import" % archive_format)
+    if imported.get("port") != verified["port"]:
+        raise RehearsalError("%s import did not retain its remapped game port"
+                             % archive_format)
+    if imported.get("mcVersion") != mc_version:
+        raise RehearsalError("%s import did not inherit the archive version"
+                             % archive_format)
+    if imported.get("modLoader") != "MOD_LOADER_VANILLA":
+        raise RehearsalError("%s import did not inherit managed Vanilla"
+                             % archive_format)
+    if imported.get("memory") != 1024 or imported.get("maxPlayers") != 5:
+        raise RehearsalError("%s import did not inherit archive runtime defaults"
+                             % archive_format)
+    destination = remote_destination(controller_storage, imported.get("dataPath", ""))
+    # Prove the mapped destination directory on the controller-side remote-storage
+    # mount, then read/hash the imported bytes through the imported server's scope.
+    if not destination.is_dir():
+        raise RehearsalError("%s destination directory is missing: %s"
+                             % (archive_format, destination))
+    destination_inventory = controller.list_tree(imported.get("id"))
+    verify_mounted_inventory(destination, destination_inventory)
+    verified_files = verify_tree_files(
+        controller, imported.get("id"), verified["files"],
+        "%s destination" % archive_format, inventory=destination_inventory)
+    if len(verified_files) != verified["file_count"]:
+        raise RehearsalError("%s destination file count differs" % archive_format)
+    engine_state = remote_container_state(remote_docker, imported.get("containerId"))
+    if engine_state["running"]:
+        raise RehearsalError("%s imported container was already running before start"
+                             % archive_format)
+    return {
+        "server_id": imported.get("id"),
+        "node_id": imported.get("nodeId"),
+        "port": imported["port"],
+        "status_before_start": imported.get("status"),
+        "container_id": imported.get("containerId"),
+        "engine_state_before_start": engine_state,
+        "data_path": imported.get("dataPath"),
+        "destination": str(destination),
+        "verified_files": len(verified_files),
+    }
 
 
 def assert_source_data_bind(server, data_dir, local_docker, inspector=inspect_container):
@@ -1397,14 +1741,23 @@ def execute(args):
     evidence.mkdir(parents=True, exist_ok=True)
     controller_storage.mkdir(parents=True, exist_ok=True)
 
+    ui_mode = bool(args.ui_driver)
     report = {
         "schema": "server-archive-rehearsal-ci-v1",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "workspace": str(workspace),
         "scope": {
-            "tickets": ["OSS-426", "OSS-427"],
-            "surface": "backend RPC with an empty frontend embed",
-            "browser_acceptance": "OSS-428 belongs to #686 and is not exercised here",
+            "tickets": ["OSS-426", "OSS-427", "OSS-428"] if ui_mode
+                       else ["OSS-426", "OSS-427"],
+            "surface": ("production SvelteKit export and create-from-archive routes "
+                        "against a disposable controller")
+                       if ui_mode else "backend RPC with an empty frontend embed",
+            "browser_acceptance": (
+                "OSS-428 production routes drive the real download and create-from-archive "
+                "RPCs on the disposable controller and remote engine"
+                if ui_mode else
+                "OSS-428 belongs to #686 and is not exercised here"),
+            "mode": "production-ui" if ui_mode else "rpc",
         },
         "candidate": {
             "commit": args.candidate_commit,
@@ -1426,6 +1779,8 @@ def execute(args):
             "gameplay": GAMEPLAY_PROPERTIES,
         },
         "formats": {},
+        "imports": {},
+        "ui": {},
         "checks": {},
         "cleanup": {"pass": False, "requested": 0, "failures": []},
         "pass": False,
@@ -1434,8 +1789,14 @@ def execute(args):
             "Disposable controller and Docker-in-Docker node on an owned bridge, not a production remote host or node VM.",
             "One managed Vanilla Minecraft version and a synthetic fixture; no mods, modules, proxy, OIDC or operator ingress.",
             "The controller and both engines run only under the hosted job's disposable workspace; no live host, world, registry tag or release is touched.",
+            ("The production UI is exercised in representative desktop and narrow viewports in light "
+             "and dark themes, but only the archive export and create-from-archive routes; other "
+             "product surfaces and gameplay boot are covered by separate evidence. The two imports "
+             "are verified stopped with their saved bytes on the remote engine and are not started "
+             "in this run.")
+            if ui_mode else
             "This backend RPC rehearsal uses an empty frontend embed and does not exercise the OSS-428 browser workflow, which belongs to #686.",
-            "Offline unit tests validate archive parsing, fixture bindings and refusal paths only; only the hosted JSON report records an actual round trip.",
+            "Offline unit tests validate archive parsing, fixture bindings, plan/evidence refusal and browser helper logic only; only the hosted JSON report records an actual round trip.",
         ],
     }
     checks = report["checks"]
@@ -1544,15 +1905,26 @@ def execute(args):
                 args.mc_version, args.player_name, args.readiness_timeout))
         ok("source_minecraft_ready")
 
-        # A running server must be refused before any bytes are read. Requiring
-        # both the code and the specific message rejects a generic precondition.
-        assert_running_export_refused(lambda: controller.call(
-            "ServerService", "ExportServerArchive", {
-                "serverId": source_id,
-                "format": "SERVER_ARCHIVE_FORMAT_ZIP",
-                "consistency": "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
-            }, timeout=ARCHIVE_TIMEOUT_SECONDS))
-        ok("export_refused_while_running")
+        # A running server must be refused before any bytes are read. The RPC
+        # rehearsal requires both the code and the specific message; the UI
+        # rehearsal proves the production route never even issues the call.
+        ui_evidence = report["ui"]
+        if args.ui_driver:
+            phase = "ui_running_export_refusal"
+            ui_evidence["refusal"] = run_ui_phase(
+                workspace, evidence,
+                ui_plan("refusal", head=args.candidate_commit, base=args.base,
+                        source_id=source_id),
+                args.admin_username, password)
+            ok("ui_export_refused_while_running")
+        else:
+            assert_running_export_refused(lambda: controller.call(
+                "ServerService", "ExportServerArchive", {
+                    "serverId": source_id,
+                    "format": "SERVER_ARCHIVE_FORMAT_ZIP",
+                    "consistency": "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
+                }, timeout=ARCHIVE_TIMEOUT_SECONDS))
+            ok("export_refused_while_running")
 
         command(controller, source_id, "gamerule keepInventory true")
         command(controller, source_id, "save-all flush")
@@ -1623,34 +1995,64 @@ def execute(args):
         ok("source_fixture_and_gameplay_written")
 
         archives = {}
-        for archive_format, rpc_format, suffix, port in (
-                ("zip", "SERVER_ARCHIVE_FORMAT_ZIP", ".zip", zip_port),
-                ("tar.gz", "SERVER_ARCHIVE_FORMAT_TAR_GZ", ".tar.gz", tar_port)):
-            phase = "export_" + archive_format.replace(".", "_")
-            exported = controller.call("ServerService", "ExportServerArchive", {
-                "serverId": source_id,
-                "format": rpc_format,
-                "consistency": "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
-            }, timeout=ARCHIVE_TIMEOUT_SECONDS)
-            session_id = exported.get("sessionId")
-            filename = exported.get("filename", "")
-            if not session_id or not filename.endswith(suffix):
-                raise RehearsalError("%s export returned an unexpected session/filename"
-                                     % archive_format)
-            destination = evidence / ("source" + suffix)
-            downloaded = controller.download_to(session_id, destination)
-            if downloaded != as_int(exported.get("totalSize"), "export total_size"):
-                raise RehearsalError("%s download size differs from export size" % archive_format)
-            verified = verify_server_archive(
-                destination, archive_format, args.candidate_version, args.mc_version,
-                1024, 5)
-            verified["filename"] = filename
-            verified["export_total_size"] = as_int(exported.get("totalSize"),
-                                                   "export total_size")
-            verified["port"] = port
-            archives[archive_format] = verified
-            report["formats"] = archives
-            ok("archive_%s_download_verified" % archive_format.replace(".", "_"))
+        ui_dir = evidence / "ui"
+        if args.ui_driver:
+            phase = "ui_export"
+            ui_evidence["export"] = run_ui_phase(
+                workspace, evidence,
+                ui_plan(
+                    "export", head=args.candidate_commit, base=args.base,
+                    source_id=source_id,
+                    exports=[{"format": archive_format, "expectedLabel": label}
+                             for archive_format, label, _suffix in UI_FORMATS]),
+                args.admin_username, password)
+            for archive_format, rpc_format, suffix, port in (
+                    ("zip", "SERVER_ARCHIVE_FORMAT_ZIP", ".zip", zip_port),
+                    ("tar.gz", "SERVER_ARCHIVE_FORMAT_TAR_GZ", ".tar.gz", tar_port)):
+                entry = ui_evidence["export"]["exports"][archive_format]
+                destination = ui_dir / entry["file"]
+                verified = verify_server_archive(
+                    destination, archive_format, args.candidate_version,
+                    args.mc_version, 1024, 5)
+                verified["filename"] = entry["filename"]
+                verified["export_total_size"] = as_int(entry["bytes"],
+                                                       "UI export bytes")
+                verified["port"] = port
+                verified["transport"] = "production-ui-download"
+                archives[archive_format] = verified
+                report["formats"] = archives
+                ok("archive_%s_download_verified" % archive_format.replace(".", "_"))
+            ok("ui_exports_downloaded_from_production_routes")
+        else:
+            for archive_format, rpc_format, suffix, port in (
+                    ("zip", "SERVER_ARCHIVE_FORMAT_ZIP", ".zip", zip_port),
+                    ("tar.gz", "SERVER_ARCHIVE_FORMAT_TAR_GZ", ".tar.gz", tar_port)):
+                phase = "export_" + archive_format.replace(".", "_")
+                exported = controller.call("ServerService", "ExportServerArchive", {
+                    "serverId": source_id,
+                    "format": rpc_format,
+                    "consistency": "SERVER_ARCHIVE_CONSISTENCY_STOPPED",
+                }, timeout=ARCHIVE_TIMEOUT_SECONDS)
+                session_id = exported.get("sessionId")
+                filename = exported.get("filename", "")
+                if not session_id or not filename.endswith(suffix):
+                    raise RehearsalError("%s export returned an unexpected session/filename"
+                                         % archive_format)
+                destination = evidence / ("source" + suffix)
+                downloaded = controller.download_to(session_id, destination)
+                if downloaded != as_int(exported.get("totalSize"), "export total_size"):
+                    raise RehearsalError("%s download size differs from export size"
+                                         % archive_format)
+                verified = verify_server_archive(
+                    destination, archive_format, args.candidate_version, args.mc_version,
+                    1024, 5)
+                verified["filename"] = filename
+                verified["export_total_size"] = as_int(exported.get("totalSize"),
+                                                       "export total_size")
+                verified["port"] = port
+                archives[archive_format] = verified
+                report["formats"] = archives
+                ok("archive_%s_download_verified" % archive_format.replace(".", "_"))
         report["formats"] = archives
         phase = "verify_archive_source_parity"
         source_parity_hashes = {
@@ -1680,114 +2082,147 @@ def execute(args):
             raise RehearsalError("ZIP and tar.gz file hashes differ")
 
         imports = {}
-        for archive_format, suffix in (("zip", ".zip"), ("tar.gz", ".tar.gz")):
+        if args.ui_driver:
+            phase = "ui_import"
+            # Re-check the custody chain before uploading: the file the wizard
+            # receives must still be the byte-for-byte download that the Python
+            # verifier accepted, not merely a file with the same name.
+            assert_ui_download_custody(ui_dir, ui_evidence["export"])
+            try:
+                ui_evidence["import"] = run_ui_phase(
+                    workspace, evidence,
+                    ui_plan(
+                        "import", head=args.candidate_commit, base=args.base,
+                        source_id=source_id, remote_node=remote,
+                        imports=[
+                            {
+                                "format": archive_format,
+                                "file": ui_evidence["export"]["exports"][archive_format]["file"],
+                                "expectedLabel": label,
+                                "name": UI_IMPORT_NAMES[archive_format],
+                                "port": port,
+                            }
+                            for archive_format, label, _suffix, port in (
+                                ("zip", "ZIP (.zip)", ".zip", zip_port),
+                                ("tar.gz", "TAR.GZ (.tar.gz)", ".tar.gz", tar_port))
+                        ]),
+                    args.admin_username, password)
+            except RehearsalError as error:
+                # A partial browser record still names servers it created; add
+                # them before re-raising so owned cleanup cannot miss one.
+                for server_id in getattr(error, "created_server_ids", []):
+                    if server_id not in created_servers:
+                        created_servers.append(server_id)
+                raise
+            for server_id in ui_evidence["import"]["created_server_ids"]:
+                if server_id in created_servers:
+                    raise RehearsalError("UI import reused a server id")
+                created_servers.append(server_id)
+
+        for archive_format, suffix, port in (
+                ("zip", ".zip", zip_port), ("tar.gz", ".tar.gz", tar_port)):
             phase = "import_" + archive_format.replace(".", "_")
             verified = archives[archive_format]
-            archive_path = evidence / ("source" + suffix)
-            upload_id = controller.upload_file(archive_path, verified["filename"])
-            preview = controller.call("ServerService", "PreviewServerArchive", {
-                "uploadId": upload_id, "nodeId": remote["id"],
-            }, timeout=ARCHIVE_TIMEOUT_SECONDS)
-            if preview.get("format") != ("SERVER_ARCHIVE_FORMAT_ZIP" if archive_format == "zip"
-                                         else "SERVER_ARCHIVE_FORMAT_TAR_GZ"):
-                raise RehearsalError("%s preview reported the wrong format" % archive_format)
-            if preview.get("schemaVersion") != ARCHIVE_SCHEMA:
-                raise RehearsalError("%s preview reported the wrong schema" % archive_format)
-            if preview.get("exporterVersion") != args.candidate_version:
-                raise RehearsalError("%s preview exporter differs from the candidate" % archive_format)
-            if preview.get("mcVersion") != args.mc_version:
-                raise RehearsalError("%s preview Minecraft version differs" % archive_format)
-            if preview.get("modLoader") != "MOD_LOADER_VANILLA":
-                raise RehearsalError("%s preview is not managed Vanilla" % archive_format)
-            if preview.get("fileCount") != verified["file_count"]:
-                raise RehearsalError("%s preview file count differs" % archive_format)
-            if as_int(preview.get("expandedBytes"), "preview expanded_bytes") != verified["expanded_bytes"]:
-                raise RehearsalError("%s preview expanded bytes differ" % archive_format)
-            required = as_int(preview.get("requiredBytes"), "preview required_bytes")
-            if required < verified["expanded_bytes"]:
-                raise RehearsalError("%s preview required bytes are too small" % archive_format)
-            available_value = preview.get("availableBytes")
-            if available_value is None:
-                raise RehearsalError("%s preview did not report destination space"
-                                     % archive_format)
-            available = as_int(available_value, "preview available_bytes")
-            if available < required:
-                raise RehearsalError("%s preview reports insufficient destination space"
-                                     % archive_format)
-            if preview.get("findings"):
-                raise RehearsalError("%s preview reported findings: %s"
-                                     % (archive_format, preview["findings"]))
-            ok("preview_%s_clean_on_remote_node" % archive_format.replace(".", "_"))
+            if args.ui_driver:
+                ui_import = ui_evidence["import"]["imports"][archive_format]
+                imported_id = ui_import["createdServerId"]
+                if imported_id not in created_servers:
+                    raise RehearsalError("%s import id is not in the owned cleanup set"
+                                         % archive_format)
+                imported = server_record(controller, imported_id)
+                name = ui_import["name"]
+                if imported.get("nodeId") != remote["id"]:
+                    raise RehearsalError("%s import was not placed on the remote node"
+                                         % archive_format)
+                assert_no_docker_overrides(imported, "%s import" % archive_format)
+                ok("ui_import_%s_created_from_archive"
+                   % archive_format.replace(".", "_"))
+                imported = wait_import_container(
+                    controller, imported_id, 600,
+                    "%s import container creation" % archive_format)
+                preview_report = {
+                    "source": "production-ui-archive-preview",
+                    "text": ui_import["preview"]["text"],
+                    "archive_file_count": verified["file_count"],
+                    "archive_expanded_bytes": verified["expanded_bytes"],
+                }
+                transport = "production-ui-upload"
+            else:
+                archive_path = evidence / ("source" + suffix)
+                upload_id = controller.upload_file(archive_path, verified["filename"])
+                preview = controller.call("ServerService", "PreviewServerArchive", {
+                    "uploadId": upload_id, "nodeId": remote["id"],
+                }, timeout=ARCHIVE_TIMEOUT_SECONDS)
+                if preview.get("format") != ("SERVER_ARCHIVE_FORMAT_ZIP"
+                                             if archive_format == "zip"
+                                             else "SERVER_ARCHIVE_FORMAT_TAR_GZ"):
+                    raise RehearsalError("%s preview reported the wrong format"
+                                         % archive_format)
+                if preview.get("schemaVersion") != ARCHIVE_SCHEMA:
+                    raise RehearsalError("%s preview reported the wrong schema"
+                                         % archive_format)
+                if preview.get("exporterVersion") != args.candidate_version:
+                    raise RehearsalError("%s preview exporter differs from the candidate"
+                                         % archive_format)
+                if preview.get("mcVersion") != args.mc_version:
+                    raise RehearsalError("%s preview Minecraft version differs"
+                                         % archive_format)
+                if preview.get("modLoader") != "MOD_LOADER_VANILLA":
+                    raise RehearsalError("%s preview is not managed Vanilla"
+                                         % archive_format)
+                if preview.get("fileCount") != verified["file_count"]:
+                    raise RehearsalError("%s preview file count differs" % archive_format)
+                if as_int(preview.get("expandedBytes"),
+                          "preview expanded_bytes") != verified["expanded_bytes"]:
+                    raise RehearsalError("%s preview expanded bytes differ"
+                                         % archive_format)
+                required = as_int(preview.get("requiredBytes"), "preview required_bytes")
+                if required < verified["expanded_bytes"]:
+                    raise RehearsalError("%s preview required bytes are too small"
+                                         % archive_format)
+                available_value = preview.get("availableBytes")
+                if available_value is None:
+                    raise RehearsalError("%s preview did not report destination space"
+                                         % archive_format)
+                available = as_int(available_value, "preview available_bytes")
+                if available < required:
+                    raise RehearsalError("%s preview reports insufficient destination space"
+                                         % archive_format)
+                if preview.get("findings"):
+                    raise RehearsalError("%s preview reported findings: %s"
+                                         % (archive_format, preview["findings"]))
+                ok("preview_%s_clean_on_remote_node"
+                   % archive_format.replace(".", "_"))
 
-            name = "archive-import-" + ("zip" if archive_format == "zip" else "tar-gz")
-            result = controller.call("ServerService", "CreateServer", {
-                "name": name,
-                "archiveUploadId": upload_id,
-                "nodeId": remote["id"],
-                "port": verified["port"],
-                "requestId": "archive-rehearsal-import-" + archive_format.replace(".", "-"),
-                "startImmediately": False,
-                "autoStart": False,
-            }, timeout=ARCHIVE_TIMEOUT_SECONDS)
-            imported = result.get("server", {})
-            imported_id = imported.get("id")
-            if not imported_id:
-                raise RehearsalError("%s import returned no server id" % archive_format)
-            if imported_id in created_servers:
-                raise RehearsalError("%s import reused a server id" % archive_format)
-            created_servers.append(imported_id)
-            if imported.get("nodeId") != remote["id"]:
-                raise RehearsalError("%s import was not placed on the remote node" % archive_format)
-            assert_no_docker_overrides(imported, "%s import" % archive_format)
-            ok("import_%s_created_without_overrides" % archive_format.replace(".", "_"))
-            imported = wait_import_container(
-                controller, imported_id, 600,
-                "%s import container creation" % archive_format)
-            assert_not_started(imported, "%s import" % archive_format)
-            if imported.get("port") != verified["port"]:
-                raise RehearsalError("%s import did not retain its remapped game port" % archive_format)
-            if imported.get("mcVersion") != args.mc_version:
-                raise RehearsalError("%s import did not inherit the archive version" % archive_format)
-            if imported.get("modLoader") != "MOD_LOADER_VANILLA":
-                raise RehearsalError("%s import did not inherit managed Vanilla" % archive_format)
-            if imported.get("memory") != 1024 or imported.get("maxPlayers") != 5:
-                raise RehearsalError("%s import did not inherit archive runtime defaults"
-                                     % archive_format)
-            destination = remote_destination(controller_storage, imported.get("dataPath", ""))
-            # The harness proves the mapped destination directory on the
-            # controller-side remote-storage mount, then reads/hashes the
-            # imported bytes through the imported server's FileService scope.
-            if not destination.is_dir():
-                raise RehearsalError("%s destination directory is missing: %s"
-                                     % (archive_format, destination))
-            destination_inventory = controller.list_tree(imported_id)
-            verify_mounted_inventory(destination, destination_inventory)
-            verified_files = verify_tree_files(
-                controller, imported_id, verified["files"],
-                "%s destination" % archive_format, inventory=destination_inventory)
-            if len(verified_files) != verified["file_count"]:
-                raise RehearsalError("%s destination file count differs" % archive_format)
-            engine_state = remote_container_state(
-                args.remote_docker, imported.get("containerId"))
-            if engine_state["running"]:
-                raise RehearsalError("%s imported container was already running before start"
-                                     % archive_format)
-            ok("import_%s_files_verified_before_start" % archive_format.replace(".", "_"))
-            ok("import_%s_container_not_running_before_start"
-               % archive_format.replace(".", "_"))
-            imports[archive_format] = {
-                "server_id": imported_id,
-                "name": name,
-                "node_id": imported.get("nodeId"),
-                "port": imported["port"],
-                "status_before_start": imported.get("status"),
-                "container_id": imported.get("containerId"),
-                "engine_state_before_start": engine_state,
-                "data_path": imported.get("dataPath"),
-                "destination": str(destination),
-                "readiness_host": args.destination_readiness_host,
-                "verified_files": len(verified_files),
-                "preview": {
+                name = "archive-import-" + ("zip" if archive_format == "zip"
+                                            else "tar-gz")
+                result = controller.call("ServerService", "CreateServer", {
+                    "name": name,
+                    "archiveUploadId": upload_id,
+                    "nodeId": remote["id"],
+                    "port": verified["port"],
+                    "requestId": "archive-rehearsal-import-"
+                                 + archive_format.replace(".", "-"),
+                    "startImmediately": False,
+                    "autoStart": False,
+                }, timeout=ARCHIVE_TIMEOUT_SECONDS)
+                imported = result.get("server", {})
+                imported_id = imported.get("id")
+                if not imported_id:
+                    raise RehearsalError("%s import returned no server id" % archive_format)
+                if imported_id in created_servers:
+                    raise RehearsalError("%s import reused a server id" % archive_format)
+                created_servers.append(imported_id)
+                if imported.get("nodeId") != remote["id"]:
+                    raise RehearsalError("%s import was not placed on the remote node"
+                                         % archive_format)
+                assert_no_docker_overrides(imported, "%s import" % archive_format)
+                ok("import_%s_created_without_overrides"
+                   % archive_format.replace(".", "_"))
+                imported = wait_import_container(
+                    controller, imported_id, 600,
+                    "%s import container creation" % archive_format)
+                preview_report = {
                     "format": preview.get("format"),
                     "schema_version": preview.get("schemaVersion"),
                     "exporter_version": preview.get("exporterVersion"),
@@ -1797,48 +2232,70 @@ def execute(args):
                     "required_bytes": required,
                     "available_bytes": available,
                     "findings": preview.get("findings", []),
-                },
+                }
+                transport = "rpc"
+
+            record = verify_import_destination(
+                controller, imported, verified, archive_format,
+                mc_version=args.mc_version, remote_docker=args.remote_docker,
+                controller_storage=controller_storage)
+            ok("import_%s_files_verified_before_start"
+               % archive_format.replace(".", "_"))
+            ok("import_%s_container_not_running_before_start"
+               % archive_format.replace(".", "_"))
+            record.update({
+                "name": name,
+                "readiness_host": args.destination_readiness_host,
+                "preview": preview_report,
                 "readiness": None,
-            }
+                "transport": transport,
+            })
+            imports[archive_format] = record
             report["imports"] = imports
 
-        for archive_format, record in imports.items():
-            phase = "verify_running_" + archive_format.replace(".", "_")
-            controller.call("ServerService", "StartServer", {
-                "id": record["server_id"],
-                "requestId": "archive-rehearsal-start-" + archive_format.replace(".", "-"),
-            }, timeout=300)
-            wait_status(controller, record["server_id"], "SERVER_STATUS_RUNNING", 600,
-                        "%s imported Minecraft startup" % archive_format)
-            engine_state = remote_container_state(
-                args.remote_docker, record["container_id"])
-            if not engine_state["running"]:
-                raise RehearsalError("%s imported container is not running on the remote engine"
-                                     % archive_format)
-            ok("import_%s_container_running_on_remote_engine"
-               % archive_format.replace(".", "_"))
-            roster = wait_for(
-                "%s console ready" % archive_format, 180,
-                lambda: command(controller, record["server_id"], "list"))
-            difficulty = wait_for(
-                "%s gameplay seed" % archive_format, 180,
-                lambda: command(controller, record["server_id"], "difficulty"))
-            if "hard" not in difficulty.lower():
-                raise RehearsalError("%s import did not keep the archived difficulty"
-                                     % archive_format)
-            readiness = wait_for(
-                "%s Minecraft Play state" % archive_format, 300,
-                lambda: run_readiness_probe(
-                    args.readiness_script, args.destination_readiness_host,
-                    record["port"], args.mc_version, args.player_name,
-                    args.readiness_timeout))
-            readiness["console_roster"] = roster.strip()[:200]
-            readiness["engine_state"] = engine_state
-            record["readiness"] = readiness
-            ok("import_%s_minecraft_ready" % archive_format.replace(".", "_"))
-            command(controller, record["server_id"], "save-all flush")
-        report["imports"] = imports
-        ok("both_imports_ready")
+        if not args.ui_driver:
+            for archive_format, record in imports.items():
+                phase = "verify_running_" + archive_format.replace(".", "_")
+                controller.call("ServerService", "StartServer", {
+                    "id": record["server_id"],
+                    "requestId": "archive-rehearsal-start-"
+                                 + archive_format.replace(".", "-"),
+                }, timeout=300)
+                wait_status(controller, record["server_id"], "SERVER_STATUS_RUNNING", 600,
+                            "%s imported Minecraft startup" % archive_format)
+                engine_state = remote_container_state(
+                    args.remote_docker, record["container_id"])
+                if not engine_state["running"]:
+                    raise RehearsalError(
+                        "%s imported container is not running on the remote engine"
+                        % archive_format)
+                ok("import_%s_container_running_on_remote_engine"
+                   % archive_format.replace(".", "_"))
+                roster = wait_for(
+                    "%s console ready" % archive_format, 180,
+                    lambda: command(controller, record["server_id"], "list"))
+                difficulty = wait_for(
+                    "%s gameplay seed" % archive_format, 180,
+                    lambda: command(controller, record["server_id"], "difficulty"))
+                if "hard" not in difficulty.lower():
+                    raise RehearsalError("%s import did not keep the archived difficulty"
+                                         % archive_format)
+                readiness = wait_for(
+                    "%s Minecraft Play state" % archive_format, 300,
+                    lambda: run_readiness_probe(
+                        args.readiness_script, args.destination_readiness_host,
+                        record["port"], args.mc_version, args.player_name,
+                        args.readiness_timeout))
+                readiness["console_roster"] = roster.strip()[:200]
+                readiness["engine_state"] = engine_state
+                record["readiness"] = readiness
+                ok("import_%s_minecraft_ready" % archive_format.replace(".", "_"))
+                command(controller, record["server_id"], "save-all flush")
+            report["imports"] = imports
+            ok("both_imports_ready")
+        else:
+            report["imports"] = imports
+            ok("ui_imports_saved_bytes_on_remote_engine")
 
         report["pass"] = all(checks.values())
     except Exception as error:  # noqa: BLE001 - keep partial evidence on failure
@@ -1889,6 +2346,8 @@ def main(argv=None):
                         help="dedicated host for game ports on the nested destination engine")
     parser.add_argument("--readiness-script",
                         default=str(ROOT / "scripts" / "qualify-archive-player.mjs"))
+    parser.add_argument("--ui-driver",
+                        help="run the production-UI acceptance phases with this browser driver")
     parser.add_argument("--readiness-timeout", type=int, default=120)
     parser.add_argument("--health-timeout", type=int, default=120)
     args = parser.parse_args(argv)

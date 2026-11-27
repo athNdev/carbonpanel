@@ -25,6 +25,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ServerLifecycleActions from '$lib/components/fragments/ServerLifecycleActions.svelte';
+	import ServerArchiveExport from '$lib/features/servers/ServerArchiveExport.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -392,6 +393,8 @@ one at https://mozilla.org/MPL/2.0/.
 							{actionLoading}
 							onaction={handleServerAction}
 						/>
+
+						<ServerArchiveExport {server} disabled={actionLoading} />
 
 						<!-- Dropdown for recreate and delete -->
 						<DropdownMenu>

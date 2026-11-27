@@ -27,6 +27,16 @@ const resourcePackHost = {
 		'[{"source":"{{server.data_path}}/modules/resource-pack-host/packs","target":"/packs","read_only":true,"create_dir":true}]',
 	defaultHooks: []
 };
+const fixtureBlueprint = {
+	id: 'fixture-blueprint',
+	name: 'Fixture Java Seed',
+	description: 'A qualified Java seed with its own image and memory setting.',
+	modLoader: 'forge',
+	mcVersion: '1.21.1',
+	dockerImage: 'java17',
+	defaultEnv: '{"MEMORY":"4G","TYPE":"FORGE"}',
+	builtin: false
+};
 
 function modVersion(id, fileName, dependencies = []) {
 	return {
@@ -43,6 +53,107 @@ function modVersion(id, fileName, dependencies = []) {
 
 function record(method, payload) {
 	calls.push({ method, payload });
+}
+
+const previewOutcomes = [];
+
+// The preview seam in this fixture is the in-process stub itself: no HTTP
+// request is made, so there is no HTTP status to report. Record the call and the
+// answer the fixture actually gave.
+function observePreview(payload, result) {
+	return result.then(
+		(value) => {
+			previewOutcomes.push({
+				method: 'previewServerArchive',
+				uploadId: payload.uploadId,
+				nodeId: payload.nodeId,
+				outcome: 'resolved',
+				errorCode: null,
+				errorName: null,
+				findings: value.findings?.length ?? 0,
+				destinationIds: value.destinations?.map((destination) => destination.id) ?? [],
+				availableBytes: value.availableBytes === undefined ? null : Number(value.availableBytes),
+				requiredBytes: value.requiredBytes === undefined ? null : Number(value.requiredBytes)
+			});
+			return value;
+		},
+		(error) => {
+			previewOutcomes.push({
+				method: 'previewServerArchive',
+				uploadId: payload.uploadId,
+				nodeId: payload.nodeId,
+				outcome: 'failed',
+				errorCode: typeof error?.code === 'number' ? error.code : null,
+				errorName: typeof error?.code === 'number' ? (Code[error.code] ?? null) : null,
+				message: error?.rawMessage ?? error?.message ?? null
+			});
+			throw error;
+		}
+	);
+}
+
+function previewServerArchiveResult(payload) {
+	const mode = globalThis.__archivePreviewMode || 'success';
+	if (mode === 'fail-once') {
+		globalThis.__archivePreviewMode = 'success';
+		return Promise.reject(new ConnectError('fixture archive preview refusal', Code.Unavailable));
+	}
+	if (mode === 'fail') {
+		return Promise.reject(new ConnectError('fixture archive preview refusal', Code.Unavailable));
+	}
+	const findings =
+		mode === 'unsupported'
+			? [
+					{
+						code: 5,
+						severity: 2,
+						message: 'The archive uses a loader that this controller does not support.'
+					}
+				]
+			: [];
+	const result = {
+		format: globalThis.__archivePreviewFormat === 2 ? 2 : 1,
+		schemaVersion: 1,
+		exporterVersion: 'fixture-1.0.0',
+		mcVersion: '1.20.6',
+		modLoader: 3,
+		loaderVersion: '0.16.0',
+		memory: 3072,
+		maxPlayers: 8,
+		fileCount: 12,
+		expandedBytes: 1048576n,
+		requiredBytes: 2097152n,
+		availableBytes: payload.nodeId
+			? globalThis.__archiveCapacityMode === 'insufficient'
+				? 1048576n
+				: 4194304n
+			: undefined,
+		destinations: globalThis.__wizardArchiveDestinations || [
+			{ id: 'node-1', name: 'Fixture Node' }
+		],
+		findings
+	};
+	if (!payload.nodeId && globalThis.__wizardHoldArchivePreflight) {
+		return new Promise((resolve) => {
+			globalThis.__wizardReleaseArchivePreflight = () => resolve(result);
+		});
+	}
+	if (payload.nodeId && globalThis.__wizardDelayedArchiveNode === payload.nodeId) {
+		const settle = () =>
+			globalThis.__wizardDelayedArchiveNodeMode === 'fail'
+				? Promise.reject(new ConnectError('stale destination preview refusal', Code.Unavailable))
+				: Promise.resolve(result);
+		if (globalThis.__wizardHoldArchiveNodePreflight) {
+			return new Promise((resolve, reject) => {
+				globalThis.__wizardReleaseArchiveNodePreflight = () => {
+					delete globalThis.__wizardReleaseArchiveNodePreflight;
+					settle().then(resolve, reject);
+				};
+			});
+		}
+		return settle();
+	}
+	return Promise.resolve(result);
 }
 
 export const rpcClient = {
@@ -80,6 +191,10 @@ export const rpcClient = {
 		},
 		createServer(payload) {
 			record('createServer', payload);
+			if (globalThis.__wizardArchiveFailCreateOnce) {
+				globalThis.__wizardArchiveFailCreateOnce = false;
+				return Promise.reject(new ConnectError('fixture archive create refusal', Code.Aborted));
+			}
 			const result = { server: { id: 'wizard-server', name: payload.name } };
 			if (globalThis.__wizardHoldCreate) {
 				return new Promise((resolve) => {
@@ -88,6 +203,61 @@ export const rpcClient = {
 			}
 			return Promise.resolve(result);
 		},
+		exportServerArchive(payload) {
+			record('exportServerArchive', payload);
+			const tar = payload.format === 2;
+			const result = {
+				sessionId: tar ? 'export-session-tar' : 'export-session-zip',
+				filename: tar ? 'fixture-server.tar.gz' : 'fixture-server.zip',
+				totalSize: 1048576n
+			};
+			const mode = globalThis.__exportMode || 'success';
+			if (mode === 'refused') {
+				// A ready archive whose scoped download is refused by the fixture
+				// download handler (HTTP 403), so the UI must preflight before
+				// claiming the download started.
+				return Promise.resolve({
+					sessionId: 'export-session-refused',
+					filename: 'fixture-server-refused.zip',
+					totalSize: 1048576n
+				});
+			}
+			if (mode === 'fail') {
+				return Promise.reject(
+					new ConnectError('fixture export preparation refusal', Code.Internal)
+				);
+			}
+			if (mode === 'hold') {
+				return new Promise((resolve) => {
+					globalThis.__wizardReleaseExport = () => {
+						delete globalThis.__wizardReleaseExport;
+						resolve(result);
+					};
+				});
+			}
+			if (mode === 'deferred') {
+				return new Promise((resolve, reject) => {
+					globalThis.__exportPending = globalThis.__exportPending || [];
+					globalThis.__exportPending.push({
+						format: payload.format,
+						sessionId: result.sessionId,
+						filename: result.filename,
+						resolve: () => resolve(result),
+						reject: (message = `deferred export refusal ${payload.format}`) =>
+							reject(new ConnectError(message, Code.Internal))
+					});
+				});
+			}
+			return Promise.resolve(result);
+		},
+		previewServerArchive(payload) {
+			record('previewServerArchive', payload);
+			return observePreview(payload, previewServerArchiveResult(payload));
+		},
+		listServers() {
+			record('listServers', {});
+			return Promise.resolve({ servers: [] });
+		},
 		getServer(payload) {
 			record('getServer', payload);
 			if (globalThis.__wizardPreparingPolls > 0) {
@@ -95,7 +265,25 @@ export const rpcClient = {
 				return Promise.resolve({ server: { id: payload.id, status: 1 } });
 			}
 			return Promise.resolve({
-				server: { id: payload.id, containerId: 'fixture-container', status: failedStart ? 7 : 5 }
+				server: {
+					id: payload.id,
+					name: 'Fixture Archive Server',
+					description: 'Disposable route fixture',
+					containerId: 'fixture-container',
+					status:
+						globalThis.__fixtureServerRunning || globalThis.location?.search?.includes('running=1')
+							? 3
+							: failedStart
+								? 7
+								: 5,
+					nodeId: 'node-1',
+					port: 25565,
+					maxPlayers: 8,
+					memory: 3072,
+					mcVersion: '1.20.6',
+					modLoader: 3,
+					loaderVersion: '0.16.0'
+				}
 			});
 		},
 		startServer(payload) {
@@ -131,12 +319,21 @@ export const rpcClient = {
 	},
 	node: {
 		listNodes() {
-			return Promise.resolve({ nodes: [{ id: 'node-1', enabled: true, status: 1 }] });
+			if (globalThis.__wizardDenyListNodes) {
+				return Promise.reject(
+					new ConnectError('insufficient permissions for nodes/read', Code.PermissionDenied)
+				);
+			}
+			return Promise.resolve({
+				nodes: globalThis.__wizardNodes || [
+					{ id: 'node-1', name: 'Fixture Node', enabled: true, status: 1 }
+				]
+			});
 		}
 	},
 	blueprint: {
 		listBlueprints() {
-			return Promise.resolve({ blueprints: [] });
+			return Promise.resolve({ blueprints: [fixtureBlueprint] });
 		}
 	},
 	modpack: {
@@ -306,7 +503,15 @@ export const rpcClient = {
 
 export const silentCallOptions = {};
 
+// ServerArchiveExport suppresses a duplicate toast when the shared RPC client
+// already toasted the failure; this fixture never pre-toasts.
+export function wasRpcErrorToasted() {
+	return false;
+}
+
 globalThis.__wizardCalls = calls;
+globalThis.__wizardPreviewOutcomes = previewOutcomes;
 globalThis.__wizardReset = () => {
 	calls.length = 0;
+	previewOutcomes.length = 0;
 };

@@ -11,7 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { Code, ConnectError } from '@connectrpc/connect';
@@ -38,10 +38,14 @@ one at https://mozilla.org/MPL/2.0/.
 		Plus,
 		Upload,
 		Loader2,
-		X
+		X,
+		Archive
 	} from '@lucide/svelte';
 	import { create, toJsonString } from '@bufbuild/protobuf';
-	import type { CreateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
+	import type {
+		CreateServerRequest,
+		PreviewServerArchiveResponse
+	} from '$lib/proto/carbonpanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 	import {
 		ModLoader,
@@ -71,6 +75,17 @@ one at https://mozilla.org/MPL/2.0/.
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import {
+		createArchiveImport,
+		isArchivePreviewCurrent,
+		type ArchiveImportState
+	} from '$lib/features/servers/archive-import-session';
+	import ArchivePreviewPanel from '$lib/features/servers/ArchivePreviewPanel.svelte';
+	import {
+		ARCHIVE_RPC_OPTIONS,
+		describePreview,
+		isSupportedArchiveFilename
+	} from '$lib/features/servers/archive-presentation';
 
 	let loading = $state(false);
 	let loadingVersions = $state(true);
@@ -196,6 +211,293 @@ one at https://mozilla.org/MPL/2.0/.
 	let nodePlacementMode = $state<'auto' | 'manual'>('auto');
 	let selectedNodeId = $state<string>('');
 	let placementStrategy = $state<string>('least_memory');
+
+	// Create from archive (OSS-428). The upload stays owned by the wizard; the
+	// session only fences preview responses and holds the stable create id.
+	let archiveMode = $state(false);
+	let archiveUploadInput = $state<HTMLInputElement | null>(null);
+	let archiveUploading = $state(false);
+	let archiveUploadPercent = $state(0);
+	let archiveImportState = $state<ArchiveImportState>({
+		uploadId: '',
+		fileName: '',
+		preview: null,
+		previewUploadId: '',
+		previewNodeId: '',
+		destinations: [],
+		preflightUploadId: '',
+		preparing: false,
+		error: null,
+		requestId: ''
+	});
+
+	interface ArchiveSubmission {
+		uploadId: string;
+		nodeId: string;
+		requestId: string;
+		preview: PreviewServerArchiveResponse;
+	}
+	interface ArchivePlacementSnapshot {
+		nodePlacementMode: 'auto' | 'manual';
+		selectedNodeId: string;
+		placementStrategy: string;
+	}
+	// The in-flight submission is captured, so completion and refusal handling
+	// never read a newer mode, upload or destination.
+	let archiveSubmission = $state<ArchiveSubmission | null>(null);
+	let priorPlacement = $state<ArchivePlacementSnapshot | null>(null);
+
+	beforeNavigate(({ cancel }) => {
+		if (archiveSubmission) cancel();
+	});
+
+	const archiveImport = createArchiveImport(
+		{
+			previewServerArchive: (request) =>
+				rpcClient.server.previewServerArchive(request, ARCHIVE_RPC_OPTIONS)
+		},
+		(state) => (archiveImportState = state)
+	);
+
+	const archivePreviewView = $derived(
+		archiveImportState.preview ? describePreview(archiveImportState.preview) : null
+	);
+	// Archive imports always use a concrete destination so the preview checks
+	// that node's storage and create submits exactly the node that was verified.
+	// Non-archive creates keep the automatic placement path.
+	const archiveNodeId = $derived(
+		archiveMode ? selectedNodeId : nodePlacementMode === 'manual' ? selectedNodeId : ''
+	);
+	const archivePreviewReady = $derived(isArchivePreviewCurrent(archiveImportState, archiveNodeId));
+	const firstEnabledNode = $derived(nodes.find((node) => node.enabled) ?? null);
+	// A successful preflight for the current upload is authoritative for archive
+	// placement: it lists the nodes enabled right now, even when the cached
+	// ListNodes inventory is stale, and it is the only source when nodes/read is
+	// denied. Cached inventory may only seed the choice before an upload.
+	const archivePreflightSettled = $derived(
+		archiveMode &&
+			Boolean(archiveImportState.uploadId) &&
+			archiveImportState.preflightUploadId === archiveImportState.uploadId
+	);
+	const archivePreflightWaiting = $derived(
+		archiveMode &&
+			Boolean(archiveImportState.uploadId) &&
+			!archivePreflightSettled &&
+			!archiveImportState.error
+	);
+	const destinationChoices = $derived.by(() => {
+		if (!archiveMode || !archiveImportState.uploadId) {
+			return nodes.filter((node) => node.enabled).map((node) => ({ id: node.id, name: node.name }));
+		}
+		if (archivePreflightSettled) {
+			return archiveImportState.destinations.map((destination) => ({
+				id: destination.id,
+				name: destination.name
+			}));
+		}
+		return [];
+	});
+	const selectedNodeEnabled = $derived.by(() => {
+		// Until the preflight settles, keep the preliminary cached choice so the
+		// first preview can still validate it. A settled preflight is the truth.
+		if (archiveMode && archiveImportState.uploadId && !archivePreflightSettled) {
+			return Boolean(selectedNodeId);
+		}
+		if (archivePreflightSettled) {
+			return archiveImportState.destinations.some(
+				(destination) => destination.id === selectedNodeId
+			);
+		}
+		return nodes.some((node) => node.id === selectedNodeId && node.enabled);
+	});
+	const archiveCreateBlockedReason = $derived.by(() => {
+		if (!archiveMode) return '';
+		if (!archiveImportState.uploadId) return 'Upload a server archive before creating.';
+		if (archiveUploading) return 'Wait for the replacement archive upload to finish.';
+		if (!archiveNodeId) {
+			if (archivePreflightSettled && archiveImportState.destinations.length === 0)
+				return 'Enable a Docker node in Settings → Docker Nodes, then retry the archive preview.';
+			return 'Choose an enabled destination node so its storage can be verified.';
+		}
+		if (archiveImportState.preparing) return 'Wait for the archive preview to finish.';
+		if (archiveImportState.error)
+			return 'Retry the archive preview for this destination before creating.';
+		if (!archivePreviewReady)
+			return 'Preview this upload for the selected destination before creating.';
+		if (archivePreviewView?.isBlocked)
+			return 'Resolve the blocking archive findings before creating.';
+		if (!archiveImportState.requestId)
+			return 'Archive submission is not ready. Re-upload the archive and try again.';
+		return '';
+	});
+	const archiveCreateReady = $derived(!archiveMode || archiveCreateBlockedReason === '');
+
+	// Bind a concrete enabled node as soon as one is available. Before an
+	// upload, cached inventory seeds the choice; afterwards only a settled
+	// preflight may bind, and a now-ineligible selection is replaced so a stale
+	// cached node cannot stay selected after it was disabled.
+	$effect(() => {
+		if (!archiveMode || archiveSubmission) return;
+		if (!archiveImportState.uploadId) {
+			if (selectedNodeEnabled) return;
+			if (firstEnabledNode) selectedNodeId = firstEnabledNode.id;
+			return;
+		}
+		if (!archivePreflightSettled) return;
+		if (archiveImportState.destinations.some((destination) => destination.id === selectedNodeId))
+			return;
+		selectedNodeId = archiveImportState.destinations[0]?.id ?? '';
+	});
+
+	// Keep the visible engine identity aligned with the verified archive. An
+	// archive cannot be combined with a different loader or Minecraft version.
+	$effect(() => {
+		const preview = archiveImportState.preview;
+		if (!archiveMode || !preview) return;
+		formData.mcVersion = preview.mcVersion;
+		formData.modLoader = preview.modLoader;
+		formData.loaderVersion = preview.loaderVersion;
+	});
+
+	// Preview again whenever the destination changes. A plain variable (not
+	// $state) holds the last key so the effect does not retrigger itself.
+	let lastArchivePreviewKey = '';
+	$effect(() => {
+		const uploadId = archiveImportState.uploadId;
+		const nodeKey = archiveNodeId;
+		if (!archiveMode || !uploadId) {
+			lastArchivePreviewKey = '';
+			return;
+		}
+		// Without a node this is an inspection-only preview (format, runtime and
+		// blockers). It cannot qualify create; a concrete preview follows once a
+		// destination is chosen.
+		const key = `${uploadId}:${nodeKey}`;
+		if (key === lastArchivePreviewKey) return;
+		lastArchivePreviewKey = key;
+		void archiveImport.refresh(nodeKey);
+	});
+
+	function retryArchivePreview() {
+		if (!archiveImportState.uploadId) return;
+		void archiveImport.retry(archiveNodeId);
+	}
+
+	// When no destination list is known, retrying the previously selected node
+	// would just refuse again. Ask for the inspection result so newly enabled
+	// nodes can be discovered, then the effect previews the concrete choice.
+	function retryArchiveDestinations() {
+		if (!archiveImportState.uploadId) return;
+		void archiveImport.retry('');
+	}
+
+	/** Pick a concrete destination for an archive while keeping the choice editable. */
+	function ensureArchiveDestination() {
+		nodePlacementMode = 'manual';
+		if (archivePreflightSettled) {
+			if (archiveImportState.destinations.some((destination) => destination.id === selectedNodeId))
+				return;
+			selectedNodeId = archiveImportState.destinations[0]?.id ?? '';
+			return;
+		}
+		if (selectedNodeEnabled) return;
+		if (firstEnabledNode) selectedNodeId = firstEnabledNode.id;
+	}
+
+	/** Standalone add-ons are post-create work; an archive already carries its files. */
+	function clearStandaloneAddons() {
+		selectedMods = [];
+		modSelectionTarget = '';
+		selectedDatapacks = [];
+		pendingDatapackUploads = [];
+		indexedDatapackTarget = '';
+		selectedModules = [];
+		showModBrowser = false;
+	}
+
+	function chooseArchiveMode() {
+		if (archiveSubmission || archiveMode) return;
+		priorPlacement = {
+			nodePlacementMode,
+			selectedNodeId,
+			placementStrategy
+		};
+		archiveMode = true;
+		if (selectedModpack || loadingModpackVersions) removeModpack();
+		// A catalog seed belongs to the former create path; its image cannot be
+		// combined with a portable archive even when the preview succeeds.
+		clearBlueprint();
+		clearStandaloneAddons();
+		ensureArchiveDestination();
+	}
+
+	function leaveArchiveMode() {
+		if (archiveSubmission) return;
+		if (!archiveMode) return;
+		archiveMode = false;
+		if (priorPlacement) {
+			nodePlacementMode = priorPlacement.nodePlacementMode;
+			selectedNodeId = priorPlacement.selectedNodeId;
+			placementStrategy = priorPlacement.placementStrategy;
+			priorPlacement = null;
+		}
+	}
+
+	// Every upload gets a generation. A replacement upload may finish after a
+	// newer one; only the newest generation may change the submission state.
+	let archiveUploadSequence = 0;
+
+	async function handleArchiveUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (archiveSubmission) return;
+		if (!file) return;
+		if (!isSupportedArchiveFilename(file.name)) {
+			toast.error('Choose a .zip or .tar.gz server archive.');
+			return;
+		}
+		const generation = ++archiveUploadSequence;
+		archiveUploading = true;
+		archiveUploadPercent = 0;
+		try {
+			const { sessionId } = await uploadFile(file, {
+				onProgress: (progress) => {
+					if (generation === archiveUploadSequence) {
+						archiveUploadPercent = Math.round(progress.percentComplete);
+					}
+				}
+			});
+			if (generation !== archiveUploadSequence) return;
+			// A failed or refused preview leaves this upload in place for retry.
+			archiveImport.setUpload(sessionId, file.name);
+		} catch (error) {
+			if (generation !== archiveUploadSequence) return;
+			toast.error(error instanceof Error ? error.message : 'Archive upload failed');
+		} finally {
+			if (generation === archiveUploadSequence) archiveUploading = false;
+		}
+	}
+
+	function removeArchive() {
+		if (archiveSubmission) return;
+		// Fence a replacement upload that is still in flight before clearing.
+		archiveUploadSequence++;
+		archiveUploading = false;
+		archiveUploadPercent = 0;
+		archiveImport.discard();
+	}
+
+	function applyArchiveDefaults() {
+		const preview = archiveImportState.preview;
+		if (!preview) return;
+		formData.mcVersion = preview.mcVersion;
+		formData.modLoader = preview.modLoader;
+		formData.loaderVersion = preview.loaderVersion;
+		formData.memory = preview.memory;
+		formData.maxPlayers = preview.maxPlayers;
+		toast.success('Archive runtime defaults applied. Review them before creating.');
+	}
 
 	// Modpack selection
 	let showModpackDialog = $state(false);
@@ -516,10 +818,12 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function applyBlueprint(seed: ServerBlueprint) {
+		if (archiveSubmission) return;
 		const spec = resolveCreateBlueprint(seed);
 		if (!spec.qualified) {
 			return;
 		}
+		leaveArchiveMode();
 		selectedBlueprintId = seed.id;
 		if (selectedModpack || loadingModpackVersions) removeModpack();
 		formData.modLoader = spec.modLoader;
@@ -533,9 +837,11 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function selectModpack(modpack: IndexedModpack) {
+		if (archiveSubmission) return;
 		const request = ++changingPack;
 		selectedModpack = modpack;
 		selectedBlueprintId = '';
+		leaveArchiveMode();
 		showModpackDialog = false;
 		loadingModpackVersions = true;
 		modpackVersions = [];
@@ -641,6 +947,14 @@ one at https://mozilla.org/MPL/2.0/.
 				toast.error('Server name is required');
 				return false;
 			}
+			if (archiveMode && archiveUploading) {
+				toast.info('Wait for the replacement archive upload to finish.');
+				return false;
+			}
+			if (archiveMode && !archiveImportState.uploadId) {
+				toast.error('Upload a server archive to continue.');
+				return false;
+			}
 		}
 		if (step === 1 && !(datapackGameVersion || formData.mcVersion).trim()) {
 			toast.error('Choose a Minecraft version.');
@@ -660,7 +974,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function goToStep(stepIndex: number) {
-		if (loading || createdServer) return;
+		if (loading || createdServer || archiveSubmission) return;
 		if (stepIndex > currentStep) {
 			for (let i = currentStep; i < stepIndex; i++) {
 				if (!canProceed(i)) return;
@@ -670,6 +984,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function nextStep() {
+		if (loading || archiveSubmission) return;
 		if (canProceed(currentStep)) {
 			if (currentStep < steps.length - 1) {
 				currentStep++;
@@ -678,12 +993,16 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function prevStep() {
+		if (loading || archiveSubmission) return;
 		if (currentStep > 0) {
 			currentStep--;
 		}
 	}
 
 	function buildSetupTasks(): SetupTask[] {
+		// Archive content is restored from its manifest; standalone setup add-ons
+		// are refused so a former selection cannot be applied to the import.
+		if (archiveMode) return [];
 		const tasks: SetupTask[] = [];
 		const add = (name: string, run: SetupTask['run']) =>
 			tasks.push({ name, run, status: 'pending' });
@@ -920,6 +1239,7 @@ one at https://mozilla.org/MPL/2.0/.
 			loading ||
 			createdServer ||
 			uploadingWizardDatapack ||
+			archiveUploading ||
 			loadingModpackVersions ||
 			currentStep !== 4
 		)
@@ -969,41 +1289,143 @@ one at https://mozilla.org/MPL/2.0/.
 			return;
 		}
 
+		if (archiveMode) {
+			if (!archiveImportState.uploadId) {
+				toast.error('Upload a server archive before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (archiveUploading) {
+				toast.error('Wait for the replacement archive upload to finish before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (nodePlacementMode !== 'manual' || !selectedNodeId) {
+				toast.error(
+					'Choose a destination node for the archive so its storage is verified before creating.'
+				);
+				currentStep = 3;
+				return;
+			}
+			if (archiveImportState.preparing) {
+				toast.error('Wait for the archive preview to finish before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (!archivePreviewReady) {
+				toast.error(
+					'Wait for a successful archive preview of this upload and destination before creating.'
+				);
+				currentStep = 0;
+				return;
+			}
+			if (archivePreviewView?.isBlocked) {
+				toast.error('This archive has blocking findings. Resolve them before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (!archiveImportState.requestId) {
+				toast.error('Archive submission is not ready. Re-upload the archive and try again.');
+				currentStep = 0;
+				return;
+			}
+		}
+
+		const submission: ArchiveSubmission | null =
+			archiveMode && archiveImportState.preview
+				? {
+						uploadId: archiveImportState.uploadId,
+						nodeId: selectedNodeId,
+						requestId: archiveImportState.requestId,
+						preview: archiveImportState.preview
+					}
+				: null;
+		if (archiveMode && !submission) {
+			toast.error('Archive submission is not ready. Preview the upload again.');
+			return;
+		}
+		archiveSubmission = submission;
 		loading = true;
-		const attempt = beginLifecycleRequest(formData.name.trim() || 'new-server', 'create');
+		// Archive submissions keep one request id across retries; a refusal does
+		// not discard the completed upload. Ordinary creates use the short-lived
+		// in-flight id as before.
+		const attempt = submission
+			? null
+			: beginLifecycleRequest(formData.name.trim() || 'new-server', 'create');
 		try {
 			const tasks = buildSetupTasks();
 			const hasAddons = tasks.length > 0;
 			deferredStart = formData.startImmediately && hasAddons;
+			const archivePreview = submission?.preview ?? null;
 			const createRequest = create(CreateServerRequestSchema, {
 				...formData,
-				mcVersion: datapackGameVersion || formData.mcVersion,
+				// The controller requires the verified archive runtime. Operator
+				// memory and max-player values in formData remain their overrides.
+				mcVersion: archivePreview
+					? archivePreview.mcVersion
+					: datapackGameVersion || formData.mcVersion,
+				modLoader: archivePreview ? archivePreview.modLoader : formData.modLoader,
+				loaderVersion: archivePreview ? archivePreview.loaderVersion : formData.loaderVersion,
+				memory: formData.memory,
+				maxPlayers: formData.maxPlayers,
 				startImmediately: formData.startImmediately && !deferredStart,
-				nodeId: nodePlacementMode === 'manual' ? selectedNodeId : '',
-				placementStrategy: nodePlacementMode === 'auto' ? placementStrategy : '',
-				modpackId: selectedModpack?.id || '',
-				modpackVersionId: selectedVersionId || '',
+				// Archive create binds exactly the node that the preview checked;
+				// it never lets the controller resolve a different one.
+				nodeId: submission
+					? submission.nodeId
+					: nodePlacementMode === 'manual'
+						? selectedNodeId
+						: '',
+				placementStrategy: submission ? '' : nodePlacementMode === 'auto' ? placementStrategy : '',
+				modpackId: submission ? '' : selectedModpack?.id || '',
+				modpackVersionId: submission ? '' : selectedVersionId || '',
 				port: useProxyMode ? 0 : formData.port,
 				proxyHostname: useProxyMode && proxyEnabled ? formData.proxyHostname : '',
-				proxyListenerId: useProxyMode && proxyEnabled ? formData.proxyListenerId : ''
+				proxyListenerId: useProxyMode && proxyEnabled ? formData.proxyListenerId : '',
+				// An archive is provisioned by its manifest; a former blueprint,
+				// manual image, detached mode or Docker override must not leak into
+				// the import request even when the operator changed modes earlier.
+				dockerImage: submission ? '' : formData.dockerImage,
+				detached: submission ? false : formData.detached,
+				dockerOverrides: submission ? undefined : formData.dockerOverrides,
+				archiveUploadId: submission ? submission.uploadId : ''
 			});
-			const fingerprint = toJsonString(CreateServerRequestSchema, createRequest);
-			if (pendingCreate?.fingerprint !== fingerprint)
-				pendingCreate = { fingerprint, requestId: attempt.requestId };
-			createRequest.requestId = pendingCreate.requestId;
+			if (submission) {
+				// The archive session allocates one id per completed upload and keeps
+				// it across retries; a refusal retains the upload for correction.
+				createRequest.requestId = submission.requestId;
+			} else {
+				const fingerprint = toJsonString(CreateServerRequestSchema, createRequest);
+				if (pendingCreate?.fingerprint !== fingerprint)
+					pendingCreate = { fingerprint, requestId: attempt!.requestId };
+				createRequest.requestId = pendingCreate.requestId;
+			}
 
-			const response = await rpcClient.server.createServer(createRequest);
+			const response = await rpcClient.server.createServer(
+				createRequest,
+				submission ? ARCHIVE_RPC_OPTIONS : undefined
+			);
 			if (!response.server?.id) throw new Error('The panel returned no server.');
+			// Only the captured upload may release its submission identity; a
+			// later session for a replacement archive keeps its own attempt.
+			if (submission && archiveImportState.uploadId === submission.uploadId)
+				archiveImport.succeeded();
+			// The committed server may navigate immediately; the in-flight fence
+			// applies only to the request, not to the post-create transition.
+			archiveSubmission = null;
 			createdServer = response.server;
 			setupTasks = tasks;
 			if (hasAddons) await applySetup();
 			else void goto(resolve('/servers/[id]', { id: response.server.id }));
 		} catch (error) {
 			toast.error(
-				`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
+				submission
+					? `Create from archive failed: ${error instanceof Error ? error.message : 'Unknown error'}. The uploaded archive was kept; you can retry with the same submission.`
+					: `Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 		} finally {
-			attempt.finish();
+			attempt?.finish();
+			archiveSubmission = null;
 			loading = false;
 		}
 	}
@@ -1181,12 +1603,14 @@ one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="radio"
-								aria-checked={selectedModpack === null}
+								aria-checked={!archiveMode && selectedModpack === null}
+								disabled={Boolean(archiveSubmission)}
 								onclick={() => {
+									leaveArchiveMode();
 									if (selectedModpack || loadingModpackVersions) removeModpack();
 								}}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack ===
-								null
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 {!archiveMode &&
+								selectedModpack === null
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
 							>
@@ -1203,13 +1627,15 @@ one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="radio"
-								aria-checked={selectedModpack !== null}
+								aria-checked={!archiveMode && selectedModpack !== null}
+								disabled={Boolean(archiveSubmission)}
 								onclick={() => {
+									leaveArchiveMode();
 									showModpackDialog = true;
 									void searchLibraryModpacks();
 								}}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack !==
-								null
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 {!archiveMode &&
+								selectedModpack !== null
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
 							>
@@ -1225,7 +1651,142 @@ one at https://mozilla.org/MPL/2.0/.
 										: 'Browse the Modpacks Library or choose a favorite'}
 								</p>
 							</button>
+
+							<!-- Archive Tile (OSS-428) -->
+							<button
+								type="button"
+								role="radio"
+								aria-checked={archiveMode}
+								disabled={Boolean(archiveSubmission)}
+								onclick={chooseArchiveMode}
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 {archiveMode
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background transition-colors hover:bg-card'}"
+								data-testid="create-from-archive-tile"
+							>
+								<div class="flex items-center gap-2">
+									<Archive class="h-4 w-4 text-accent-text" />
+									<h4 class="text-sm font-semibold text-foreground">From Server Archive</h4>
+								</div>
+								<p
+									class="mt-1 text-xs {archiveMode
+										? 'text-accent-foreground'
+										: 'text-muted-foreground'}"
+								>
+									Create a new server from a portable ZIP or tar.gz export.
+								</p>
+							</button>
 						</div>
+
+						{#if archiveMode}
+							<div class="mt-3 space-y-4 rounded-none border border-primary bg-background p-4">
+								<div class="flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<h4 class="text-sm font-semibold text-foreground">
+											Create from server archive
+										</h4>
+										<p class="mt-1 font-sans text-xs text-muted-foreground">
+											Upload a ZIP or tar.gz export. Preview validates every checksum and reports
+											runtime compatibility and destination capacity. A new name, node and free port
+											are required. No running server is stopped by this flow.
+										</p>
+									</div>
+									{#if archiveImportState.uploadId}
+										<button
+											type="button"
+											onclick={removeArchive}
+											disabled={Boolean(archiveSubmission)}
+											class="shrink-0 cursor-pointer rounded-none bg-secondary px-3 py-1.5 font-mono text-xs text-foreground uppercase transition-colors hover:bg-destructive hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+										>
+											Remove archive
+										</button>
+									{/if}
+								</div>
+
+								<div class="flex flex-wrap items-center gap-3">
+									<input
+										bind:this={archiveUploadInput}
+										type="file"
+										accept=".zip,.tar.gz,.tgz,application/zip,application/gzip"
+										class="hidden"
+										onchange={handleArchiveUpload}
+										disabled={Boolean(archiveSubmission)}
+										data-testid="archive-file-input"
+									/>
+									<CarbonButton
+										kind="secondary"
+										size="sm"
+										disabled={archiveUploading || Boolean(archiveSubmission)}
+										onclick={() => archiveUploadInput?.click()}
+									>
+										{#if archiveUploading}
+											<Loader2 class="h-4 w-4 animate-spin" />
+											Uploading… {archiveUploadPercent}%
+										{:else}
+											<Upload class="h-4 w-4" />
+											{archiveImportState.uploadId ? 'Replace archive' : 'Upload archive'}
+										{/if}
+									</CarbonButton>
+									{#if archiveImportState.fileName}
+										<span class="min-w-0 truncate font-mono text-xs text-muted-foreground">
+											{archiveImportState.fileName}
+										</span>
+									{/if}
+								</div>
+
+								{#if archiveImportState.preparing}
+									<div
+										class="flex items-center gap-2 border border-border bg-card p-3"
+										role="status"
+									>
+										<CarbonInlineLoading
+											description="Preparing archive preview — validating every file can take a few minutes."
+										/>
+									</div>
+								{:else if archiveImportState.error}
+									<div
+										class="flex flex-wrap items-center justify-between gap-3 border-l-4 border-destructive bg-destructive/10 p-3"
+										data-testid="archive-preview-error"
+									>
+										<p role="alert" class="text-xs text-destructive-text">
+											{archiveImportState.error}
+										</p>
+										{#if archiveImportState.uploadId}
+											<CarbonButton
+												kind="secondary"
+												size="sm"
+												disabled={archiveUploading || Boolean(archiveSubmission)}
+												onclick={retryArchivePreview}
+											>
+												Retry preview
+											</CarbonButton>
+										{/if}
+									</div>
+								{:else if archivePreviewView}
+									<ArchivePreviewPanel
+										view={archivePreviewView}
+										nodeId={archiveNodeId}
+										port={useProxyMode ? 0 : formData.port}
+									/>
+									<div class="flex flex-wrap items-center gap-3">
+										<button
+											type="button"
+											onclick={applyArchiveDefaults}
+											disabled={Boolean(archiveSubmission)}
+											class="focus-ring cursor-pointer rounded-none border border-border bg-card px-3 py-1.5 font-mono text-xs text-accent-text uppercase transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+										>
+											Apply runtime defaults
+										</button>
+										<span class="font-sans text-xs text-muted-foreground">
+											Applied defaults remain editable; the controller revalidates the archive on
+											create.
+										</span>
+									</div>
+								{:else if archiveImportState.uploadId}
+									<p class="font-sans text-xs text-muted-foreground">Preparing preview…</p>
+								{/if}
+							</div>
+						{/if}
 
 						{#if selectedModpack}
 							<div
@@ -1390,7 +1951,18 @@ one at https://mozilla.org/MPL/2.0/.
 						>
 							Minecraft Version
 						</label>
-						{#if selectedModpack}
+						{#if archiveMode}
+							<input
+								id="mcVersion"
+								readonly
+								data-testid="archive-runtime-mc"
+								value={archiveImportState.preview?.mcVersion || 'Verified from the archive preview'}
+								class="h-10 w-full border border-dashed border-border bg-background px-4 text-sm text-muted-foreground"
+							/>
+							<p class="font-sans text-xs text-muted-foreground">
+								Locked to the archive runtime. Re-upload a different archive to change it.
+							</p>
+						{:else if selectedModpack}
 							<input
 								id="mcVersion"
 								readonly
@@ -1439,39 +2011,53 @@ one at https://mozilla.org/MPL/2.0/.
 						>
 							Mod Loader / Server Software
 						</label>
-						<div class="relative">
-							<select
+						{#if archiveMode}
+							<input
 								id="modLoader"
-								value={formData.modLoader.toString()}
-								onchange={(e) => {
-									const val = Number(e.currentTarget.value);
-									formData.modLoader = val as ModLoader;
-								}}
-								disabled={loading || !!selectedModpack}
-								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 text-sm text-foreground transition-colors focus:bg-accent disabled:opacity-50"
-							>
-								{#each modLoaders as loader (loader.name)}
-									{@const enumVal =
-										ModLoader[loader.name.toUpperCase() as keyof typeof ModLoader] ?? 0}
-									<option value={enumVal.toString()}>
-										{loader.displayName}
-									</option>
-								{/each}
-							</select>
-							<div
-								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
-							>
-								<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-									<path
-										fill-rule="evenodd"
-										d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-										clip-rule="evenodd"
-									/>
-								</svg>
+								readonly
+								data-testid="archive-runtime-loader"
+								value={archivePreviewView?.modLoader || 'Verified from the archive preview'}
+								class="h-10 w-full border border-dashed border-border bg-background px-4 text-sm text-muted-foreground"
+							/>
+						{:else}
+							<div class="relative">
+								<select
+									id="modLoader"
+									value={formData.modLoader.toString()}
+									onchange={(e) => {
+										const val = Number(e.currentTarget.value);
+										formData.modLoader = val as ModLoader;
+									}}
+									disabled={loading || !!selectedModpack}
+									class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 text-sm text-foreground transition-colors focus:bg-accent disabled:opacity-50"
+								>
+									{#each modLoaders as loader (loader.name)}
+										{@const enumVal =
+											ModLoader[loader.name.toUpperCase() as keyof typeof ModLoader] ?? 0}
+										<option value={enumVal.toString()}>
+											{loader.displayName}
+										</option>
+									{/each}
+								</select>
+								<div
+									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
+								>
+									<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+										<path
+											fill-rule="evenodd"
+											d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</div>
 							</div>
-						</div>
+						{/if}
 
-						{#if selectedModpack}
+						{#if archiveMode}
+							<p class="mt-1 font-sans text-xs text-muted-foreground">
+								Archive provisioning uses the verified runtime and cannot mix in a different loader.
+							</p>
+						{:else if selectedModpack}
 							<p class="mt-1 font-mono text-xs text-accent-text">
 								Mod loader auto-determined by preset configuration.
 							</p>
@@ -1486,7 +2072,26 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</div>
 
-					{#if loaderTakesVersion && !selectedModpack}
+					{#if archiveMode}
+						<div class="space-y-1.5">
+							<label
+								for="loaderVersion"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+							>
+								Loader Version
+							</label>
+							<input
+								id="loaderVersion"
+								readonly
+								data-testid="archive-runtime-loader-version"
+								value={archiveImportState.preview?.loaderVersion || 'default'}
+								class="h-10 w-full border border-dashed border-border bg-background px-4 font-mono text-sm text-muted-foreground"
+							/>
+							<p class="mt-1 font-sans text-xs text-muted-foreground">
+								Verified from the archive; create submits this loader version.
+							</p>
+						</div>
+					{:else if loaderTakesVersion && !selectedModpack}
 						<!-- Loader Version (Carbon Select) -->
 						<div class="space-y-1.5">
 							<label
@@ -1755,6 +2360,59 @@ one at https://mozilla.org/MPL/2.0/.
 						</p>
 					</div>
 
+					{#if archiveMode}
+						<div
+							class="space-y-2 rounded-none border border-border bg-background p-4"
+							data-testid="archive-destination-confirmation"
+						>
+							<p
+								class="font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+							>
+								Archive destination
+							</p>
+							<div class="flex flex-wrap gap-x-6 gap-y-1 font-mono text-xs">
+								<span class="inline-flex items-baseline gap-1.5">
+									<span class="text-muted-foreground">Node</span>
+									<span class="text-foreground" data-testid="archive-destination-node">
+										{archiveNodeId || 'not selected'}
+									</span>
+								</span>
+								<span class="inline-flex items-baseline gap-1.5">
+									<span class="text-muted-foreground">Port</span>
+									<span class="text-foreground">{useProxyMode ? 'proxy' : formData.port}</span>
+								</span>
+								{#if archivePreviewView}
+									<span class="inline-flex items-baseline gap-1.5">
+										<span class="text-muted-foreground">Required</span>
+										<span class="text-foreground">{archivePreviewView.requiredBytes}</span>
+									</span>
+									<span class="inline-flex items-baseline gap-1.5">
+										<span class="text-muted-foreground">Available</span>
+										<span class="text-foreground">{archivePreviewView.availableBytes ?? '—'}</span>
+									</span>
+								{/if}
+							</div>
+							{#if archivePreviewView}
+								<p
+									class="font-sans text-xs {archivePreviewView.capacity === 'insufficient'
+										? 'text-destructive-text'
+										: 'text-muted-foreground'}"
+								>
+									{archivePreviewView.capacityText}
+								</p>
+								{#if archivePreviewView.isBlocked}
+									<p class="font-sans text-xs text-destructive-text">
+										This archive has blocking findings and cannot be created.
+									</p>
+								{/if}
+							{:else}
+								<p class="font-sans text-xs text-muted-foreground">
+									Waiting for the archive preview to verify this destination's free space.
+								</p>
+							{/if}
+						</div>
+					{/if}
+
 					<!-- Cluster Placement Mode (Carbon Tiles) -->
 					<div class="space-y-3">
 						<span
@@ -1772,8 +2430,11 @@ one at https://mozilla.org/MPL/2.0/.
 								type="button"
 								role="radio"
 								aria-checked={nodePlacementMode === 'auto'}
-								onclick={() => (nodePlacementMode = 'auto')}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
+								aria-disabled={archiveMode}
+								onclick={() => {
+									if (!archiveMode) nodePlacementMode = 'auto';
+								}}
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors aria-disabled:cursor-not-allowed {nodePlacementMode ===
 								'auto'
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
@@ -1784,9 +2445,10 @@ one at https://mozilla.org/MPL/2.0/.
 										Auto-Placement (Load Balanced)
 									</h4>
 								</div>
-								<p class="mt-1 text-xs text-muted-foreground">
-									Cluster scheduler selects optimal worker node based on available memory and active
-									workload.
+								<p class="mt-1 text-xs {archiveMode ? 'text-foreground' : 'text-muted-foreground'}">
+									{archiveMode
+										? 'Unavailable for archives: preview and create must bind the same node so storage is verified.'
+										: 'Cluster scheduler selects optimal worker node based on available memory and active workload.'}
 								</p>
 							</button>
 
@@ -1810,6 +2472,16 @@ one at https://mozilla.org/MPL/2.0/.
 							</button>
 						</div>
 
+						{#if archiveMode && !archiveNodeId && !(archiveImportState.uploadId && destinationChoices.length === 0)}
+							<div
+								class="border border-border bg-background p-4 text-xs text-muted-foreground"
+								data-testid="archive-destination-required"
+							>
+								Choose an enabled destination node. Archive preview and create need the same
+								concrete node so its free space is verified before the import.
+							</div>
+						{/if}
+
 						{#if nodePlacementMode === 'auto'}
 							<div class="space-y-2 rounded-none border border-border bg-background p-4">
 								<label
@@ -1830,16 +2502,103 @@ one at https://mozilla.org/MPL/2.0/.
 							</div>
 						{:else}
 							<div class="space-y-2">
-								{#if loadingNodes}
+								{#if loadingNodes && destinationChoices.length === 0}
 									<div
 										class="flex items-center justify-center border border-border bg-background p-6"
 									>
 										<CarbonInlineLoading description="Scanning cluster topology..." />
 									</div>
-								{:else if nodes.length === 0}
-									<div class="border border-border bg-background p-4 text-xs text-muted-foreground">
-										No worker nodes available. Add and enable a Docker node in Settings → Docker
-										Nodes before creating servers.
+								{:else if archivePreflightWaiting}
+									<div
+										class="border border-border bg-background p-4 text-xs text-muted-foreground"
+										data-testid="archive-destination-preflight"
+									>
+										Preparing the archive placement preflight so you can choose an enabled
+										destination without node inventory access.
+									</div>
+								{:else if archiveMode ? destinationChoices.length === 0 : nodes.length === 0}
+									{#if archiveMode && archiveImportState.uploadId}
+										<div
+											class="space-y-3 border border-border bg-background p-4"
+											data-testid="archive-destination-empty"
+										>
+											<p class="text-xs text-muted-foreground">
+												{#if archivePreflightSettled}
+													The archive placement preflight found no enabled destination nodes. Enable
+													a Docker node in Settings → Docker Nodes, then retry the preview.
+												{:else if archiveImportState.error}
+													The archive placement preflight could not list enabled destinations. Retry
+													the preview after checking the controller.
+												{:else}
+													The archive placement preflight returned no enabled destinations. Retry
+													the preview after enabling a Docker node in Settings → Docker Nodes.
+												{/if}
+											</p>
+											<CarbonButton
+												kind="secondary"
+												size="sm"
+												disabled={archiveUploading ||
+													archiveImportState.preparing ||
+													Boolean(archiveSubmission)}
+												onclick={retryArchiveDestinations}
+												data-testid="archive-destination-retry"
+											>
+												Retry preflight
+											</CarbonButton>
+										</div>
+									{:else}
+										<div
+											class="border border-border bg-background p-4 text-xs text-muted-foreground"
+										>
+											No worker nodes available. Add and enable a Docker node in Settings → Docker
+											Nodes before creating servers.
+										</div>
+									{/if}
+								{:else if archiveMode}
+									<div
+										role="radiogroup"
+										aria-label="Archive destination node"
+										class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+									>
+										{#each destinationChoices as destination (destination.id)}
+											{@const node = nodes.find((candidate) => candidate.id === destination.id)}
+											<button
+												type="button"
+												role="radio"
+												aria-checked={selectedNodeId === destination.id}
+												disabled={Boolean(archiveSubmission)}
+												data-testid="archive-destination-option"
+												onclick={() => {
+													if (!archiveSubmission) selectedNodeId = destination.id;
+												}}
+												class="focus-ring relative cursor-pointer rounded-none border p-3.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 {selectedNodeId ===
+												destination.id
+													? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+													: 'border-border bg-background hover:bg-card'}"
+											>
+												<div class="flex items-center justify-between gap-2">
+													<span class="text-sm font-medium text-foreground">{destination.name}</span
+													>
+													{#if selectedNodeId === destination.id}
+														<CarbonTag type="blue" size="sm">SELECTED</CarbonTag>
+													{/if}
+												</div>
+												{#if node}
+													<p class="mt-1 truncate font-mono text-xs text-muted-foreground">
+														{node.host || node.advertisedIp || 'local socket'}
+													</p>
+													{#if Number(node.availableMemoryMb) > 0}
+														<p class="mt-1 font-mono text-xs text-muted-foreground">
+															{(Number(node.availableMemoryMb) / 1024).toFixed(1)} GB free
+														</p>
+													{/if}
+												{:else}
+													<p class="mt-1 font-mono text-xs text-muted-foreground">
+														Enabled destination from the archive placement preflight
+													</p>
+												{/if}
+											</button>
+										{/each}
 									</div>
 								{:else}
 									<div
@@ -1917,42 +2676,56 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</div>
 
-					<!-- Advanced Docker Image -->
-					<div class="space-y-1.5 border-t border-border pt-2">
-						<label
-							for="docker_image"
-							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-						>
-							Docker Image <span class="text-xs font-normal text-muted-foreground lowercase"
-								>(Advanced)</span
-							>
-						</label>
-						<div class="relative">
-							<select
-								id="docker_image"
-								bind:value={formData.dockerImage}
-								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 font-mono text-sm text-foreground transition-colors focus:bg-accent"
-							>
-								<option value="">Auto-select base image (Recommended)</option>
-								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
-									<option value={image.tag}>
-										{getDockerImageDisplayName(image)}
-									</option>
-								{/each}
-							</select>
-							<div
-								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
-							>
-								<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-									<path
-										fill-rule="evenodd"
-										d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-										clip-rule="evenodd"
-									/>
-								</svg>
+					<!-- Archived runtime: container identity comes from the verified manifest. -->
+					{#if archiveMode}
+						<div class="border-t border-border pt-2" data-testid="archive-runtime-fields-locked">
+							<div class="border border-border bg-background p-3">
+								<p class="text-xs font-medium text-foreground">Managed runtime from the archive</p>
+								<p class="mt-1 font-sans text-xs text-muted-foreground">
+									Docker image, Detached Mode and Docker overrides are not used for an archive
+									import. The verified archive runtime supplies the container configuration; memory
+									and max players stay editable.
+								</p>
 							</div>
 						</div>
-					</div>
+					{:else}
+						<!-- Advanced Docker Image -->
+						<div class="space-y-1.5 border-t border-border pt-2">
+							<label
+								for="docker_image"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+							>
+								Docker Image <span class="text-xs font-normal text-muted-foreground lowercase"
+									>(Advanced)</span
+								>
+							</label>
+							<div class="relative">
+								<select
+									id="docker_image"
+									bind:value={formData.dockerImage}
+									class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 font-mono text-sm text-foreground transition-colors focus:bg-accent"
+								>
+									<option value="">Auto-select base image (Recommended)</option>
+									{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
+										<option value={image.tag}>
+											{getDockerImageDisplayName(image)}
+										</option>
+									{/each}
+								</select>
+								<div
+									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
+								>
+									<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+										<path
+											fill-rule="evenodd"
+											d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</div>
+							</div>
+						</div>
+					{/if}
 
 					<!-- Lifecycle Toggles -->
 					<div class="space-y-3 border-t border-border pt-2">
@@ -1980,35 +2753,38 @@ one at https://mozilla.org/MPL/2.0/.
 							</label>
 
 							<!-- Detached Mode -->
-							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {useProxyMode
-									? 'cursor-not-allowed opacity-50'
-									: ''}"
-							>
-								<input
-									type="checkbox"
-									bind:checked={formData.detached}
-									disabled={useProxyMode}
-									class="h-4 w-4 rounded-none accent-primary"
-								/>
-								<div>
-									<span class="block text-xs font-medium text-foreground">Detached Mode</span>
-									<span class="block font-sans text-xs text-muted-foreground"
-										>Persists past daemon stop</span
-									>
-								</div>
-							</label>
+							{#if !archiveMode}
+								<label
+									class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {useProxyMode
+										? 'cursor-not-allowed opacity-50'
+										: ''}"
+								>
+									<input
+										type="checkbox"
+										bind:checked={formData.detached}
+										disabled={useProxyMode}
+										class="h-4 w-4 rounded-none accent-primary"
+									/>
+									<div>
+										<span class="block text-xs font-medium text-foreground">Detached Mode</span>
+										<span class="block font-sans text-xs text-muted-foreground"
+											>Persists past daemon stop</span
+										>
+									</div>
+								</label>
+							{/if}
 
 							<!-- Auto Start -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {formData.detached
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {formData.detached &&
+								!archiveMode
 									? 'cursor-not-allowed opacity-50'
 									: ''}"
 							>
 								<input
 									type="checkbox"
 									bind:checked={formData.autoStart}
-									disabled={formData.detached}
+									disabled={formData.detached && !archiveMode}
 									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
@@ -2056,13 +2832,15 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Docker Overrides -->
-					<div class="border-t border-border pt-2">
-						<DockerOverridesEditor
-							bind:overrides={formData.dockerOverrides}
-							disabled={loading}
-							onchange={(overrides) => (formData.dockerOverrides = overrides)}
-						/>
-					</div>
+					{#if !archiveMode}
+						<div class="border-t border-border pt-2">
+							<DockerOverridesEditor
+								bind:overrides={formData.dockerOverrides}
+								disabled={loading}
+								onchange={(overrides) => (formData.dockerOverrides = overrides)}
+							/>
+						</div>
+					{/if}
 				</div>
 			{:else if currentStep === 4}
 				<div class="space-y-5">
@@ -2072,251 +2850,277 @@ one at https://mozilla.org/MPL/2.0/.
 							Add optional content and services now or manage them from the server page later.
 						</p>
 					</div>
-					<nav aria-label="Add-on types" class="flex flex-wrap gap-2 border-b border-border pb-3">
-						{#each addonTabs as tab (tab)}
-							{@const count =
-								tab === 'Mods'
-									? selectedMods.length
-									: tab === 'Modules'
-										? selectedModules.length
-										: selectedDatapacks.length + pendingDatapackUploads.length}
-							<CarbonButton
-								kind={addonTab === tab ? 'secondary' : 'tertiary'}
-								size="sm"
-								aria-pressed={addonTab === tab}
-								onclick={() => selectAddonTab(tab)}
-							>
-								{tab}{count > 0 ? ` (${count})` : ''}
-							</CarbonButton>
-						{/each}
-					</nav>
-
-					{#if addonTab === 'Datapacks'}
-						<div class="border border-border bg-card p-4">
-							<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-								<div>
-									<p class="text-xs font-semibold tracking-wider text-foreground uppercase">
-										Upload local datapack
-									</p>
-									<p class="mt-1 text-xs text-muted-foreground">
-										Upload a <code class="font-mono">.zip</code> containing
-										<code class="font-mono">pack.mcmeta</code>. The archive is queued and installed
-										after the server is created.
-									</p>
-								</div>
-								<div class="flex items-center gap-2">
-									<input
-										bind:this={datapackUploadInput}
-										type="file"
-										accept=".zip,application/zip"
-										class="hidden"
-										onchange={handleWizardDatapackUpload}
-									/>
-									<CarbonButton
-										kind="secondary"
-										size="sm"
-										disabled={uploadingWizardDatapack}
-										onclick={() => datapackUploadInput?.click()}
-									>
-										{#if uploadingWizardDatapack}
-											<Loader2 class="h-4 w-4 animate-spin" />
-											Uploading… {wizardDatapackUploadPercent}%
-										{:else}
-											<Upload class="h-4 w-4" />
-											Upload Datapack
-										{/if}
-									</CarbonButton>
-								</div>
-							</div>
-						</div>
-
-						{#if selectedDatapacks.length > 0 || pendingDatapackUploads.length > 0}
-							<div class="border border-border bg-card">
-								<div
-									class="border-b border-border px-4 py-2.5 text-xs font-semibold text-foreground uppercase"
-								>
-									Selected for install ({selectedDatapacks.length + pendingDatapackUploads.length})
-								</div>
-								<ul class="divide-y divide-border">
-									{#each pendingDatapackUploads as dp (dp.sessionId)}
-										<li
-											class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground"
-										>
-											<span class="flex min-w-0 items-center gap-2">
-												<Upload class="h-4 w-4 shrink-0 text-muted-foreground" />
-												<span class="truncate" title={dp.fileName}>{dp.name}</span>
-												<span
-													class="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground uppercase"
-													>Local upload</span
-												>
-											</span>
-											<button
-												type="button"
-												onclick={() => removePendingDatapackUpload(dp.sessionId)}
-												aria-label={`Remove uploaded datapack ${dp.fileName}`}
-												class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
-											>
-												<X class="h-4 w-4" />
-											</button>
-										</li>
-									{/each}
-									{#each selectedDatapacks as dp (dp.id)}
-										<li
-											class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground"
-										>
-											<span class="flex min-w-0 items-center gap-2">
-												<Package class="h-4 w-4 shrink-0 text-muted-foreground" />
-												<span class="truncate">{dp.name}</span>
-											</span>
-											<button
-												type="button"
-												onclick={() => removeDatapack(dp.id)}
-												aria-label={`Remove datapack ${dp.name}`}
-												class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
-											>
-												<X class="h-4 w-4" />
-											</button>
-										</li>
-									{/each}
-								</ul>
-							</div>
-						{/if}
-
-						{#if datapackGameVersion}
-							<DatapackSearch
-								gameVersion={datapackGameVersion}
-								emptyHint="Search for datapacks, or skip this step and add them later."
-							>
-								{#snippet actions(d)}
-									{@const added = selectedDatapacks.some((p) => p.id === d.id)}
-									<button
-										type="button"
-										aria-pressed={added}
-										onclick={() => toggleDatapack(d.id, d.name, d.indexer)}
-										class="focus-ring flex h-9 cursor-pointer items-center gap-1.5 rounded-none px-3 font-sans text-xs font-medium transition-colors {added
-											? 'bg-secondary text-muted-foreground hover:bg-secondary'
-											: 'bg-primary text-primary-foreground hover:bg-[var(--button-primary-hover)]'}"
-									>
-										{#if added}<Check class="h-3.5 w-3.5" /> Added{:else}<Plus
-												class="h-3.5 w-3.5"
-											/> Add{/if}
-									</button>
-								{/snippet}
-							</DatapackSearch>
-						{:else}
-							<p class="text-sm text-muted-foreground">
-								This modpack release has no known Minecraft version. You can upload a ZIP or browse
-								compatible datapacks from the server after creation.
+					{#if archiveMode}
+						<div
+							class="border border-border bg-background p-4"
+							data-testid="archive-addons-disabled"
+						>
+							<p class="text-sm font-semibold text-foreground">Standalone add-ons are disabled</p>
+							<p class="mt-1 font-sans text-xs text-muted-foreground">
+								The archive already contains its mods, plugins, datapacks and configuration. Archive
+								creation uses the verified runtime, so separate add-on setup is skipped here. Manage
+								individual add-ons from the server page after it is created.
 							</p>
-						{/if}
-					{:else if addonTab === 'Mods'}
-						<div class="space-y-4 border border-border bg-card p-4">
-							{#if canBrowseMods}
-								<p class="text-sm text-muted-foreground">
-									Browse server-compatible mods for {loaderDisplayName(formData.modLoader)} on Minecraft
-									{formData.mcVersion}. Required dependencies are checked when you select a release.
-								</p>
-								<CarbonButton kind="secondary" onclick={() => (showModBrowser = true)}
-									>Browse mods</CarbonButton
-								>
-							{:else if selectedModpack}
-								<p class="text-sm text-muted-foreground">
-									The modpack provisions its own mods on first boot. Open the server’s Mods tab
-									after provisioning to manage individual mods.
-								</p>
-							{:else if runtimeOverridden}
-								<p class="text-sm text-muted-foreground">
-									Remove the custom Docker game type, Minecraft version, entrypoint, or command to
-									browse compatible mods during setup.
-								</p>
-								<CarbonButton kind="tertiary" onclick={() => goToStep(3)}
-									>Review runtime settings</CarbonButton
-								>
-							{:else}
-								<p class="text-sm text-muted-foreground">
-									Choose Fabric, Forge, NeoForge, or Quilt and a Minecraft version to add mods
-									during setup.
-								</p>
-								<CarbonButton kind="tertiary" onclick={() => goToStep(1)}
-									>Choose game engine</CarbonButton
-								>
-							{/if}
-							{#if selectedMods.length > 0}
-								<ul class="divide-y divide-border border-t border-border">
-									{#each selectedMods as mod (mod.project)}
-										<li class="flex items-center justify-between gap-4 py-2">
-											<span class="text-sm"
-												>{mod.name}
-												<span class="text-xs text-muted-foreground"
-													>{mod.versionLabel}{mod.files.length > 1
-														? ` · ${mod.files.length - 1} required dependencies`
-														: ''}</span
-												></span
-											>
-											<CarbonButton
-												kind="tertiary"
-												size="sm"
-												aria-label={`Remove ${mod.name}`}
-												onclick={() =>
-													(selectedMods = selectedMods.filter(
-														(item) => item.project !== mod.project
-													))}>Remove</CarbonButton
-											>
-										</li>
-									{/each}
-								</ul>
-							{/if}
 						</div>
 					{:else}
-						<p class="text-sm text-muted-foreground">
-							Selected modules are added as stopped services. You can start them from the server’s
-							Modules tab. Set up BlueMap in World View after the world exists.
-						</p>
-						{#if loadingModules}
-							<CarbonInlineLoading description="Loading module templates…" />
-						{:else if modulesError}
-							<p class="text-sm text-destructive-text" role="status">{modulesError}</p>
-							<CarbonButton kind="secondary" onclick={loadModules}
-								>Retry module templates</CarbonButton
-							>
-						{:else if moduleTemplates.length === 0}
-							<p class="text-sm text-muted-foreground">
-								This panel has no module templates available for setup.
-							</p>
-						{:else}
-							<div class="grid gap-3 md:grid-cols-2">
-								{#each moduleTemplates as template (template.id)}
-									{@const selected = selectedModules.some((item) => item.id === template.id)}
-									{@const restriction = moduleRestriction(template)}
-									<div
-										class="flex items-start justify-between gap-4 border border-border bg-card p-4"
-									>
-										<div class="min-w-0">
-											<p class="text-sm font-semibold">{template.name}</p>
-											<p class="mt-1 text-xs text-muted-foreground">{template.description}</p>
-											{#if restriction}<p class="mt-2 text-xs text-muted-foreground">
-													{restriction}
-												</p>{/if}
-										</div>
+						<nav aria-label="Add-on types" class="flex flex-wrap gap-2 border-b border-border pb-3">
+							{#each addonTabs as tab (tab)}
+								{@const count =
+									tab === 'Mods'
+										? selectedMods.length
+										: tab === 'Modules'
+											? selectedModules.length
+											: selectedDatapacks.length + pendingDatapackUploads.length}
+								<CarbonButton
+									kind={addonTab === tab ? 'secondary' : 'tertiary'}
+									size="sm"
+									aria-pressed={addonTab === tab}
+									onclick={() => selectAddonTab(tab)}
+								>
+									{tab}{count > 0 ? ` (${count})` : ''}
+								</CarbonButton>
+							{/each}
+						</nav>
+
+						{#if addonTab === 'Datapacks'}
+							<div class="border border-border bg-card p-4">
+								<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<div>
+										<p class="text-xs font-semibold tracking-wider text-foreground uppercase">
+											Upload local datapack
+										</p>
+										<p class="mt-1 text-xs text-muted-foreground">
+											Upload a <code class="font-mono">.zip</code> containing
+											<code class="font-mono">pack.mcmeta</code>. The archive is queued and
+											installed after the server is created.
+										</p>
+									</div>
+									<div class="flex items-center gap-2">
+										<input
+											bind:this={datapackUploadInput}
+											type="file"
+											accept=".zip,application/zip"
+											class="hidden"
+											onchange={handleWizardDatapackUpload}
+										/>
 										<CarbonButton
-											kind={selected ? 'secondary' : 'tertiary'}
+											kind="secondary"
 											size="sm"
-											aria-label={`${selected ? 'Remove' : 'Add'} ${template.name}`}
-											aria-pressed={selected}
-											disabled={Boolean(restriction) && !selected}
-											onclick={() =>
-												(selectedModules = selected
-													? selectedModules.filter((item) => item.id !== template.id)
-													: [...selectedModules, template])}
+											disabled={uploadingWizardDatapack}
+											onclick={() => datapackUploadInput?.click()}
 										>
-											{selected ? 'Remove' : 'Add'}
+											{#if uploadingWizardDatapack}
+												<Loader2 class="h-4 w-4 animate-spin" />
+												Uploading… {wizardDatapackUploadPercent}%
+											{:else}
+												<Upload class="h-4 w-4" />
+												Upload Datapack
+											{/if}
 										</CarbonButton>
 									</div>
-								{/each}
+								</div>
 							</div>
+
+							{#if selectedDatapacks.length > 0 || pendingDatapackUploads.length > 0}
+								<div class="border border-border bg-card">
+									<div
+										class="border-b border-border px-4 py-2.5 text-xs font-semibold text-foreground uppercase"
+									>
+										Selected for install ({selectedDatapacks.length +
+											pendingDatapackUploads.length})
+									</div>
+									<ul class="divide-y divide-border">
+										{#each pendingDatapackUploads as dp (dp.sessionId)}
+											<li
+												class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground"
+											>
+												<span class="flex min-w-0 items-center gap-2">
+													<Upload class="h-4 w-4 shrink-0 text-muted-foreground" />
+													<span class="truncate" title={dp.fileName}>{dp.name}</span>
+													<span
+														class="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground uppercase"
+														>Local upload</span
+													>
+												</span>
+												<button
+													type="button"
+													onclick={() => removePendingDatapackUpload(dp.sessionId)}
+													aria-label={`Remove uploaded datapack ${dp.fileName}`}
+													class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
+												>
+													<X class="h-4 w-4" />
+												</button>
+											</li>
+										{/each}
+										{#each selectedDatapacks as dp (dp.id)}
+											<li
+												class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground"
+											>
+												<span class="flex min-w-0 items-center gap-2">
+													<Package class="h-4 w-4 shrink-0 text-muted-foreground" />
+													<span class="truncate">{dp.name}</span>
+												</span>
+												<button
+													type="button"
+													onclick={() => removeDatapack(dp.id)}
+													aria-label={`Remove datapack ${dp.name}`}
+													class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
+												>
+													<X class="h-4 w-4" />
+												</button>
+											</li>
+										{/each}
+									</ul>
+								</div>
+							{/if}
+
+							{#if datapackGameVersion}
+								<DatapackSearch
+									gameVersion={datapackGameVersion}
+									emptyHint="Search for datapacks, or skip this step and add them later."
+								>
+									{#snippet actions(d)}
+										{@const added = selectedDatapacks.some((p) => p.id === d.id)}
+										<button
+											type="button"
+											aria-pressed={added}
+											onclick={() => toggleDatapack(d.id, d.name, d.indexer)}
+											class="focus-ring flex h-9 cursor-pointer items-center gap-1.5 rounded-none px-3 font-sans text-xs font-medium transition-colors {added
+												? 'bg-secondary text-muted-foreground hover:bg-secondary'
+												: 'bg-primary text-primary-foreground hover:bg-[var(--button-primary-hover)]'}"
+										>
+											{#if added}<Check class="h-3.5 w-3.5" /> Added{:else}<Plus
+													class="h-3.5 w-3.5"
+												/> Add{/if}
+										</button>
+									{/snippet}
+								</DatapackSearch>
+							{:else}
+								<p class="text-sm text-muted-foreground">
+									This modpack release has no known Minecraft version. You can upload a ZIP or
+									browse compatible datapacks from the server after creation.
+								</p>
+							{/if}
+						{:else if addonTab === 'Mods'}
+							<div class="space-y-4 border border-border bg-card p-4">
+								{#if canBrowseMods}
+									<p class="text-sm text-muted-foreground">
+										Browse server-compatible mods for {loaderDisplayName(formData.modLoader)} on Minecraft
+										{formData.mcVersion}. Required dependencies are checked when you select a
+										release.
+									</p>
+									<CarbonButton kind="secondary" onclick={() => (showModBrowser = true)}
+										>Browse mods</CarbonButton
+									>
+								{:else if selectedModpack}
+									<p class="text-sm text-muted-foreground">
+										The modpack provisions its own mods on first boot. Open the server’s Mods tab
+										after provisioning to manage individual mods.
+									</p>
+								{:else if runtimeOverridden}
+									<p class="text-sm text-muted-foreground">
+										Remove the custom Docker game type, Minecraft version, entrypoint, or command to
+										browse compatible mods during setup.
+									</p>
+									<CarbonButton kind="tertiary" onclick={() => goToStep(3)}
+										>Review runtime settings</CarbonButton
+									>
+								{:else}
+									<p class="text-sm text-muted-foreground">
+										Choose Fabric, Forge, NeoForge, or Quilt and a Minecraft version to add mods
+										during setup.
+									</p>
+									<CarbonButton kind="tertiary" onclick={() => goToStep(1)}
+										>Choose game engine</CarbonButton
+									>
+								{/if}
+								{#if selectedMods.length > 0}
+									<ul class="divide-y divide-border border-t border-border">
+										{#each selectedMods as mod (mod.project)}
+											<li class="flex items-center justify-between gap-4 py-2">
+												<span class="text-sm"
+													>{mod.name}
+													<span class="text-xs text-muted-foreground"
+														>{mod.versionLabel}{mod.files.length > 1
+															? ` · ${mod.files.length - 1} required dependencies`
+															: ''}</span
+													></span
+												>
+												<CarbonButton
+													kind="tertiary"
+													size="sm"
+													aria-label={`Remove ${mod.name}`}
+													onclick={() =>
+														(selectedMods = selectedMods.filter(
+															(item) => item.project !== mod.project
+														))}>Remove</CarbonButton
+												>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
+						{:else}
+							<p class="text-sm text-muted-foreground">
+								Selected modules are added as stopped services. You can start them from the server’s
+								Modules tab. Set up BlueMap in World View after the world exists.
+							</p>
+							{#if loadingModules}
+								<CarbonInlineLoading description="Loading module templates…" />
+							{:else if modulesError}
+								<p class="text-sm text-destructive-text" role="status">{modulesError}</p>
+								<CarbonButton kind="secondary" onclick={loadModules}
+									>Retry module templates</CarbonButton
+								>
+							{:else if moduleTemplates.length === 0}
+								<p class="text-sm text-muted-foreground">
+									This panel has no module templates available for setup.
+								</p>
+							{:else}
+								<div class="grid gap-3 md:grid-cols-2">
+									{#each moduleTemplates as template (template.id)}
+										{@const selected = selectedModules.some((item) => item.id === template.id)}
+										{@const restriction = moduleRestriction(template)}
+										<div
+											class="flex items-start justify-between gap-4 border border-border bg-card p-4"
+										>
+											<div class="min-w-0">
+												<p class="text-sm font-semibold">{template.name}</p>
+												<p class="mt-1 text-xs text-muted-foreground">{template.description}</p>
+												{#if restriction}<p class="mt-2 text-xs text-muted-foreground">
+														{restriction}
+													</p>{/if}
+											</div>
+											<CarbonButton
+												kind={selected ? 'secondary' : 'tertiary'}
+												size="sm"
+												aria-label={`${selected ? 'Remove' : 'Add'} ${template.name}`}
+												aria-pressed={selected}
+												disabled={Boolean(restriction) && !selected}
+												onclick={() =>
+													(selectedModules = selected
+														? selectedModules.filter((item) => item.id !== template.id)
+														: [...selectedModules, template])}
+											>
+												{selected ? 'Remove' : 'Add'}
+											</CarbonButton>
+										</div>
+									{/each}
+								</div>
+							{/if}
 						{/if}
 					{/if}
 				</div>
+			{/if}
+
+			{#if archiveMode && currentStep === steps.length - 1 && archiveCreateBlockedReason}
+				<p
+					role="status"
+					data-testid="archive-create-blocked-help"
+					class="border-l-4 border-primary bg-accent px-3 py-2 font-sans text-xs text-foreground"
+				>
+					{archiveCreateBlockedReason}
+				</p>
 			{/if}
 
 			<!-- Carbon Wizard Navigation Bar -->
@@ -2326,6 +3130,7 @@ one at https://mozilla.org/MPL/2.0/.
 					kind="tertiary"
 					size="md"
 					class="whitespace-nowrap"
+					disabled={loading || Boolean(archiveSubmission)}
 				>
 					Cancel
 				</CarbonButton>
@@ -2336,6 +3141,7 @@ one at https://mozilla.org/MPL/2.0/.
 							kind="secondary"
 							size="md"
 							class="gap-2 whitespace-nowrap"
+							disabled={loading || Boolean(archiveSubmission)}
 							onclick={prevStep}
 						>
 							<ChevronLeft class="h-4 w-4" aria-hidden="true" />
@@ -2348,6 +3154,7 @@ one at https://mozilla.org/MPL/2.0/.
 							kind="primary"
 							size="md"
 							class="gap-2 whitespace-nowrap"
+							disabled={loading || Boolean(archiveSubmission)}
 							onclick={nextStep}
 						>
 							<span>Next Step</span>
@@ -2362,7 +3169,9 @@ one at https://mozilla.org/MPL/2.0/.
 							disabled={loading ||
 								loadingVersions ||
 								loadingModpackVersions ||
-								uploadingWizardDatapack}
+								uploadingWizardDatapack ||
+								archiveUploading ||
+								(archiveMode && !archiveCreateReady)}
 							{loading}
 						>
 							{#if !loading}
