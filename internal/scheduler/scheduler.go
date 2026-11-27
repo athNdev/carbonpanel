@@ -49,27 +49,6 @@ var ErrTaskAlreadyRunning = errors.New("task is already running")
 // disable a task.
 var errInvalidTaskSchedule = errors.New("invalid task schedule")
 
-// ModUpdatePlanner stages reviewed compatible releases. The concrete owner
-// lives in the RPC service layer; the scheduler keeps only this interface so
-// manual and scheduled updates use one operation without an import cycle or a
-// process-global provider. A nil planner fails closed.
-type ModUpdatePlanner interface {
-	StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (staged int, refused int, reasons []string, err error)
-}
-
-// maxAutomaticModUpdatesPerRun bounds a single policy run. The value is also
-// used as an allocation capacity in the planner, so an oversized persisted
-// config must never reach it unchecked.
-const maxAutomaticModUpdatesPerRun = 50
-
-// DefaultModUpdatesPerRun is the budget used when a policy omits its limit.
-const DefaultModUpdatesPerRun = 10
-
-type modUpdateRunBudget struct {
-	staged    int
-	exhausted bool
-}
-
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
@@ -126,15 +105,6 @@ type Scheduler struct {
 	// root so scheduled and RPC starts contend on the same node key. Nil fails
 	// closed at the acquire helper.
 	admission *serverruntime.AdmissionCoordinator
-
-	// modUpdatePlanner is injected at composition root. It is the same planner
-	// the manual review-and-apply RPC uses, so a schedule cannot fork policy.
-	modUpdatePlanner ModUpdatePlanner
-}
-
-// SetModUpdatePlanner supplies the shared manual/scheduled mod update planner.
-func (s *Scheduler) SetModUpdatePlanner(planner ModUpdatePlanner) {
-	s.modUpdatePlanner = planner
 }
 
 // Config holds scheduler configuration
@@ -426,8 +396,6 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		// it enabled and due for a later retry.
 		if err := s.updateNextRun(task); err != nil {
 			switch {
-			case errors.Is(err, storage.ErrModUpdateScheduleChanged):
-				s.log.Debug("Task %s: schedule changed while claiming its due slot", task.Name)
 			case errors.Is(err, errInvalidTaskSchedule):
 				s.log.Error("Task %s: invalid schedule, refusing dispatch: %v", task.Name, err)
 				if dbErr := s.disableInvalidSchedule(ctx, task); dbErr != nil {
@@ -438,18 +406,6 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			}
 			s.releaseTask(task.ID)
 			continue
-		}
-
-		// A policy edit may win immediately after the atomic slot claim. Read
-		// the current revision before planning and refuse the stale snapshot.
-		if task.TaskType == storage.TaskTypeModUpdate {
-			claimedTask, err := s.revalidateModUpdateClaim(ctx, task)
-			if err != nil {
-				s.log.Error("Task %s: mod update policy changed after claiming its due slot, refusing dispatch: %v", task.Name, err)
-				s.releaseTask(task.ID)
-				continue
-			}
-			task = claimedTask
 		}
 
 		// Execute task asynchronously
@@ -671,10 +627,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		retries = 0
 	}
 
-	var modBudget modUpdateRunBudget
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData, &modBudget)
-		if execErr == nil || attempt >= retries || execCtx.Err() != nil || modBudget.exhausted {
+		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
+		if execErr == nil || attempt >= retries || execCtx.Err() != nil {
 			break
 		}
 
@@ -795,7 +750,7 @@ func (s *Scheduler) recordChainStop(ctx context.Context, execution *storage.Task
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any, modBudget *modUpdateRunBudget) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -813,8 +768,6 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	case storage.TaskTypeModpackUpdate:
 		return s.executeModpackUpdateTask(ctx, server, task)
-	case storage.TaskTypeModUpdate:
-		return s.executeModUpdateTask(ctx, server, task, modBudget)
 	case storage.TaskTypeChunkyPregen:
 		return s.executeChunkyPregen(ctx, server, task)
 	default:
@@ -864,9 +817,6 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
 	advance := func(nextRun *time.Time) error {
-		if task.TaskType == storage.TaskTypeModUpdate {
-			return s.claimModUpdateSchedule(ctx, task, nextRun, now)
-		}
 		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
 	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
@@ -886,48 +836,6 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 		return fmt.Errorf("store next run: %w", err)
 	}
 	return nil
-}
-
-// claimModUpdateSchedule atomically advances a mod-update due slot only when
-// the schedule, deadline, status, and policy snapshot still match. The policy
-// JSON is its durable revision: a concurrent operator edit makes this update
-// match no row, so the stale policy cannot be dispatched.
-func (s *Scheduler) claimModUpdateSchedule(ctx context.Context, task *storage.ScheduledTask, nextRun *time.Time, lastRun time.Time) error {
-	result := s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
-		Where("id = ? AND task_type = ? AND status = ? AND schedule = ?", task.ID, task.TaskType, task.Status, task.Schedule).
-		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
-		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt).
-		Where("COALESCE(config, '') = ?", task.Config).
-		Where("next_run IS ?", task.NextRun).
-		Updates(map[string]any{"next_run": nextRun, "last_run": lastRun})
-	if result.Error == nil && result.RowsAffected == 0 {
-		return storage.ErrModUpdateScheduleChanged
-	}
-	return result.Error
-}
-
-// revalidateModUpdateClaim reads the policy revision after the slot claim.
-// An edit that commits between the claim and this read fails closed instead
-// of reaching the planner with the stale snapshot.
-func (s *Scheduler) revalidateModUpdateClaim(ctx context.Context, claimed *storage.ScheduledTask) (*storage.ScheduledTask, error) {
-	current, err := s.store.GetScheduledTask(ctx, claimed.ID)
-	if err != nil {
-		return nil, err
-	}
-	if current.TaskType != claimed.TaskType || current.Status != claimed.Status || current.Config != claimed.Config || !sameScheduledTaskTiming(current, claimed) {
-		return nil, fmt.Errorf("%w: policy revision changed", storage.ErrModUpdateScheduleChanged)
-	}
-	return current, nil
-}
-
-func sameScheduledTaskTiming(a, b *storage.ScheduledTask) bool {
-	if a.Schedule != b.Schedule || a.CronExpr != b.CronExpr || a.Timezone != b.Timezone || a.IntervalSecs != b.IntervalSecs {
-		return false
-	}
-	if a.RunAt == nil || b.RunAt == nil {
-		return a.RunAt == nil && b.RunAt == nil
-	}
-	return a.RunAt.Equal(*b.RunAt)
 }
 
 // disableInvalidSchedule disables only the exact schedule state that failed
@@ -1553,81 +1461,6 @@ func webhookEventName(t v1.TriggeredEventType) string {
 	default:
 		return "manual"
 	}
-}
-
-// ValidateModUpdateConfigJSON rejects a malformed policy before it is stored,
-// so a misconfigured schedule fails at create/update time rather than hours
-// later when the schedule first fires.
-func ValidateModUpdateConfigJSON(raw string) error {
-	_, err := ParseModUpdateConfigJSON(raw)
-	return err
-}
-
-// ParseModUpdateConfigJSON returns the validated policy used to create a task.
-func ParseModUpdateConfigJSON(raw string) (storage.ModUpdateTaskConfig, error) {
-	var cfg storage.ModUpdateTaskConfig
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return cfg, fmt.Errorf("invalid mod update policy: %w", err)
-	}
-	return cfg, ValidateModUpdateConfig(cfg)
-}
-
-// ValidateModUpdateConfig checks a decoded policy at the execution boundary.
-func ValidateModUpdateConfig(cfg storage.ModUpdateTaskConfig) error {
-	if cfg.MaxUpdatesPerRun < 0 || cfg.MaxUpdatesPerRun > maxAutomaticModUpdatesPerRun {
-		return fmt.Errorf("max_updates_per_run must be between 0 and %d", maxAutomaticModUpdatesPerRun)
-	}
-	switch strings.ToLower(strings.TrimSpace(cfg.Window)) {
-	case "", "next_restart":
-	case "idle":
-		if cfg.IdleMinutes <= 0 || cfg.IdleMinutes > 10080 {
-			return errors.New("idle_minutes must be between 1 and 10080 for the idle window")
-		}
-	default:
-		return fmt.Errorf("unknown apply window %q", cfg.Window)
-	}
-	return nil
-}
-
-// executeModUpdateTask runs an opt-in mod update policy through the shared
-// planner. It never publishes bytes itself: the existing journaled batch apply
-// remains the only path that writes the live mods directory.
-func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, budget *modUpdateRunBudget) (string, error) {
-	var cfg storage.ModUpdateTaskConfig
-	if task.Config != "" {
-		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
-			return "", fmt.Errorf("invalid mod update policy: %w", err)
-		}
-	}
-	if !cfg.Enabled {
-		return "mod update policy is disabled; nothing staged", nil
-	}
-	if err := ValidateModUpdateConfig(cfg); err != nil {
-		return "", fmt.Errorf("invalid mod update policy: %w", err)
-	}
-	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
-		return "server is running; mod update policy skipped by running-server policy", nil
-	}
-	if s.modUpdatePlanner == nil {
-		return "", errors.New("mod update planner is not installed")
-	}
-	limit := cfg.MaxUpdatesPerRun
-	if limit == 0 {
-		limit = DefaultModUpdatesPerRun
-	}
-	cfg.MaxUpdatesPerRun = limit - budget.staged
-	staged, refused, reasons, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
-	budget.staged += staged
-	budget.exhausted = budget.staged >= limit
-	output := fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", budget.staged, refused)
-	if len(reasons) > 0 {
-		shown := reasons
-		if len(shown) > 3 {
-			shown = shown[:3]
-		}
-		output += "; reasons: " + strings.Join(shown, " | ")
-	}
-	return output, err
 }
 
 // ModpackUpdateTaskConfig matches the configuration for periodic modpack updates

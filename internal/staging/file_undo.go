@@ -4,7 +4,6 @@ package staging
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,79 +29,38 @@ type undoEntry struct {
 	SHA256  string `json:"sha256,omitempty"`
 }
 
-func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, limit int64) (int64, string, string, error) {
+func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, want *undoEntry, limit int64) (int64, string, error) {
 	r, err := acc.OpenRead(ctx, src)
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", err
 	}
 	defer func() { _ = r.Close() }()
 	w, err := acc.BeginWrite(ctx, dst, max(1, limit))
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", err
 	}
 	defer func() { _ = w.Close() }()
 	h := sha256.New()
-	h512 := sha512.New()
-	n, err := io.CopyBuffer(io.MultiWriter(w, h, h512), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
+	n, err := io.CopyBuffer(io.MultiWriter(w, h), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
 	err = errors.Join(err, r.Close())
 	if err != nil {
-		return n, "", "", err
+		return n, "", err
 	}
 	if n > limit {
-		return n, "", "", fmt.Errorf("staged transfer exceeds %d bytes", limit)
+		return n, "", fmt.Errorf("staged transfer exceeds %d bytes", limit)
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
-	sum512 := hex.EncodeToString(h512.Sum(nil))
 	if want != nil && (n != want.Size || sum != want.SHA256) {
-		return n, sum, sum512, fmt.Errorf("staged recovery checksum mismatch for %s", want.Target)
+		return n, sum, fmt.Errorf("staged recovery checksum mismatch for %s", want.Target)
 	}
 	if err = w.Commit(); err != nil {
-		return n, sum, sum512, err
+		return n, sum, err
 	}
-	return n, sum, sum512, nil
-}
-
-// fileSHA512 reads one file without loading it into memory and verifies that
-// it did not change while the digest was being calculated.
-func fileSHA512(ctx context.Context, acc nodestorage.Accessor, target string, limit int64) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	before, err := acc.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	if !before.Mode().IsRegular() {
-		return "", fmt.Errorf("file %s is not a regular file", target)
-	}
-	r, err := acc.OpenRead(ctx, target)
-	if err != nil {
-		return "", err
-	}
-	h := sha512.New()
-	n, copyErr := io.CopyBuffer(h, io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
-	closeErr := r.Close()
-	if err := errors.Join(copyErr, closeErr); err != nil {
-		return "", err
-	}
-	if n > limit {
-		return "", fmt.Errorf("file %s exceeds the %d-byte digest limit", target, limit)
-	}
-	after, err := acc.Stat(target)
-	if err != nil {
-		return "", err
-	}
-	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
-		return "", fmt.Errorf("file %s changed while its digest was checked", target)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return n, sum, nil
 }
 
 func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []storage.StagedContentChange) ([]fileSnap, error) {
-	type pending struct {
-		source, target, action string
-		expectedLiveSha512     string
-	}
+	type pending struct{ source, target, action string }
 	var files []pending
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -121,10 +79,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				files = append(files, pending{source: e.stage, target: e.live, action: storage.StagedActionReplace})
 			}
 		} else {
-			files = append(files, pending{
-				source: row.StagePath, target: row.TargetPath, action: row.Action,
-				expectedLiveSha512: row.ExpectedLiveSha512,
-			})
+			files = append(files, pending{source: row.StagePath, target: row.TargetPath, action: row.Action})
 		}
 	}
 	if len(files) == 0 {
@@ -167,12 +122,9 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			item.backup = path.Join(recovery, fmt.Sprintf("%06d.data", i))
 			record.Existed = true
 			record.Backup = item.backup
-			n, sum, sum512, err := copyStream(ctx, acc, file.target, item.backup, nil, storageworker.MaxStreamBytes-total)
+			n, sum, err := copyStream(ctx, acc, file.target, item.backup, nil, storageworker.MaxStreamBytes-total)
 			if err != nil {
 				return abortPreparation(err)
-			}
-			if file.expectedLiveSha512 != "" && !strings.EqualFold(sum512, file.expectedLiveSha512) {
-				return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but found %s", file.target, file.expectedLiveSha512, sum512))
 			}
 			total += n
 			if total > storageworker.MaxStreamBytes {
@@ -182,8 +134,6 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 			record.SHA256 = sum
 			item.size = n
 			item.sha256 = sum
-		} else if file.expectedLiveSha512 != "" {
-			return abortPreparation(fmt.Errorf("staged target %s changed after staging: expected SHA-512 %s but the live file is missing", file.target, file.expectedLiveSha512))
 		}
 		snaps = append(snaps, item)
 		manifest = append(manifest, record)
@@ -199,7 +149,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	if err := acc.WriteFile(path.Join(recovery, "manifest.json"), body); err != nil {
 		return abortPreparation(err)
 	}
-	// All old contents, preconditions, and the recovery manifest exist before the first mutation.
+	// All old contents and the recovery manifest exist before the first mutation.
 	var published int64
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -210,7 +160,7 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 				return snaps, err
 			}
 		} else {
-			n, _, _, err := copyStream(ctx, acc, file.source, file.target, nil, storageworker.MaxStreamBytes-published)
+			n, _, err := copyStream(ctx, acc, file.source, file.target, nil, storageworker.MaxStreamBytes-published)
 			if err != nil {
 				return snaps, err
 			}
@@ -225,7 +175,7 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 	for i := len(snaps) - 1; i >= 0; i-- {
 		item := snaps[i]
 		if item.existed {
-			_, _, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, item.size)
+			_, _, err := copyStream(ctx, acc, item.backup, item.target, &undoEntry{Target: item.target, Size: item.size, SHA256: item.sha256}, item.size)
 			if err != nil {
 				failed = errors.Join(failed, fmt.Errorf("staged rollback incomplete; recovery %q: %w", item.recoveryRoot, err))
 			}

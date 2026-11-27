@@ -9,34 +9,13 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { Upload, Download, Trash2, FileText, X, Boxes, Search, Check, Ban } from '@lucide/svelte';
 	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { Mod } from '$lib/proto/carbonpanel/v1/mod_pb';
-	import { ConfigApplyWindow } from '$lib/proto/carbonpanel/v1/config_pb';
-	import {
-		ExecutionStatus,
-		ScheduleType,
-		TaskStatus,
-		TaskType,
-		type ScheduledTask,
-		type TaskExecution
-	} from '$lib/proto/carbonpanel/v1/task_pb';
 	import { formatBytes } from '$lib/utils';
-	import {
-		buildPolicyConfig,
-		buildUpdateSelections,
-		currentUpdateSelectionIds,
-		DEFAULT_POLICY_STATE,
-		isCurrentServer,
-		policyFromPersistedTask,
-		updateOutcomeLabel,
-		updateOutcomeTagType,
-		updateCandidateFingerprint,
-		updateStateTagType
-	} from '$lib/mod-update-ui';
+	import { summarizeModUpdateCheck } from '$lib/utils/mod-update-summary';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import ModBrowserDialog from '$lib/components/mod-browser-dialog.svelte';
 	import {
@@ -46,8 +25,6 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm,
 		CarbonSpinner,
 		CarbonDataTable,
-		CarbonAccordion,
-		CarbonAccordionItem,
 		CarbonEmptyState,
 		CarbonErrorState
 	} from '$lib/components/carbon';
@@ -77,225 +54,14 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let hasLoaded = false;
 	let requestNumber = 0;
-	// Status-strip ownership (E5): update checks take a token and staging
-	// invalidates outstanding ones, so an older in-flight check can never
-	// overwrite a newer stage result (e.g. a refused stage) on the strip.
+	// Status-strip ownership: update checks take a token so an older in-flight
+	// check can never overwrite a newer result on the strip.
 	let statusNumber = 0;
 	let updateStatus = $state('');
 	let previousServerId = $state(server.id);
 
 	// E3: per-row pending state so double-clicks cannot double-apply.
 	let busyMods = $state<Record<string, 'toggle' | 'delete'>>({});
-
-	// Reviewed update application. Selection is explicit: a preview never
-	// stages bytes on its own, and only state=available rows can be selected.
-	let selectedUpdates = $state<string[]>([]);
-	let selectedUpdateFingerprints = $state<Record<string, string>>({});
-	let updateWindow = $state<'next' | 'time' | 'idle'>('next');
-	let applyAtLocal = $state('');
-	let idleMinutes = $state(15);
-	let stagingUpdates = $state(false);
-	let checkingUpdates = $state(false);
-	let stagedOutcomes = $state<StagedOutcomeRow[]>([]);
-	let policyOpen = $state(false);
-
-	// Opt-in automatic policy. The policy is a typed mod_update task; TaskService
-	// owns schedule, timezone, next/last run and bounded retries.
-	let policyTask = $state<ScheduledTask | null>(null);
-	let policyEnabled = $state(false);
-	let policyCron = $state('0 3 * * *');
-	let policyTimezone = $state('UTC');
-	let policyExcluded = $state('');
-	let policyMax = $state(5);
-	let policySkipRunning = $state(true);
-	let policySkipRunningExplicit = $state(true);
-	let policyWindow = $state<'next_restart' | 'idle'>('next_restart');
-	let policyIdleMinutes = $state(15);
-	let policyLastOutcome = $state('No runs yet');
-	let policySaving = $state(false);
-	let policyLoading = $state(false);
-	let policyLoadedServer = $state<string | null>(null);
-	let policyReady = $derived(policyLoadedServer === server.id);
-	let loadedPolicyOptIn = false;
-	let policyGeneration = 0;
-	onDestroy(() => {
-		policyGeneration++;
-	});
-
-	interface StagedOutcomeRow {
-		modId: string;
-		fileName: string;
-		outcome: string;
-		reason: string;
-	}
-
-	let availableUpdates = $derived(mods.filter((mod) => mod.updatePreview?.state === 'available'));
-	let currentSelectedUpdates = $derived(
-		currentUpdateSelectionIds(mods, selectedUpdates, selectedUpdateFingerprints)
-	);
-
-	$effect(() => {
-		if (currentSelectedUpdates.length === selectedUpdates.length) return;
-		selectedUpdates = currentSelectedUpdates;
-		selectedUpdateFingerprints = Object.fromEntries(
-			currentSelectedUpdates.map((id) => [id, selectedUpdateFingerprints[id]])
-		);
-	});
-
-	function toggleUpdateSelection(id: string) {
-		const mod = mods.find((candidate) => candidate.id === id);
-		if (!mod?.updatePreview || mod.updatePreview.state !== 'available') return;
-		const fingerprint = updateCandidateFingerprint(mod.updatePreview);
-		if (currentSelectedUpdates.includes(id)) {
-			selectedUpdates = selectedUpdates.filter((selected) => selected !== id);
-			const fingerprints = { ...selectedUpdateFingerprints };
-			delete fingerprints[id];
-			selectedUpdateFingerprints = fingerprints;
-		} else {
-			selectedUpdates = [...selectedUpdates.filter((selected) => selected !== id), id];
-			selectedUpdateFingerprints = { ...selectedUpdateFingerprints, [id]: fingerprint };
-		}
-	}
-
-	function applyWindowEnum(): ConfigApplyWindow {
-		if (updateWindow === 'time') return ConfigApplyWindow.AT_TIME;
-		if (updateWindow === 'idle') return ConfigApplyWindow.IDLE;
-		return ConfigApplyWindow.NEXT_RESTART;
-	}
-
-	function timestampLabel(value: { seconds: bigint | number } | undefined): string {
-		if (!value || !value.seconds) return '—';
-		return new Date(Number(value.seconds) * 1000).toLocaleString();
-	}
-
-	let policyNextRun = $derived(
-		timestampLabel(policyTask?.status === TaskStatus.ENABLED ? policyTask.nextRun : undefined)
-	);
-	let policyScheduleStatus = $derived(
-		policyTask?.status === TaskStatus.ENABLED
-			? 'Enabled'
-			: policyTask?.status === TaskStatus.PAUSED
-				? 'Paused'
-				: policyTask?.status === TaskStatus.DISABLED
-					? 'Disabled'
-					: 'Not scheduled'
-	);
-	let policyLastRun = $derived(timestampLabel(policyTask?.lastRun));
-	let policySummary = $derived(`${policyScheduleStatus} · Next run: ${policyNextRun}`);
-
-	async function loadPolicy() {
-		if (!canHaveMods() || policyLoading) return;
-		const serverId = server.id;
-		const generation = policyGeneration;
-		const current = () => generation === policyGeneration && isCurrentServer(serverId, server.id);
-		try {
-			policyLoading = true;
-			const response = await rpcClient.task.listTasks({ serverId });
-			if (!current()) return;
-			const task = response.tasks.find((candidate) => candidate.taskType === TaskType.MOD_UPDATE);
-			policyTask = task ?? null;
-			const state = policyFromPersistedTask(task ?? null, TaskStatus.ENABLED);
-			policyEnabled = state.enabled;
-			loadedPolicyOptIn = state.enabled;
-			policyLoadedServer = serverId;
-			policyCron = state.cron;
-			policyTimezone = state.timezone;
-			policyExcluded = state.excludedProjects;
-			policyMax = state.maxPerRun;
-			policySkipRunning = state.skipWhenRunning ?? false;
-			policySkipRunningExplicit = state.skipWhenRunning !== undefined || !task;
-			policyWindow = state.window;
-			policyIdleMinutes = state.idleMinutes;
-			if (task) {
-				const history = await rpcClient.task.listTaskExecutions({ taskId: task.id, limit: 1 });
-				if (!current()) return;
-				const latest: TaskExecution | undefined = history.executions[0];
-				if (latest) {
-					const outcome =
-						latest.status === ExecutionStatus.FAILED
-							? `Failed: ${latest.error || 'unknown error'}`
-							: latest.status === ExecutionStatus.TIMEOUT
-								? 'Timed out'
-								: latest.status === ExecutionStatus.COMPLETED
-									? latest.output || 'Completed'
-									: 'Last run recorded';
-					policyLastOutcome = `${outcome} (${timestampLabel(latest.startedAt)})`;
-				} else {
-					policyLastOutcome = 'No runs yet';
-				}
-			} else {
-				policyLastOutcome = 'No runs yet';
-			}
-		} catch (error) {
-			if (current() && !wasRpcErrorToasted(error))
-				toast.error('Failed to load the mod update policy');
-		} finally {
-			if (current()) policyLoading = false;
-		}
-	}
-
-	async function savePolicy() {
-		if (!policyReady || policyLoading || policySaving) return;
-		const serverId = server.id;
-		const generation = policyGeneration;
-		const current = () => generation === policyGeneration && isCurrentServer(serverId, server.id);
-		const task = policyTask;
-		const enabled = policyEnabled;
-		const explicitOptInChange = enabled !== loadedPolicyOptIn;
-		const config = buildPolicyConfig({
-			enabled,
-			excludedProjects: policyExcluded,
-			maxPerRun: policyMax,
-			skipWhenRunning: policySkipRunningExplicit ? policySkipRunning : undefined,
-			window: policyWindow,
-			idleMinutes: policyIdleMinutes
-		});
-		try {
-			policySaving = true;
-			let savedTask: ScheduledTask | null;
-			if (task) {
-				const updated = await rpcClient.task.updateTask({
-					id: task.id,
-					cronExpr: policyCron,
-					timezone: policyTimezone,
-					config
-				});
-				savedTask = updated.task ?? task;
-				// Finish the mutation on the captured task even after navigation.
-				if (explicitOptInChange) {
-					const status = enabled ? TaskStatus.ENABLED : TaskStatus.DISABLED;
-					if (savedTask.status !== status) {
-						const toggled = await rpcClient.task.toggleTask({ id: task.id, status });
-						savedTask = toggled.task ?? savedTask;
-					}
-				}
-			} else {
-				const created = await rpcClient.task.createTask({
-					serverId,
-					name: 'Automatic mod updates',
-					description: 'Stages compatible provider updates into the pending batch.',
-					taskType: TaskType.MOD_UPDATE,
-					schedule: ScheduleType.CRON,
-					cronExpr: policyCron,
-					timezone: policyTimezone,
-					config,
-					retryCount: 1,
-					retryDelay: 60
-				});
-				savedTask = created.task ?? null;
-			}
-			if (!current()) return;
-			policyTask = savedTask;
-			loadedPolicyOptIn = enabled;
-			toast.success('Mod update policy saved');
-			await loadPolicy();
-		} catch (error) {
-			if (current() && !wasRpcErrorToasted(error))
-				toast.error('Failed to save the mod update policy');
-		} finally {
-			if (current()) policySaving = false;
-		}
-	}
 
 	$effect(() => {
 		if (server.id !== previousServerId) {
@@ -305,10 +71,6 @@ one at https://mozilla.org/MPL/2.0/.
 			// state reset; the upload flow also re-checks the target server id.
 			cancelCurrentUpload();
 			updateStatus = '';
-			checkingUpdates = false;
-			selectedUpdates = [];
-			selectedUpdateFingerprints = {};
-			stagedOutcomes = [];
 			mods = [];
 			loading = true;
 			loadError = '';
@@ -318,29 +80,10 @@ one at https://mozilla.org/MPL/2.0/.
 			uploadAbortController = null;
 			busyMods = {};
 			hasLoaded = false;
-			// Invalidate outstanding policy work even if navigation returns to
-			// the same server before an earlier response arrives.
-			policyGeneration++;
-			policyTask = null;
-			policyLoadedServer = null;
-			policyLoading = false;
-			loadedPolicyOptIn = false;
-			policyEnabled = DEFAULT_POLICY_STATE.enabled;
-			policyCron = DEFAULT_POLICY_STATE.cron;
-			policyTimezone = DEFAULT_POLICY_STATE.timezone;
-			policyExcluded = DEFAULT_POLICY_STATE.excludedProjects;
-			policyMax = DEFAULT_POLICY_STATE.maxPerRun;
-			policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning ?? true;
-			policySkipRunningExplicit = true;
-			policyWindow = DEFAULT_POLICY_STATE.window;
-			policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
-			policyLastOutcome = 'No runs yet';
-			policySaving = false;
 		}
 		if (active && !hasLoaded) {
 			hasLoaded = true;
 			loadMods();
-			loadPolicy();
 		}
 	});
 
@@ -371,13 +114,9 @@ one at https://mozilla.org/MPL/2.0/.
 		// Only a check writes the status strip; plain refreshes never do.
 		const statusToken = checkUpdates ? ++statusNumber : 0;
 		const ownsStatus = () => statusToken !== 0 && statusToken === statusNumber;
-		// E5: checking and staging are mutually exclusive. A check never
-		// clobbers an in-flight staging summary; the stage flow owns
-		// updateStatus until it finishes.
-		if (checkUpdates && !stagingUpdates) {
+		if (checkUpdates) {
 			updateStatus = 'Checking installed files for compatible releases…';
 		}
-		checkingUpdates = checkUpdates;
 		// A vanilla server has no mods directory, and asking for one returns an
 		// error the RPC interceptor turns into a toast - on a tab that already
 		// explains the server cannot take mods. Do not make the call.
@@ -394,9 +133,8 @@ one at https://mozilla.org/MPL/2.0/.
 			if (!isCurrent()) return;
 			mods = response.mods;
 			loadError = '';
-			if (checkUpdates && !stagingUpdates && ownsStatus()) {
-				const available = mods.filter((mod) => mod.updatePreview?.state === 'available').length;
-				updateStatus = `Checked ${mods.length} installed files. Compatible updates available for ${available}.`;
+			if (checkUpdates && ownsStatus()) {
+				updateStatus = summarizeModUpdateCheck(mods.map((mod) => mod.updatePreview?.state));
 			}
 		} catch (error) {
 			if (isCurrent()) {
@@ -405,7 +143,7 @@ one at https://mozilla.org/MPL/2.0/.
 				loadError = checkUpdates
 					? 'The update check failed. The installed list was not refreshed.'
 					: 'Failed to read the installed mods from the server.';
-				if (checkUpdates && !stagingUpdates && ownsStatus())
+				if (checkUpdates && ownsStatus())
 					updateStatus = 'Update check failed. Try again.';
 				// E2: the interceptor already toasted the formatted RPC error.
 				if (!wasRpcErrorToasted(error))
@@ -414,69 +152,7 @@ one at https://mozilla.org/MPL/2.0/.
 		} finally {
 			if (isCurrent()) {
 				loading = false;
-				checkingUpdates = false;
 			}
-		}
-	}
-
-	async function stageSelectedUpdates() {
-		const selections = buildUpdateSelections(
-			mods,
-			currentSelectedUpdates,
-			selectedUpdateFingerprints
-		);
-		if (selections.length === 0) return;
-
-		let applyAtUnix = 0;
-		if (updateWindow === 'time') {
-			const parsed = new Date(applyAtLocal).getTime();
-			if (!applyAtLocal || !Number.isFinite(parsed)) {
-				toast.error('Choose a valid apply time');
-				return;
-			}
-			applyAtUnix = Math.floor(parsed / 1000);
-		}
-		if (updateWindow === 'idle' && (!Number.isInteger(idleMinutes) || idleMinutes <= 0)) {
-			toast.error('Idle minutes must be a positive whole number');
-			return;
-		}
-
-		try {
-			// E5: staging takes over the status strip from any running check.
-			stagingUpdates = true;
-			checkingUpdates = false;
-			// Invalidate outstanding check tokens: an older in-flight check
-			// must not overwrite this stage's result once it lands.
-			statusNumber++;
-			stagedOutcomes = [];
-			const response = await rpcClient.mod.updateMod({
-				serverId: server.id,
-				updateSelections: selections,
-				updateWindow: applyWindowEnum(),
-				updateApplyAtUnix: BigInt(applyAtUnix),
-				updateIdleMinutes: updateWindow === 'idle' ? idleMinutes : 0
-			});
-			stagedOutcomes = response.stagedUpdates.map((row) => ({
-				modId: row.modId,
-				fileName: row.fileName,
-				outcome: row.outcome,
-				reason: row.reason
-			}));
-			const staged = response.stagedUpdates.filter((row) => row.outcome === 'staged').length;
-			const refused = response.stagedUpdates.length - staged;
-			updateStatus = `Staged ${staged} update(s) for the pending batch${refused ? `; ${refused} refused and left untouched` : ''}.`;
-			selectedUpdates = [];
-			selectedUpdateFingerprints = {};
-			if (staged > 0) {
-				toast.success(`${staged} mod update(s) staged`);
-				await loadMods(true);
-			} else {
-				toast.error('No update was staged. Recheck the installed files and try again.');
-			}
-		} catch (error) {
-			if (!wasRpcErrorToasted(error)) toast.error('Failed to stage mod updates');
-		} finally {
-			stagingUpdates = false;
 		}
 	}
 
@@ -661,7 +337,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="secondary"
 				size="sm"
-				disabled={loading || uploading || stagingUpdates || !mods.length}
+				disabled={loading || uploading || !mods.length}
 				onclick={() => loadMods(true)}
 			>
 				Check for updates
@@ -753,11 +429,8 @@ one at https://mozilla.org/MPL/2.0/.
 		progress lives inline here instead of in its own floating bar. -->
 	<div class="border-y border-border bg-card px-3 py-2" role="status">
 		<div class="flex items-center gap-2 text-sm text-muted-foreground">
-			{#if checkingUpdates || stagingUpdates}
-				<CarbonSpinner
-					size="sm"
-					label={stagingUpdates ? 'Staging mod updates' : 'Checking installed mods for updates'}
-				/>
+			{#if updateStatus.startsWith('Checking')}
+				<CarbonSpinner size="sm" label="Checking installed mods for updates" />
 			{/if}
 			<span class="min-w-0 flex-1">{updateStatus}</span>
 		</div>
@@ -792,254 +465,6 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 	</div>
-
-	<!-- Pending updates card: the review flow is isolated above the list so
-		update controls never interleave with installed rows. -->
-	{#if availableUpdates.length > 0}
-		<div
-			class="flex flex-col gap-3 border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-end"
-		>
-			<p class="w-full font-mono text-xs font-semibold tracking-wider text-foreground uppercase">
-				Compatible updates ({availableUpdates.length})
-			</p>
-			<div class="min-w-0">
-				<label
-					for="mod-update-window"
-					class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-				>
-					Apply window
-				</label>
-				<select
-					id="mod-update-window"
-					bind:value={updateWindow}
-					class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-				>
-					<option value="next">Next restart</option>
-					<option value="time">At a chosen time (browser local)</option>
-					<option value="idle">When the server is empty</option>
-				</select>
-			</div>
-			{#if updateWindow === 'time'}
-				<div class="min-w-0">
-					<label
-						for="mod-update-apply-at"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Apply at
-					</label>
-					<input
-						id="mod-update-apply-at"
-						type="datetime-local"
-						bind:value={applyAtLocal}
-						class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-			{/if}
-			{#if updateWindow === 'idle'}
-				<div class="min-w-0">
-					<label
-						for="mod-update-idle"
-						class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-					>
-						Idle minutes
-					</label>
-					<input
-						id="mod-update-idle"
-						type="number"
-						min="1"
-						bind:value={idleMinutes}
-						class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-					/>
-				</div>
-			{/if}
-			<CarbonButton
-				kind="primary"
-				size="sm"
-				disabled={stagingUpdates || currentSelectedUpdates.length === 0}
-				onclick={stageSelectedUpdates}
-			>
-				{#if stagingUpdates}
-					<CarbonSpinner size="sm" label="Staging mod updates" />
-				{/if}
-				Stage {currentSelectedUpdates.length} selected update{currentSelectedUpdates.length === 1
-					? ''
-					: 's'}
-			</CarbonButton>
-			{#if stagedOutcomes.length > 0}
-				<ul class="w-full border-t border-border pt-2" aria-label="Staging results">
-					{#each stagedOutcomes as row (row.modId)}
-						<li class="flex flex-wrap items-center gap-2 py-0.5">
-							<CarbonTag type={updateOutcomeTagType(row.outcome)} size="sm">
-								{updateOutcomeLabel(row.outcome)}
-							</CarbonTag>
-							<span class="font-mono text-xs text-foreground">
-								{mods.find((mod) => mod.id === row.modId)?.displayName || row.fileName}
-							</span>
-							{#if row.reason}
-								<span class="text-xs text-muted-foreground">{row.reason}</span>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
-	{/if}
-
-	<!-- Automatic update policy -->
-	{#if canHaveMods()}
-		<CarbonAccordion>
-			<CarbonAccordionItem
-				title="Automatic update policy"
-				subtitle={policySummary}
-				bind:open={policyOpen}
-			>
-				<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-					<label class="flex items-center gap-2 text-xs text-foreground">
-						<input
-							type="checkbox"
-							bind:checked={policyEnabled}
-							class="h-3.5 w-3.5 accent-primary"
-						/>
-						Opt in to automatic updates
-					</label>
-					<div class="min-w-0">
-						<label
-							for="mod-policy-cron"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Schedule (cron)
-						</label>
-						<input
-							id="mod-policy-cron"
-							bind:value={policyCron}
-							class="h-8 w-40 rounded-none border border-border bg-background px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
-						/>
-					</div>
-					<div class="min-w-0">
-						<label
-							for="mod-policy-tz"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Timezone
-						</label>
-						<input
-							id="mod-policy-tz"
-							bind:value={policyTimezone}
-							class="h-8 w-32 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-						/>
-					</div>
-					<div class="min-w-0">
-						<label
-							for="mod-policy-excluded"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Excluded project IDs
-						</label>
-						<input
-							id="mod-policy-excluded"
-							bind:value={policyExcluded}
-							placeholder="project-a, project-b"
-							class="h-8 w-48 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-						/>
-					</div>
-					<div class="min-w-0">
-						<label
-							for="mod-policy-max"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Max per run
-						</label>
-						<input
-							id="mod-policy-max"
-							type="number"
-							min="1"
-							max="50"
-							bind:value={policyMax}
-							class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-						/>
-					</div>
-					<div class="min-w-0">
-						<label
-							for="mod-policy-window"
-							class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-						>
-							Apply window
-						</label>
-						<select
-							id="mod-policy-window"
-							bind:value={policyWindow}
-							class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-						>
-							<option value="next_restart">Next restart</option>
-							<option value="idle">When empty</option>
-						</select>
-					</div>
-					{#if policyWindow === 'idle'}
-						<div class="min-w-0">
-							<label
-								for="mod-policy-idle"
-								class="mb-1 block font-mono text-xs text-muted-foreground uppercase"
-							>
-								Idle minutes
-							</label>
-							<input
-								id="mod-policy-idle"
-								type="number"
-								min="1"
-								max="10080"
-								bind:value={policyIdleMinutes}
-								class="h-8 w-24 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
-							/>
-						</div>
-					{/if}
-					<label class="flex items-center gap-2 text-xs text-foreground">
-						<input
-							type="checkbox"
-							bind:checked={policySkipRunning}
-							onchange={() => (policySkipRunningExplicit = true)}
-							class="h-3.5 w-3.5 accent-primary"
-						/>
-						Skip while running
-					</label>
-					<CarbonButton
-						kind="secondary"
-						size="sm"
-						disabled={!policyReady || policyLoading || policySaving}
-						onclick={savePolicy}
-					>
-						Save policy
-					</CarbonButton>
-					{#if policyLoading && !policyReady}
-						<CarbonSpinner size="sm" label="Loading policy" description="Loading policy" />
-					{:else if !policyReady}
-						<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}
-							>Retry loading policy</CarbonButton
-						>
-					{/if}
-					<dl
-						class="grid w-full grid-cols-1 gap-1 border-t border-border pt-2 font-mono text-xs text-muted-foreground sm:grid-cols-4"
-					>
-						<div>
-							<dt class="inline">Schedule:</dt>
-							<dd class="inline">{policyScheduleStatus}</dd>
-						</div>
-						<div>
-							<dt class="inline">Next run:</dt>
-							<dd class="inline">{policyNextRun}</dd>
-						</div>
-						<div>
-							<dt class="inline">Last run:</dt>
-							<dd class="inline">{policyLastRun}</dd>
-						</div>
-						<div>
-							<dt class="inline">Outcome:</dt>
-							<dd class="inline break-words">{policyLastOutcome}</dd>
-						</div>
-					</dl>
-				</div>
-			</CarbonAccordionItem>
-		</CarbonAccordion>
-	{/if}
 
 	<div class="min-h-0 flex-1 overflow-auto bg-background">
 		{#if !canHaveMods()}
@@ -1180,40 +605,16 @@ one at https://mozilla.org/MPL/2.0/.
 							</td>
 							<td class="px-3 py-3 align-top">
 								{#if mod.updatePreview}
-									<div class="flex min-w-0 flex-col gap-1">
-										<div class="flex flex-wrap items-center gap-2">
-											<CarbonTag
-												type={updateStateTagType(mod.updatePreview.state)}
-												size="sm"
-												title={mod.updatePreview.reason}
-											>
-												{mod.updatePreview.state.replace(/_/g, ' ')}
-											</CarbonTag>
-											{#if mod.updatePreview.state === 'available'}
-												<label
-													class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground"
-												>
-													<input
-														type="checkbox"
-														checked={currentSelectedUpdates.includes(mod.id)}
-														onchange={() => toggleUpdateSelection(mod.id)}
-														class="h-3.5 w-3.5 accent-primary"
-													/>
-													Stage this update
-												</label>
+									{#if mod.updatePreview.installedVersion}
+										<p class="mt-1 text-xs break-words text-muted-foreground">
+											{mod.updatePreview.provider || 'Modrinth'} · Installed
+											{mod.updatePreview.installedVersion}
+											{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
+												· Candidate {mod.updatePreview.candidateVersion}
 											{/if}
-										</div>
-										{#if mod.updatePreview.installedVersion}
-											<p class="text-xs break-words text-muted-foreground">
-												{mod.updatePreview.provider || 'Provider'} · Installed
-												{mod.updatePreview.installedVersion}
-												{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
-													· Candidate {mod.updatePreview.candidateVersion}
-												{/if}
-											</p>
-										{/if}
-										<p class="text-xs text-muted-foreground">{mod.updatePreview.reason}</p>
-									</div>
+										</p>
+									{/if}
+									<p class="mt-1 text-sm text-muted-foreground">{mod.updatePreview.reason}</p>
 								{:else}
 									<span class="font-mono text-xs text-muted-foreground">—</span>
 								{/if}

@@ -9,13 +9,10 @@
 package db
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
-	"gorm.io/gorm"
 )
 
 type ServerStatus string
@@ -165,60 +162,6 @@ type Server struct {
 	JoinObservationKind string    `json:"join_observation_kind" gorm:"-"`
 	JoinObservedAt      time.Time `json:"join_observed_at" gorm:"-"`
 	LastGoodJoinAt      time.Time `json:"last_good_join_at" gorm:"-"`
-}
-
-// ErrStagedModVersionChange reports that a server version or effective mod
-// loader cannot change while a reviewed provider candidate is still staged.
-var ErrStagedModVersionChange = errors.New("cannot change server version or mod loader while reviewed mod updates are staged")
-
-// ErrStagedModCandidateContext reports that a reviewed mod candidate row was
-// missing the game version and loader admission context it was prepared for.
-var ErrStagedModCandidateContext = errors.New("staged mod candidate compatibility context is missing")
-
-// BeforeUpdate keeps a reviewed mod candidate and the server it was prepared
-// for in the same version/loader context. Uploaded mods remain outside this
-// gate; a reviewed row is identified by its live digest precondition.
-func (s *Server) BeforeUpdate(tx *gorm.DB) error {
-	if s == nil || s.ID == "" {
-		return nil
-	}
-	var current Server
-	if err := tx.Session(&gorm.Session{NewDB: true}).
-		Select("id", "mc_version", "mod_loader", "modpack_loader").
-		Where("id = ?", s.ID).
-		Take(&current).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
-	}
-	if current.MCVersion == s.MCVersion && current.effectiveModLoader() == s.effectiveModLoader() {
-		return nil
-	}
-	var rows []StagedContentChange
-	if err := tx.Session(&gorm.Session{NewDB: true}).
-		Where("server_id = ? AND kind = ? AND status = ?", s.ID, StagedKindMod, StagedStatusStaged).
-		Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, row := range rows {
-		// A live-digest precondition is written only for provider-reviewed
-		// replacements. Uploaded mods remain outside this version/loader gate.
-		if row.ExpectedLiveSha512 == "" {
-			continue
-		}
-		return fmt.Errorf("%w: staged candidate %s", ErrStagedModVersionChange, row.FileName)
-	}
-	return nil
-}
-
-func (s *Server) effectiveModLoader() ModLoader {
-	switch s.ModLoader {
-	case ModLoaderAutoCurseForge, ModLoaderCurseForge, ModLoaderFTBA, ModLoaderModrinth:
-		return s.ModpackLoader
-	default:
-		return s.ModLoader
-	}
 }
 
 type ServerConfig struct {
@@ -678,28 +621,18 @@ const (
 // StagedContentChange is one mod, datapack, or file edit waiting in a batch.
 // StagePath is empty for a delete, which records the live path to remove later.
 type StagedContentChange struct {
-	ID         string `json:"id" gorm:"primaryKey"`
-	ServerID   string `json:"server_id" gorm:"not null;index;column:server_id"`
-	BatchID    string `json:"batch_id" gorm:"not null;index;column:batch_id"`
-	Kind       string `json:"kind" gorm:"not null"`
-	Action     string `json:"action" gorm:"not null"`
-	TargetPath string `json:"target_path" gorm:"not null;column:target_path"`
-	StagePath  string `json:"stage_path,omitempty" gorm:"column:stage_path"`
-	FileName   string `json:"file_name" gorm:"column:file_name"`
-	// ExpectedLiveSha512 is the installed digest observed when a reviewed
-	// update was staged. Publish must recheck it so a later local edit cannot
-	// be silently overwritten by a delayed apply. Empty means no precondition.
-	ExpectedLiveSha512 string `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
-	// CandidateGameVersion and CandidateLoader are write-only admission
-	// guards. The durable candidate context lives beside the staged payload;
-	// these fields let the insert transaction reject a stale candidate if the
-	// server version or loader changed while its bytes were being prepared.
-	CandidateGameVersion string       `json:"-" gorm:"-"`
-	CandidateLoader      string       `json:"-" gorm:"-"`
-	Status               StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt            time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt            *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server               *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	ID         string       `json:"id" gorm:"primaryKey"`
+	ServerID   string       `json:"server_id" gorm:"not null;index;column:server_id"`
+	BatchID    string       `json:"batch_id" gorm:"not null;index;column:batch_id"`
+	Kind       string       `json:"kind" gorm:"not null"`
+	Action     string       `json:"action" gorm:"not null"`
+	TargetPath string       `json:"target_path" gorm:"not null;column:target_path"`
+	StagePath  string       `json:"stage_path,omitempty" gorm:"column:stage_path"`
+	FileName   string       `json:"file_name" gorm:"column:file_name"`
+	Status     StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt  time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt  *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server     *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // TaskType defines the type of scheduled task
@@ -714,20 +647,8 @@ const (
 	TaskTypeScript        TaskType = "script"         // Run a custom script
 	TaskTypeWebhook       TaskType = "webhook"        // Send an HTTP webhook
 	TaskTypeModpackUpdate TaskType = "modpack_update" // Periodically fetch and update modpack from Git/source
-	TaskTypeModUpdate     TaskType = "mod_update"     // Opt-in automatic/scheduled mod updates using the shared planner
 	TaskTypeChunkyPregen  TaskType = "chunky_pregen"  // Automated background Chunky radius pre-generation task runner
 )
-
-// ModUpdateTaskConfig is the JSON payload of a mod_update ScheduledTask. It is
-// an opt-in policy: a task without Enabled never stages anything.
-type ModUpdateTaskConfig struct {
-	Enabled          bool     `json:"enabled"`
-	ExcludedProjects []string `json:"excluded_projects,omitempty"`
-	MaxUpdatesPerRun int      `json:"max_updates_per_run,omitempty"`
-	SkipWhenRunning  bool     `json:"skip_when_running,omitempty"`
-	Window           string   `json:"window,omitempty"`
-	IdleMinutes      int      `json:"idle_minutes,omitempty"`
-}
 
 // TaskStatus defines the status of a scheduled task
 type TaskStatus string

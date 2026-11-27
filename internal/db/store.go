@@ -369,20 +369,11 @@ func (s *Store) GetServerConfig(ctx context.Context, serverID string) (*ServerCo
 }
 
 func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.saveServerConfig(ctx, config)
+	return s.db.WithContext(ctx).Save(config).Error
 }
 
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.saveServerConfig(ctx, config)
-}
-
-func (s *Store) saveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := guardServerConfigRuntimeChangeTx(tx, config); err != nil {
-			return err
-		}
-		return tx.Save(config).Error
-	})
+	return s.db.WithContext(ctx).Save(config).Error
 }
 
 // SaveSyncedServerConfig updates only the fields propagated by global sync.
@@ -1588,55 +1579,6 @@ func (s *Store) ListDueScheduledTasks(ctx context.Context, before time.Time) ([]
 
 func (s *Store) UpdateScheduledTask(ctx context.Context, task *ScheduledTask) error {
 	return s.db.WithContext(ctx).Save(task).Error
-}
-
-// ErrModUpdateScheduleChanged indicates the scheduling state observed by a
-// writer was replaced by a schedule edit or status toggle.
-var ErrModUpdateScheduleChanged = errors.New("mod update schedule changed")
-
-func matchingTaskSchedule(tx *gorm.DB, task *ScheduledTask) *gorm.DB {
-	return tx.Where("task_type = ? AND status = ? AND schedule = ?", task.TaskType, task.Status, task.Schedule).
-		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
-		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt)
-}
-
-// UpdateModUpdatePolicy saves a task definition only while the observed
-// schedule and status hold. Policy-only changes preserve scheduler deadlines.
-func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *ScheduledTask, scheduleChanged bool) (bool, error) {
-	omit := []string{"ID", "Status", "CreatedAt", "LastRun"}
-	if !scheduleChanged {
-		omit = append(omit, "NextRun")
-	}
-	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(task), previous).
-		Select("*").Omit(omit...).Updates(task)
-	return result.RowsAffected != 0, result.Error
-}
-
-// AdvanceModUpdateSchedule refuses to advance a stale schedule, status,
-// or deadline. SQL IS also matches a task whose observed deadline was NULL.
-func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time) error {
-	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
-		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
-		Updates(map[string]any{"next_run": nextRun, "last_run": lastRun})
-	if result.Error == nil && result.RowsAffected == 0 {
-		return ErrModUpdateScheduleChanged
-	}
-	return result.Error
-}
-
-// ToggleModUpdateSchedule updates scheduling fields without writing a stale
-// policy definition or execution record.
-func (s *Store) ToggleModUpdateSchedule(ctx context.Context, previous, task *ScheduledTask) (bool, error) {
-	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), previous).
-		Where("id = ?", task.ID).Updates(map[string]any{"status": task.Status, "next_run": task.NextRun})
-	return result.RowsAffected != 0, result.Error
-}
-
-// DisableInvalidModUpdateSchedule avoids disabling a replacement schedule
-// when calculation from the scheduler's earlier snapshot fails.
-func (s *Store) DisableInvalidModUpdateSchedule(ctx context.Context, task *ScheduledTask) error {
-	return matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
-		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).Update("status", TaskStatusDisabled).Error
 }
 
 func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {

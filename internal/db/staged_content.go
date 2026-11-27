@@ -16,60 +16,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ensureStagedModCandidateAdmission enforces the write-only candidate
-// compatibility context on reviewed mod replacements. A reviewed candidate must
-// be admitted against the same server MC version and effective loader it was
-// prepared for; stale or missing context is rejected before the row is visible.
-func ensureStagedModCandidateAdmission(tx *gorm.DB, row *StagedContentChange) error {
-	if row == nil || row.Kind != StagedKindMod || row.ExpectedLiveSha512 == "" {
-		return nil
-	}
-	if row.CandidateGameVersion == "" || row.CandidateLoader == "" {
-		return ErrStagedModCandidateContext
-	}
-	var srv Server
-	if err := tx.Select("id", "mc_version", "mod_loader", "modpack_loader").Where("id = ?", row.ServerID).Take(&srv).Error; err != nil {
-		return err
-	}
-	if row.CandidateGameVersion != srv.MCVersion || row.CandidateLoader != string(srv.effectiveModLoader()) {
-		return fmt.Errorf("%w: candidate was prepared for loader %s and game version %s, not %s and %s", ErrStagedModVersionChange, row.CandidateLoader, row.CandidateGameVersion, string(srv.effectiveModLoader()), srv.MCVersion)
-	}
-	return nil
-}
-
-func hasStagedReviewedModCandidates(tx *gorm.DB, serverID string) (bool, error) {
-	var rows []StagedContentChange
-	if err := tx.Select("expected_live_sha512").
-		Where("server_id = ? AND kind = ? AND status = ?", serverID, StagedKindMod, StagedStatusStaged).
-		Find(&rows).Error; err != nil {
-		return false, err
-	}
-	for _, row := range rows {
-		if row.ExpectedLiveSha512 != "" {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func ensureNoStagedReviewedModCandidatesTx(tx *gorm.DB, serverID string) error {
-	has, err := hasStagedReviewedModCandidates(tx, serverID)
-	if err != nil {
-		return err
-	}
-	if has {
-		return ErrStagedModVersionChange
-	}
-	return nil
-}
-
-// HasStagedReviewedModCandidates reports whether the server has any staged
-// reviewed mod replacement whose live digest precondition identifies a provider
-// candidate.
-func (s *Store) HasStagedReviewedModCandidates(ctx context.Context, serverID string) (bool, error) {
-	return hasStagedReviewedModCandidates(s.db.WithContext(ctx), serverID)
-}
-
 // AddStagedContent joins the server's one open batch and records a content
 // edit. It does not copy bytes or touch the live tree; the caller writes the
 // staged file first. A new batch uses the next-restart window and does not
@@ -109,9 +55,6 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 			if err := setBatchWindow(tx, batch, UpdateWindowNextRestart, StagedApplyOnRestart, nil, 0); err != nil {
 				return err
 			}
-		}
-		if err := ensureStagedModCandidateAdmission(tx, row); err != nil {
-			return err
 		}
 		if row.ID == "" {
 			row.ID = uuid.New().String()
@@ -280,112 +223,10 @@ func batchWindowConflict(batch *ServerUpdateBatch, window UpdateWindow, applyAt 
 		ErrUpdateBatchConflict, batch.ID, batch.Window, batch.ApplyAt, batch.IdleMinutes, window, applyAt, idleMinutes)
 }
 
-// CheckReviewedContentWindow checks admission before the caller fetches payloads.
-// PrepareReviewedContentBatch and AddStagedContentToBatch enforce it at writes.
-func (s *Store) CheckReviewedContentWindow(ctx context.Context, serverID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
-	tx := s.db.WithContext(ctx)
-	batch, err := openUpdateBatch(tx, serverID)
-	if err != nil || batch == nil {
-		return err
-	}
-	return checkReviewedContentWindow(tx, batch, window, applyAt, idleMinutes)
-}
-
-func checkReviewedContentWindow(tx *gorm.DB, batch *ServerUpdateBatch, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
-	if err := requireNoBatchCronConfig(tx, batch.ID); err != nil {
-		return err
-	}
-	if batchWindowMatches(batch, window, applyAt, idleMinutes) {
-		return nil
-	}
-	content, err := hasBatchContent(tx, batch.ID)
-	if err != nil {
-		return err
-	}
-	configs, err := hasBatchConfig(tx, batch.ID)
-	if err != nil {
-		return err
-	}
-	if content || configs {
-		return batchWindowConflict(batch, window, applyAt, idleMinutes)
-	}
-	return nil
-}
-
-// AddStagedContentToBatch inserts only into the reviewed, still-open batch
-// with the same window and no independently scheduled config row.
-func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentChange, batchID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Write first to serialize with config admission. Nothing is visible
-		// until commit, and a refusal rolls this insert back.
-		row.BatchID = batchID
-		if row.Status == "" {
-			row.Status = StagedStatusStaged
-		}
-		if err := tx.Create(row).Error; err != nil {
-			return err
-		}
-		if err := requireBatchAdmission(tx, row.ServerID); err != nil {
-			return err
-		}
-		batch, err := openUpdateBatch(tx, row.ServerID)
-		if err != nil {
-			return err
-		}
-		if batch == nil || batch.ID != batchID || !batchWindowMatches(batch, window, applyAt, idleMinutes) {
-			return fmt.Errorf("%w: chosen batch %s closed or changed window before staging", ErrUpdateBatchConflict, batchID)
-		}
-		if err := requireNoBatchCronConfig(tx, batchID); err != nil {
-			return err
-		}
-		return ensureStagedModCandidateAdmission(tx, row)
-	})
-}
-
 // SetBatchIdleSince records when the current idle stretch started.
 // A nil value clears it, which is what a player joining does.
 func (s *Store) SetBatchIdleSince(ctx context.Context, id string, since *time.Time) error {
 	return s.db.WithContext(ctx).Model(&ServerUpdateBatch{}).Where("id = ?", id).Update("idle_since", since).Error
-}
-
-// PrepareReviewedContentBatch commits the window before content is written,
-// serializing the counterpart check and any window change with config staging.
-func (s *Store) PrepareReviewedContentBatch(ctx context.Context, serverID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) (*ServerUpdateBatch, error) {
-	return s.setOpenBatchWindow(ctx, serverID, window, applyAt, idleMinutes, true)
-}
-
-// SetOpenBatchWindow moves an open batch and its pending non-cron configs.
-// Batch publication uses it to park legacy cron rows after due work finishes.
-func (s *Store) SetOpenBatchWindow(ctx context.Context, serverID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) (*ServerUpdateBatch, error) {
-	return s.setOpenBatchWindow(ctx, serverID, window, applyAt, idleMinutes, false)
-}
-
-func (s *Store) setOpenBatchWindow(ctx context.Context, serverID string, window UpdateWindow, applyAt *time.Time, idleMinutes int, reviewed bool) (*ServerUpdateBatch, error) {
-	mode, err := modeForWindow(window, applyAt, idleMinutes)
-	if err != nil {
-		return nil, err
-	}
-	var batch *ServerUpdateBatch
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		batch, err = ensureOpenBatch(tx, serverID, window)
-		if err != nil {
-			return err
-		}
-		if reviewed {
-			if err := requireBatchAdmission(tx, serverID); err != nil {
-				return err
-			}
-			if err := checkReviewedContentWindow(tx, batch, window, applyAt, idleMinutes); err != nil {
-				return err
-			}
-		}
-		return setBatchWindow(tx, batch, window, mode, applyAt, idleMinutes)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return batch, nil
 }
 
 func setBatchWindow(tx *gorm.DB, batch *ServerUpdateBatch, window UpdateWindow, mode StagedApplyMode, applyAt *time.Time, idleMinutes int) error {

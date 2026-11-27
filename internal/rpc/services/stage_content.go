@@ -13,12 +13,10 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
-	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/google/uuid"
 )
 
@@ -26,10 +24,7 @@ import (
 // change) is what copies these bytes onto the live tree.
 const stagedContentRoot = ".carbon-panel/staged"
 
-var (
-	errStagedPath           = errors.New("invalid staged path")
-	errStagedCandidateState = errors.New("staged mod candidate no longer matches the server version or loader")
-)
+var errStagedPath = errors.New("invalid staged path")
 
 func safeStageTarget(rel string) (string, error) {
 	rel = strings.TrimSpace(strings.ReplaceAll(rel, "\\", "/"))
@@ -73,12 +68,6 @@ func serverAccessor(ctx context.Context, store *storage.Store, server *storage.S
 // .carbon-panel/staged. A delete records the live path and writes nothing.
 // The server's mods directory, datapacks directory, and world are not modified.
 func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
-	return stageContentBytesWithPrecondition(ctx, store, server, resolver, kind, action, targetRel, fileName, data, "")
-}
-
-// stageContentBytesWithPrecondition records the live digest observed at stage
-// time. The journaled publish rechecks it before copying replacement bytes.
-func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -102,14 +91,13 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 		}
 	}
 	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
-		ID:                 id,
-		ServerID:           server.ID,
-		Kind:               kind,
-		Action:             action,
-		TargetPath:         target,
-		StagePath:          stagePath,
-		FileName:           base,
-		ExpectedLiveSha512: expectedLiveSha512,
+		ID:         id,
+		ServerID:   server.ID,
+		Kind:       kind,
+		Action:     action,
+		TargetPath: target,
+		StagePath:  stagePath,
+		FileName:   base,
 	})
 	if err != nil {
 		if stagePath != "" {
@@ -118,89 +106,6 @@ func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store
 		return nil, err
 	}
 	return row, nil
-}
-
-// stageModContentToBatch writes candidate bytes and inserts the staged row
-// only while the reviewed batch is still open with the reviewed window. This
-// closes the window between choosing the batch and writing its payload.
-func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
-	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
-	targetRel, fileName string, data []byte, expectedLiveSha512 string, candidate *staging.ModCandidateMetadata) (*storage.StagedContentChange, error) {
-	target, err := safeStageTarget(targetRel)
-	if err != nil {
-		return nil, err
-	}
-	base, err := stagedFileBase(fileName)
-	if err != nil {
-		return nil, err
-	}
-	if (candidate == nil) != (expectedLiveSha512 == "") {
-		return nil, errors.New("reviewed mod candidate metadata and live digest must be recorded together")
-	}
-	if candidate != nil {
-		current, err := store.GetServer(ctx, server.ID)
-		if err != nil {
-			if !isSQLiteBusyError(err) {
-				return nil, fmt.Errorf("reload server before staging mod candidate: %w", err)
-			}
-			current = server
-		}
-		if err := validateStagedCandidateContext(current, *candidate); err != nil {
-			return nil, err
-		}
-		server = current
-	}
-	acc, err := serverAccessor(ctx, store, server, resolver)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = acc.Close() }()
-	id := uuid.New().String()
-	stagePath := stagedContentRoot + "/" + id + "/" + base
-	if _, err := nodestorage.WriteFrom(ctx, acc, stagePath, bytes.NewReader(data), 64<<30); err != nil {
-		return nil, err
-	}
-	if candidate != nil {
-		if err := staging.WriteModCandidateMetadata(ctx, acc, stagePath, *candidate); err != nil {
-			_ = acc.RemoveAll(stagedContentRoot + "/" + id)
-			return nil, err
-		}
-	}
-	candidateGameVersion, candidateLoader := "", ""
-	if candidate != nil {
-		candidateGameVersion, candidateLoader = candidate.GameVersion, candidate.Loader
-	}
-	row := &storage.StagedContentChange{
-		ID:                   id,
-		ServerID:             server.ID,
-		Kind:                 storage.StagedKindMod,
-		Action:               storage.StagedActionReplace,
-		TargetPath:           target,
-		StagePath:            stagePath,
-		FileName:             base,
-		ExpectedLiveSha512:   expectedLiveSha512,
-		CandidateGameVersion: candidateGameVersion,
-		CandidateLoader:      candidateLoader,
-	}
-	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
-		_ = acc.RemoveAll(stagedContentRoot + "/" + id)
-		return nil, err
-	}
-	return row, nil
-}
-
-func validateStagedCandidateContext(server *storage.Server, candidate staging.ModCandidateMetadata) error {
-	if server == nil {
-		return fmt.Errorf("%w: server is unavailable", errStagedCandidateState)
-	}
-	loader := string(server.ModLoader)
-	if isModpackPlatformLoader(server.ModLoader) {
-		loader = string(server.ModpackLoader)
-	}
-	if candidate.Loader != loader || candidate.GameVersion != server.MCVersion {
-		return fmt.Errorf("%w: candidate was prepared for loader %s and game version %s, not %s and %s", errStagedCandidateState, candidate.Loader, candidate.GameVersion, loader, server.MCVersion)
-	}
-	return nil
 }
 
 // discardStagedContent deletes staged bytes, then marks the row discarded.
@@ -225,30 +130,6 @@ func discardStagedContent(ctx context.Context, store *storage.Store, server *sto
 	}
 	_, err = store.DiscardStagedContent(ctx, id)
 	return err
-}
-
-// retryableStagedContentError reports whether a failed stage can be retried
-// without changing the operator's selection. Path, symlink, and batch
-// admission failures are permanent; storage and database write failures are
-// transient and must reach the scheduler's retry policy.
-func retryableStagedContentError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, errStagedPath) || errors.Is(err, errStagedCandidateState) || errors.Is(err, storage.ErrStagedModCandidateContext) ||
-		errors.Is(err, storage.ErrStagedModVersionChange) || errors.Is(err, storage.ErrUpdateBatchConflict) ||
-		nodestorage.IsEscape(err) || nodestorage.IsSymlink(err) {
-		return false
-	}
-	return true
-}
-
-func isSQLiteBusyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "SQLITE_BUSY")
 }
 
 func stageContentError(err error) error {

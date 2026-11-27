@@ -16,7 +16,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
-	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
@@ -51,14 +50,7 @@ func stagedFiles(t *testing.T, root string) []string {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(root, ".carbon-panel", "staged", "*", "*"))
 	require.NoError(t, err)
-	payloads := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if filepath.Base(match) == staging.ModCandidateMetadataFileName {
-			continue
-		}
-		payloads = append(payloads, match)
-	}
-	return payloads
+	return matches
 }
 
 func TestStageContentReservesRecoveryPaths(t *testing.T) {

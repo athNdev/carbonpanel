@@ -123,40 +123,6 @@ func validateStagedConfigFields(config *ServerConfig, changes map[string]any) er
 // ErrStagedConfigMoved is returned when a live field changed after it was staged.
 var ErrStagedConfigMoved = errors.New("staged config field changed since it was recorded")
 
-func configChangesRuntimeVersionOrLoader(changes map[string]any) bool {
-	if len(changes) == 0 {
-		return false
-	}
-	_, hasType := changes["type"]
-	_, hasVersion := changes["version"]
-	return hasType || hasVersion
-}
-
-func guardServerConfigRuntimeChangeTx(tx *gorm.DB, config *ServerConfig) error {
-	if config == nil || config.ServerID == "" {
-		return nil
-	}
-	var current ServerConfig
-	err := tx.Select("type", "version").Where("server_id = ?", config.ServerID).Take(&current).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if ptrStringEqual(current.Type, config.Type) && ptrStringEqual(current.Version, config.Version) {
-		return nil
-	}
-	return ensureNoStagedReviewedModCandidatesTx(tx, config.ServerID)
-}
-
-func ptrStringEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
 // StageConfigChange records changes as a diff vs the live config. It works
 // regardless of the instance's operational state — nothing is applied here.
 func (s *Store) StageConfigChange(ctx context.Context, serverID string, changes map[string]any, mode StagedApplyMode, cronExpr string) (*StagedConfigChange, error) {
@@ -187,13 +153,6 @@ type stageConfigOptions struct {
 	IdleMinutes    int
 	Window         UpdateWindow
 	SetBatchWindow bool
-}
-
-// ValidateUpdateWindow checks an apply window before any bytes are staged, so
-// an invalid at_time/idle request cannot leave an open batch behind.
-func ValidateUpdateWindow(window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
-	_, err := modeForWindow(window, applyAt, idleMinutes)
-	return err
 }
 
 func modeForWindow(window UpdateWindow, applyAt *time.Time, idleMinutes int) (StagedApplyMode, error) {
@@ -287,11 +246,6 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		diff := DiffMaps(current, changes)
 		if len(diff) == 0 {
 			return fmt.Errorf("no differences vs current config")
-		}
-		if configChangesRuntimeVersionOrLoader(diff) {
-			if err := ensureNoStagedReviewedModCandidatesTx(tx, serverID); err != nil {
-				return err
-			}
 		}
 		payload, err := json.Marshal(diff)
 		if err != nil {
@@ -419,41 +373,6 @@ func (s *Store) StagedConfigConflict(ctx context.Context, serverID, batchID stri
 	return nil
 }
 
-// StagedConfigConflictForIDs validates only the config rows this operation will
-// actually publish. An independently scheduled row in the same batch owns a
-// different base and must not block a due mod update.
-func (s *Store) StagedConfigConflictForIDs(ctx context.Context, serverID string, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	var rows []StagedConfigChange
-	if err := s.db.WithContext(ctx).
-		Where("server_id = ? AND id IN ? AND status = ?", serverID, ids, StagedStatusStaged).
-		Find(&rows).Error; err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	live := &ServerConfig{}
-	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).First(live).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		live = s.CreateDefaultServerConfig(serverID)
-	} else if err != nil {
-		return err
-	}
-	base, err := ServerConfigToMap(live)
-	if err != nil {
-		return err
-	}
-	for i := range rows {
-		if err := stagedConfigStillMatches(base, rows[i].BasePayload); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ListBatchConfig returns staged config rows still waiting in one batch, oldest first.
 func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedConfigChange, error) {
 	var rows []*StagedConfigChange
@@ -534,11 +453,6 @@ func (s *Store) ApplyStagedConfigChange(ctx context.Context, id string) (*Staged
 		}
 		if err := validateStagedConfigFields(live, diff); err != nil {
 			return err
-		}
-		if configChangesRuntimeVersionOrLoader(diff) {
-			if err := ensureNoStagedReviewedModCandidatesTx(tx, staged.ServerID); err != nil {
-				return err
-			}
 		}
 
 		base, err := ServerConfigToMap(live)

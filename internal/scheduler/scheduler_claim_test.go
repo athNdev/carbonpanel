@@ -18,69 +18,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestDueModUpdateSlotClaimRejectsConcurrentPolicyEdit(t *testing.T) {
-	s, store := newTriggerTestScheduler(t)
-	planner := &fakeModPlanner{}
-	s.SetModUpdatePlanner(planner)
-	ctx := context.Background()
-
-	require.NoError(t, store.CreateServer(ctx, &storage.Server{
-		ID: "srv-policy-race", Name: "policy-race", Status: storage.StatusStopped,
-	}))
-	overdue := time.Now().Add(-time.Hour)
-	task := &storage.ScheduledTask{
-		ID: "task-policy-race", ServerID: "srv-policy-race", Name: "policy race",
-		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
-		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", NextRun: &overdue,
-		Config: `{"enabled":true,"excluded_projects":["stale"]}`,
-	}
-	require.NoError(t, store.CreateScheduledTask(ctx, task))
-
-	const editedConfig = `{"enabled":true,"excluded_projects":["current"]}`
-	policyEdited := false
-	require.NoError(t, store.DB().Callback().Update().Before("gorm:update").Register(
-		"fixture:policy-edit-before-due-slot-claim",
-		func(tx *gorm.DB) {
-			if policyEdited || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "scheduled_tasks" {
-				return
-			}
-			updates, ok := tx.Statement.Dest.(map[string]any)
-			if !ok {
-				return
-			}
-			if _, updatingNextRun := updates["next_run"]; !updatingNextRun {
-				return
-			}
-
-			policyEdited = true
-			observed, err := store.GetScheduledTask(ctx, task.ID)
-			require.NoError(t, err)
-			edited := *observed
-			edited.Config = editedConfig
-			saved, err := store.UpdateModUpdatePolicy(ctx, observed, &edited, false)
-			require.NoError(t, err)
-			require.True(t, saved)
-		},
-	))
-
-	s.checkAndRunDueTasks()
-	s.wg.Wait()
-
-	require.True(t, policyEdited, "the fixture must race the due-slot claim")
-	require.Zero(t, planner.calls, "a stale policy snapshot must not reach the planner")
-	stored, err := store.GetScheduledTask(ctx, task.ID)
-	require.NoError(t, err)
-	require.Equal(t, editedConfig, stored.Config)
-	require.NotNil(t, stored.NextRun)
-	require.True(t, stored.NextRun.Equal(overdue), "a rejected claim must leave the due slot unchanged")
-
-	// The next check retries the still-due slot with the current policy.
-	s.checkAndRunDueTasks()
-	s.wg.Wait()
-	require.Equal(t, 1, planner.calls)
-	require.Equal(t, []string{"current"}, planner.cfg.ExcludedProjects)
-}
-
 func TestTransientNextRunFailureLeavesTaskEnabledAndDue(t *testing.T) {
 	s, store := newTriggerTestScheduler(t)
 	ctx := context.Background()

@@ -842,28 +842,14 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 
-	// Align Minecraft version and mod loader. Refuse runtime changes while a
-	// reviewed mod candidate is staged so we cannot publish into a new context.
+	// Align Minecraft version and mod loader
 	oldMCVersion, oldModLoader := server.MCVersion, server.ModLoader
 	server.MCVersion = pack.MCVersion
 	server.ModLoader = storage.ModLoader(strings.ToLower(pack.ModLoader))
 	runtimeChanged := oldMCVersion != server.MCVersion || oldModLoader != server.ModLoader
-	if runtimeChanged {
-		if has, checkErr := h.store.HasStagedReviewedModCandidates(r.Context(), server.ID); checkErr != nil {
-			http.Error(w, fmt.Sprintf("failed to check staged mod candidates: %v", checkErr), http.StatusInternalServerError)
-			return
-		} else if has {
-			http.Error(w, storage.ErrStagedModVersionChange.Error(), http.StatusConflict)
-			return
-		}
-	}
 
 	if req.Mode == "sync" {
 		if err := h.store.UpdateServer(r.Context(), server); err != nil {
-			if errors.Is(err, storage.ErrStagedModVersionChange) {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
-			}
 			http.Error(w, fmt.Sprintf("failed to update server: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -885,10 +871,6 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 				if rbErr := h.store.UpdateServer(r.Context(), server); rbErr != nil {
 					h.log.Error("packwiz sync rollback failed after config error: %v (original: %v)", rbErr, err)
 				}
-			}
-			if errors.Is(err, storage.ErrStagedModVersionChange) {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
 			}
 			http.Error(w, fmt.Sprintf("failed to update config: %v", err), http.StatusInternalServerError)
 			return
@@ -928,10 +910,6 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 
 	if runtimeChanged {
 		if err := h.store.UpdateServer(r.Context(), server); err != nil {
-			if errors.Is(err, storage.ErrStagedModVersionChange) {
-				http.Error(w, err.Error(), http.StatusConflict)
-				return
-			}
 			http.Error(w, fmt.Sprintf("failed to update server: %v", err), http.StatusInternalServerError)
 			return
 		}

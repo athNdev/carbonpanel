@@ -2189,9 +2189,6 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 
 	// Save server updates first
 	if err := s.store.UpdateServer(ctx, server); err != nil {
-		if errors.Is(err, storage.ErrStagedModVersionChange) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
-		}
 		s.log.Error("Failed to update server: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 	}
