@@ -4,7 +4,7 @@
 
 package mcp
 
-const descriptorFingerprint = "9207461c89b54410d92eaf90450c54df046a4a92de6ddb9357f385bcafde2cd5"
+const descriptorFingerprint = "8fdceb4c82761b6fd0576879cf38060803321d15499700cdfdeee61098ce8f9f"
 
 var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ActivityService/ListActivityLogs", Service: "carbonpanel.v1.ActivityService", Method: "ListActivityLogs", Client: "NewActivityServiceClient", Scope: "activity/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
