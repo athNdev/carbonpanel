@@ -50,14 +50,17 @@ export function updateStateClass(state: string | undefined): string {
 	}
 }
 
-// Identity of the candidate the operator actually reviewed. Installed fields
-// are deliberately excluded: installation drift is already refused by the RPC.
+// Identity of the candidate the operator actually reviewed: the offered row
+// (version id, SHA-512 and filename) together with the installed bytes. A
+// refresh that changes either half requires a fresh review; the RPC refuses
+// installation drift, but it must not be staged under the earlier review.
 export function updateCandidateFingerprint(preview?: UpdatePreviewLike | null): string {
 	if (!preview) return '';
 	return [
 		preview.candidateVersionId ?? '',
 		preview.candidateSha512 ?? '',
-		preview.candidateFilename ?? ''
+		preview.candidateFilename ?? '',
+		preview.installedSha512 ?? ''
 	].join('\u0000');
 }
 
@@ -83,12 +86,11 @@ export function currentUpdateSelectionIds(
 export function buildUpdateSelections(
 	mods: ModLike[],
 	selectedIds: string[],
-	selectedFingerprints?: Record<string, string>
+	selectedFingerprints: Record<string, string>
 ): UpdateSelection[] {
 	return mods
 		.filter((mod) => {
 			if (!selectedIds.includes(mod.id) || mod.updatePreview?.state !== 'available') return false;
-			if (!selectedFingerprints) return true;
 			const recorded = selectedFingerprints[mod.id];
 			return recorded !== undefined && updateCandidateFingerprint(mod.updatePreview) === recorded;
 		})
@@ -100,6 +102,54 @@ export function buildUpdateSelections(
 			candidateSha512: mod.updatePreview!.candidateSha512 ?? '',
 			candidateFilename: mod.updatePreview!.candidateFilename ?? ''
 		}));
+}
+
+export interface UpdateSelectionPrune {
+	kept: string[];
+	fingerprints: Record<string, string>;
+	/** Rows whose offered release or installed bytes changed since review. */
+	changed: string[];
+	/** Rows that are no longer listed, or were never fingerprinted. */
+	missing: string[];
+}
+
+// Reconcile a selection with a fresh listing. Only a check supplies previews;
+// a plain reload must not read their absence as "every candidate changed". With
+// previews, a still-available row whose identity changed is cleared, a row that
+// is merely no longer available is retained (it cannot stage until a later
+// check offers the reviewed candidate again), and a vanished row is dropped
+// silently. Without previews only vanished rows are dropped and the recorded
+// fingerprints are kept for the next check.
+export function pruneUpdateSelections(
+	mods: ModLike[],
+	selectedIds: string[],
+	selectedFingerprints: Record<string, string>,
+	previewsSupplied: boolean
+): UpdateSelectionPrune {
+	const byId = new Map(mods.map((mod) => [mod.id, mod]));
+	const kept: string[] = [];
+	const fingerprints: Record<string, string> = {};
+	const changed: string[] = [];
+	const missing: string[] = [];
+	for (const id of selectedIds) {
+		const recorded = selectedFingerprints[id];
+		const mod = byId.get(id);
+		if (!mod || recorded === undefined) {
+			missing.push(id);
+			continue;
+		}
+		if (
+			previewsSupplied &&
+			mod.updatePreview?.state === 'available' &&
+			updateCandidateFingerprint(mod.updatePreview) !== recorded
+		) {
+			changed.push(id);
+			continue;
+		}
+		kept.push(id);
+		fingerprints[id] = recorded;
+	}
+	return { kept, fingerprints, changed, missing };
 }
 
 export interface PolicyFormState {

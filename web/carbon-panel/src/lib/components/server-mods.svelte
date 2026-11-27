@@ -46,6 +46,7 @@ one at https://mozilla.org/MPL/2.0/.
 		DEFAULT_POLICY_STATE,
 		isCurrentServer,
 		policyFromPersistedTask,
+		pruneUpdateSelections,
 		updateCandidateFingerprint,
 		updateStateClass
 	} from '$lib/mod-update-ui';
@@ -94,6 +95,12 @@ one at https://mozilla.org/MPL/2.0/.
 	// The reviewed candidate identity for each checked row. A selection is only
 	// stageable while the current preview still matches this fingerprint.
 	let selectedUpdateFingerprints = $state<Record<string, string>>({});
+	// True only while `mods` came from a check that attached previews. A plain
+	// reload returns no previews, so their absence must not invalidate a review.
+	let previewsSupplied = $state(false);
+	// Why a selection was dropped, kept apart from the check summary so a later
+	// status update cannot hide it.
+	let selectionNotice = $state('');
 	let updateWindow = $state<'next' | 'time' | 'idle'>('next');
 	let applyAtLocal = $state('');
 	let idleMinutes = $state(15);
@@ -132,6 +139,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function toggleUpdateSelection(mod: Mod) {
 		if (mod.updatePreview?.state !== 'available') return;
+		selectionNotice = '';
 		if (selectedUpdates.includes(mod.id)) {
 			selectedUpdates = selectedUpdates.filter((selected) => selected !== mod.id);
 			const fingerprints = { ...selectedUpdateFingerprints };
@@ -288,10 +296,12 @@ one at https://mozilla.org/MPL/2.0/.
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 			updateStatus = '';
+			selectionNotice = '';
 			selectedUpdates = [];
 			selectedUpdateFingerprints = {};
 			checking = false;
 			mods = [];
+			previewsSupplied = false;
 			loading = true;
 			uploading = false;
 			hasLoaded = false;
@@ -322,18 +332,24 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	// A refresh can replace or withdraw the candidate an operator selected. Drop
-	// the stale selection instead of staging a release they did not review.
+	// only what the refresh proves stale, so a provider outage cannot discard
+	// intent: a plain reload has no previews and only drops deleted rows, a check
+	// clears a changed available candidate, and a row that is merely no longer
+	// available stays selected but unstageable until the reviewed one returns.
 	$effect(() => {
-		const validIds = currentSelectedUpdates;
-		if (validIds.length >= selectedUpdates.length) return;
-		const affected = selectedUpdates
-			.filter((id) => !validIds.includes(id))
-			.map((id) => mods.find((mod) => mod.id === id)?.fileName ?? id);
-		const fingerprints: Record<string, string> = {};
-		for (const id of validIds) fingerprints[id] = selectedUpdateFingerprints[id];
-		selectedUpdates = validIds;
-		selectedUpdateFingerprints = fingerprints;
-		updateStatus = `Selection cleared for ${affected.join(', ')}: the available release changed and must be reviewed and selected again.`;
+		const prune = pruneUpdateSelections(
+			mods,
+			selectedUpdates,
+			selectedUpdateFingerprints,
+			previewsSupplied
+		);
+		if (prune.changed.length === 0 && prune.missing.length === 0) return;
+		selectedUpdates = prune.kept;
+		selectedUpdateFingerprints = prune.fingerprints;
+		if (prune.changed.length > 0) {
+			const files = prune.changed.map((id) => mods.find((mod) => mod.id === id)?.fileName ?? id);
+			selectionNotice = `Selection cleared for ${files.join(', ')}: the installed file or offered release changed; review and select it again.`;
+		}
 	});
 
 	let filteredMods = $derived.by(() => {
@@ -377,6 +393,7 @@ one at https://mozilla.org/MPL/2.0/.
 		// explains the server cannot take mods. Do not make the call.
 		if (!canHaveMods()) {
 			mods = [];
+			previewsSupplied = false;
 			loading = false;
 			checking = false;
 			return;
@@ -388,6 +405,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const response = await rpcClient.mod.listMods({ serverId, checkUpdates });
 			if (!isCurrent()) return;
 			mods = response.mods;
+			previewsSupplied = checkUpdates;
 			if (checkUpdates) {
 				updateStatus = summarizeModUpdateCheck(mods.map((mod) => mod.updatePreview?.state));
 			}
@@ -452,6 +470,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const staged = response.stagedUpdates.filter((row) => row.outcome === 'staged').length;
 			const refused = response.stagedUpdates.length - staged;
 			updateStatus = `Staged ${staged} update(s) for the pending batch${refused ? `; ${refused} refused and left untouched` : ''}.`;
+			selectionNotice = '';
 			selectedUpdates = [];
 			selectedUpdateFingerprints = {};
 			if (staged > 0) {
@@ -690,6 +709,9 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	{/snippet}
 	<p role="status" class="px-3 text-sm text-muted-foreground">{updateStatus}</p>
+	{#if selectionNotice}
+		<p role="status" class="px-3 text-sm text-warning-text">{selectionNotice}</p>
+	{/if}
 	{#if availableUpdates.length > 0}
 		<!--
 			One compact control per row on a phone: an inline label beside the
@@ -947,7 +969,7 @@ one at https://mozilla.org/MPL/2.0/.
 											>
 												<input
 													type="checkbox"
-													checked={selectedUpdates.includes(mod.id)}
+													checked={currentSelectedUpdates.includes(mod.id)}
 													onchange={() => toggleUpdateSelection(mod)}
 													class="h-3.5 w-3.5 accent-primary"
 												/>

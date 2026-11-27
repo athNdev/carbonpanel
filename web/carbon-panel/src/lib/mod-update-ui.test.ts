@@ -7,6 +7,7 @@ import {
 	currentUpdateSelectionIds,
 	DEFAULT_POLICY_STATE,
 	policyFromPersistedTask,
+	pruneUpdateSelections,
 	updateCandidateFingerprint,
 	updateStateClass,
 	type ModLike
@@ -34,7 +35,8 @@ test('installed mod update selection only includes checked available previews', 
 		},
 		{ id: 'mod-3', fileName: 'plain.jar' }
 	];
-	assert.deepEqual(buildUpdateSelections(mods, ['mod-1']), [
+	const fingerprints = { 'mod-1': updateCandidateFingerprint(available.updatePreview) };
+	assert.deepEqual(buildUpdateSelections(mods, ['mod-1'], fingerprints), [
 		{
 			modId: 'mod-1',
 			fileName: 'mod.jar',
@@ -44,7 +46,13 @@ test('installed mod update selection only includes checked available previews', 
 			candidateFilename: 'mod-2.jar'
 		}
 	]);
-	assert.deepEqual(buildUpdateSelections(mods, ['mod-2', 'mod-3']), []);
+	assert.deepEqual(
+		buildUpdateSelections(mods, ['mod-2', 'mod-3'], {
+			'mod-2': updateCandidateFingerprint(mods[1].updatePreview),
+			'mod-3': ''
+		}),
+		[]
+	);
 });
 
 function withPreview(changes: Partial<NonNullable<ModLike['updatePreview']>>): ModLike {
@@ -93,6 +101,41 @@ test('a row leaving the available state invalidates the selection', () => {
 	);
 });
 
+test('a retained non-available selection is not stageable until the reviewed candidate returns', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	const fingerprints = { 'mod-1': fingerprint };
+	const unavailable = withPreview({ state: 'unavailable' });
+	assert.deepEqual(currentUpdateSelectionIds([unavailable], ['mod-1'], fingerprints), []);
+	assert.deepEqual(buildUpdateSelections([unavailable], ['mod-1'], fingerprints), []);
+	// A provider recovery that offers the same candidate revalidates the intent.
+	assert.deepEqual(currentUpdateSelectionIds([available], ['mod-1'], fingerprints), ['mod-1']);
+	assert.deepEqual(buildUpdateSelections([available], ['mod-1'], fingerprints), [
+		{
+			modId: 'mod-1',
+			fileName: 'mod.jar',
+			installedSha512: 'installed-hash',
+			candidateVersionId: 'version-2',
+			candidateSha512: 'candidate-hash',
+			candidateFilename: 'mod-2.jar'
+		}
+	]);
+});
+
+test('an installed digest change invalidates the reviewed selection in both helpers', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	const reinstalled = withPreview({ installedSha512: 'other-installed-hash' });
+	assert.deepEqual(
+		currentUpdateSelectionIds([reinstalled], ['mod-1'], { 'mod-1': fingerprint }),
+		[]
+	);
+	assert.deepEqual(buildUpdateSelections([reinstalled], ['mod-1'], { 'mod-1': fingerprint }), []);
+});
+
+test('a selection without a recorded fingerprint cannot stage', () => {
+	assert.deepEqual(currentUpdateSelectionIds([available], ['mod-1'], {}), []);
+	assert.deepEqual(buildUpdateSelections([available], ['mod-1'], {}), []);
+});
+
 test('current selection ids keep only rows whose candidate still matches the review', () => {
 	const unchanged: ModLike = { ...available, id: 'mod-1', fileName: 'unchanged.jar' };
 	const changed: ModLike = {
@@ -125,7 +168,61 @@ test('the candidate fingerprint distinguishes version, digest and filename', () 
 		base,
 		updateCandidateFingerprint({ ...available.updatePreview, candidateFilename: 'f3.jar' })
 	);
+	assert.notEqual(
+		base,
+		updateCandidateFingerprint({ ...available.updatePreview, installedSha512: 'i3' })
+	);
 	assert.equal(updateCandidateFingerprint(null), '');
+});
+
+test('pruning clears only a changed available candidate and keeps the rest selected', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	const unchanged: ModLike = { ...available, id: 'mod-1' };
+	const changed: ModLike = {
+		...withPreview({ candidateVersionId: 'version-3' }),
+		id: 'mod-2',
+		fileName: 'changed.jar'
+	};
+	const prune = pruneUpdateSelections(
+		[unchanged, changed],
+		['mod-1', 'mod-2'],
+		{ 'mod-1': fingerprint, 'mod-2': fingerprint },
+		true
+	);
+	assert.deepEqual(prune.kept, ['mod-1']);
+	assert.deepEqual(prune.changed, ['mod-2']);
+	assert.deepEqual(prune.missing, []);
+	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
+});
+
+test('a check that withdraws availability retains the reviewed selection quietly', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	const prune = pruneUpdateSelections(
+		[withPreview({ state: 'unavailable' })],
+		['mod-1'],
+		{ 'mod-1': fingerprint },
+		true
+	);
+	assert.deepEqual(prune.kept, ['mod-1']);
+	assert.deepEqual(prune.changed, []);
+	assert.deepEqual(prune.missing, []);
+	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
+});
+
+test('a reload without previews keeps reviewed candidates and drops only deleted mods', () => {
+	const fingerprint = updateCandidateFingerprint(available.updatePreview);
+	// listMods without checkUpdates returns rows without previews.
+	const plain: ModLike = { id: 'mod-1', fileName: 'mod.jar' };
+	const prune = pruneUpdateSelections(
+		[plain],
+		['mod-1', 'mod-deleted'],
+		{ 'mod-1': fingerprint, 'mod-deleted': fingerprint },
+		false
+	);
+	assert.deepEqual(prune.kept, ['mod-1']);
+	assert.deepEqual(prune.changed, []);
+	assert.deepEqual(prune.missing, ['mod-deleted']);
+	assert.deepEqual(prune.fingerprints, { 'mod-1': fingerprint });
 });
 
 test('each preview state has the intended presentation treatment', () => {

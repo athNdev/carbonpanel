@@ -32,9 +32,9 @@ JSON-backed `mod_update` policies use the same planner; save waits for the task 
 
 # Consequences
 
-- The panel binds each reviewed selection to the candidate version id, SHA-512
-  and filename it was selected with; a refresh returning a different candidate
-  clears that row's selection, so a new release cannot be staged under the earlier review.
+- The panel binds each reviewed selection to the installed file and the offered
+  candidate (version id, SHA-512, filename); a change to either clears that row,
+  so an unchanged candidate with changed installed bytes needs re-selection.
 - Drift, provider, download and checksum mismatches are per-item refusals;
   other selected updates still stage. The reviewed installed digest selects the
   actual live copy, and two matching copies are refused as ambiguous.
