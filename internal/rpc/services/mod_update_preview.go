@@ -19,7 +19,7 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
-// providerLookupPrefix marks a failed provider lookup so a scheduled policy can
+// providerLookupPrefix marks a failed provider lookup so the preview can
 // distinguish a provider outage from a genuinely unidentified local upload.
 // Provider errors may embed response bodies, request URLs and transport
 // details, so the client-visible reason is fixed instead of echoing them.
