@@ -196,6 +196,58 @@ type stagedModUpdate struct {
 	Reason   string
 }
 
+// modUpdateOutcomeRetryable marks a pre-fetch already-staged decision that the
+// current open batch no longer backs. This request must not download or stage
+// that file; a resubmission can stage it.
+const modUpdateOutcomeRetryable = "retryable"
+
+func markModUpdateRetryable(result *stagedModUpdate) {
+	result.Outcome = modUpdateOutcomeRetryable
+	result.Reason = "the open update batch changed; resubmit to stage this file"
+}
+
+// currentBatchHoldsAlreadyStaged verifies the pre-fetch already-staged decisions
+// against the batch that is open now. It returns that batch when every reported
+// file is still pending, or nil after marking the stale results retryable.
+func (s *ModService) currentBatchHoldsAlreadyStaged(ctx context.Context, serverID string, results []stagedModUpdate) (*storage.ServerUpdateBatch, bool, error) {
+	current, err := s.store.OpenUpdateBatch(ctx, serverID)
+	if err != nil {
+		return nil, false, err
+	}
+	if current == nil {
+		stale := false
+		for i := range results {
+			if results[i].Outcome == "already_staged" {
+				markModUpdateRetryable(&results[i])
+				stale = true
+			}
+		}
+		return nil, stale, nil
+	}
+	rows, err := s.store.ListBatchContent(ctx, current.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	present := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		if row.Kind == storage.StagedKindMod {
+			present[row.FileName] = true
+		}
+	}
+	stale := false
+	for i := range results {
+		if results[i].Outcome != "already_staged" || present[results[i].FileName] {
+			continue
+		}
+		markModUpdateRetryable(&results[i])
+		stale = true
+	}
+	if stale {
+		return nil, true, nil
+	}
+	return current, false, nil
+}
+
 type readyModUpdate struct {
 	selection   *v1.ModUpdateSelection
 	targetPath  string
@@ -461,10 +513,21 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if len(ready) == 0 {
 		// An all-already-staged resubmission names the batch it was checked
 		// against, so the caller binds to the same open batch instead of
-		// treating the response as batchless. Other all-refused outcomes are
-		// not evidence that the open batch is the right target.
+		// treating the response as batchless. Recheck the current batch content
+		// first: a batch discarded between the snapshot and here must not be
+		// reported as holding files it no longer contains. Those results are
+		// retryable so a resubmission can stage them. Other all-refused outcomes
+		// are not evidence that the open batch is the right target.
 		if openBatch != nil && allAlreadyStaged(results) {
-			return results, openBatch, transient, nil
+			current, stale, err := s.currentBatchHoldsAlreadyStaged(ctx, server.ID, results)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if stale {
+				transient = errors.Join(transient, errors.New("the open update batch changed; resubmit to stage the reported files"))
+				return results, nil, transient, nil
+			}
+			return results, current, transient, nil
 		}
 		return results, nil, transient, nil
 	}
@@ -518,6 +581,18 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			if row.Kind == storage.StagedKindMod {
 				alreadyStaged[row.FileName] = true
 			}
+		}
+		// The pre-fetch snapshot may have been taken against a batch that was
+		// discarded while the candidate was downloaded. Do not claim
+		// already_staged for a file the current batch no longer holds: mark it
+		// retryable and leave it for a resubmission instead of staging it here.
+		for i := range results {
+			result := &results[i]
+			if result.Outcome != "already_staged" || alreadyStaged[result.FileName] {
+				continue
+			}
+			markModUpdateRetryable(result)
+			transient = errors.Join(transient, fmt.Errorf("%s: %s", result.FileName, result.Reason))
 		}
 		for i := range ready {
 			item := ready[i]

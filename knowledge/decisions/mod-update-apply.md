@@ -44,8 +44,7 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   retryable policy error; definitive validation refusals remain per-item.
 - Publishing, backup, rollback, apply windows and per-server serialization are
   the existing staged-batch guarantees. Durable approval, the data-write lease
-  and window checks are in
-  [Reviewed mod update publication](mod-update-publication.md).
+  and window checks are in [Reviewed mod update publication](mod-update-publication.md).
 - The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
@@ -53,8 +52,9 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
 - Journaled admission recomputes the runtime target after reload and refuses a
   moved target for re-review. An open-batch file is reported `already_staged`
-  before download, spends no budget, and the under-journal recheck still refuses
-  a late duplicate. An all-already-staged resubmission returns that open batch
-  id, so the caller binds to the checked batch until the under-journal recheck.
+  before download, spends no budget, and the under-journal recheck refuses a
+  late duplicate. A resubmission names the batch only after confirming it still
+  holds every reported file; a file no longer pending after a discard is
+  retryable and is not staged here.
 - Due slots and execution claims are in
   [Mod update scheduling and legacy rows](mod-update-scheduling.md).

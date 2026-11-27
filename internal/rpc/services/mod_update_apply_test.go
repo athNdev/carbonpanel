@@ -1412,3 +1412,111 @@ func TestAllAlreadyStagedResubmissionReturnsOpenBatchID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 }
+
+// A batch discarded after the pre-fetch snapshot must not be named as the batch
+// that holds an all-already-staged resubmission. The result is retryable, and a
+// resubmission can stage the file.
+func TestAllAlreadyStagedResubmissionDroppedBatchIsRetryable(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-all-already-staged-dropped", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{data: map[string][]byte{"a.jar": []byte("next-a")}}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(fetcher)
+
+	first, err := svc.UpdateMod(ctx, connect.NewRequest(
+		twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)))
+	require.NoError(t, err)
+	require.Equal(t, "staged", first.Msg.GetStagedUpdates()[0].GetOutcome())
+	firstBatch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, firstBatch)
+
+	var discardOnce sync.Once
+	svc.SetModUpdateLookup(twoModPreviewFixture{onLookup: func(string) {
+		discardOnce.Do(func() {
+			dropContentBatch(t, ctx, store, firstBatch.ID)
+		})
+	}})
+	fetcher.calls = 0
+	second, err := svc.UpdateMod(ctx, connect.NewRequest(
+		twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)))
+	require.NoError(t, err)
+	require.Empty(t, second.Msg.GetUpdateBatchId(), "a discarded batch must not be returned as the target")
+	require.Len(t, second.Msg.GetStagedUpdates(), 1)
+	require.Equal(t, modUpdateOutcomeRetryable, second.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Zero(t, fetcher.calls, "a retryable already-staged result must not download again")
+
+	current, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, current)
+}
+
+// A-already-staged plus B: if the snapshot's batch is discarded while B is
+// downloaded, A must become retryable while B stages into the new batch.
+func TestAlreadyStagedFileIsRetryableWhenBatchDiscardedBeforeAdmission(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-stale-already-staged", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(fetcher)
+
+	first, err := svc.UpdateMod(ctx, connect.NewRequest(
+		twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)))
+	require.NoError(t, err)
+	require.Equal(t, "staged", first.Msg.GetStagedUpdates()[0].GetOutcome())
+	firstBatch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, firstBatch)
+
+	fetcher.calls = 0
+	fetcher.onFetch = func(filename string) {
+		if filename == "b.jar" {
+			dropContentBatch(t, ctx, store, firstBatch.ID)
+		}
+	}
+	second := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+	second.UpdateSelections = append(second.UpdateSelections,
+		twoModRequest(server.ID, "b.jar", "installed-b", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0).UpdateSelections...)
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(second))
+	require.NoError(t, err)
+	require.Equal(t, 1, fetcher.calls, "only B is downloaded; A was reported already staged in the snapshot")
+	outcomes := map[string]string{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetFileName()] = row.GetOutcome()
+	}
+	require.Equal(t, modUpdateOutcomeRetryable, outcomes["a.jar"])
+	require.Equal(t, "staged", outcomes["b.jar"])
+	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
+	require.NotEqual(t, firstBatch.ID, res.Msg.GetUpdateBatchId())
+	rows, err := store.ListBatchContent(ctx, res.Msg.GetUpdateBatchId())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "b.jar", rows[0].FileName)
+}
+
+// dropContentBatch models an operator discarding the open batch: staged rows
+// become discarded and the batch closes so it can no longer be targeted.
+func dropContentBatch(t *testing.T, ctx context.Context, store *storage.Store, batchID string) {
+	t.Helper()
+	rows, err := store.ListBatchContent(ctx, batchID)
+	require.NoError(t, err)
+	for _, row := range rows {
+		_, err := store.DiscardStagedContent(ctx, row.ID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.CloseUpdateBatch(ctx, batchID, storage.UpdateBatchDiscarded))
+}
