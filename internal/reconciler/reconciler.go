@@ -798,7 +798,10 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		r.convergeWhenTransitionEnds(serverID)
 		return nil
 	}
-	defer transition.Release()
+	// This pass is itself the convergence the transition-end hook would
+	// request. Releasing quietly keeps the hook for genuine operator and
+	// lifecycle releases instead of letting every pass queue the next one.
+	defer transition.ReleaseQuiet()
 
 	server, err := r.store.GetServer(ctx, serverID)
 	if err != nil || server == nil {

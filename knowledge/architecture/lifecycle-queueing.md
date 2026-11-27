@@ -28,8 +28,10 @@ sources:
   disappear before recreating; it never runs a second full stop window inside
   the lock.
 - `docker.SetTransitionEndNotifier(reconciler.NotifyTransitionEnded)` ends the
-  reconciler's blind window: stored status converges when a transition
-  releases, not at the next sweep.
+  reconciler's blind window: stored status converges when a lifecycle
+  transition releases, not at the next sweep. Only `Release` notifies; the
+  reconciler's own pass uses `ReleaseQuiet` because that pass already converged
+  the server, so releasing it must not queue a redundant follow-up pass.
 
 # Version-change gate
 

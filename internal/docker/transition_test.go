@@ -90,6 +90,49 @@ func TestStaleReleaseKeepsLaterOwner(t *testing.T) {
 	}
 }
 
+// TestReleaseNotifiesButQuietReleaseDoesNot pins the two release paths. A
+// genuine lifecycle release wakes the transition-end hook; the reconciler's own
+// quiet release ends the claim (so waiters wake and the server is acquirable)
+// without scheduling a redundant convergence pass.
+func TestReleaseNotifiesButQuietReleaseDoesNot(t *testing.T) {
+	var notified []string
+	SetTransitionEndNotifier(func(serverID string) {
+		notified = append(notified, serverID)
+	})
+	t.Cleanup(func() { SetTransitionEndNotifier(nil) })
+
+	loud, err := TryBeginServerTransition("srv-notify")
+	if err != nil {
+		t.Fatalf("transition should be acquired: %v", err)
+	}
+	loud.Release()
+	if len(notified) != 1 || notified[0] != "srv-notify" {
+		t.Fatalf("notifications after Release = %v, want [srv-notify]", notified)
+	}
+
+	quiet, err := TryBeginServerTransition("srv-quiet")
+	if err != nil {
+		t.Fatalf("transition should be acquired: %v", err)
+	}
+	quiet.ReleaseQuiet()
+	if len(notified) != 1 {
+		t.Fatalf("quiet release notified the hook: %v", notified)
+	}
+	select {
+	case <-quiet.Done():
+	default:
+		t.Fatal("quiet release must still close Done")
+	}
+	if ServerTransitionInFlight("srv-quiet") {
+		t.Fatal("quiet release must end the claim")
+	}
+	reacquired, err := TryBeginServerTransition("srv-quiet")
+	if err != nil {
+		t.Fatalf("server should be acquirable after a quiet release: %v", err)
+	}
+	reacquired.Release()
+}
+
 func TestWaitForServerTransitionWaitsUntilReleased(t *testing.T) {
 	transition, err := TryBeginServerTransition("srv-wait")
 	if err != nil {

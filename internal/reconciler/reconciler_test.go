@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -569,9 +570,10 @@ func TestReconcileOOMKillIsReportedAsError(t *testing.T) {
 }
 
 type sequencedClient struct {
-	mu      sync.Mutex
-	summary *container.Summary
-	state   *docker.ContainerState
+	mu           sync.Mutex
+	summary      *container.Summary
+	state        *docker.ContainerState
+	observations int
 }
 
 func (c *sequencedClient) set(summary *container.Summary, state *docker.ContainerState) {
@@ -593,7 +595,14 @@ func (c *sequencedClient) ResolveContainer(context.Context, string) (*container.
 func (c *sequencedClient) ObserveContainer(context.Context, string) (*docker.ContainerState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observations++
 	return c.state, nil
+}
+
+func (c *sequencedClient) observeCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.observations
 }
 
 func (c *sequencedClient) StartContainer(context.Context, string) error { return nil }
@@ -1459,6 +1468,82 @@ func TestTransitionEndTriggersConvergenceWithoutTheSweep(t *testing.T) {
 	}
 	got, _ := store.GetServer(context.Background(), server.ID)
 	t.Fatalf("status after the transition ended = %s, want running", got.Status)
+}
+
+// TestReconcilerPassDoesNotNudgeItself wires the production transition-end hook
+// the way cmd/carbon-panel does. A convergence pass must release its own
+// transition quietly: notifying would queue another pass, and each pass would
+// keep queueing the next, spinning the reconciler instead of leaving it to
+// Docker events and the sweep. A genuine external release must still nudge.
+func TestReconcilerPassDoesNotNudgeItself(t *testing.T) {
+	server := &db.Server{ID: "srv-self-nudge", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	cli := &sequencedClient{}
+	cli.set(&container.Summary{ID: "c1"}, &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning})
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour, // never the reason a follow-up pass runs here
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	// The startup pass observes the already-running container once.
+	waitForObserveCalls(t, cli, 1)
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
+	}
+
+	// Give any self-queued follow-up well past the debounce window to run. With
+	// the self-nudge loop, passes keep arriving every window and this count
+	// grows; without it, the single startup pass is all that runs.
+	deadline := time.Now().Add(10 * r.cfg.DebounceWindow)
+	for time.Now().Before(deadline) {
+		time.Sleep(r.cfg.DebounceWindow)
+	}
+	if got := cli.observeCalls(); got != 1 {
+		t.Fatalf("startup pass scheduled %d follow-up observations, want 1 total", got)
+	}
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
+	}
+
+	// An operator/lifecycle release is still a real transition end: it notifies
+	// and queues a convergence pass.
+	external, err := docker.TryBeginServerTransition(server.ID)
+	if err != nil {
+		t.Fatalf("external transition: %v", err)
+	}
+	external.Release()
+	if got := notified.Load(); got != 1 {
+		t.Fatalf("external release notified %d times, want 1", got)
+	}
+	waitForObserveCalls(t, cli, 2)
+}
+
+func waitForObserveCalls(t *testing.T, cli *sequencedClient, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cli.observeCalls() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("observations = %d, want at least %d", cli.observeCalls(), want)
 }
 
 func TestNotifyTransitionEndedNudgesTheActiveReconciler(t *testing.T) {

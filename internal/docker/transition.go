@@ -56,13 +56,15 @@ const slowTransitionWarnAt = 2 * time.Minute
 // can capture warnings and the server process can install its logger.
 var transitionWarner = func(string, ...any) {}
 
-// transitionEndNotifier receives the server ID of every released lifecycle
-// transition. The reconciler uses it to converge status immediately instead of
-// waiting for the next sweep. Nil until a process installs a notifier.
+// transitionEndNotifier receives the server ID of every lifecycle transition
+// released with Release. The reconciler's own transitions use ReleaseQuiet and
+// are deliberately omitted. The reconciler uses the hook to converge status
+// immediately instead of waiting for the next sweep. Nil until a process
+// installs a notifier.
 var transitionEndNotifier func(serverID string)
 
 // SetTransitionEndNotifier installs the callback fired when a lifecycle
-// transition is released. Passing nil restores the silent default.
+// transition is released with Release. Passing nil restores the silent default.
 func SetTransitionEndNotifier(fn func(serverID string)) {
 	transitionEndNotifier = fn
 }
@@ -116,10 +118,22 @@ func (t *Transition) Done() <-chan struct{} {
 	return t.done
 }
 
-// Release ends the transition. It removes the registration only while this
-// handle still owns it, so releasing a stale handle cannot evict a later owner
-// that has since claimed the server.
+// Release ends the transition and notifies the transition-end hook. It removes
+// the registration only while this handle still owns it, so releasing a stale
+// handle cannot evict a later owner that has since claimed the server.
 func (t *Transition) Release() {
+	t.release(true)
+}
+
+// ReleaseQuiet ends the transition without firing the transition-end hook. A
+// caller whose work already converged the server - the reconciler's own pass -
+// uses it so its release does not queue another pass. The claim still ends and
+// waiters still wake; only the end notification is skipped.
+func (t *Transition) ReleaseQuiet() {
+	t.release(false)
+}
+
+func (t *Transition) release(notify bool) {
 	if t == nil {
 		return
 	}
@@ -130,7 +144,7 @@ func (t *Transition) Release() {
 		}
 		close(t.done)
 		serverTransitions.Unlock()
-		if transitionEndNotifier != nil {
+		if notify && transitionEndNotifier != nil {
 			transitionEndNotifier(t.serverID)
 		}
 	})
