@@ -20,7 +20,8 @@ no server ID remain in the global audit API.
 Each lifecycle row also shows its node, endpoint generation, request key and
 durable phase, so it can be joined to a server or node. Where daemon identity
 matters the row shows a derived correlation state: **matched**, **unmatched**
-or **unknown**. A raw Docker daemon id, host or socket is never shown. An
+or **unknown**. A raw Docker daemon id is never shown. Recorded error text can
+include a host or socket as evidence; credentials in it are still redacted. An
 **unknown** correlation means the panel could not compare daemon identity, not
 that the operation failed.
 

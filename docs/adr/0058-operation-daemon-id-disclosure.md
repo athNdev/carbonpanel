@@ -16,9 +16,9 @@ question: does this operation belong to this server and node, and is its
 outcome still safe to retry?
 
 The operation API, the server Operations panel and the support bundle already
-avoid credentials and Docker hosts. The remaining raw daemon id on the CLI list
-and in internal projections would still disclose a stable host fingerprint
-without helping the operator.
+expose no raw daemon id and no dedicated Docker host, socket or credential
+field. The remaining raw daemon id on the CLI list and in internal projections
+would still disclose a stable host fingerprint without helping the operator.
 
 ## Decision
 
@@ -37,14 +37,16 @@ Operator projections expose only non-secret correlation data:
 Correlation is `unmatched` when the recorded node, endpoint generation or
 observed daemon identity differs from the current node. It is `unknown` when
 either side has no observed daemon identity, so the panel does not claim a
-match. The raw daemon id, host, socket and credentials never leave the
-controller.
+match. The correlation fields never carry the raw daemon id, host, socket or
+credential, and no operator-facing projection serializes the raw daemon id.
+Recorded error text keeps its existing credential redaction; hosts, sockets and
+daemon messages in that text remain as evidence.
 
 ## Consequences
 
 - An operator can join an operation to a server/node and decide whether to
-  wait, retry with a new request id or release the lock without seeing a host
-  fingerprint.
+  wait, retry with a new request id or release the lock without seeing a
+  daemon-id fingerprint.
 - The wire change is additive: existing clients ignore the new fields, and the
   daemon id was never part of the operator response.
 - Legacy nodes that have not observed a daemon id report `unknown` correlation

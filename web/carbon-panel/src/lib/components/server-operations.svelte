@@ -20,6 +20,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		countOperationsByOutcome,
 		operationActionLabel,
 		outcomeTagType,
+		requestKeyTitle,
 		requiresManualCheck
 	} from './server-operations';
 	import { CarbonConfirm, CarbonTag } from '$lib/components/carbon';
@@ -169,8 +170,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/if}
 
 	{#if operations.length > 0}
-		<div class="overflow-x-auto">
-			<table class="w-full min-w-[900px] text-xs" aria-label="Lifecycle operation journal">
+		<div
+			class="focus-ring overflow-x-auto"
+			role="region"
+			aria-label="Operations table"
+			tabindex="0"
+		>
+			<table
+				class="operation-journal-table w-full min-w-[900px] text-xs"
+				aria-label="Lifecycle operation journal"
+			>
 				<thead>
 					<tr class="border-b border-border text-left text-muted-foreground">
 						<th scope="col" class="py-2 pr-4 font-medium">Started</th>
@@ -193,7 +202,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<div class="text-[11px] text-muted-foreground">{op.phase}</div>
 							</td>
 							<td class="py-2 pr-4 whitespace-nowrap">
-								<div class="font-mono" title={op.nodeId || ''}>{op.nodeId || '—'}</div>
+								<div class="max-w-[18rem] truncate font-mono" title={op.nodeId || undefined}>
+									{op.nodeId || '—'}
+								</div>
 								<div
 									class="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
 								>
@@ -203,10 +214,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									>
 								</div>
 							</td>
-							<td
-								class="max-w-[180px] truncate py-2 pr-4 font-mono"
-								title={`request id: ${op.requestId || '—'}`}
-							>
+							<td class="max-w-[180px] truncate py-2 pr-4 font-mono" title={requestKeyTitle(op)}>
 								{op.requestKey || op.requestId || '—'}
 							</td>
 							<td class="py-2 pr-4">

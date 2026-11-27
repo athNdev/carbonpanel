@@ -93,3 +93,16 @@ export function countOperationsByOutcome(
 	}
 	return counts;
 }
+
+/**
+ * The request key column shows the journal key and falls back to the client
+ * request id on partial rows. The tooltip has to name the value that is on
+ * screen: a generated key is a request key, not a request id.
+ */
+export function requestKeyTitle(
+	op: Pick<LifecycleOperation, 'requestKey' | 'requestId'>
+): string | undefined {
+	if (op.requestKey) return `request key: ${op.requestKey}`;
+	if (op.requestId) return `request id: ${op.requestId}`;
+	return undefined;
+}

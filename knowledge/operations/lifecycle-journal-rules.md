@@ -51,9 +51,9 @@ sources:
   `executing_stale`, uncertain effect is `uncertain_external_effect`, both
   "do not retry blindly".
 - The projection joins by node id, endpoint generation, request key and phase.
-  Daemon identity appears only as `matched` / `unmatched` / `unknown`; no raw
-  daemon id, host, socket or credential. See
-  [ADR 0058](../../docs/adr/0058-operation-daemon-id-disclosure.md).
+  Daemon identity appears only as `matched` / `unmatched` / `unknown`, and no raw
+  daemon id is projected: the correlation fields carry no daemon id, host,
+  socket or credential. See [ADR 0058](../../docs/adr/0058-operation-daemon-id-disclosure.md).
 - Credentials in recorded error text are redacted before it reaches a
   diagnostic. Hosts, paths and daemon messages stay: they are the evidence.
 - The activity feed stores the same client `request_id` as the journal row, so

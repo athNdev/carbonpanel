@@ -12,6 +12,7 @@ import {
 	countOperationsByOutcome,
 	operationActionLabel,
 	outcomeTagType,
+	requestKeyTitle,
 	requiresManualCheck
 } from './server-operations';
 
@@ -75,6 +76,23 @@ test('correlation never renders a daemon match when the state is unknown', () =>
 	assert.equal(correlationTagType(undefined as unknown as string), 'gray');
 });
 
+test('the request key tooltip names the value that is on screen', () => {
+	assert.equal(
+		requestKeyTitle({ requestKey: 'req-9f21-start', requestId: 'req-9f21-start' }),
+		'request key: req-9f21-start'
+	);
+	// A generated key is a journal request key, not a request id.
+	assert.equal(
+		requestKeyTitle({ requestKey: 'generated:7d3c-migrate', requestId: '' }),
+		'request key: generated:7d3c-migrate'
+	);
+	assert.equal(
+		requestKeyTitle({ requestKey: '', requestId: 'req-77ab-migrate' }),
+		'request id: req-77ab-migrate'
+	);
+	assert.equal(requestKeyTitle({ requestKey: '', requestId: '' }), undefined);
+});
+
 test('counts add up to the number of rows', () => {
 	const counts = countOperationsByOutcome([
 		{ outcome: 'success' },
@@ -119,4 +137,38 @@ test('journal copy is trimmed to the approved sentences', () => {
 		content.includes('requiresManualCheck(op)'),
 		'stale and uncertain rows must warn against a blind retry'
 	);
+});
+
+test('the journal has one keyboard-operable horizontal scroll region', () => {
+	const markup = fs.readFileSync(
+		path.resolve(import.meta.dirname, 'server-operations.svelte'),
+		'utf-8'
+	);
+	const css = fs
+		.readFileSync(path.resolve(import.meta.dirname, '../../app.css'), 'utf-8')
+		.replace(/\r\n/g, '\n');
+
+	assert.match(markup, /role="region"/);
+	assert.match(markup, /aria-label="Operations table"/);
+	assert.match(markup, /tabindex="0"/);
+	assert.match(markup, /class="[^"]*focus-ring[^"]*"/);
+	assert.match(markup, /class="[^"]*overflow-x-auto[^"]*"/);
+
+	// The narrow-width table safety net turns a table into a block scroller.
+	// This class keeps the wrapper the only horizontal scroll surface, so a long
+	// cell cannot hide the right-hand columns behind a second scrollbar.
+	assert.match(markup, /operation-journal-table/);
+	assert.match(
+		css,
+		/\.operation-journal-table\s*\{[^}]*display:\s*table;[^}]*overflow:\s*visible;/
+	);
+});
+
+test('a long node id truncates while keeping its full value available', () => {
+	const markup = fs.readFileSync(
+		path.resolve(import.meta.dirname, 'server-operations.svelte'),
+		'utf-8'
+	);
+	assert.match(markup, /max-w-\[18rem\] truncate font-mono/);
+	assert.match(markup, /title=\{op\.nodeId \|\| undefined\}/);
 });
