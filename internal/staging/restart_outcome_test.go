@@ -996,6 +996,18 @@ func TestModuleIntentMakesInterruptedRecoveryAmbiguousAndSealed(t *testing.T) {
 	require.Equal(t, before, after, "ambiguous recovery must not restore or clean up")
 }
 
+// clearRetainedRecoveryLease drops a lease retained for a pending recovery so
+// repeated in-process test runs start from a fresh gate.
+func clearRetainedRecoveryLease(serverID string) {
+	retainedRecoveryLeases.Lock()
+	lease := retainedRecoveryLeases.byServer[serverID]
+	delete(retainedRecoveryLeases.byServer, serverID)
+	retainedRecoveryLeases.Unlock()
+	if lease != nil {
+		lease.Release()
+	}
+}
+
 // stageTwoFileBatch stages two ordinary file rows in created order and returns
 // the batch id plus the rows as the publisher will select them.
 func stageTwoFileBatch(t *testing.T, store *storage.Store, data, serverID, first, second string) (string, []storage.StagedContentChange) {
@@ -1005,6 +1017,11 @@ func stageTwoFileBatch(t *testing.T, store *storage.Store, data, serverID, first
 	batch := openBatch(t, store, serverID, storage.UpdateWindowNextRestart, nil, 0)
 	stageFile(t, store, data, batch, serverID, first, "new-"+first)
 	stageFile(t, store, data, batch, serverID, second, "new-"+second)
+	// Pin the creation order so the publisher always writes the first target
+	// before the injected failure on the second.
+	require.NoError(t, store.DB().Model(&storage.StagedContentChange{}).
+		Where("id = ?", serverID+"-"+first).
+		Update("created_at", time.Now().UTC().Add(-time.Hour)).Error)
 	rows, err := store.ListBatchContent(context.Background(), batch)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -1032,6 +1049,7 @@ func TestApplyingRecoveryRefusesToOverwriteAnOrdinarySave(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
 	server := &storage.Server{ID: "recover-save", Name: "recover-save", DataPath: data}
+	t.Cleanup(func() { clearRetainedRecoveryLease(server.ID) })
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	require.NoError(t, os.WriteFile(filepath.Join(data, "file.txt"), []byte("old"), 0o644))
@@ -1084,6 +1102,7 @@ func TestInterruptedApplyingAttemptRecoversItsOwnWrites(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
 	server := &storage.Server{ID: "recover-partial", Name: "recover-partial", DataPath: data}
+	t.Cleanup(func() { clearRetainedRecoveryLease(server.ID) })
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	batch, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
@@ -1098,12 +1117,7 @@ func TestInterruptedApplyingAttemptRecoversItsOwnWrites(t *testing.T) {
 
 	// A process restart drops the retained lease; recovery must still prove the
 	// written target by its staged post-image and restore it automatically.
-	retainedRecoveryLeases.Lock()
-	if lease := retainedRecoveryLeases.byServer[server.ID]; lease != nil {
-		delete(retainedRecoveryLeases.byServer, server.ID)
-		lease.Release()
-	}
-	retainedRecoveryLeases.Unlock()
+	clearRetainedRecoveryLease(server.ID)
 	require.NoError(t, os.WriteFile(filepath.Join(data, filepath.FromSlash(rows[1].StagePath)), []byte("new-second.txt"), 0o644))
 	before, err := store.GetUpdatePublication(ctx, batch)
 	require.NoError(t, err)
@@ -1140,6 +1154,7 @@ func TestFailedApplyingAttemptKeepsTheLeaseUntilRetry(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)
 	server := &storage.Server{ID: "recover-lease", Name: "recover-lease", DataPath: data}
+	t.Cleanup(func() { clearRetainedRecoveryLease(server.ID) })
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	_, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
