@@ -10,7 +10,7 @@
 // @ts-nocheck -- Bun test-only harness; Bun plugin/global types are not in this app's tsconfig.
 
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
-import { compile } from 'svelte/compiler';
+import { compile, compileModule } from 'svelte/compiler';
 import { readFileSync } from 'node:fs';
 
 if (!GlobalRegistrator.isRegistered) {
@@ -92,6 +92,17 @@ Bun.plugin({
 				generate: 'client',
 				dev: true,
 				css: 'injected'
+			});
+			return { contents: js.code, loader: 'js' };
+		});
+		// Runes modules (.svelte.js) carry reactive state for stores the DOM tests
+		// mount; they need Svelte's module transform, not the component transform.
+		build.onLoad({ filter: /\.svelte\.js$/ }, async (args) => {
+			const source = readFileSync(args.path, 'utf8');
+			const { js } = compileModule(source, {
+				filename: args.path,
+				generate: 'client',
+				dev: true
 			});
 			return { contents: js.code, loader: 'js' };
 		});
