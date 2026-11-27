@@ -18,6 +18,17 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
+// Mirror the real rpc-client's helpers that components import. The fixture
+// replaces the whole module, so a missing export would fail the route import
+// before the diagnostics globals are installed.
+export function wasRpcErrorToasted(error) {
+	return typeof error === 'object' && error !== null && error.__rpcToasted === true;
+}
+
+export const silentCallOptions = {
+	headers: new Headers({ 'X-Silent-Request': 'true' })
+};
+
 export const rpcClient = {
 	server: {
 		getServerLogs(request) {
