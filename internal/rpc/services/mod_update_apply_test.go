@@ -1377,3 +1377,38 @@ func TestStageReviewedModUpdateRequiresKnownServerAndValidWindow(t *testing.T) {
 	_, err = svc.UpdateMod(ctx, connect.NewRequest(idle))
 	require.Error(t, err, "idle requires positive idle minutes")
 }
+
+// A resubmission whose every selection is already in the open batch must name
+// the batch it was checked against, so the caller does not treat the response
+// as batchless.
+func TestAllAlreadyStagedResubmissionReturnsOpenBatchID(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-all-already-staged", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchFixture{data: []byte("next")}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(fetcher)
+
+	first, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Equal(t, "staged", first.Msg.GetStagedUpdates()[0].GetOutcome())
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, batch.ID, first.Msg.GetUpdateBatchId())
+	require.Equal(t, 1, fetcher.calls)
+
+	fetcher.calls = 0
+	second, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Equal(t, "already_staged", second.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Equal(t, batch.ID, second.Msg.GetUpdateBatchId(), "an all-already-staged resubmission must carry the checked batch id")
+	require.Zero(t, fetcher.calls, "an already-staged file must not be downloaded again")
+	rows, err := store.ListBatchContent(ctx, second.Msg.GetUpdateBatchId())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}

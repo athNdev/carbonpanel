@@ -205,6 +205,23 @@ type readyModUpdate struct {
 	resultIndex int
 }
 
+// allAlreadyStaged reports whether every requested selection was already in the
+// open batch. Duplicates inside the request count as copies of that same
+// already-staged decision.
+func allAlreadyStaged(results []stagedModUpdate) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, result := range results {
+		switch result.Outcome {
+		case "already_staged", "already_selected":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // errModUpdateRunningSkipped reports a scheduled policy that decided at journal
 // admission not to stage because the server is running. It is a policy outcome,
 // not a failure, so the scheduler records a successful skip instead of retrying.
@@ -309,10 +326,12 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	// A resubmission must not download a file that is already staged or spend
 	// the cumulative budget on it. The journal rechecks this below so a row
 	// staged after this snapshot still cannot be duplicated.
+	var openBatch *storage.ServerUpdateBatch
 	alreadyStagedBeforeFetch := make(map[string]bool)
-	if openBatch, err := s.store.OpenUpdateBatch(ctx, server.ID); err != nil {
+	if batch, err := s.store.OpenUpdateBatch(ctx, server.ID); err != nil {
 		return nil, nil, nil, err
-	} else if openBatch != nil {
+	} else if batch != nil {
+		openBatch = batch
 		rows, err := s.store.ListBatchContent(ctx, openBatch.ID)
 		if err != nil {
 			return nil, nil, nil, err
@@ -440,6 +459,13 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		results = append(results, result)
 	}
 	if len(ready) == 0 {
+		// An all-already-staged resubmission names the batch it was checked
+		// against, so the caller binds to the same open batch instead of
+		// treating the response as batchless. Other all-refused outcomes are
+		// not evidence that the open batch is the right target.
+		if openBatch != nil && allAlreadyStaged(results) {
+			return results, openBatch, transient, nil
+		}
 		return results, nil, transient, nil
 	}
 
