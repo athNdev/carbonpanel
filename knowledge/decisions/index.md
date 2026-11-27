@@ -65,6 +65,7 @@
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Release qualification uses the retained OCI archive](release-staging-artifact-contract.md) — The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
+- [Resolve an unpersisted replacement identity through an explicit marker](publication-identity-unresolved.md) — A created replacement whose identity write fails is retried, then recorded as identity-unresolved; a retry may adopt that dispatch's canonical container and verify it, never the baseline or an unrelated discovery.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.

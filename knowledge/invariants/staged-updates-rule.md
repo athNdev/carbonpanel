@@ -5,7 +5,7 @@ description: "A server has one open update batch. Staging adds to that batch. It
 status: stable
 owners: [oss-runtime]
 code_refs: [internal/db/staged_config.go, internal/db/staged_content.go, internal/rpc/services/stage_content.go, internal/staging, internal/rpc/services/update_batch.go, internal/scheduler/scheduler.go, web/carbon-panel/src/lib/components/server-configuration.svelte, web/carbon-panel/src/lib/components/server-tasks.svelte]
-verified: { by: agent:opencode, at: 2026-11-27 }
+verified: { by: agent:opencode, at: 2026-11-28 }
 sources:
   - title: Parent concept
     resource: staged-updates.md
@@ -15,6 +15,11 @@ sources:
 A server has one open update batch. Staging adds to that batch. It must not
 call Docker, change server status, write the live `ServerConfig` row, or write
 the mods directory, the datapacks directory, or the world.
+
+One batch may hold at most one staged content row per normalized live target
+(case, separator and trailing-separator aliases name the same file). A second
+row is refused with an actionable conflict and is rolled back, because a single
+live post-image cannot verify two recorded entries during recovery.
 
 File bytes for a staged install or replace go through node storage at
 `.carbon-panel/staged/<id>/` inside the server data root. A delete records the
