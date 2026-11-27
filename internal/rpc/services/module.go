@@ -992,6 +992,9 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 			if nodestorage.IsUnavailable(err) {
 				return nil, connect.NewError(connect.CodeUnavailable, err)
 			}
+			if errors.Is(err, storage.ErrDuplicateStagedTarget) || errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrModpackBatchConflict) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+			}
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 		fresh, err := s.store.GetModule(ctx, module.ID)

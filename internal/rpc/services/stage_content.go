@@ -247,7 +247,7 @@ func stageContentError(err error) error {
 	switch {
 	case nodestorage.IsUnavailable(err):
 		return connect.NewError(connect.CodeUnavailable, err)
-	case errors.Is(err, storage.ErrUpdateBatchConflict), errors.Is(err, storage.ErrDuplicateStagedTarget):
+	case errors.Is(err, storage.ErrUpdateBatchConflict), errors.Is(err, storage.ErrDuplicateStagedTarget), errors.Is(err, storage.ErrModpackBatchConflict):
 		// Batch state is an admission precondition, matching reviewed-mod and
 		// config staging; keep the operator-facing conflict message intact.
 		return connect.NewError(connect.CodeFailedPrecondition, err)

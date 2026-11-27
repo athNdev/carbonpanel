@@ -62,3 +62,44 @@ func TestUpdateModuleStageLeavesTheLiveModule(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, storage.StagedKindModule, rows[0].Kind)
 }
+
+// TestUpdateModuleStageRefusesASecondEdit maps a duplicate module target to the
+// same FailedPrecondition admission code as file staging, with an actionable
+// message, instead of an internal error.
+func TestUpdateModuleStageRefusesASecondEdit(t *testing.T) {
+	ctx := context.Background()
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	store, err := storage.NewSQLiteStore(&config.Config{
+		Database: config.DatabaseConfig{
+			Path:           fmt.Sprintf("file:%s?mode=memory&cache=shared", dbName),
+			AutoMigrate:    true,
+			MaxConnections: 5,
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &storage.Server{ID: "mod-stage-dup", Name: "mod-stage-dup", DataPath: t.TempDir(), Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.DB().Create(&storage.Module{
+		ID: "map-dup", Name: "map-dup", ServerID: server.ID, TemplateID: "tpl", Status: "stopped", Config: "old",
+	}).Error)
+
+	svc := NewModuleService(store, nil, nil, nil, nil, nil, nil, logger.New())
+	first := "new"
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-dup", Config: &first, Stage: true}))
+	require.NoError(t, err)
+
+	second := "newer"
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-dup", Config: &second, Stage: true}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "%v", err)
+	require.ErrorIs(t, err, storage.ErrDuplicateStagedTarget)
+	require.Contains(t, err.Error(), "already staged")
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the duplicate module edit must not be committed")
+}
