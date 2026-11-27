@@ -510,28 +510,35 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(compatCalls.at(-1).serverId, "srv-1");
   // Prove the in-component guard is exercised: mark this DOM node, then use a
-  // param-only client-side navigation (popstate) so SvelteKit reuses the page
-  // and the ServerWorld instance instead of recreating them.
+  // client-side navigation that changes the server id but keeps ?tab=world so
+  // SvelteKit reuses the page and the ServerWorld instance instead of
+  // remounting the World subtree.
   await page.evaluate(() => {
     const panel = document.querySelector("[data-server-tab-panel]");
     if (panel) panel.setAttribute("data-qa-marker", "same-instance");
   });
   // SvelteKit intercepts same-origin anchor clicks through its global handler;
-  // an injected link navigates param-only without replacing the page instance.
+  // an injected link navigates client-side without replacing the page instance,
+  // and preserving ?tab=world keeps the World subtree mounted.
   await page.evaluate(() => {
     const link = document.createElement("a");
     link.id = "qa-nav-link";
-    link.href = "/servers/srv-2";
+    link.href = "/servers/srv-2?tab=world";
     link.textContent = "QA navigation";
     document.body.appendChild(link);
     link.click();
   });
-  await page.waitForURL("**/servers/srv-2");
+  await page.waitForURL("**/servers/srv-2*");
   await page.waitForTimeout(400);
+  assert.equal(
+    await page.getByTestId("tab-world").getAttribute("aria-selected"),
+    "true",
+    "the World tab must remain selected after navigation",
+  );
   assert.equal(
     await page.locator('[data-qa-marker="same-instance"]').count(),
     1,
-    "the World tab instance must survive param-only navigation",
+    "the World tab instance must survive client-side navigation",
   );
   navHold.splice(0).forEach((resolve) => resolve());
   holdCompat = null;
