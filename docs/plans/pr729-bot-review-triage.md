@@ -5,6 +5,21 @@
 **Triage date:** 2026-11-23  
 **Scope note:** The first review body explicitly states "5 more major findings are in follow-up comments..." and "48 more minor findings are in follow-up comments..." that are not present in the provided review-body artifact. This triage covers the 7 extracted inline comments, the outside-diff comment, and actionable findings visible in the provided review bodies. It does **not** fabricate dispositions for follow-up comments absent from the artifacts.
 
+> **PR #729 split note (2026-11-27):** Findings that cite the reviewed
+> mod-update apply/selection stack describe code that PR #729 removed:
+> `internal/rpc/services/mod_update_apply.go`, `mod_update_policy.go`,
+> `web/carbon-panel/src/lib/mod-update-ui.ts`, the scheduler mod-update policy
+> and claim, `ModUpdateSelection`/`StagedModUpdate`, and the per-row "Stage
+> this update" control. They remain historical triage, not open work in this
+> tree. A2-A11 below are affected (A2 `ExpectedLiveSha512`; A3/A4/A5 apply
+> service; A6 policy UI; A7-A10 scheduler mod-update policy; A11 selection
+> state). The retained surface is the read-only #680 installed-mod preview in
+> `internal/rpc/services/mod_update_preview.go`, summarized by
+> `summarizeModUpdateCheck()` in
+> `web/carbon-panel/src/lib/utils/mod-update-summary.ts`, with no stage, apply
+> or policy controls. #687 owns any future apply work; re-triage a finding
+> against retained code before acting on it.
+
 ## VALID+OPEN backlog (top priority)
 
 | # | Severity | File:line | Concern | Evidence / notes |

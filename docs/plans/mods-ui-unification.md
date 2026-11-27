@@ -5,6 +5,20 @@
 
 Sources read: `web/carbon-panel/src/lib/components/server-mods.svelte`, `mod-browser-dialog.svelte`, `datapack-browser-dialog.svelte`, `datapack-search.svelte`, `fragments/StudioModTable.svelte`, `server-ui/ServerTabPanel.svelte`, `carbon/*`, `src/routes/servers/[id]/+page.svelte`, `src/routes/servers/new/+page.svelte`, `src/routes/modpacks/studio/[id]/+page.svelte`, `src/lib/mod-update-ui.ts`, `src/lib/features/servers/create-content.ts`, `src/lib/features/modpacks/studio/{mod-actions,dependencies}.ts`, `src/lib/utils/request-sequence.ts`, `src/lib/api/rpc-client.ts`, `src/app.css` + `src/lib/design-system/tokens.css`, `proto/carbonpanel/v1/{mod,mod_browse}.proto`, `internal/rpc/services/mod_browse.go`, `internal/rpc/handlers/mod_search.go`, `internal/rpc/services/mod_plugins.go`, `internal/indexers/hangar/*`.
 
+> **PR #729 split note (2026-11-27):** The reviewed mod-update apply/selection
+> scope described in this brief was removed by the PR #729 split. References
+> below to `src/lib/mod-update-ui.ts`, `mod-update-ui.test.ts`,
+> `updateStateTagType()`, `updateOutcomeTagType()`, `server-mods-update.test.ts`,
+> the staged-update review panel, the automatic update policy, the per-row
+> "Stage this update" control and the staged-outcome list are historical and no
+> longer describe the tree. The retained surface is the read-only #680
+> installed-mod preview in
+> `internal/rpc/services/mod_update_preview.go`, summarized by
+> `summarizeModUpdateCheck()` in
+> `web/carbon-panel/src/lib/utils/mod-update-summary.ts`, and rendered by the
+> server-mods preview row with no stage, apply or policy controls. Do not
+> rebuild that panel from this brief; #687 owns any future apply work.
+
 ---
 
 ## 1. Instance inventory
@@ -13,7 +27,7 @@ There are **six** mods-management surfaces (two more than the epic named): the s
 
 ### A. Server view — Mods tab
 
-**File:** `web/carbon-panel/src/lib/components/server-mods.svelte` (1,091 lines) + `src/lib/mod-update-ui.ts` (pure helpers, unit-tested).
+**File:** `web/carbon-panel/src/lib/components/server-mods.svelte` (1,091 lines) + `src/lib/mod-update-ui.ts` (pure helpers, unit-tested). *(The `mod-update-ui.ts` helper file was removed by the PR #729 split; the retained read-only preview summary lives in `src/lib/utils/mod-update-summary.ts`.)*
 
 - **Props:** `{ server: Server; active?: boolean }`.
 - **Shell:** `ServerTabPanel` (`title="Mod & Plugin Management"`, description "Manage extensions in the container `mods|plugins` directory", `chip` snippet = `CarbonTag teal` with the directory, `actions` + `toolbar` snippets).
@@ -23,9 +37,9 @@ There are **six** mods-management surfaces (two more than the epic named): the s
 - **Toolbar:** search (client-side over displayName/fileName/description, Escape clears) + three filter buttons with counts; upload progress row (filename, %, cancel X, byte counts via `formatBytes`).
 - **Status line:** `<p role="status">` with spinner + `updateStatus` text ("Checking installed files…", "Checked N installed files. Compatible updates available for M.", staging summary, or failure text).
 - **Sections stacked below toolbar:**
-  1. **Staged-update review panel** (only when `availableUpdates.length > 0`): apply-window select (next restart / chosen time / idle), conditional datetime/idle inputs, `Stage N selected update(s)` primary button, per-outcome `<ul>` with `CarbonTag` tone per `updateOutcomeTagType()`.
-  2. **Automatic update policy** in a native `<details>`: opt-in checkbox, cron, timezone, excluded projects, max per run, window, idle minutes, skip-while-running, `Save policy`, retry-when-unloaded, and a 4-col `dl` of schedule/next run/last run/outcome.
-  3. **Installed rows** (`divide-y`): enable/disable toggle button (Check/Ban + Active/Disabled, green vs gray), strikethrough title when disabled, version in a bordered mono chip, metadata line (FileText + file name, size, uploaded date), update-preview `CarbonTag` + "Stage this update" checkbox + `provider · installed X · candidate Y` + reason text, description `line-clamp-1`, and a bordered action cluster (Download, Trash2 icon-only buttons).
+  1. **Staged-update review panel** (historical; removed by the PR #729 split) (only when `availableUpdates.length > 0`): apply-window select (next restart / chosen time / idle), conditional datetime/idle inputs, `Stage N selected update(s)` primary button, per-outcome `<ul>` with `CarbonTag` tone per `updateOutcomeTagType()`.
+  2. **Automatic update policy** (historical; removed by the PR #729 split) in a native `<details>`: opt-in checkbox, cron, timezone, excluded projects, max per run, window, idle minutes, skip-while-running, `Save policy`, retry-when-unloaded, and a 4-col `dl` of schedule/next run/last run/outcome.
+  3. **Installed rows** (`divide-y`): enable/disable toggle button (Check/Ban + Active/Disabled, green vs gray), strikethrough title when disabled, version in a bordered mono chip, metadata line (FileText + file name, size, uploaded date), read-only update-preview text (`provider · installed X · candidate Y`) + reason, description `line-clamp-1`, and a bordered action cluster (Download, Trash2 icon-only buttons). The per-row "Stage this update" checkbox and staging controls were removed by the PR #729 split; #680's read-only preview row is retained.
 - **States:** loading = centered `CarbonInlineLoading "Reading mods/ directory..."`; incompatible loader = ad-hoc Package-icon panel; zero mods = ad-hoc Package-icon panel; filter miss = one-line muted text. **No error state** (see edge case E1).
 - **Modal:** `ModBrowserDialog bind:open onInstalled={loadMods}`; `CarbonConfirm` for delete.
 - **Load model:** manual refresh only (no polling); loads once per activation via `$effect (active && !hasLoaded)`; full re-`loadMods()` after every mutation (toggle/delete/upload/stage).
@@ -146,7 +160,7 @@ Severity: 🔴 user-visible data/misleading state, 🟡 friction/confusing, 🟢
 | E3 | A | **Toggle/delete have no per-row pending state** — `toggleMod` double-click issues two `updateMod` calls (second reverts the first); delete confirm button is not disabled during the await. | 🟡 |
 | E4 | A | **Server switch mid-upload imports into the wrong server** — the server-change reset block clears flags but never calls `uploadAbortController.abort()`; the in-flight chunked upload finishes and `importUploadedMod` runs with the *new* `server.id` and the *old* file. | 🔴 |
 | E5 | A | **Check-updates vs staging not mutually exclusive** — a concurrent `listMods(checkUpdates)` completing after `updateMod` staging overwrites `mods` and clobbers the `updateStatus` staging summary (and vice versa). Guarded only by last-write-wins. | 🟡 |
-| E6 | A | `updateWindow === 'time'` past timestamps / timezone confusion unvalidated beyond `Number.isFinite`. | 🟡 |
+| E6 | A | `updateWindow === 'time'` past timestamps / timezone confusion unvalidated beyond `Number.isFinite`. (historical; apply-window UI removed by the PR #729 split) | 🟡 |
 | E7 | B | **Dialog closed mid-install** — install continues (correct), toast fires, parent refresh runs, session entry is pushed after the close-reset so it re-appears on reopen. Mostly benign; the `installing` flag is *not* reset on close, so a reopen during an in-flight install shows a disabled button with no visible reason. | 🟡 |
 | E8 | B | **Transitive deps pre-selected during install are invisible** — `resolveDependencyInstallItems` mutates `selectedDependencies` after install begins; the checkbox UI never reflects the additions. | 🟡 |
 | E9 | B | **Provider outage mid dependency resolution silently drops deps** — unresolvable deps are `console.warn`ed and skipped; the mod installs without its required dependencies and nothing surfaces beyond a missing dep count. | 🔴 |
@@ -180,7 +194,7 @@ Handled well (keep): B's `createRequestSequence` usage; A's server-id capture + 
 
 ### 4.2 Proposed module
 
-`src/lib/features/mods/mods-browser-store.svelte.ts` — a `$state` class factory instantiated per mount (not a global singleton) so server tab, wizard, and studio each own a instance; pure logic (`resolveDependencyInstallItems`, filter math, outcome mapping) moves beside `mod-update-ui.ts` as testable modules.
+`src/lib/features/mods/mods-browser-store.svelte.ts` — a `$state` class factory instantiated per mount (not a global singleton) so server tab, wizard, and studio each own a instance; pure logic (`resolveDependencyInstallItems`, filter math) moves beside the retained `mod-update-summary.ts` as testable modules. (The removed update-panel helper file `mod-update-ui.ts` is historical; see the PR #729 split note.)
 
 ### 4.3 Machine
 
@@ -228,7 +242,7 @@ Behaviors intentionally **not** in the shared store: check-updates/staging (A), 
 
 E1 → `listError` region + `CarbonErrorState`; E2 → single toast site in store; E3 → per-row `pending` set; E4 → `TARGET_CHANGED` aborts upload controller; E5 → exclusive checking/staging; E7 → `CLOSE` resets `installing`; E8/E9 → install outcome list incl. skipped deps; E10 → same outcome list; E15/E21 → shared `createRequestSequence` + optional `AbortSignal`; E16 → per-row `adding` map; E18 → `updatesMap` invalidated on `TARGET_CHANGED`/save; E22 → store keyed by target identity resets on prop change.
 
-Test seams: extend the existing patterns — `mod-update-ui.test.ts` (pure helpers) for new pure modules; a store test instantiating the machine with an injected `VersionLookup` (as `create-content.ts` already does) exercising E5/E7/E9/E15.
+Test seams: extend the existing patterns — `mod-update-summary.test.ts` (retained read-only preview summary) for new pure modules; a store test instantiating the machine with an injected `VersionLookup` (as `create-content.ts` already does) exercising E5/E7/E9/E15. The removed `mod-update-ui.test.ts` is not a seam.
 
 ---
 
@@ -238,8 +252,8 @@ Test seams: extend the existing patterns — `mod-update-ui.test.ts` (pure helpe
 
 1. **Header** (unchanged idiom): title, description, `chip` = `CarbonTag teal` directory (`mods/` or `plugins/`), actions = `Check for updates` (secondary), `Browse & Install` (primary, opens dialog), `Upload .jar` (secondary). Keep exact `ServerTabPanel` snippets so spacing/motion match Backups/Tasks.
 2. **Status strip** (always rendered, `role="status"`): spinner + one-line outcome of the last operation (checked N/M, staged X refused Y, upload progress inline here). Replaces today's floating `<p>` and the separate upload bar — one place the eye checks after any action.
-3. **Pending updates card** (conditional, `availableUpdates > 0`): `CarbonDataTable`-style header "Compatible updates (N)" + selection checkboxes + apply-window controls + `Stage selected` + outcome list. Isolating it above the list stops the update UI from interleaving with rows.
-4. **Installed content table** — the main change: replace hand-rolled rows with **`CarbonDataTable`** (matches `PlayerRoster`, `TemplateManagement`, library/modpacks lists). Columns: *Name* (display name + disabled strikethrough + version chip), *Status* (enable/disable as a `CarbonTag`-style toggle or `CarbonButton ghost` with Check/Ban — keep the existing tag visual), *File* (mono, truncate), *Size*, *Updated*, *Update* (`CarbonTag` via `updateStateTagType` + reason as `title`), *Actions* (Download, Delete iconOnly with ≥32px hit areas). Use the container-query collapse pattern from `StudioModTable` for <800px (hide File/Size/Updated) and the card-grid fallback <420px.
+3. **Pending updates card** (historical; removed by the PR #729 split; the read-only preview row is retained instead) (conditional, `availableUpdates > 0`): `CarbonDataTable`-style header "Compatible updates (N)" + selection checkboxes + apply-window controls + `Stage selected` + outcome list. Isolating it above the list stops the update UI from interleaving with rows.
+4. **Installed content table** — the main change: replace hand-rolled rows with **`CarbonDataTable`** (matches `PlayerRoster`, `TemplateManagement`, library/modpacks lists). Columns: *Name* (display name + disabled strikethrough + version chip), *Status* (enable/disable as a `CarbonTag`-style toggle or `CarbonButton ghost` with Check/Ban — keep the existing tag visual), *File* (mono, truncate), *Size*, *Updated*, *Update* (read-only preview state and reason; the removed `updateStateTagType` mapping was deleted by the PR #729 split), *Actions* (Download, Delete iconOnly with ≥32px hit areas). Use the container-query collapse pattern from `StudioModTable` for <800px (hide File/Size/Updated) and the card-grid fallback <420px.
 5. **Automatic update policy** — swap native `<details>` for `CarbonAccordion`/`CarbonAccordionItem` (already in the design system) with the same fields and the `dl` summary moved into the collapsed header (schedule · next run · last outcome).
 6. **Empty/error/loading** — `CarbonEmptyState` for incompatible loader ("This server type doesn't load mods or plugins") and for zero mods (action = open browser); `CarbonErrorState` for load failure with retry (fixes E1); `CarbonInlineLoading` for first load; one-line muted text for filter misses.
 
@@ -278,12 +292,12 @@ New home: `web/carbon-panel/src/lib/components/mods/` (+ store in `src/lib/featu
 | `ModsFilterChips.svelte` | B's activeFilters chips + suggestion input | `{ filters: ActiveFilter[]; vocabulary: FilterVocab[]; onadd(label); onremove(key) }` |
 | `ModsVersionPicker.svelte` | B's version list + dependency panel | `{ versions: CatalogVersion[]; selectedId (bindable); dependencySelection (bindable); disabledDeps?: Set<string>; busy? }` |
 | `ModsBrowserDialog.svelte` | current `mod-browser-dialog.svelte` | same external contract (`open`, `server`, `onCompleted(outcome: InstallOutcome[])`, `onQueue?`, `queuedMods?`) so A/C call-sites barely move |
-| `ModsInstallOutcomeList.svelte` | A's staged-outcome `ul`; reused for dialog install outcomes | `{ rows: {label, tone, detail}[] }` (tone via existing `updateOutcomeTagType`) |
+| `ModsInstallOutcomeList.svelte` | A's staged-outcome `ul` (historical; removed by the PR #729 split); reused for dialog install outcomes | `{ rows: {label, tone, detail}[] }` (historical `updateOutcomeTagType`; removed) |
 | `InstalledModsTable.svelte` | A's hand-rolled rows | `{ mods; searchQuery (bindable); filter (bindable); busyIds; ontoggle; ondelete; ondownload; snippet updateCell? }` — `CarbonDataTable` + container queries |
 | `ModUploadProgress.svelte` | A's ad-hoc progress bar | `{ progress: UploadProgress; filename; oncancel }` |
 | `ModUpdatePolicyCard.svelte` | A's `<details>` policy | `{ state (bindable fields or one object), onLoad, onSave, ready }` — wraps `CarbonAccordionItem` |
 
-Keep `mod-update-ui.ts` as the tone/label source of truth; new pure modules (`filter-vocabulary.ts` fed by server data instead of hardcoded versions, `dependency-plan.ts` for E9 outcome capture) sit beside it with tests mirroring `mod-update-ui.test.ts`.
+Keep the retained `mod-update-summary.ts` as the read-only preview summary source. (The original brief's `mod-update-ui.ts` tone/label source of truth was removed by the PR #729 split.) New pure modules (`filter-vocabulary.ts` fed by server data instead of hardcoded versions, `dependency-plan.ts` for E9 outcome capture) sit beside the retained helper with mirrored tests.
 
 ---
 
@@ -291,7 +305,7 @@ Keep `mod-update-ui.ts` as the tone/label source of truth; new pure modules (`fi
 
 1. **Pure groundwork (no visual change):** extract `resolveDependencyInstallItems` + outcome capture (E8/E9) and the search/versions sequences into `features/mods/`; store tests for the machine (OSS-461 core).
 2. **Shared leaf components:** `ModsCatalogSearchBar`, `ModsCatalogResultCard`, `ModsFilterChips`, `ModsVersionPicker`, `ModsInstallOutcomeList`; re-skin B onto them (Carbon-only), fix the `/mods…` copy and per-item outcomes.
-3. **Server tab deep pass (OSS-462):** `InstalledModsTable`, `ModUpdatePolicyCard`, `ModUploadProgress`, status strip, `CarbonErrorState`/`CarbonEmptyState`, exclusive checking/staging, upload abort on server change (E4), row pending states (E3), `wasRpcErrorToasted` (E2).
+3. **Server tab deep pass (OSS-462):** `InstalledModsTable`, `ModUpdatePolicyCard` (historical; policy UI removed by the PR #729 split), `ModUploadProgress`, status strip, `CarbonErrorState`/`CarbonEmptyState`, upload abort on server change (E4), row pending states (E3), `wasRpcErrorToasted` (E2).
 4. **Convergence:** point D's Add-Mods modal at the shared search bar/result card, add sequence guard + per-row adding (E15/E16), confirm-on-batch-remove (E17), consider switching its transport to the RPC client (E20) — flag as a separate decision with the deprecation window.
 5. **Adjacent:** give `DatapackSearch` the shared bar + sequence guard (E21).
 
@@ -304,7 +318,7 @@ Verification per repo norms: `bun run check && bun run test` for the web surface
 | Concern | File |
 | --- | --- |
 | Server tab rows/states | `web/carbon-panel/src/lib/components/server-mods.svelte` |
-| Update/policy helpers + tones | `web/carbon-panel/src/lib/mod-update-ui.ts` (+ `.test.ts`) |
+| Update/policy helpers + tones | `web/carbon-panel/src/lib/utils/mod-update-summary.ts` (retained read-only preview summary; `mod-update-ui.ts`, its test and the apply/policy helpers were removed by the PR #729 split) |
 | Browser dialog | `web/carbon-panel/src/lib/components/mod-browser-dialog.svelte` |
 | Wizard step + queue | `web/carbon-panel/src/routes/servers/new/+page.svelte` |
 | Solver + merge guards | `web/carbon-panel/src/lib/features/servers/create-content.ts` |

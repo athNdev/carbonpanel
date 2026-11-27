@@ -7,6 +7,20 @@
 `docs/design-system/`, `scripts/test_design_system_page.py`, the surfaces the quality pass touches
 (server mods, mod browser, servers/new, modpacks studio, worldview), and the landing demo harness.
 
+> **PR #729 split note (2026-11-27):** The reviewed mod-update apply/selection
+> panel described in this research was removed by the PR #729 split. References
+> below to `src/lib/mod-update-ui.ts`, `updateStateTagType()`,
+> `updateOutcomeTagType()`, `updateOutcomeLabel()`, `updateStateClass()`,
+> `server-mods-update.test.ts`, the per-row "Stage this update" control, the
+> staged-outcome list and the automatic-policy accordion are historical and no
+> longer describe the tree. The retained surface is the read-only #680
+> installed-mod preview in
+> `internal/rpc/services/mod_update_preview.go`, summarized by
+> `summarizeModUpdateCheck()` in
+> `web/carbon-panel/src/lib/utils/mod-update-summary.ts`, and rendered by the
+> server-mods preview row with no stage or apply controls. Do not restore the
+> removed panel from this plan; #687 owns any future apply work.
+
 ## 1. Goal and scope
 
 The quality pass introduces four idioms: a unified mods management UI, a floating save/undo action
@@ -243,10 +257,11 @@ considered and rejected: four surfaces re-implementing the same anatomy is exact
 ### 4.4 Badge/tag semantics for mod states
 
 The palette is fully tokenized (11 tones, contrast-tested). The semantic mapping already exists in
-`lib/mod-update-ui.ts`: update states → `green` (available), `gray` (current, unknown_source),
-`yellow` (review_required), `red` (unavailable); staged outcomes → `green` (staged), `yellow`
-(refused_*), `red` (error). Labels always spell the state ("Refused: checksum mismatch"), so color
-is never the sole carrier.
+`lib/mod-update-ui.ts` (historical; removed by the PR #729 split, see the split note above): update
+states → `green` (available), `gray` (current, unknown_source), `yellow` (review_required), `red`
+(unavailable); staged outcomes → `green` (staged), `yellow` (refused_*), `red` (error). Labels always
+spell the state ("Refused: checksum mismatch"), so color is never the sole carrier. The retained
+read-only preview renders its state and reason as text and has no staged outcomes.
 
 Gaps: (1) the mapping lives in a mods-specific module while other surfaces (datapacks, deploy
 dialog, module states) re-derive tones ad hoc; (2) `updateStateClass()` in the same file emits a
@@ -257,7 +272,8 @@ green = available/healthy/staged, yellow = attention/refused-review, red = faile
 gray = neutral/current/unknown, blue = informational, cyan/teal = count/selection accents, purple/
 magenta reserved for branding accents. Keep `mod-update-ui.ts` as the executable mapping for mods
 and reference it from the docs. Enable/Disabled chips move to CarbonTag gray/green with the state
-in the label ("Active"/"Disabled" already do this).
+in the label ("Active"/"Disabled" already do this). *(The `mod-update-ui.ts` mapping was removed by
+the PR #729 split; use the retained `summarizeModUpdateCheck()` summary instead.)*
 
 ### 4.5 Empty, error and loading states
 
@@ -292,7 +308,8 @@ use "…" consistently; keep it).
 
 Existing anchors: the README "Content" pattern (direct sentence-case labels), the CarbonConfirm
 consequence-naming rules, UpdateBatch's apply-window terminology ("Apply window", "Next restart",
-"When empty", "Pick a time", "Staged"), and `updateOutcomeLabel()`. Gap: there is no single
+"When empty", "Pick a time", "Staged"), and `updateOutcomeLabel()` (historical; removed by the PR #729
+split). Gap: there is no single
 terminology table for the idioms the quality pass unifies. Plan: add a "Terminology" spec block to
 the docs page under `#patterns`: mod update states (Available / Current / Review required /
 Unavailable), staged outcomes (Staged / Refused: … / Error), batch terms (Staged changes, Discard,
@@ -314,7 +331,7 @@ strings (e.g. server-mods "No mods installed" vs mod-browser "No matching mods f
 | 7 | `routes/modpacks/studio/[id]/+page.svelte` | `Loader2` ×8 (one inside a CarbonButton — use the `loading` prop); `text-amber-500` icon (non-token color) | `loading` props; token color (e.g. `text-warning-text` or accent) |
 | 8 | `routes/modpacks/studio/+page.svelte`, `export-dialog.svelte` | `Loader2` ×3 | Same |
 | 9 | `routes/servers/new/+page.svelte` | `Loader2` ×1 (otherwise clean — no hex, no rounded) | Same |
-| 10 | `src/lib/mod-update-ui.ts` | `updateStateClass()` second chip idiom | Delete in favor of `updateStateTagType()` |
+| 10 | `src/lib/mod-update-ui.ts` | `updateStateClass()` second chip idiom | Delete in favor of `updateStateTagType()` (historical: file and helpers removed by the PR #729 split; no executable mapping remains) |
 | 11 | `src/lib/components/scroll-to-top.svelte` | Fixed surface without safe-area insets; raw `z-50` | Apply the documented safe-area pattern + `--carbon-z-action-bar`-adjacent token |
 | 12 | `src/lib/components/server-console.svelte`, `server-ui/ModuleLogsDialog.svelte` | Literal terminal fg/bg hexes (`#161616/#ffffff/#f4f4f4`, `#e8e8e8/#000000`) | Map to `--background`/`--foreground` (+documented terminal exception only if contrast requires) |
 | 13 | Systemic | 92 `Loader2`/`RefreshCw animate-spin` occurrences vs CarbonSpinner | Migrate at least every touched surface; add the "no raw Loader2" rule to docs |
@@ -443,7 +460,8 @@ change → verify surfaces) make splitting them churn-prone. Sequencing keeps la
    docs into the same commit as the exports.
 4. **Phase 3 — surface adoption and drift fixes on touched files.** Unified mods UI (server-mods →
    ResultCard/ActionBar/tag mapping; mod-browser → CarbonModal/CarbonTag/states; studio + datapack
-   browser follow), `updateStateClass` deletion, server view sections get the action bar, worldview
+   browser follow), `updateStateClass` deletion (historical; removed by the PR #729 split), server
+   view sections get the action bar, worldview
    loading-pattern notes, Loader2→CarbonSpinner/`loading` props on touched surfaces (§5 rows 2–9,
    10, 12, 13-touched-only), ServerLifecycleActions token rebuild + `bun run build:homepage`.
    This is where implementation agents for the other OSS-448 children consume the system; design-system

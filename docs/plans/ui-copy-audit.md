@@ -3,6 +3,16 @@
 Branch: `feat/v2.1.1-improvements` · Scope: `web/carbon-panel/src` (SvelteKit / Svelte 5, IBM Carbon voice)
 Jira: OSS-465 (child of OSS-448). Status of this document: audit complete; replacements not yet applied.
 
+> **PR #729 split note (2026-11-27):** The per-row "Stage this update"
+> control, the staged-outcome labels and `web/carbon-panel/src/lib/mod-update-ui.ts`
+> were removed by the PR #729 split, so the mods entries that reference them
+> below (#39 and the pinned `server-mods-update.test.ts` list) are historical
+> and are not copy to preserve. The retained surface is the read-only #680
+> installed-mod preview in `internal/rpc/services/mod_update_preview.go`,
+> summarized by `summarizeModUpdateCheck()` in
+> `web/carbon-panel/src/lib/utils/mod-update-summary.ts`, and rendered by the
+> server-mods preview row with no stage or apply controls.
+
 ## 1. Method
 
 Systematic sweep of every `.svelte` route page and component plus the user-facing label
@@ -155,7 +165,7 @@ Proposed pattern: state the requirement — `Enter a valid, available port`, `Se
 | 36 | **engine / modloader / server software** | wizard step `Game Engine` (`servers/new:92`), header `Engine & Loader` (`servers/+page.svelte:409`), `Engine specs` (`servers/[id]:488`), label `Mod Loader / Server Software` (`servers/new:1440`), `custom modloaders` (`servers/new:1198`), `getModLoaderDisplay` column, `ModpackDetails.svelte` | canonical **mod loader** (two words) for Fabric/Forge/etc.; the Minecraft release row is **Minecraft version**. Replace "Engine" headings: step `Runtime`, list header `Minecraft & loader`, detail heading `Runtime` |
 | 37 | **datapack vs data pack** | `server-datapacks.svelte:115` (`World data packs`), everywhere else `datapack` | **datapack** |
 | 38 | **map view / World View / World map** | tab `World` (`servers/[id]:109`), modal title `World map` (`servers/[id]:878`), card `World View preview` (`WorldViewWorkspace.svelte:693`), empty `Map not available` (:1056), library link `View map` (`library/+page.svelte:356`) | canonical **World view** for the feature, **Map** for the canvas; card → `World view`, keep modal `World map` |
-| 39 | **Save vs Apply vs Stage** | configuration `Stage` (`server-configuration.svelte:591`), tasks `Save Changes` (`server-tasks.svelte:1706`), mods `Stage this update` (pinned), server settings implicit save | keep: **Stage** = queue changes with an apply window; **Save** = write settings now; document in §3 and leave as-is (they are different actions) |
+| 39 | **Save vs Apply vs Stage** | configuration `Stage` (`server-configuration.svelte:591`), tasks `Save Changes` (`server-tasks.svelte:1706`), mods `Stage this update` (pinned; removed by the PR #729 split), server settings implicit save | keep: **Stage** = queue changes with an apply window; **Save** = write settings now; document in §3 and leave as-is (they are different actions) |
 | 40 | **ellipsis character** | mixed ASCII `...` (`servers/+page.svelte:215`, `modpacks/+page.svelte:534`, `CarbonInlineLoading.svelte:17`, many) and Unicode `…` (`library` pages, `players` pages, `servers/new:1056,1070,1078`) | standardize on `…` (U+2026) in visible copy; includes the login P0 fix |
 | 41 | **& vs and** | `Mod & Plugin Management` (`server-mods.svelte:558`), `Modules & Sidecars` (`modules/+page.svelte:32`), `Engine & Loader` (`servers/+page.svelte:409`), `Library entries` table desc `provenance, bindings and compatibility` (`library/+page.svelte:422`) | **and** in body copy; `&` acceptable only in nav labels — pick nav-only rule and apply |
 | 42 | **button casing** | Title Case: `Create Server`, `Import Modpack`, `Create Admin Account`, `Open Console`, `Delete Server`, `Restore Backup`, `Delete Node` vs sentence case: `Open server` (`servers/new:1088`), `Back to servers`, `Create from config`, `Import world`, `Bind revision` | **sentence case** for all buttons (Carbon style); batch find/replace in confirm `confirmLabel`s too |
@@ -222,7 +232,7 @@ Proposed pattern: state the requirement — `Enter a valid, available port`, `Se
 |---|---|---|
 | Routes (13 pages) | 13 | ~45 |
 | `lib/components` (server tabs, settings, worldview, files) | 24 | ~35 |
-| `lib/features` + label maps (`presentation.ts`, `mod-update-ui.ts`, `server-join.ts`, `overlays.ts`) | 6 | ~12 |
+| `lib/features` + label maps (`presentation.ts`, `mod-update-ui.ts` (removed by the PR #729 split; retained summary is `lib/utils/mod-update-summary.ts`), `server-join.ts`, `overlays.ts`) | 6 | ~12 |
 | Carbon shared components (empty-state default, inline-loading default) | 2 | 2 |
 
 ---
@@ -244,8 +254,9 @@ No contract tests pin these; `server-console.test.ts` does *not* pin the delete 
 - Players: roster filter labels already canonical; fix `AddAllowlistEntry` button casing only.
 
 Contract tests that must be updated in this group: none for the listed strings; note
-`server-mods-update.test.ts` pins several mods-tab strings — those strings are *not* in the
-P1 change set (they are already canonical), so no test edits expected.
+`server-mods-update.test.ts` (removed by the PR #729 split) pinned several mods-tab strings — those
+strings are *not* in the P1 change set (they are already canonical), so no test edits expected. The
+retained `mod-update-summary.test.ts` is unaffected.
 
 ### P2 — secondary pages (41 strings, ~20 files)
 - World Library pages (new/import/[id]) jargon rewrites (§2.4), ellipsis normalization.
