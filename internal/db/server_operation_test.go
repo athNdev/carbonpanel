@@ -78,6 +78,60 @@ func TestServerOperationJournalLifecycle(t *testing.T) {
 	}
 }
 
+func TestCompletedServerOperationForRequestSpansStepKinds(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	op, _, err := store.BeginServerOperation(ctx, "srv-replay", "node-1", "cont-1", "request-a:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationPrepared, ServerOperationExecuting, ""); err != nil {
+		t.Fatalf("advance to executing: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationExecuting, ServerOperationComplete, ""); err != nil {
+		t.Fatalf("advance to complete: %v", err)
+	}
+
+	// A replay may select another kind, so the request completes for every kind.
+	completed, err := store.HasCompletedServerOperationForRequest(ctx, "srv-replay", "request-a")
+	if err != nil {
+		t.Fatalf("HasCompletedServerOperationForRequest: %v", err)
+	}
+	if !completed {
+		t.Fatal("a completed start step must complete the request for another step kind")
+	}
+	for _, tc := range []struct{ serverID, requestID string }{
+		{"srv-replay", "request-b"},
+		{"srv-replay", "request-a2"},
+		{"srv-other", "request-a"},
+	} {
+		completed, err := store.HasCompletedServerOperationForRequest(ctx, tc.serverID, tc.requestID)
+		if err != nil {
+			t.Fatalf("HasCompletedServerOperationForRequest(%s, %s): %v", tc.serverID, tc.requestID, err)
+		}
+		if completed {
+			t.Fatalf("request %q for server %q must not be reported completed", tc.requestID, tc.serverID)
+		}
+	}
+
+	failed, _, err := store.BeginServerOperation(ctx, "srv-failed", "node-1", "cont-1", "request-c:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation(failed): %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, failed.ID, ServerOperationPrepared, ServerOperationFailed, "docker refused"); err != nil {
+		t.Fatalf("advance to failed: %v", err)
+	}
+	completed, err = store.HasCompletedServerOperationForRequest(ctx, "srv-failed", "request-c")
+	if err != nil {
+		t.Fatalf("HasCompletedServerOperationForRequest(failed): %v", err)
+	}
+	if completed {
+		t.Fatal("a failed step must not gate a retry as completed")
+	}
+}
+
 func TestNoteActiveServerOperationKeepsTheLock(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

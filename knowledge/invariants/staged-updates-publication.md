@@ -30,9 +30,11 @@ A restart selects its file and config rows in one exclusive snapshot. A legacy `
 attempt generation, with phases preparing, prepared, applying, dispatched, verified, cleaned and abandoned. The record, not mutable status, APPLIED rows
 or container discovery, decides whether a runtime dispatch happened. Dispatch records the exact applied config/content ids inside the journaled mutation that
 performs the runtime write, immediately before that write (unpause, start, create or recreate), and captures the replacement identity returned at creation.
-Dispatch is idempotent, so one attempt records it once even when several journaled steps follow. A completed or replayed request whose callback is
-suppressed, or is refused by the journal's container-identity binding after an earlier replacement changed the tracked id, writes no dispatch and mutates
-no container; its fresh rows are restaged and the batch stays unsealed, and the request is refused so a new request ID can publish. The replacement identity is persisted
+Dispatch is idempotent, so one attempt records it once even when several journaled steps follow. A lifecycle request ID completes for the server across
+every journaled step, not per step kind: before any live write or dispatch, start and restart refuse a request ID that already completed any step kind, so a
+replay cannot select the unpause, create, recreate or in-place restart step that the current state would now imply. A completed replay mutates no container,
+writes no dispatch or replacement identity, and leaves fresh rows and config staged in the open, unsealed batch; a new request ID is required to publish them.
+A suppressed callback or a journal identity-binding refusal likewise writes no dispatch and mutates no container, and fresh rows stay retryable. The replacement identity is persisted
 with a bounded context detached from caller cancellation, so a created container stays verifiable after the request is cancelled. A created container is
 never removed because persisting its server fields failed: it may already contain the staged bytes and is retained under the recorded identity for an
 identity-verifying retry. A retry acknowledges only that exact identity for that attempt; reconciling another canonical

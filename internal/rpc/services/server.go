@@ -2515,6 +2515,23 @@ func unsafeDataRemoval(path string) bool {
 // staged row may be published under it.
 var errLifecycleRequestCompleted = errors.New("this lifecycle request ID was already completed; retry the staged change with a new request ID")
 
+// refuseCompletedLifecycleRequest refuses a replay of a request whose journaled
+// step already completed. The journal key carries the step kind, so checking
+// only the kind the current state would select would let a replay of the same
+// request ID select another kind (unpause, create, recreate or in-place
+// restart) and mutate the runtime. This gate spans every kind and runs before
+// the first live write or dispatch.
+func (s *ServerService) refuseCompletedLifecycleRequest(ctx context.Context, serverID, requestID string) error {
+	completed, err := s.store.HasCompletedServerOperationForRequest(ctx, serverID, requestID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check the lifecycle request journal: %w", err))
+	}
+	if completed {
+		return connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
+	}
+	return nil
+}
+
 // A completed request ID may suppress the mutation callback. It cannot
 // acknowledge fresh staged changes that were published by this attempt. The
 // dispatch intent is written inside the journaled callback so a suppressed
@@ -2552,6 +2569,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
+	if err := s.refuseCompletedLifecycleRequest(ctx, server.ID, requestID); err != nil {
 		return nil, err
 	}
 
@@ -3068,6 +3088,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
+	if err := s.refuseCompletedLifecycleRequest(ctx, server.ID, requestID); err != nil {
 		return nil, err
 	}
 
