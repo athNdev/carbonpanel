@@ -117,8 +117,13 @@ class DesignSystemPageTests(unittest.TestCase):
     def test_page_documents_layer_scale_shake_and_mods_patterns(self):
         page = PAGE.read_text(encoding="utf-8")
         for documented in ("z-[60]", "carbon-shake", "Mods management patterns",
-                           "mod-update-ui.ts", "mods-browser-store.svelte.ts"):
+                           "mod-update-summary.ts", "mods-browser-store.svelte.ts",
+                           "internal/rpc/services/mod_update_preview.go"):
             self.assertIn(documented, page)
+        self.assertNotIn("mod-update-ui.ts", page,
+                         "the removed update panel mapping is still documented")
+        self.assertNotIn("updateOutcomeLabel", page,
+                         "the removed update outcome mapping is still documented")
 
     def test_theme_preview_toggle_is_present(self):
         page = PAGE.read_text(encoding="utf-8")

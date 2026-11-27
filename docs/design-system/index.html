@@ -3919,71 +3919,23 @@
             app-internal, not part of the Carbon export surface; the conventions
             below are their contract with the design system.
           </p>
-          <div class="table-wrap compact">
-            <table class="doc-table">
-              <thead>
-                <tr>
-                  <th scope="col">State</th>
-                  <th scope="col">Tag tone</th>
-                  <th scope="col">Tag label</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Update available</td>
-                  <td><code>green</code></td>
-                  <td>The state name, underscores spaced ("available")</td>
-                </tr>
-                <tr>
-                  <td>Up to date</td>
-                  <td><code>gray</code></td>
-                  <td>"current"</td>
-                </tr>
-                <tr>
-                  <td>Unverified source</td>
-                  <td><code>gray</code></td>
-                  <td>
-                    "unknown source" — distinguished by text, never color alone
-                  </td>
-                </tr>
-                <tr>
-                  <td>Needs operator review</td>
-                  <td><code>yellow</code></td>
-                  <td>"review required"</td>
-                </tr>
-                <tr>
-                  <td>Cannot update</td>
-                  <td><code>red</code></td>
-                  <td>"unavailable"</td>
-                </tr>
-                <tr>
-                  <td>Staged for install</td>
-                  <td><code>green</code></td>
-                  <td>"Staged"</td>
-                </tr>
-                <tr>
-                  <td>Install refused</td>
-                  <td><code>yellow</code></td>
-                  <td>
-                    "Refused: &lt;reason&gt;" (file changed, provider rejected,
-                    download failed, checksum mismatch)
-                  </td>
-                </tr>
-                <tr>
-                  <td>Install failed</td>
-                  <td><code>red</code></td>
-                  <td>"Error"</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <h3 class="table-title">Installed mod update preview</h3>
           <p class="annotation">
-            Executable mapping: <code>updateStateTagType()</code>,
-            <code>updateOutcomeTagType()</code> and
-            <code>updateOutcomeLabel()</code> in
-            <code>src/lib/mod-update-ui.ts</code>. Reuse the table instead of
-            re-deriving tones per surface, and keep the label spelling the state
-            so color is never the sole carrier.
+            The server Mods tab keeps a read-only installed-mod preview. The
+            backend classifier in
+            <code>internal/rpc/services/mod_update_preview.go</code> reports
+            <code>available</code>, <code>current</code>,
+            <code>review_required</code>, <code>unknown_source</code> or
+            <code>unavailable</code> plus a fixed reason. The preview row
+            renders the provider, installed version, optional candidate version
+            and that reason as muted text; the status line summarizes the
+            states with <code>summarizeModUpdateCheck()</code> in
+            <code>src/lib/utils/mod-update-summary.ts</code>.
+          </p>
+          <p class="annotation">
+            The preview is read-only: it exposes no stage, apply or policy
+            control and never changes the container or the live files. Keep the
+            reason visible beside the state so color is never the sole carrier.
           </p>
           <div class="spec-grid">
             <div>
