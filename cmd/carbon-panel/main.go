@@ -563,6 +563,14 @@ func main() {
 	// only after the planner is installed, so lifecycle events cannot reach a
 	// scheduler with no mod-update executor.
 	eventBus.Subscribe(taskScheduler.HandleServerEvent)
+	// Register the scheduler's stop before the metrics collector starts. Defers
+	// run LIFO, so metrics.Stop must be registered after this one to stop the
+	// metrics producer before the scheduler's WaitGroup drains.
+	defer func() {
+		if err := taskScheduler.Stop(); err != nil {
+			log.Error("Failed to stop task scheduler: %v", err)
+		}
+	}()
 	if err := metricsCollector.Start(); err != nil {
 		log.Error("Failed to start metrics collector: %v", err)
 	}
@@ -574,11 +582,6 @@ func main() {
 	if err := taskScheduler.Start(); err != nil {
 		log.Error("Failed to start task scheduler: %v", err)
 	}
-	defer func() {
-		if err := taskScheduler.Stop(); err != nil {
-			log.Error("Failed to stop task scheduler: %v", err)
-		}
-	}()
 
 	// The auth manager persists the recovery key. Announce the secret only
 	// when this process generated it; later starts log the path alone so a

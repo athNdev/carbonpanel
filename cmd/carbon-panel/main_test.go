@@ -69,12 +69,10 @@ func TestShouldAutoStartOnBoot_PausedIsNotExcluded(t *testing.T) {
 	}
 }
 
-// TestStartupInstallsModUpdatePlannerBeforeEventProducers guards the
-// composition-root order. rpc.NewServer installs the shared mod-update planner
-// on the scheduler; until that happens an event-triggered policy that fires has
-// no executor. Keep the construction before the scheduler subscription, the
-// metrics collector start and the scheduler run loop.
-func TestStartupInstallsModUpdatePlannerBeforeEventProducers(t *testing.T) {
+// mainCallPositions records the first call position of each `receiver.Method`
+// in main() so tests can assert composition-root ordering.
+func mainCallPositions(t *testing.T) map[string]token.Pos {
+	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "main.go", nil, 0)
 	if err != nil {
@@ -117,22 +115,43 @@ func TestStartupInstallsModUpdatePlannerBeforeEventProducers(t *testing.T) {
 			return true
 		})
 	}
+	return positions
+}
 
-	before := func(first, second string) {
-		t.Helper()
-		firstPos, ok := positions[first]
-		if !ok {
-			t.Fatalf("%s call not found in main", first)
-		}
-		secondPos, ok := positions[second]
-		if !ok {
-			t.Fatalf("%s call not found in main", second)
-		}
-		if firstPos >= secondPos {
-			t.Fatalf("%s must run before %s (positions %d, %d)", first, second, firstPos, secondPos)
-		}
+func requireCallBefore(t *testing.T, positions map[string]token.Pos, first, second string) {
+	t.Helper()
+	firstPos, ok := positions[first]
+	if !ok {
+		t.Fatalf("%s call not found in main", first)
 	}
-	before("rpc.NewServer", "subscribe-task-scheduler")
-	before("rpc.NewServer", "metricsCollector.Start")
-	before("rpc.NewServer", "taskScheduler.Start")
+	secondPos, ok := positions[second]
+	if !ok {
+		t.Fatalf("%s call not found in main", second)
+	}
+	if firstPos >= secondPos {
+		t.Fatalf("%s must run before %s (positions %d, %d)", first, second, firstPos, secondPos)
+	}
+}
+
+// TestStartupInstallsModUpdatePlannerBeforeEventProducers guards the
+// composition-root order. rpc.NewServer installs the shared mod-update planner
+// on the scheduler; until that happens an event-triggered policy that fires has
+// no executor. Keep the construction before the scheduler subscription, the
+// metrics collector start and the scheduler run loop.
+func TestStartupInstallsModUpdatePlannerBeforeEventProducers(t *testing.T) {
+	positions := mainCallPositions(t)
+	requireCallBefore(t, positions, "rpc.NewServer", "subscribe-task-scheduler")
+	requireCallBefore(t, positions, "rpc.NewServer", "metricsCollector.Start")
+	requireCallBefore(t, positions, "rpc.NewServer", "taskScheduler.Start")
+}
+
+// TestShutdownStopsMetricsBeforeScheduler guards the LIFO defer order at the
+// composition root. The scheduler consumes metrics, so the metrics producer must
+// stop first: the scheduler's stop defer is registered before the collector
+// starts, and the collector's stop defer after it. Stopping the scheduler first
+// would leave the metrics producer active under a drained scheduler.
+func TestShutdownStopsMetricsBeforeScheduler(t *testing.T) {
+	positions := mainCallPositions(t)
+	requireCallBefore(t, positions, "taskScheduler.Stop", "metricsCollector.Start")
+	requireCallBefore(t, positions, "taskScheduler.Stop", "metricsCollector.Stop")
 }
