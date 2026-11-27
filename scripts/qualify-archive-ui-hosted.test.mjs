@@ -2,6 +2,8 @@
 // Offline fail-closed tests for the hosted production-UI acceptance driver.
 // They never launch a browser, start Docker or contact a controller.
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import { test } from "node:test";
 import path from "node:path";
 
@@ -16,7 +18,11 @@ import {
   planArtifactPath,
   previewFacts,
   readHead,
+  recordCreatedImport,
   safeArtifactName,
+  serverIdFromUrl,
+  upsertImportEntry,
+  writeDriverRecord,
 } from "./qualify-archive-ui-hosted.mjs";
 
 const HEAD = "a".repeat(40);
@@ -226,4 +232,104 @@ test("readHead reports the exact checkout", () => {
   assert.match(observed.observed, /^[0-9a-f]{40}$/);
   assert.equal(observed.match, false);
   assert.equal(typeof observed.worktreeClean, "boolean");
+});
+
+test("the created server id comes from the post-create /servers/<uuid> URL", () => {
+  const id = "3f2a6c1e-9b4d-4e7a-8c5f-1d2e3a4b5c6d";
+  assert.equal(serverIdFromUrl(`/servers/${id}`), id);
+  assert.equal(serverIdFromUrl(`/servers/${id}/`), id);
+  assert.equal(serverIdFromUrl(`http://127.0.0.1:18080/servers/${id}?tab=overview`), id);
+  assert.equal(serverIdFromUrl(new URL(`http://127.0.0.1:18080/servers/${id}#files`)), id);
+  // Canonical ids are lowercase even if the URL is not.
+  assert.equal(serverIdFromUrl(`/servers/${id.toUpperCase()}`), id);
+  for (const unrelated of [
+    "",
+    "/",
+    "/servers",
+    "/servers/new",
+    "/servers/srv-source-1",
+    `/servers/${id}/console`,
+    `/server/${id}`,
+    `/servers/${id}-extra`,
+    "/servers/not-a-uuid",
+    "/servers/%E0%A4%A",
+  ]) {
+    assert.equal(serverIdFromUrl(unrelated), null, `accepted ${unrelated}`);
+  }
+});
+
+test("the created id is persisted before the screenshot and survives a capture failure", async () => {
+  const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "archive-ui-record-"));
+  const id = "5b1c2d3e-4f60-4718-9a2b-3c4d5e6f7081";
+  try {
+    const record = {
+      schema: RECORD_SCHEMA,
+      phase: "import",
+      imports: [],
+      screenshots: [],
+      error: null,
+    };
+    const entry = {
+      format: "zip",
+      name: "archive-ui-zip",
+      file: "source.zip",
+      expectedLabel: "ZIP (.zip)",
+      port: 25586,
+      createdServerId: id,
+      createdRoute: `/servers/${id}`,
+    };
+    const events = [];
+    let persistedAtCapture = null;
+    await assert.rejects(
+      recordCreatedImport({
+        record,
+        entry,
+        persist: async () => {
+          events.push("persist");
+          await writeDriverRecord(record, outDir, "import");
+        },
+        capture: async () => {
+          events.push("capture");
+          persistedAtCapture = JSON.parse(
+            await fs.readFile(path.join(outDir, "import-run.json"), "utf8"),
+          );
+          throw new Error("screenshot failed");
+        },
+      }),
+      /screenshot failed/,
+    );
+
+    // The id reached disk before the screenshot started, and the in-memory
+    // partial record still carries it for the driver's failure path.
+    assert.deepEqual(events, ["persist", "capture"]);
+    assert.deepEqual(
+      persistedAtCapture.imports.map((saved) => saved.createdServerId),
+      [id],
+    );
+    assert.equal(record.imports.length, 1);
+    assert.equal(record.imports[0].createdServerId, id);
+    assert.equal(record.imports[0].createdRoute, `/servers/${id}`);
+
+    // Re-persisting the failed record (what main does on error) keeps the id.
+    await writeDriverRecord(record, outDir, "import");
+    const partial = JSON.parse(
+      await fs.readFile(path.join(outDir, "import-run.json"), "utf8"),
+    );
+    assert.deepEqual(
+      partial.imports.map((saved) => saved.createdServerId),
+      [id],
+    );
+
+    // Updating the same format is idempotent: it must not add a duplicate.
+    upsertImportEntry(record, { format: "zip", port: 25587 });
+    assert.equal(record.imports.length, 1);
+    assert.equal(record.imports[0].port, 25587);
+    assert.equal(record.imports[0].createdServerId, id);
+    await assert.rejects(
+      recordCreatedImport({ record, entry: { format: "zip" } }),
+      /persist callback/,
+    );
+  } finally {
+    await fs.rm(outDir, { recursive: true, force: true });
+  }
 });

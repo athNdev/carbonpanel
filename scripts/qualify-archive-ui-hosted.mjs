@@ -89,6 +89,34 @@ export function formatFromFilename(name) {
   return null;
 }
 
+// The product creates servers with canonical UUIDs (uuid.New().String()) and
+// the detail route is /servers/[id]. Archive creation has no setup tasks, so
+// /servers/new navigates straight to that route; the URL is the stable source
+// of the created id.
+const SERVER_ID_PATTERN =
+  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+export function serverIdFromUrl(raw) {
+  let pathname;
+  try {
+    pathname =
+      raw instanceof URL
+        ? raw.pathname
+        : new URL(String(raw ?? ""), "http://127.0.0.1").pathname;
+  } catch {
+    return null;
+  }
+  const match = /^\/servers\/([^/]+)\/?$/.exec(pathname);
+  if (!match) return null;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  return SERVER_ID_PATTERN.test(decoded) ? decoded.toLowerCase() : null;
+}
+
 function nonEmptyString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${label} must be a non-empty string`);
@@ -581,26 +609,21 @@ async function importPhase(page, plan, outDir, record, persist) {
       await page.waitForTimeout(250);
     }
     await create.click();
-    await page.getByRole("heading", { name: "Server created" }).waitFor({
+    // Archive creation commits the server and /servers/new immediately navigates
+    // to /servers/[id] because an archive import has no setup tasks. Waiting for
+    // the real route is deterministic; the transient "Server created" panel and
+    // its result link are not.
+    await page.waitForURL((url) => serverIdFromUrl(url) !== null, {
       timeout: plan.timeouts.createMs,
     });
-
-    const openLink = page.getByRole("link", { name: "Open server" });
-    const href = await openLink.getAttribute("href");
-    const match = /\/servers\/([^/?#]+)/.exec(href ?? "");
-    assert.ok(match, `${entry.format}: created server link is missing its id`);
-    const createdServerId = decodeURIComponent(match[1]);
-
-    await capture(
-      page,
-      outDir,
-      `import-${entry.format === "zip" ? "zip" : "tar"}-created-desktop-light`,
-      { width: 1440, height: 900 },
-      "light",
-      record.screenshots,
+    const current = new URL(page.url());
+    const createdServerId = serverIdFromUrl(current);
+    assert.ok(
+      createdServerId,
+      `${entry.format}: create did not navigate to /servers/<uuid>`,
     );
 
-    record.imports.push({
+    const createdEntry = {
       format: entry.format,
       name: entry.name,
       file: entry.file,
@@ -614,11 +637,28 @@ async function importPhase(page, plan, outDir, record, persist) {
       destinationNodeName: plan.remoteNode.name,
       port: entry.port,
       createdServerId,
-      createdRoute: href,
+      createdRoute: current.pathname,
+    };
+    // Custody first: the id reaches disk before any screenshot or theme
+    // evaluation can fail, so Python cleanup still owns the created server.
+    await recordCreatedImport({
+      record,
+      entry: createdEntry,
+      persist,
+      capture: async () => {
+        await page.getByTestId("showcase-server-detail").waitFor({
+          timeout: plan.timeouts.routeMs,
+        });
+        await capture(
+          page,
+          outDir,
+          `import-${entry.format === "zip" ? "zip" : "tar"}-created-detail-desktop-light`,
+          { width: 1440, height: 900 },
+          "light",
+          record.screenshots,
+        );
+      },
     });
-    // Persist the created id before the next import so a later failure still
-    // leaves the Python cleanup set the complete list of owned servers.
-    await persist();
   }
 }
 
@@ -667,7 +707,7 @@ export async function runDriver({ planPath, outDir, env = process.env, cwd = rep
   try {
     await login(page, plan.base, { username, password }, plan.timeouts);
     const persist = () =>
-      writeDriverRecord(record, outDir, plan.phase).catch(() => {});
+      writeDriverRecord(record, outDir, plan.phase);
     if (plan.phase === "refusal") {
       await refusalPhase(page, plan, outDir, record);
     } else if (plan.phase === "export") {
@@ -677,19 +717,51 @@ export async function runDriver({ planPath, outDir, env = process.env, cwd = rep
     }
   } catch (error) {
     record.error = String((error && error.message) || error);
+    // Attach before the best-effort failure screenshot so the partial record
+    // (including any created id) survives even if that capture fails.
+    error.record = record;
     await page
       .screenshot({
         path: artifactPath(outDir, `FAILED-${plan.phase}.png`),
         fullPage: true,
       })
       .catch(() => {});
-    error.record = record;
     throw error;
   } finally {
     await context.close().catch(() => {});
     await browser.close().catch(() => {});
   }
   return record;
+}
+
+export function upsertImportEntry(record, entry) {
+  if (!record || !Array.isArray(record.imports)) {
+    throw new Error("driver record has no imports list");
+  }
+  const format = nonEmptyString(entry?.format, "import.format");
+  const index = record.imports.findIndex(
+    (existing) => existing && existing.format === format,
+  );
+  if (index === -1) {
+    record.imports.push(entry);
+  } else {
+    record.imports[index] = { ...record.imports[index], ...entry };
+  }
+  return entry;
+}
+
+// Record the created server id, persist it atomically, and only then do any
+// risky browser work (screenshots, theme evaluation). Callers keep the entry
+// in memory even if capture fails, so the driver failure path can attach the
+// partial record and Python cleanup still owns the server.
+export async function recordCreatedImport({ record, entry, persist, capture }) {
+  if (typeof persist !== "function") {
+    throw new Error("recordCreatedImport requires a persist callback");
+  }
+  upsertImportEntry(record, entry);
+  await persist();
+  if (capture) await capture();
+  return entry;
 }
 
 export async function writeDriverRecord(record, outDir, phase) {
