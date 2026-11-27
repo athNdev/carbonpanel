@@ -12,6 +12,12 @@
 // head, browser, viewport, theme, contrast, overflow, scroll and page-error
 // checks for each captured state.
 //
+// Preview outcomes are recorded from the fixture itself: previewServerArchive
+// resolves inside the seeded in-process rpc-client, not over HTTP, so results.json
+// records the method, upload/destination, resolved/failed outcome, Connect error
+// code and capacity values, and states plainly that no HTTP status exists. Only
+// the archive downloads are HTTP and carry a status and byte count.
+//
 //   PLAYWRIGHT_BROWSERS_PATH=<existing browser cache> \
 //   REVIEW_ARCHIVE_OUT=<evidence directory> \
 //     node scripts/review/archive-routes-check.mjs
@@ -102,6 +108,8 @@ const evidence = {
       "export-session-tar": "fixture tar.gz bytes",
       "export-session-refused": "fixture refusal response (403, no body)",
     },
+    previewTransport:
+      "previewServerArchive is answered by the seeded in-process rpc-client in web/carbon-panel/e2e/wizard-datapack-upload/rpc-stub.js. It makes no HTTP request, so a preview has no HTTP status or byte length; the recorded facts are the call payload, resolved/failed outcome, Connect error code, findings and capacity.",
   },
   hostedPath: {
     status: "not-run",
@@ -121,6 +129,10 @@ const evidence = {
   views: [],
   states: [],
   previews: [],
+  network: {
+    pageXhrOrFetch: [],
+    note: "No browser XHR/fetch request is issued for archive preview or create: both go through the seeded in-process rpc-client, so no preview HTTP status can be recorded. Archive downloads are the only HTTP transfers and are recorded in downloads/downloadRefusals.",
+  },
   downloads: [],
   unacknowledged: [],
   downloadRefusals: [],
@@ -133,11 +145,13 @@ const evidence = {
     clipping: [],
     theme: [],
   },
+  controls: [],
   artifacts: [],
 };
 
 const artifacts = [];
 const downloadRequests = [];
+const pageRequests = [];
 let base = "";
 let server;
 let browser;
@@ -207,6 +221,71 @@ async function waitForWizard(page) {
 async function waitForDetail(page) {
   await page.getByTestId("server-export-archive").waitFor({ timeout: 30_000 });
   await page.getByTestId("showcase-server-detail").waitFor({ timeout: 30_000 });
+}
+
+// The fixture records every preview answer in __wizardPreviewOutcomes; consume
+// each outcome once per wizard run so results.json names the state that caused it.
+let previewCursor = 0;
+
+function previewRecord(view, scenario, outcome) {
+  return {
+    view: view.name,
+    scenario,
+    method: outcome.method,
+    transport:
+      "seeded in-process rpc-client (web/carbon-panel/e2e/wizard-datapack-upload/rpc-stub.js)",
+    httpStatus: null,
+    httpStatusNote:
+      "no HTTP request exists at this seam: the fixture stub resolves the preview in-process, so a preview has no HTTP status or byte length",
+    uploadId: outcome.uploadId ?? "",
+    nodeId: outcome.nodeId ?? "",
+    outcome: outcome.outcome,
+    errorCode: outcome.errorCode ?? null,
+    errorName: outcome.errorName ?? null,
+    findings: outcome.findings ?? 0,
+    destinationIds: outcome.destinationIds ?? [],
+    availableBytes: outcome.availableBytes ?? null,
+    requiredBytes: outcome.requiredBytes ?? null,
+  };
+}
+
+async function capturePreviews(page, view, scenario) {
+  const outcomes = await page.evaluate(
+    () => globalThis.__wizardPreviewOutcomes ?? [],
+  );
+  // The route may reuse the automatic destination preview, so a later UI state
+  // can legitimately add no new fixture outcome. Callers assert what they need.
+  const fresh = outcomes.slice(previewCursor);
+  previewCursor = outcomes.length;
+  const records = fresh.map((outcome) =>
+    previewRecord(view, scenario, outcome),
+  );
+  for (const record of records) {
+    assert.ok(
+      record.outcome === "resolved" || record.outcome === "failed",
+      `${scenario}: preview outcome must be resolved or failed`,
+    );
+    assert.equal(
+      record.httpStatus,
+      null,
+      `${scenario}: this fixture boundary has no HTTP status for a preview`,
+    );
+    if (record.outcome === "failed") {
+      assert.equal(
+        typeof record.errorCode,
+        "number",
+        `${scenario}: a failed preview must carry its Connect error code`,
+      );
+      assert.ok(record.errorName, `${scenario}: the error code must be named`);
+    } else {
+      assert.ok(
+        record.destinationIds.length >= 0,
+        `${scenario}: a resolved preview lists its destinations`,
+      );
+    }
+  }
+  evidence.previews.push(...records);
+  return records;
 }
 
 async function applyTheme(page, theme, label) {
@@ -552,6 +631,21 @@ async function openExportWithKeyboard(page, label) {
   );
 }
 
+// --carbon-control-md is the 40px Carbon control height. Measuring the rendered
+// box keeps the sizing claim measured instead of inferred from the class list.
+async function measureControl(locator, label) {
+  const box = await locator.boundingBox();
+  assert.ok(box, `${label}: control must be laid out`);
+  const height = Math.round(box.height * 10) / 10;
+  assert.ok(
+    height >= 39.5 && height <= 41,
+    `${label}: height ${height}px is not the 40px Carbon md control`,
+  );
+  const record = { label, height, target: 40 };
+  evidence.controls.push(record);
+  return record;
+}
+
 async function chooseFormatWithKeyboard(page, label, format) {
   await page.keyboard.press("Tab");
   if (format === "tar.gz") await page.keyboard.press("Tab");
@@ -672,6 +766,10 @@ async function exerciseDetail(page, view) {
   await applyTheme(page, view.theme, `detail ${view.name}`);
 
   const panel = page.getByTestId("archive-export-panel");
+  await measureControl(
+    page.getByTestId("server-export-archive"),
+    `detail ${view.name}: Export archive trigger`,
+  );
   await openExportWithKeyboard(page, `detail ${view.name}`);
   await captureState(page, {
     route: "/servers/[id]",
@@ -679,6 +777,10 @@ async function exerciseDetail(page, view) {
     view,
     target: panel,
   });
+  await measureControl(
+    page.getByTestId("archive-prepare"),
+    `detail ${view.name}: Prepare export`,
+  );
 
   await chooseFormatWithKeyboard(page, `detail ${view.name}`, "tar.gz");
   await captureState(page, {
@@ -718,6 +820,10 @@ async function exerciseDetail(page, view) {
     view,
     target: panel,
   });
+  await measureControl(
+    page.getByTestId("archive-download"),
+    `detail ${view.name}: Download archive`,
+  );
 
   assert.equal(
     await page.getByTestId("archive-download").isDisabled(),
@@ -824,10 +930,14 @@ async function exerciseDetail(page, view) {
     view,
     target: panel,
   });
+  await measureControl(
+    page.getByTestId("archive-retry"),
+    `detail ${view.name}: Try again`,
+  );
   await page.evaluate(() => {
     globalThis.__exportMode = "success";
   });
-  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await page.getByTestId("archive-retry").click();
   await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
   await closeExportWithKeyboard(page, `detail ${view.name} error`);
 
@@ -884,6 +994,7 @@ async function openWizard(page, view, options) {
     },
     { destinations, previewMode, capacity, denyListNodes, format },
   );
+  previewCursor = 0;
   await page.getByPlaceholder("survival-smp-01").fill(name);
   const tile = page.getByTestId("create-from-archive-tile");
   await tile.focus();
@@ -927,12 +1038,57 @@ async function exerciseNewRoute(page, view) {
     view,
     target: page.getByTestId("archive-preview"),
   });
+  const uploadStepPreviews = await capturePreviews(
+    page,
+    view,
+    "archive-preview-zip",
+  );
+  assert.ok(
+    uploadStepPreviews.length >= 1,
+    "the upload-step preview must be exposed by the fixture",
+  );
+  const uploadStepPreview = uploadStepPreviews.at(-1);
+  assert.equal(
+    uploadStepPreview.outcome,
+    "resolved",
+    "the upload-step preview resolves",
+  );
+  assert.equal(
+    uploadStepPreview.nodeId,
+    "node-1",
+    "the upload-step preview names the automatic first destination",
+  );
+  assert.equal(uploadStepPreview.findings, 0, "the fixture preview is clean");
+  assert.deepEqual(
+    uploadStepPreview.destinationIds,
+    ["node-1", "node-2"],
+    "the preview lists the enabled destinations that the wizard must offer",
+  );
 
   await nextSteps(page, 3);
   const stepPanel = page
     .getByTestId("archive-destination-confirmation")
     .locator("xpath=..");
   await page.getByTestId("archive-destination-confirmation").waitFor();
+  const placementPreviews = await capturePreviews(
+    page,
+    view,
+    "placement-same-node",
+  );
+  assert.deepEqual(
+    placementPreviews.filter((record) => record.outcome !== "resolved"),
+    [],
+    "reaching the cluster step must not fail a preview",
+  );
+  const automaticDestination =
+    placementPreviews.find((record) => record.nodeId === "node-1") ??
+    uploadStepPreview;
+  assert.equal(automaticDestination.nodeId, "node-1");
+  assert.equal(automaticDestination.outcome, "resolved");
+  assert.ok(
+    automaticDestination.availableBytes >= automaticDestination.requiredBytes,
+    "the automatic destination preview reports enough free space",
+  );
   const autoPlacement = page.getByRole("radio", { name: /Auto-Placement/ });
   assert.equal(
     await autoPlacement.getAttribute("aria-disabled"),
@@ -984,6 +1140,23 @@ async function exerciseNewRoute(page, view) {
     view,
     target: stepPanel,
   });
+  const destinationPreviews = await capturePreviews(
+    page,
+    view,
+    "destination-change",
+  );
+  assert.ok(
+    destinationPreviews.length >= 1,
+    "selecting another destination must preview it",
+  );
+  const changedDestination = destinationPreviews.at(-1);
+  assert.equal(changedDestination.nodeId, "node-2");
+  assert.equal(changedDestination.outcome, "resolved");
+  assert.equal(
+    changedDestination.httpStatus,
+    null,
+    "a destination preview is not an HTTP request",
+  );
 
   await page.evaluate(() => {
     globalThis.__archivePreviewMode = "unsupported";
@@ -1000,6 +1173,22 @@ async function exerciseNewRoute(page, view) {
     view,
     target: stepPanel,
   });
+  const blockedPreviews = await capturePreviews(page, view, "blocked-findings");
+  assert.ok(
+    blockedPreviews.length >= 1,
+    "returning to the blocked destination must preview it",
+  );
+  const blockedPreview = blockedPreviews.at(-1);
+  assert.equal(blockedPreview.nodeId, "node-1");
+  assert.equal(
+    blockedPreview.outcome,
+    "resolved",
+    "blocking findings are a resolved preview, not a failed call",
+  );
+  assert.ok(
+    blockedPreview.findings >= 1,
+    "the blocked preview carries its finding count",
+  );
   await page.getByRole("button", { name: /Add-ons/ }).click();
   assert.equal(
     await page
@@ -1030,6 +1219,22 @@ async function exerciseNewRoute(page, view) {
     view,
     target: stepPanel,
   });
+  const capacityPreviews = await capturePreviews(
+    page,
+    view,
+    "insufficient-capacity",
+  );
+  assert.ok(
+    capacityPreviews.length >= 1,
+    "the insufficient-capacity destination must be previewed",
+  );
+  const shortDestination = capacityPreviews.at(-1);
+  assert.equal(shortDestination.nodeId, "node-2");
+  assert.equal(shortDestination.outcome, "resolved");
+  assert.ok(
+    shortDestination.availableBytes < shortDestination.requiredBytes,
+    "the insufficient-capacity preview reports less free space than required",
+  );
 
   await page.evaluate(() => {
     globalThis.__archiveCapacityMode = "sufficient";
@@ -1039,6 +1244,18 @@ async function exerciseNewRoute(page, view) {
     () =>
       document.querySelector('[data-testid="archive-destination-node"]')
         ?.textContent === "node-1",
+  );
+  const readyPreviews = await capturePreviews(page, view, "create-ready");
+  assert.ok(
+    readyPreviews.length >= 1,
+    "the create-ready destination must be previewed",
+  );
+  const readyPreview = readyPreviews.at(-1);
+  assert.equal(readyPreview.nodeId, "node-1");
+  assert.equal(readyPreview.outcome, "resolved");
+  assert.ok(
+    readyPreview.availableBytes >= readyPreview.requiredBytes,
+    "the create-ready preview reports enough free space",
   );
   await page.getByRole("button", { name: /Add-ons/ }).click();
   await page
@@ -1082,6 +1299,14 @@ async function exerciseNewRoute(page, view) {
     view,
     target: page.getByTestId("archive-preview"),
   });
+  const tarPreviews = await capturePreviews(page, view, "archive-preview-tar");
+  assert.ok(tarPreviews.length >= 1, "the tar.gz preview must be exposed");
+  assert.equal(tarPreviews.at(-1).outcome, "resolved");
+  assert.deepEqual(
+    tarPreviews.at(-1).destinationIds,
+    ["node-1", "node-2"],
+    "the tar.gz preview lists the same destinations",
+  );
 
   await openWizard(page, view, {
     name: `archive-route-empty-${view.name}`,
@@ -1092,6 +1317,18 @@ async function exerciseNewRoute(page, view) {
   await page.getByTestId("archive-destination-empty").waitFor({
     timeout: 15_000,
   });
+  const emptyPreviews = await capturePreviews(page, view, "no-destination");
+  assert.ok(
+    emptyPreviews.length >= 1,
+    "the empty preflight must be exposed by the fixture",
+  );
+  const emptyPreview = emptyPreviews.at(-1);
+  assert.equal(emptyPreview.outcome, "resolved");
+  assert.deepEqual(
+    emptyPreview.destinationIds,
+    [],
+    "the empty preflight resolves with no enabled destination",
+  );
   await captureState(page, {
     route: "/servers/new",
     state: "no-destination",
@@ -1288,9 +1525,25 @@ try {
       page.setDefaultTimeout(60_000);
       const pageErrors = [];
       const consoleErrors = [];
+      const viewRequests = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("console", (message) => {
         if (message.type() === "error") consoleErrors.push(message.text());
+      });
+      // The fixture replaces the RPC transport, so archive preview and create
+      // must not issue any browser XHR/fetch. Recording it keeps the "no HTTP
+      // status at this seam" statement checkable instead of assumed.
+      page.on("request", (request) => {
+        const type = request.resourceType();
+        if (type !== "xhr" && type !== "fetch") return;
+        const entry = {
+          view: view.name,
+          method: request.method(),
+          url: request.url().replace(base, "<review-base>"),
+          resourceType: type,
+        };
+        viewRequests.push(entry);
+        pageRequests.push(entry);
       });
       evidence.views.push({
         name: view.name,
@@ -1322,8 +1575,19 @@ try {
         [],
         `${view.name}: console errors`,
       );
+      assert.deepEqual(
+        viewRequests,
+        [],
+        `${view.name}: the fixture must not issue browser XHR/fetch for preview or create`,
+      );
     }
     evidence.downloadRequests = downloadRequests;
+    evidence.network.pageXhrOrFetch = pageRequests;
+    assert.deepEqual(
+      pageRequests,
+      [],
+      "no browser XHR/fetch request exists for the preview or create seam",
+    );
   } finally {
     await browser?.close();
     await server?.close();
@@ -1336,7 +1600,13 @@ try {
   );
   await assertArtifactsComplete();
   console.log(
-    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, authenticated ZIP and tar.gz downloads, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks",
+    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, measured 40px Carbon md export actions, authenticated ZIP and tar.gz downloads, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks",
+  );
+  console.log(
+    `CONTROLS: ${evidence.controls.map((control) => `${control.label}=${control.height}px`).join("; ")}`,
+  );
+  console.log(
+    `PREVIEWS: ${evidence.previews.length} previewServerArchive outcomes recorded from the seeded in-process rpc-client (resolved/failed + Connect error code); no preview HTTP status exists at this seam and none is claimed. Browser XHR/fetch requests: ${pageRequests.length}.`,
   );
 } catch (error) {
   await fs.mkdir(out, { recursive: true }).catch(() => {});

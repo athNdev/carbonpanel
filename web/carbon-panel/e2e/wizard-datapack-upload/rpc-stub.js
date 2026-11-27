@@ -55,6 +55,107 @@ function record(method, payload) {
 	calls.push({ method, payload });
 }
 
+const previewOutcomes = [];
+
+// The preview seam in this fixture is the in-process stub itself: no HTTP
+// request is made, so there is no HTTP status to report. Record the call and the
+// answer the fixture actually gave.
+function observePreview(payload, result) {
+	return result.then(
+		(value) => {
+			previewOutcomes.push({
+				method: 'previewServerArchive',
+				uploadId: payload.uploadId,
+				nodeId: payload.nodeId,
+				outcome: 'resolved',
+				errorCode: null,
+				errorName: null,
+				findings: value.findings?.length ?? 0,
+				destinationIds: value.destinations?.map((destination) => destination.id) ?? [],
+				availableBytes: value.availableBytes === undefined ? null : Number(value.availableBytes),
+				requiredBytes: value.requiredBytes === undefined ? null : Number(value.requiredBytes)
+			});
+			return value;
+		},
+		(error) => {
+			previewOutcomes.push({
+				method: 'previewServerArchive',
+				uploadId: payload.uploadId,
+				nodeId: payload.nodeId,
+				outcome: 'failed',
+				errorCode: typeof error?.code === 'number' ? error.code : null,
+				errorName: typeof error?.code === 'number' ? (Code[error.code] ?? null) : null,
+				message: error?.rawMessage ?? error?.message ?? null
+			});
+			throw error;
+		}
+	);
+}
+
+function previewServerArchiveResult(payload) {
+	const mode = globalThis.__archivePreviewMode || 'success';
+	if (mode === 'fail-once') {
+		globalThis.__archivePreviewMode = 'success';
+		return Promise.reject(new ConnectError('fixture archive preview refusal', Code.Unavailable));
+	}
+	if (mode === 'fail') {
+		return Promise.reject(new ConnectError('fixture archive preview refusal', Code.Unavailable));
+	}
+	const findings =
+		mode === 'unsupported'
+			? [
+					{
+						code: 5,
+						severity: 2,
+						message: 'The archive uses a loader that this controller does not support.'
+					}
+				]
+			: [];
+	const result = {
+		format: globalThis.__archivePreviewFormat === 2 ? 2 : 1,
+		schemaVersion: 1,
+		exporterVersion: 'fixture-1.0.0',
+		mcVersion: '1.20.6',
+		modLoader: 3,
+		loaderVersion: '0.16.0',
+		memory: 3072,
+		maxPlayers: 8,
+		fileCount: 12,
+		expandedBytes: 1048576n,
+		requiredBytes: 2097152n,
+		availableBytes: payload.nodeId
+			? globalThis.__archiveCapacityMode === 'insufficient'
+				? 1048576n
+				: 4194304n
+			: undefined,
+		destinations: globalThis.__wizardArchiveDestinations || [
+			{ id: 'node-1', name: 'Fixture Node' }
+		],
+		findings
+	};
+	if (!payload.nodeId && globalThis.__wizardHoldArchivePreflight) {
+		return new Promise((resolve) => {
+			globalThis.__wizardReleaseArchivePreflight = () => resolve(result);
+		});
+	}
+	if (payload.nodeId && globalThis.__wizardDelayedArchiveNode === payload.nodeId) {
+		const settle = () =>
+			globalThis.__wizardDelayedArchiveNodeMode === 'fail'
+				? Promise.reject(new ConnectError('stale destination preview refusal', Code.Unavailable))
+				: Promise.resolve(result);
+		if (globalThis.__wizardHoldArchiveNodePreflight) {
+			return new Promise((resolve, reject) => {
+				globalThis.__wizardReleaseArchiveNodePreflight = () => {
+					delete globalThis.__wizardReleaseArchiveNodePreflight;
+					settle().then(resolve, reject);
+				};
+			});
+		}
+		return settle();
+	}
+	return Promise.resolve(result);
+}
+
 export const rpcClient = {
 	minecraft: {
 		getMinecraftVersions() {
@@ -141,73 +242,7 @@ export const rpcClient = {
 		},
 		previewServerArchive(payload) {
 			record('previewServerArchive', payload);
-			const mode = globalThis.__archivePreviewMode || 'success';
-			if (mode === 'fail-once') {
-				globalThis.__archivePreviewMode = 'success';
-				return Promise.reject(
-					new ConnectError('fixture archive preview refusal', Code.Unavailable)
-				);
-			}
-			if (mode === 'fail') {
-				return Promise.reject(
-					new ConnectError('fixture archive preview refusal', Code.Unavailable)
-				);
-			}
-			const findings =
-				mode === 'unsupported'
-					? [
-							{
-								code: 5,
-								severity: 2,
-								message: 'The archive uses a loader that this controller does not support.'
-							}
-						]
-					: [];
-			const result = {
-				format: globalThis.__archivePreviewFormat === 2 ? 2 : 1,
-				schemaVersion: 1,
-				exporterVersion: 'fixture-1.0.0',
-				mcVersion: '1.20.6',
-				modLoader: 3,
-				loaderVersion: '0.16.0',
-				memory: 3072,
-				maxPlayers: 8,
-				fileCount: 12,
-				expandedBytes: 1048576n,
-				requiredBytes: 2097152n,
-				availableBytes: payload.nodeId
-					? globalThis.__archiveCapacityMode === 'insufficient'
-						? 1048576n
-						: 4194304n
-					: undefined,
-				destinations: globalThis.__wizardArchiveDestinations || [
-					{ id: 'node-1', name: 'Fixture Node' }
-				],
-				findings
-			};
-			if (!payload.nodeId && globalThis.__wizardHoldArchivePreflight) {
-				return new Promise((resolve) => {
-					globalThis.__wizardReleaseArchivePreflight = () => resolve(result);
-				});
-			}
-			if (payload.nodeId && globalThis.__wizardDelayedArchiveNode === payload.nodeId) {
-				const settle = () =>
-					globalThis.__wizardDelayedArchiveNodeMode === 'fail'
-						? Promise.reject(
-								new ConnectError('stale destination preview refusal', Code.Unavailable)
-							)
-						: Promise.resolve(result);
-				if (globalThis.__wizardHoldArchiveNodePreflight) {
-					return new Promise((resolve, reject) => {
-						globalThis.__wizardReleaseArchiveNodePreflight = () => {
-							delete globalThis.__wizardReleaseArchiveNodePreflight;
-							settle().then(resolve, reject);
-						};
-					});
-				}
-				return settle();
-			}
-			return Promise.resolve(result);
+			return observePreview(payload, previewServerArchiveResult(payload));
 		},
 		listServers() {
 			record('listServers', {});
@@ -465,6 +500,8 @@ export function wasRpcErrorToasted() {
 }
 
 globalThis.__wizardCalls = calls;
+globalThis.__wizardPreviewOutcomes = previewOutcomes;
 globalThis.__wizardReset = () => {
 	calls.length = 0;
+	previewOutcomes.length = 0;
 };
