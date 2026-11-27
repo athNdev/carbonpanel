@@ -1963,6 +1963,35 @@ type ModpackUpdateTaskConfig struct {
 	AuthToken                string `json:"auth_token"`
 }
 
+// modpackPendingCommitFile records a fetched commit whose stage or sync has
+// not completed. The clone cache is reset to FETCH_HEAD before the tree is
+// staged, so HEAD already names the fetched commit when a later run starts.
+// Without this marker that run would compare HEAD with FETCH_HEAD, report "no
+// updates", and lose an update a refused stage never published.
+const modpackPendingCommitFile = ".carbon-panel_pending_update"
+
+func readModpackPendingCommit(cacheDir string) string {
+	body, err := os.ReadFile(filepath.Join(cacheDir, modpackPendingCommitFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
+}
+
+// writeModpackPendingCommit records the fetched commit before the cache is
+// reset or staged. A write failure must stop the update rather than let the
+// fetched commit become invisible on the next run.
+func writeModpackPendingCommit(cacheDir, commit string) error {
+	if commit == "" {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(cacheDir, modpackPendingCommitFile), []byte(commit+"\n"), 0o644)
+}
+
+func clearModpackPendingCommit(cacheDir string) {
+	_ = os.Remove(filepath.Join(cacheDir, modpackPendingCommitFile))
+}
+
 // executeModpackUpdateTask handles cloning or fetching updates from Git/source, syncing into the server directory, and restarting if updates are applied
 func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
 	var cfg ModpackUpdateTaskConfig
@@ -2025,12 +2054,16 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		}
 		hasUpdates = true
 		updateSummary = fmt.Sprintf("Initial modpack clone successful from %s on branch %s", cfg.GitURL, branch)
+		if err := writeModpackPendingCommit(cacheDir, remoteHash); err != nil {
+			return "", fmt.Errorf("record the fetched modpack commit for retry: %w", err)
+		}
 	} else {
 		// Fetch and check if updates are available
 		if out, err := fetchFn(ctx, cacheDir, branch); err != nil {
 			return string(out), fmt.Errorf("git fetch failed: %w: %s", err, string(out))
 		}
 
+		pendingHash := readModpackPendingCommit(cacheDir)
 		cmdHead := exec.CommandContext(ctx, "git", "-C", cacheDir, "rev-parse", "HEAD")
 		headOut, _ := cmdHead.Output()
 		currentHash = strings.TrimSpace(string(headOut))
@@ -2039,12 +2072,16 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		remoteOut, _ := cmdRemote.Output()
 		remoteHash = strings.TrimSpace(string(remoteOut))
 
-		if currentHash == remoteHash && currentHash != "" {
+		// A pending marker means an earlier run fetched an update but its stage
+		// or sync did not complete. Treat it as an update even though the
+		// earlier reset already moved HEAD to the fetched commit.
+		retryingFetched := pendingHash != ""
+		if currentHash == remoteHash && currentHash != "" && !retryingFetched {
 			return fmt.Sprintf("Modpack is up to date at commit %s (no updates)", currentHash[:min(8, len(currentHash))]), nil
 		}
 
 		// Inspect changed files between current commit and new FETCH_HEAD
-		if currentHash != "" && remoteHash != "" {
+		if currentHash != "" && remoteHash != "" && currentHash != remoteHash {
 			cmdDiff := exec.CommandContext(ctx, "git", "-C", cacheDir, "diff", "--name-only", currentHash, remoteHash)
 			if diffOut, err := cmdDiff.Output(); err == nil {
 				for _, f := range strings.Split(string(diffOut), "\n") {
@@ -2056,6 +2093,12 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			}
 		}
 
+		// Persist the fetched commit before resetting HEAD. If the stage below
+		// is refused, the next run must still see this commit as unpublished.
+		if err := writeModpackPendingCommit(cacheDir, remoteHash); err != nil {
+			return "", fmt.Errorf("record the fetched modpack commit for retry: %w", err)
+		}
+
 		// Pull latest changes
 		cmdReset := exec.CommandContext(ctx, "git", "-C", cacheDir, "reset", "--hard", "FETCH_HEAD")
 		if out, err := cmdReset.CombinedOutput(); err != nil {
@@ -2063,9 +2106,13 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		}
 
 		hasUpdates = true
-		updateSummary = fmt.Sprintf("Updated modpack from commit %s to %s",
-			currentHash[:min(8, len(currentHash))],
-			remoteHash[:min(8, len(remoteHash))])
+		if retryingFetched && currentHash == remoteHash {
+			updateSummary = fmt.Sprintf("Retrying previously fetched modpack commit %s", remoteHash[:min(8, len(remoteHash))])
+		} else {
+			updateSummary = fmt.Sprintf("Updated modpack from commit %s to %s",
+				currentHash[:min(8, len(currentHash))],
+				remoteHash[:min(8, len(remoteHash))])
+		}
 	}
 
 	if hasUpdates {
@@ -2081,6 +2128,7 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
 				return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
 			}
+			clearModpackPendingCommit(cacheDir)
 			return updateSummary + "; staged into the open batch", nil
 		}
 
@@ -2131,6 +2179,7 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			}
 			return out, syncErr
 		}
+		clearModpackPendingCommit(cacheDir)
 
 		// Check if maintenance window or immediate restart is triggered
 		shouldRestartNow := cfg.RestartImmediately
