@@ -36,6 +36,26 @@ func TestFabricOptimizationInstallPreservesJarOnNon2xx(t *testing.T) {
 	assertNoFabricOptimizationTemp(t, filepath.Dir(existing))
 }
 
+// A 206 response is a declared fragment, not the complete jar, even when its
+// Content-Length matches the bytes it sends. It must not replace the installed
+// jar.
+func TestFabricOptimizationInstallRejectsPartialContent(t *testing.T) {
+	existing, target := fabricOptimizationFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		body := []byte("fragment")
+		w.Header().Set("Content-Length", "8")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(body)
+	}, "lithium-2.0.jar")
+
+	err := installFabricOptimizationJar(context.Background(), filepath.Dir(existing), target, "lithium")
+	require.Error(t, err)
+	body, err := os.ReadFile(existing)
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(body), "a partial response must not replace the installed jar")
+	require.NoFileExists(t, filepath.Join(filepath.Dir(existing), "lithium-2.0.jar"))
+	assertNoFabricOptimizationTemp(t, filepath.Dir(existing))
+}
+
 func TestFabricOptimizationInstallPreservesJarOnTruncatedBody(t *testing.T) {
 	existing, target := fabricOptimizationFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "1024")

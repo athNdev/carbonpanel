@@ -794,7 +794,7 @@ const (
 // installFabricOptimizationJar downloads one optimization mod through a
 // context-bound, bounded request and only replaces the live jar after the
 // complete body has been written to a temporary file in the mods directory. A
-// non-2xx, oversized, truncated or empty response leaves the existing jar in
+// non-200, oversized, truncated or empty response leaves the existing jar in
 // place and removes the partial temporary file.
 func installFabricOptimizationJar(ctx context.Context, modsDir string, target modrinthVersionFile, prefix string) error {
 	targetPath, err := modInstallPath(modsDir, target.Filename)
@@ -813,7 +813,7 @@ func installFabricOptimizationJar(ctx context.Context, modsDir string, target mo
 		return fmt.Errorf("download: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 	if resp.ContentLength > maxFabricOptimizationJarBytes {
