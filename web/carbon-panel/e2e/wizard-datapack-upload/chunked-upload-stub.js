@@ -10,6 +10,14 @@ globalThis.__wizardUploadCalls = calls;
 globalThis.__wizardUploadMode = 'success';
 globalThis.__wizardPendingUploads = [];
 
+export function cancelUpload() {
+	return Promise.resolve();
+}
+
+export function getUploadStatus() {
+	return Promise.resolve({ percentComplete: 100 });
+}
+
 export function uploadFile(file, options) {
 	const mode = globalThis.__wizardUploadMode || 'success';
 	const callIndex = calls.length + 1;

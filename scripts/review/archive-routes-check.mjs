@@ -1,26 +1,39 @@
 // SPDX-License-Identifier: MPL-2.0
 // Normal-route browser evidence for OSS-428 archive portability.
 //
-// Logs in through the production login page, uses the production layout and
-// drives /servers/[id] and /servers/new against a disposable review stack. It
-// records refused/unacknowledged export states, authorized ZIP and tar.gz
-// downloads with transfer status, filename, bytes and digest, and archive
-// previews from both files. It never targets a shared panel or real service.
+// Renders the production /servers/new and /servers/[id] route components in a
+// disposable Vite fixture. The RPC transport, SvelteKit app modules and the
+// resumable uploader are replaced; the routes, archive components, Carbon
+// controls, Tailwind theme and language are the application implementation.
+// No live panel, credentials, Docker daemon, world or external service is used.
 //
-//   REVIEW_BASE=http://127.0.0.1:8099 \
-//   PANEL_REVIEW_USER=reviewer PANEL_REVIEW_PASSWORD=... \
+// The script writes screenshots, downloaded fixture archives and results.json
+// and indexes every generated file in results.json. It also records the exact
+// head, browser, viewport, theme, contrast, overflow, scroll and page-error
+// checks for each captured state.
+//
+//   PLAYWRIGHT_BROWSERS_PATH=<existing browser cache> \
+//   REVIEW_ARCHIVE_OUT=<evidence directory> \
 //     node scripts/review/archive-routes-check.mjs
+//
+// A live-controller run is deliberately separate: bring up the disposable
+// review stack, point REVIEW_BASE at it and use the hosted commands recorded in
+// results.json. This checkout does not start Docker on the Windows host.
 
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchReviewBrowser } from "./browser.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
+const project = path.resolve(repoRoot, "web/carbon-panel");
+const fixture = path.join(project, "e2e", "wizard-datapack-upload");
 const verifiedHead = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: repoRoot,
   encoding: "utf8",
@@ -29,16 +42,34 @@ const worktreeStatus = execFileSync("git", ["status", "--porcelain"], {
   cwd: repoRoot,
   encoding: "utf8",
 }).trim();
-const base = (process.env.REVIEW_BASE || "http://127.0.0.1:8099").replace(
-  /\/$/,
-  "",
-);
-const user = process.env.PANEL_REVIEW_USER || "reviewer";
-const password = process.env.PANEL_REVIEW_PASSWORD || "Review-Panel-2026";
 const out = path.resolve(
   process.env.REVIEW_ARCHIVE_OUT ||
-    path.join(here, "../../tmp/review-output/archive-routes-live"),
+    path.join(here, "../../tmp/review-output/archive-routes-fixture"),
 );
+const browserCache =
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||
+  path.join(repoRoot, "tmp", "review-browsers");
+
+const requireFrontend = createRequire(path.join(project, "package.json"));
+const { createServer } = await import(
+  pathToFileURL(requireFrontend.resolve("vite")).href
+);
+const { svelte } = await import(
+  pathToFileURL(requireFrontend.resolve("@sveltejs/vite-plugin-svelte")).href
+);
+const { default: tailwind } = await import(
+  pathToFileURL(requireFrontend.resolve("@tailwindcss/vite")).href
+);
+
+const sha256 = (buffer) =>
+  crypto.createHash("sha256").update(buffer).digest("hex");
+const slug = (route) => (route.includes("[id]") ? "detail" : "new");
+const views = [
+  { name: "desktop-dark", width: 1440, height: 900, theme: "dark" },
+  { name: "desktop-light", width: 1440, height: 900, theme: "light" },
+  { name: "narrow-dark", width: 390, height: 844, theme: "dark" },
+  { name: "narrow-light", width: 390, height: 844, theme: "light" },
+];
 
 const evidence = {
   head: {
@@ -48,335 +79,1272 @@ const evidence = {
     worktreeStatus: worktreeStatus ? worktreeStatus.split("\n") : [],
   },
   scope:
-    "Normal /servers/[id] and /servers/new production routes through the disposable review stack. Live-engine round trips remain separate evidence.",
-  base: base.replace(/:\d+$/, ":<review-port>"),
+    "Disposable normal-route fixture: production /servers/new and /servers/[id] route components, archive export/create components, Carbon controls and application CSS. Live controller, Docker daemon, real worlds and external services are not exercised.",
+  fixture: {
+    entries: [
+      "/new.html -> real routes/servers/new/+page.svelte",
+      "/detail.html -> real routes/servers/[id]/+page.svelte",
+    ],
+    replaced: [
+      "$lib/api/rpc-client (seeded loopback RPC responses)",
+      "$app/state, $app/navigation, $app/paths, $app/env (inert route stubs)",
+      "$lib/utils/chunked-upload (bounded uploader)",
+      "$lib/components/carbon (barrel re-exports the real Carbon components)",
+    ],
+    real: [
+      "server detail route and overview layout",
+      "create-server wizard and archive preview, placement and create flow",
+      "ServerArchiveExport and ArchiveExportPanel",
+      "Carbon modal, buttons, controls, theme tokens and app.css",
+    ],
+    downloadSessions: {
+      "export-session-zip": "fixture zip bytes",
+      "export-session-tar": "fixture tar.gz bytes",
+      "export-session-refused": "fixture refusal response (403, no body)",
+    },
+  },
+  hostedPath: {
+    status: "not-run",
+    blocker:
+      "This Windows checkout has no disposable Linux/WSL review stack or Docker daemon; AGENTS.md keeps Docker fixtures in a disposable named session and this assignment forbids starting a full Docker stack on the host.",
+    commands: [
+      "node scripts/review/run.mjs single-seeded up",
+      "REVIEW_BASE=http://127.0.0.1:<session-port> PANEL_REVIEW_USER=<review-user> PANEL_REVIEW_PASSWORD=<review-password> node scripts/review/run.mjs single-seeded review --plan scripts/review/plan-console.json",
+      "node scripts/review/run.mjs single-seeded down",
+    ],
+    note: "The hosted path must be rerun at the exact head before claiming live-engine acceptance. This fixture run is UI/route evidence only.",
+  },
   views: [],
-  downloads: [],
+  states: [],
   previews: [],
+  downloads: [],
+  unacknowledged: [],
+  downloadRefusals: [],
   keyboard: [],
-  errors: [],
+  checks: {
+    pageErrors: [],
+    consoleErrors: [],
+    overflow: [],
+    contrast: [],
+    clipping: [],
+    theme: [],
+  },
+  artifacts: [],
 };
 
-const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
+const artifacts = [];
+const downloadRequests = [];
+let base = "";
+let server;
+let browser;
 
-async function setTheme(page, theme) {
+function artifactPath(name) {
+  const file = path.join(out, name);
+  const relative = path.relative(out, file);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`artifact escapes the evidence directory: ${name}`);
+  }
+  return file;
+}
+
+async function shot(target, name, meta) {
+  const file = artifactPath(name);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await target.screenshot({ path: file, animations: "disabled" });
+  const bytes = await fs.readFile(file);
+  artifacts.push({
+    file: path.relative(out, file).replaceAll("\\", "/"),
+    bytes: bytes.byteLength,
+    sha256: sha256(bytes),
+    ...meta,
+  });
+  return file;
+}
+
+async function assertArtifactsComplete() {
+  const expected = new Set([
+    "results.json",
+    ...artifacts.map((entry) => entry.file),
+  ]);
+  const found = [];
+  async function walk(directory) {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(absolute);
+      else found.push(path.relative(out, absolute).replaceAll("\\", "/"));
+    }
+  }
+  await walk(out);
+  const unindexed = found.filter((file) => !expected.has(file));
+  const missing = [...expected].filter((file) => !found.includes(file));
+  assert.deepEqual(unindexed, [], "every generated file must be indexed");
+  assert.deepEqual(missing, [], "every indexed artifact must exist");
+}
+
+async function waitForFunction(page, fn, label, timeout = 25_000) {
+  try {
+    await page.waitForFunction(fn, null, { timeout });
+  } catch (error) {
+    throw new Error(`timed out waiting for ${label}`, { cause: error });
+  }
+}
+
+async function waitForWizard(page) {
+  await waitForFunction(
+    page,
+    () => Boolean(globalThis.__wizardCalls),
+    "the wizard fixture",
+  );
+  await page
+    .getByRole("button", { name: "Next Step" })
+    .waitFor({ timeout: 15_000 });
+}
+
+async function waitForDetail(page) {
+  await page.getByTestId("server-export-archive").waitFor({ timeout: 30_000 });
+  await page.getByTestId("showcase-server-detail").waitFor({ timeout: 30_000 });
+}
+
+async function applyTheme(page, theme, label) {
   await page.evaluate((value) => {
     document.documentElement.setAttribute("data-carbon-theme", value);
     document.documentElement.classList.toggle("dark", value === "dark");
   }, theme);
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(120);
+  const measured = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.className = "bg-background";
+    probe.style.cssText =
+      "position:fixed;left:-9999px;top:0;width:1px;height:1px;pointer-events:none";
+    document.body.appendChild(probe);
+    const background = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const match = background.match(/rgba?\(([^)]+)\)/);
+    const parts = match
+      ? match[1]
+          .split(/[ ,/]+/)
+          .filter(Boolean)
+          .map(Number)
+      : [255, 255, 255, 1];
+    const linear = (channel) => {
+      const value = channel / 255;
+      return value <= 0.04045
+        ? value / 12.92
+        : ((value + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance =
+      0.2126 * linear(parts[0]) +
+      0.7152 * linear(parts[1]) +
+      0.0722 * linear(parts[2]);
+    return {
+      attribute: document.documentElement.getAttribute("data-carbon-theme"),
+      darkClass: document.documentElement.classList.contains("dark"),
+      background,
+      luminance,
+      isDark: luminance < 0.5,
+    };
+  });
+  assert.equal(measured.attribute, theme, `${label}: theme attribute`);
+  assert.equal(measured.darkClass, theme === "dark", `${label}: dark class`);
+  assert.equal(
+    measured.isDark,
+    theme === "dark",
+    `${label}: rendered background ${measured.background} does not match ${theme}`,
+  );
+  evidence.checks.theme.push({ label, theme, ...measured });
+  return measured;
 }
 
-async function login(page) {
-  await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
-  await page
-    .locator('input[placeholder="Enter your username"]')
-    .fill(user);
-  await page.locator('input[placeholder="Enter your password"]').fill(password);
-  await Promise.all([
-    page.waitForURL((url) => !String(url).includes("/login"), {
-      timeout: 15_000,
-    }),
-    page.locator('button[type="submit"]').click(),
-  ]);
-  await page.locator("main").waitFor({ timeout: 15_000 });
+function contrastRatio(foreground, background) {
+  const linear = (channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = ([r, g, b]) =>
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
-async function firstServerPath(page) {
-  await page.goto(`${base}/servers`, { waitUntil: "domcontentloaded" });
-  await page
-    .locator('a[href^="/servers/"]')
+async function contrastSamples(root) {
+  return root.evaluate((element) => {
+    const parse = (value) => {
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1]
+        .split(/[ ,/]+/)
+        .filter(Boolean)
+        .map(Number);
+      return [parts[0], parts[1], parts[2], parts[3] ?? 1];
+    };
+    const composite = (top, bottom) => {
+      const alpha = top[3];
+      return [
+        top[0] * alpha + bottom[0] * (1 - alpha),
+        top[1] * alpha + bottom[1] * (1 - alpha),
+        top[2] * alpha + bottom[2] * (1 - alpha),
+        1,
+      ];
+    };
+    const samples = [];
+    const nodes = element.querySelectorAll(
+      "p,h1,h2,h3,h4,legend,label,button,span",
+    );
+    for (const node of nodes) {
+      const text = node.textContent?.replace(/\s+/g, " ").trim();
+      if (!text || node.closest("button[disabled]")) continue;
+      if (!node.offsetParent && node.tagName !== "BODY") continue;
+      const style = getComputedStyle(node);
+      if (style.visibility === "hidden" || Number(style.opacity) === 0)
+        continue;
+      let background = [255, 255, 255, 1];
+      let opacity = 1;
+      for (let current = node; current; current = current.parentElement) {
+        const currentStyle = getComputedStyle(current);
+        opacity *= Number(currentStyle.opacity || 1);
+        const parsed = parse(currentStyle.backgroundColor);
+        if (parsed && parsed[3] > 0) {
+          background = composite(parsed, background);
+          if (parsed[3] === 1) break;
+        }
+      }
+      const foreground = parse(style.color) || [0, 0, 0, 1];
+      if (opacity < 1) foreground[3] *= opacity;
+      const effective =
+        foreground[3] === 1
+          ? foreground
+          : [
+              foreground[0] * foreground[3] +
+                background[0] * (1 - foreground[3]),
+              foreground[1] * foreground[3] +
+                background[1] * (1 - foreground[3]),
+              foreground[2] * foreground[3] +
+                background[2] * (1 - foreground[3]),
+              1,
+            ];
+      samples.push({
+        text: text.slice(0, 120),
+        foreground: effective.slice(0, 3),
+        background: background.slice(0, 3),
+        fontSize: Number.parseFloat(style.fontSize),
+        fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
+      });
+    }
+    return samples;
+  });
+}
+
+async function checkContrast(root, label) {
+  const samples = await contrastSamples(root);
+  assert.ok(samples.length > 0, `${label}: expected readable text`);
+  const violations = [];
+  for (const sample of samples) {
+    const ratio = contrastRatio(sample.foreground, sample.background);
+    const large =
+      sample.fontSize >= 24 ||
+      (sample.fontSize >= 18.66 && sample.fontWeight >= 700);
+    const required = large ? 3 : 4.5;
+    if (ratio + 0.001 < required) {
+      violations.push({
+        text: sample.text,
+        ratio: Number(ratio.toFixed(2)),
+        required,
+        fontSize: sample.fontSize,
+        fontWeight: sample.fontWeight,
+      });
+    }
+  }
+  assert.deepEqual(violations, [], `${label}: contrast violations`);
+  const minimum = samples.reduce(
+    (lowest, sample) =>
+      Math.min(lowest, contrastRatio(sample.foreground, sample.background)),
+    Infinity,
+  );
+  evidence.checks.contrast.push({
+    label,
+    samples: samples.length,
+    minimum: Number(minimum.toFixed(2)),
+  });
+  return minimum;
+}
+
+async function checkNoHorizontalOverflow(page, label) {
+  const measured = await page.evaluate(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    return {
+      rootOverflow: root.scrollWidth - root.clientWidth,
+      bodyOverflow: body.scrollWidth - body.clientWidth,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+  });
+  assert.ok(
+    measured.rootOverflow <= 1 && measured.bodyOverflow <= 1,
+    `${label}: horizontal overflow root=${measured.rootOverflow} body=${measured.bodyOverflow}`,
+  );
+  evidence.checks.overflow.push({ label, ...measured });
+  return measured;
+}
+
+async function checkNoClipping(target, label) {
+  const measured = await target.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  assert.ok(
+    measured.scrollHeight <= measured.clientHeight + 1,
+    `${label}: content is clipped by an internal vertical scroller`,
+  );
+  assert.ok(
+    measured.scrollWidth <= measured.clientWidth + 1,
+    `${label}: content is clipped by an internal horizontal scroller`,
+  );
+  evidence.checks.clipping.push({ label, ...measured, clipped: false });
+  return measured;
+}
+
+async function captureScrollerSegments(target, baseName, meta) {
+  const handle = await target.evaluateHandle((element) => {
+    for (let node = element.parentElement; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (
+        /(auto|scroll)/.test(style.overflowY) &&
+        node.scrollHeight > node.clientHeight + 1
+      ) {
+        return node;
+      }
+    }
+    return null;
+  });
+  const scroller = handle.asElement();
+  if (!scroller) return { segments: 1 };
+  const segments = [];
+  try {
+    await scroller.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    segments.push(
+      await shot(scroller, `${baseName}-scroll-top.png`, {
+        ...meta,
+        role: "scroll-segment",
+        segment: "top",
+      }),
+    );
+    const maximum = await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    });
+    assert.ok(maximum > 0, "a scroll segment must have a bottom position");
+    segments.push(
+      await shot(scroller, `${baseName}-scroll-bottom.png`, {
+        ...meta,
+        role: "scroll-segment",
+        segment: "bottom",
+      }),
+    );
+  } finally {
+    await scroller.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await handle.dispose();
+  }
+  return {
+    segments: segments.length,
+    files: segments.map((file) => path.basename(file)),
+  };
+}
+
+async function captureState(page, spec) {
+  const {
+    route,
+    state,
+    view,
+    target,
+    label = `${route} ${state}`,
+    captureViewport = true,
+  } = spec;
+  const actual = page.viewportSize();
+  assert.deepEqual(
+    actual,
+    { width: view.width, height: view.height },
+    `${label}: viewport drifted from ${view.width}x${view.height}`,
+  );
+  await target.first().waitFor({ state: "visible", timeout: 30_000 });
+  await target
     .first()
-    .waitFor({ timeout: 30_000 });
-  await page.waitForTimeout(750);
-  const href = await page.evaluate(() => {
-    const links = [...document.querySelectorAll('a[href^="/servers/"]')];
+    .scrollIntoViewIfNeeded()
+    .catch(() => {});
+  await page.waitForTimeout(80);
+  const overflow = await checkNoHorizontalOverflow(page, label);
+  const clipping = await checkNoClipping(target.first(), label);
+  const minimumContrast = await checkContrast(target.first(), label);
+  const name = `${slug(route)}-${state}-${view.name}`;
+  await shot(target.first(), `${name}.png`, {
+    role: "state-panel",
+    route,
+    state,
+    view: view.name,
+    theme: view.theme,
+    viewport: actual,
+  });
+  let contextFile = null;
+  if (captureViewport) {
+    contextFile = await shot(page, `${name}-viewport.png`, {
+      role: "viewport-context",
+      route,
+      state,
+      view: view.name,
+      theme: view.theme,
+      viewport: actual,
+    });
+  }
+  const scroller = await captureScrollerSegments(target.first(), name, {
+    route,
+    state,
+    view: view.name,
+  });
+  const entry = {
+    route,
+    state,
+    view: view.name,
+    theme: view.theme,
+    viewport: actual,
+    screenshot: path.basename(artifactPath(`${name}.png`)),
+    viewportScreenshot: contextFile ? path.basename(contextFile) : null,
+    contrastMinimum: Number(minimumContrast.toFixed(2)),
+    overflow,
+    clipping,
+    scrollSegments: scroller.segments,
+    scrollSegmentFiles: scroller.files ?? [],
+  };
+  evidence.states.push(entry);
+  return entry;
+}
+
+async function focusLabel(page) {
+  return page.evaluate(() => {
+    const active = document.activeElement;
     return (
-      links
-        .map((link) => link.getAttribute("href"))
-        .find((value) => value && value !== "/servers/new") || null
+      active?.getAttribute("aria-label") ||
+      active?.textContent?.replace(/\s+/g, " ").trim() ||
+      active?.tagName ||
+      ""
     );
   });
-  assert.ok(href, "the disposable stack must expose a server detail link");
-  return href;
 }
 
-async function closeExport(page) {
-  if (
-    (await page.getByTestId("archive-export-panel").count()) > 0 &&
-    (await page.getByTestId("archive-export-panel").isVisible())
-  ) {
-    await page.keyboard.press("Escape");
-    await page
-      .getByTestId("archive-export-panel")
-      .waitFor({ state: "hidden" });
-  }
-}
-
-async function openExport(page) {
+async function openExportWithKeyboard(page, label) {
   const trigger = page.getByTestId("server-export-archive");
   await trigger.focus();
   await page.keyboard.press("Enter");
-  evidence.keyboard.push("Enter opened the export modal");
+  evidence.keyboard.push(`${label}: Enter opened the export modal`);
   await page.getByTestId("archive-export-panel").waitFor();
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Close modal",
   );
 }
 
-async function chooseFormat(page, format) {
-  const label = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
+async function chooseFormatWithKeyboard(page, label, format) {
   await page.keyboard.press("Tab");
   if (format === "tar.gz") await page.keyboard.press("Tab");
   await page.keyboard.press("Space");
+  const option = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
   assert.equal(
-    await page.getByRole("radio", { name: label }).getAttribute("aria-checked"),
+    await page
+      .getByRole("radio", { name: option })
+      .getAttribute("aria-checked"),
     "true",
+    `${label}: Space must select ${option}`,
   );
-  evidence.keyboard.push(`Space selected ${label}`);
+  evidence.keyboard.push(`${label}: Space selected ${option}`);
 }
 
-async function downloadArchive(page, format, view) {
-  const label = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
-  await openExport(page);
-  await chooseFormat(page, format);
-  await page.screenshot({
-    path: path.join(out, `detail-export-${format}-${view}.png`),
-    fullPage: true,
+async function closeExportWithKeyboard(page, label) {
+  await page.keyboard.press("Escape");
+  await page.getByTestId("archive-export-panel").waitFor({ state: "hidden" });
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "server-export-archive",
+  );
+  evidence.keyboard.push(
+    `${label}: Escape closed the modal and returned focus`,
+  );
+}
+
+async function recordDownload(page, download, view, format) {
+  const suggested = download.suggestedFilename();
+  const savedName = `download-${view.name}-${format}-${suggested}`;
+  const saved = artifactPath(savedName);
+  await download.saveAs(saved);
+  const bytes = await fs.readFile(saved);
+  artifacts.push({
+    file: savedName,
+    bytes: bytes.byteLength,
+    sha256: sha256(bytes),
+    role: "download",
+    view: view.name,
+    format,
+    filename: suggested,
+  });
+  const response = await page.context().request.get(download.url());
+  const body = await response.body();
+  const headers = response.headers();
+  const record = {
+    format,
+    view: view.name,
+    url: download.url().replace(base, "<review-base>"),
+    status: response.status(),
+    filename: suggested,
+    disposition: headers["content-disposition"] || "",
+    contentType: headers["content-type"] || "",
+    declaredLength: Number(headers["content-length"] || 0),
+    downloadedBytes: bytes.byteLength,
+    responseBytes: body.byteLength,
+    sha256Download: sha256(bytes),
+    sha256Response: sha256(body),
+    metadataSource: "page.context().request.get(download.url())",
+  };
+  assert.equal(record.status, 200, `${view.name} ${format}: status`);
+  assert.ok(
+    record.filename.endsWith(format === "tar.gz" ? ".tar.gz" : ".zip"),
+    `${view.name} ${format}: filename ${record.filename}`,
+  );
+  assert.ok(
+    record.disposition.includes(record.filename),
+    `${view.name} ${format}: disposition names ${record.filename}`,
+  );
+  assert.equal(
+    record.declaredLength,
+    record.downloadedBytes,
+    `${view.name} ${format}: declared length matches the download`,
+  );
+  assert.equal(
+    record.responseBytes,
+    record.downloadedBytes,
+    `${view.name} ${format}: re-fetch length matches the download`,
+  );
+  assert.equal(
+    record.sha256Response,
+    record.sha256Download,
+    `${view.name} ${format}: re-fetch digest matches the download`,
+  );
+  assert.ok(record.downloadedBytes > 0, `${view.name} ${format}: bytes`);
+  evidence.downloads.push(record);
+  return record;
+}
+
+async function recordRefusedDownload(page, view, label) {
+  const response = await page
+    .context()
+    .request.get(`${base}/api/v1/download/export-session-refused`);
+  const body = await response.body();
+  const headers = response.headers();
+  const record = {
+    view: view.name,
+    label,
+    url: `${base}/api/v1/download/export-session-refused`.replace(
+      base,
+      "<review-base>",
+    ),
+    status: response.status(),
+    declaredLength: Number(headers["content-length"] || 0),
+    bytes: body.byteLength,
+    contentType: headers["content-type"] || "",
+    disposition: headers["content-disposition"] || "",
+  };
+  assert.equal(record.status, 403, `${label}: fixture refusal status`);
+  assert.equal(record.bytes, 0, `${label}: refusal carries no archive bytes`);
+  evidence.downloadRefusals.push(record);
+}
+
+async function exerciseDetail(page, view) {
+  await page.goto(`${base}/detail.html`, { waitUntil: "domcontentloaded" });
+  await waitForDetail(page);
+  await applyTheme(page, view.theme, `detail ${view.name}`);
+
+  const panel = page.getByTestId("archive-export-panel");
+  await openExportWithKeyboard(page, `detail ${view.name}`);
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-idle-zip",
+    view,
+    target: panel,
   });
 
+  await chooseFormatWithKeyboard(page, `detail ${view.name}`, "tar.gz");
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-idle-tar",
+    view,
+    target: panel,
+  });
+
+  await page.evaluate(() => {
+    globalThis.__exportMode = "hold";
+    globalThis.__wizardReset();
+  });
+  await page.keyboard.press("Tab");
   assert.equal(
-    await page.getByTestId("archive-download").count(),
-    0,
-    "download is not offered before preparation",
+    await focusLabel(page),
+    "Prepare export",
+    "Tab must reach Prepare export from the format radios",
   );
-  await page.getByTestId("archive-prepare").click();
-  await page
-    .getByTestId("archive-export-ready")
-    .waitFor({ timeout: 10 * 60 * 1000 });
-  const filename = (
-    await page.getByTestId("archive-export-ready").textContent()
-  ).trim();
-  await page.screenshot({
-    path: path.join(out, `detail-export-ready-${format}-${view}.png`),
-    fullPage: true,
+  await page.keyboard.press("Enter");
+  evidence.keyboard.push(
+    `detail ${view.name}: Enter started archive preparation`,
+  );
+  await page.getByText("Preparing archive…").waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-preparing-tar",
+    view,
+    target: panel,
+  });
+
+  await page.evaluate(() => globalThis.__wizardReleaseExport());
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-ready-tar",
+    view,
+    target: panel,
   });
 
   assert.equal(
     await page.getByTestId("archive-download").isDisabled(),
     true,
-    "download must stay disabled until the notice is acknowledged",
+    "download stays disabled before acknowledgement",
   );
+  const beforeRequests = downloadRequests.length;
+  await page
+    .getByTestId("archive-download")
+    .click({ force: true })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  assert.equal(
+    downloadRequests.length,
+    beforeRequests,
+    "an unacknowledged download must not start a transfer",
+  );
+  evidence.unacknowledged.push({
+    view: view.name,
+    route: "/servers/[id]",
+    format: "tar.gz",
+    buttonDisabled: true,
+    downloadRequests: downloadRequests.length - beforeRequests,
+  });
+  await page
+    .getByLabel("I have reviewed this notice before downloading.")
+    .focus();
+  await page.keyboard.press("Space");
+  evidence.keyboard.push(
+    `detail ${view.name}: Space acknowledged the disclosure`,
+  );
+  assert.equal(
+    await page
+      .getByLabel("I have reviewed this notice before downloading.")
+      .isChecked(),
+    true,
+    "the disclosure can be acknowledged from the keyboard",
+  );
+  await page.getByTestId("archive-download").focus();
+  const tarDownload = page.waitForEvent("download", { timeout: 30_000 });
+  await page.keyboard.press("Enter");
+  evidence.keyboard.push(
+    `detail ${view.name}: Enter authorized the tar.gz download`,
+  );
+  await recordDownload(page, await tarDownload, view, "tar.gz");
+  await panel.waitFor({ state: "hidden" });
+
+  await page.evaluate(() => {
+    globalThis.__exportMode = "success";
+  });
+  await openExportWithKeyboard(page, `detail ${view.name} zip`);
+  await chooseFormatWithKeyboard(page, `detail ${view.name} zip`, "zip");
+  await page.getByTestId("archive-prepare").focus();
+  await page.keyboard.press("Enter");
+  evidence.keyboard.push(
+    `detail ${view.name} zip: Enter started archive preparation`,
+  );
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-ready-zip",
+    view,
+    target: panel,
+  });
+  const zipBeforeRequests = downloadRequests.length;
+  await page
+    .getByTestId("archive-download")
+    .click({ force: true })
+    .catch(() => {});
+  await page.waitForTimeout(150);
+  assert.equal(
+    downloadRequests.length,
+    zipBeforeRequests,
+    "the ZIP download stays blocked before acknowledgement",
+  );
+  evidence.unacknowledged.push({
+    view: view.name,
+    route: "/servers/[id]",
+    format: "zip",
+    buttonDisabled: true,
+    downloadRequests: downloadRequests.length - zipBeforeRequests,
+  });
   await page
     .getByLabel("I have reviewed this notice before downloading.")
     .check();
-  await page.getByTestId("archive-download").focus();
-  const downloadPromise = page.waitForEvent("download", {
-    timeout: 10 * 60 * 1000,
+  const zipDownload = page.waitForEvent("download", { timeout: 30_000 });
+  await page.getByTestId("archive-download").click();
+  await recordDownload(page, await zipDownload, view, "zip");
+  await panel.waitFor({ state: "hidden" });
+
+  await openExportWithKeyboard(page, `detail ${view.name} error`);
+  await page.evaluate(() => {
+    globalThis.__exportMode = "fail";
+    globalThis.__wizardReset();
   });
-  await page.keyboard.press("Enter");
-  evidence.keyboard.push("Enter authorized the archive download");
-  const download = await downloadPromise;
-  const suggested = download.suggestedFilename();
-  const saved = path.join(out, `${view}-${suggested}`);
-  await download.saveAs(saved);
-  const bytes = await fs.readFile(saved);
-  // Inspect the same authorized session through the browser context so the
-  // evidence can state the HTTP status and headers without transferring the
-  // archive a second time.
-  const response = await page.context().request.fetch(download.url(), {
-    method: "HEAD",
-  });
-  const result = {
-    format,
-    view,
-    status: response.status(),
-    url: download.url().replace(base, "<review-base>"),
-    filename: suggested,
-    byteLength: bytes.byteLength,
-    sha256: sha256(bytes),
-    contentType: response.headers()["content-type"] || "",
-    disposition: response.headers()["content-disposition"] || "",
-    declaredLength: Number(response.headers()["content-length"] || 0),
-  };
-  assert.equal(
-    result.declaredLength,
-    result.byteLength,
-    "the authorized response length matches the downloaded bytes",
-  );
-  assert.equal(result.status, 200);
-  assert.ok(
-    result.filename.endsWith(format === "tar.gz" ? ".tar.gz" : ".zip"),
-    `download filename ${result.filename} matches ${format}`,
-  );
-  assert.ok(result.byteLength > 0, "the authorized transfer carries bytes");
-  assert.ok(
-    result.disposition.includes(suggested),
-    "the download response names the current archive filename",
-  );
-  evidence.downloads.push(result);
+  await page.getByTestId("archive-prepare").click();
   await page
     .getByTestId("archive-export-panel")
-    .waitFor({ state: "hidden" });
-  return saved;
+    .getByText("fixture export preparation refusal")
+    .waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-error",
+    view,
+    target: panel,
+  });
+  await page.evaluate(() => {
+    globalThis.__exportMode = "success";
+  });
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await page.getByTestId("archive-export-ready").waitFor({ timeout: 15_000 });
+  await closeExportWithKeyboard(page, `detail ${view.name} error`);
+
+  await page.goto(`${base}/detail.html?running=1`, {
+    waitUntil: "domcontentloaded",
+  });
+  await waitForDetail(page);
+  await applyTheme(page, view.theme, `detail running ${view.name}`);
+  await openExportWithKeyboard(page, `detail running ${view.name}`);
+  await page.getByTestId("archive-export-running").waitFor();
+  assert.equal(
+    await page.getByTestId("archive-prepare").isDisabled(),
+    true,
+    "a running server must not prepare an export",
+  );
+  assert.equal(
+    await page.getByRole("radio", { name: "ZIP (.zip)" }).isDisabled(),
+    true,
+    "a running server must disable format selection",
+  );
+  await captureState(page, {
+    route: "/servers/[id]",
+    state: "export-refused-running",
+    view,
+    target: panel,
+  });
+  await closeExportWithKeyboard(page, `detail running ${view.name}`);
+  await recordRefusedDownload(page, view, `detail ${view.name} refused`);
 }
 
-async function previewArchive(page, archivePath, format, view) {
-  await page.goto(`${base}/servers/new`, { waitUntil: "domcontentloaded" });
-  await page.getByPlaceholder("survival-smp-01").fill("archive-route-fixture");
+async function openWizard(page, view, options) {
+  const {
+    name,
+    format = "zip",
+    destinations = [
+      { id: "node-1", name: "Fixture Node" },
+      { id: "node-2", name: "Fixture Node B" },
+    ],
+    previewMode = "success",
+    capacity = "sufficient",
+    denyListNodes = true,
+  } = options;
+  await page.goto(`${base}/new.html`, { waitUntil: "domcontentloaded" });
+  await waitForWizard(page);
+  await applyTheme(page, view.theme, `new ${name} ${view.name}`);
+  await page.evaluate(
+    ({ destinations, previewMode, capacity, denyListNodes, format }) => {
+      globalThis.__wizardDenyListNodes = denyListNodes;
+      globalThis.__wizardArchiveDestinations = destinations;
+      globalThis.__archivePreviewMode = previewMode;
+      globalThis.__archiveCapacityMode = capacity;
+      globalThis.__archivePreviewFormat = format === "tar.gz" ? 2 : 1;
+      globalThis.__wizardReset();
+    },
+    { destinations, previewMode, capacity, denyListNodes, format },
+  );
+  await page.getByPlaceholder("survival-smp-01").fill(name);
   const tile = page.getByTestId("create-from-archive-tile");
   await tile.focus();
   await page.keyboard.press("Space");
-  evidence.keyboard.push("Space selected the create-from-archive tile");
-  await page.locator('[data-testid="archive-file-input"]').setInputFiles(archivePath);
-  await page.getByTestId("archive-preview").waitFor({ timeout: 10 * 60 * 1000 });
+  evidence.keyboard.push(
+    `new ${name} ${view.name}: Space selected the archive tile`,
+  );
+  await page.locator('[data-testid="archive-file-input"]').setInputFiles({
+    name: format === "tar.gz" ? "fixture-server.tar.gz" : "fixture-server.zip",
+    mimeType: format === "tar.gz" ? "application/gzip" : "application/zip",
+    buffer: Buffer.from(
+      format === "tar.gz"
+        ? "\x1f\x8bfixture-server"
+        : "PK\x03\x04fixture-server",
+    ),
+  });
+  await page.getByTestId("archive-preview").waitFor({ timeout: 15_000 });
   const label = format === "tar.gz" ? "TAR.GZ (.tar.gz)" : "ZIP (.zip)";
   await page
     .getByTestId("archive-preview")
     .getByText(label, { exact: true })
     .waitFor();
-  await page.screenshot({
-    path: path.join(out, `new-preview-${format}-${view}.png`),
-    fullPage: true,
-  });
-  await page
-    .getByTestId("archive-preview")
-    .screenshot({ path: path.join(out, `new-preview-${format}-${view}-panel.png`) });
-  for (let step = 0; step < 4; step++)
+  return label;
+}
+
+async function nextSteps(page, count) {
+  for (let step = 0; step < count; step++) {
     await page.getByRole("button", { name: "Next Step" }).click();
-  const create = page.getByRole("button", { name: "Create Server", exact: true });
-  await create.waitFor();
-  evidence.previews.push({
-    format,
-    view,
-    filename: path.basename(archivePath),
-    screenshot: `new-preview-${format}-${view}.png`,
-    createEnabled: await create.isEnabled(),
+  }
+}
+
+async function exerciseNewRoute(page, view) {
+  const previewZip = await openWizard(page, view, {
+    name: `archive-route-zip-${view.name}`,
+    format: "zip",
   });
-  await page.screenshot({
-    path: path.join(out, `new-create-${format}-${view}.png`),
-    fullPage: true,
+  assert.equal(previewZip, "ZIP (.zip)");
+  await captureState(page, {
+    route: "/servers/new",
+    state: "archive-preview-zip",
+    view,
+    target: page.getByTestId("archive-preview"),
+  });
+
+  await nextSteps(page, 3);
+  const stepPanel = page
+    .getByTestId("archive-destination-confirmation")
+    .locator("xpath=..");
+  await page.getByTestId("archive-destination-confirmation").waitFor();
+  const autoPlacement = page.getByRole("radio", { name: /Auto-Placement/ });
+  assert.equal(
+    await autoPlacement.getAttribute("aria-disabled"),
+    "true",
+    "archive mode must not offer generic automatic placement",
+  );
+  assert.equal(
+    await autoPlacement.getAttribute("disabled"),
+    null,
+    "the same-node explanation must stay keyboard reachable",
+  );
+  await autoPlacement.focus();
+  assert.match(
+    await focusLabel(page),
+    /Auto-Placement/,
+    "focus must reach the aria-disabled Auto-Placement explanation",
+  );
+  evidence.keyboard.push(
+    `new ${view.name}: focus reached the aria-disabled Auto-Placement card`,
+  );
+  await captureState(page, {
+    route: "/servers/new",
+    state: "placement-same-node",
+    view,
+    target: stepPanel,
+  });
+
+  const options = page.getByTestId("archive-destination-option");
+  assert.equal(await options.count(), 2, "the preflight must offer both nodes");
+  await options.nth(1).click();
+  await page.waitForFunction(
+    () =>
+      globalThis.__wizardCalls.some(
+        (call) =>
+          call.method === "previewServerArchive" &&
+          call.payload.nodeId === "node-2",
+      ),
+    null,
+    { timeout: 15_000 },
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="archive-destination-node"]')
+        ?.textContent === "node-2",
+  );
+  await captureState(page, {
+    route: "/servers/new",
+    state: "destination-change",
+    view,
+    target: stepPanel,
+  });
+
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "unsupported";
+  });
+  await options.nth(0).click();
+  await page
+    .getByText("This archive has blocking findings and cannot be created.", {
+      exact: true,
+    })
+    .waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/new",
+    state: "blocked-findings",
+    view,
+    target: stepPanel,
+  });
+  await page.getByRole("button", { name: /Add-ons/ }).click();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Create Server", exact: true })
+      .isDisabled(),
+    true,
+    "blocking findings must leave Create disabled",
+  );
+  await page
+    .getByTestId("archive-create-blocked-help")
+    .getByText("Resolve the blocking archive findings before creating.", {
+      exact: true,
+    })
+    .waitFor();
+  await page.getByRole("button", { name: /Cluster & Runtime/ }).click();
+
+  await page.evaluate(() => {
+    globalThis.__archivePreviewMode = "success";
+    globalThis.__archiveCapacityMode = "insufficient";
+  });
+  await options.nth(1).click();
+  await page
+    .getByText("Destination does not have enough free space", { exact: true })
+    .waitFor({ timeout: 15_000 });
+  await captureState(page, {
+    route: "/servers/new",
+    state: "insufficient-capacity",
+    view,
+    target: stepPanel,
+  });
+
+  await page.evaluate(() => {
+    globalThis.__archiveCapacityMode = "sufficient";
+  });
+  await options.nth(0).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="archive-destination-node"]')
+        ?.textContent === "node-1",
+  );
+  await page.getByRole("button", { name: /Add-ons/ }).click();
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Create Server", exact: true })
+      .isDisabled(),
+    false,
+    "a current successful preview must enable Create",
+  );
+  await page
+    .getByRole("button", { name: "Create Server", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Server created" }).waitFor({
+    timeout: 15_000,
+  });
+  const createCall = (await page.evaluate(() => globalThis.__wizardCalls)).find(
+    (call) => call.method === "createServer",
+  );
+  assert.ok(createCall, "Create Server must submit the wizard");
+  assert.equal(createCall.payload.archiveUploadId, "seeded-session");
+  assert.equal(createCall.payload.nodeId, "node-1");
+  await captureState(page, {
+    route: "/servers/new",
+    state: "create-submitted",
+    view,
+    target: page.locator('section[aria-label="Server setup results"]'),
+    captureViewport: true,
+  });
+
+  const previewTar = await openWizard(page, view, {
+    name: `archive-route-tar-${view.name}`,
+    format: "tar.gz",
+  });
+  assert.equal(previewTar, "TAR.GZ (.tar.gz)");
+  await captureState(page, {
+    route: "/servers/new",
+    state: "archive-preview-tar",
+    view,
+    target: page.getByTestId("archive-preview"),
+  });
+
+  await openWizard(page, view, {
+    name: `archive-route-empty-${view.name}`,
+    format: "zip",
+    destinations: [],
+  });
+  await nextSteps(page, 3);
+  await page.getByTestId("archive-destination-empty").waitFor({
+    timeout: 15_000,
+  });
+  await captureState(page, {
+    route: "/servers/new",
+    state: "no-destination",
+    view,
+    target: page.getByTestId("archive-destination-empty").locator("xpath=.."),
   });
 }
 
-let browser;
-let runError;
 try {
   await fs.mkdir(out, { recursive: true });
-  const launched = await launchReviewBrowser({ headless: true });
-  browser = launched.browser;
-  evidence.browser = launched.metadata;
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 1000 },
-  });
-  page.setDefaultTimeout(60_000);
-  page.on("pageerror", (error) => evidence.errors.push(error.message));
-
-  await login(page);
-  const detailPath = await firstServerPath(page);
-
-  for (const view of [
-    { name: "desktop-dark", width: 1440, height: 1000, theme: "dark" },
-    { name: "desktop-light", width: 1440, height: 1000, theme: "light" },
-    { name: "narrow-dark", width: 390, height: 900, theme: "dark" },
-    { name: "narrow-light", width: 390, height: 900, theme: "light" },
-  ]) {
-    await page.setViewportSize({ width: view.width, height: view.height });
-    await page.goto(`${base}${detailPath}`, { waitUntil: "domcontentloaded" });
-    await page.getByTestId("server-export-archive").waitFor({
-      timeout: 30_000,
+  const cache = await fs.mkdtemp(
+    path.join(os.tmpdir(), "carbon-archive-routes-"),
+  );
+  const sessions = {
+    "export-session-zip": {
+      bytes: Buffer.from("fixture-zip-archive-bytes"),
+      type: "application/zip",
+      filename: "fixture-server.zip",
+    },
+    "export-session-tar": {
+      bytes: Buffer.from("fixture-tar-gz-archive-bytes"),
+      type: "application/gzip",
+      filename: "fixture-server.tar.gz",
+    },
+  };
+  try {
+    server = await createServer({
+      configFile: false,
+      root: project,
+      cacheDir: cache,
+      publicDir: path.join(project, "static"),
+      resolve: {
+        dedupe: ["svelte"],
+        alias: [
+          {
+            find: /^@bufbuild\/protobuf$/,
+            replacement: path.join(
+              project,
+              "node_modules/@bufbuild/protobuf/dist/esm/index.js",
+            ),
+          },
+          { find: "$app/state", replacement: path.join(fixture, "state.js") },
+          {
+            find: "$app/navigation",
+            replacement: path.join(fixture, "navigation.js"),
+          },
+          {
+            find: "$app/paths",
+            replacement: path.join(
+              project,
+              "e2e/oss-245-diagnostics-reconnect/paths.js",
+            ),
+          },
+          {
+            find: "$app/env",
+            replacement: path.join(
+              project,
+              "e2e/oss-245-diagnostics-reconnect/environment.js",
+            ),
+          },
+          {
+            find: "$lib/api/rpc-client",
+            replacement: path.join(fixture, "rpc-stub.js"),
+          },
+          {
+            find: "$lib/utils/chunked-upload",
+            replacement: path.join(fixture, "chunked-upload-stub.js"),
+          },
+          {
+            find: /^\$lib\/components\/carbon$/,
+            replacement: path.join(fixture, "carbon.js"),
+          },
+          { find: "$lib", replacement: path.join(project, "src/lib") },
+        ],
+      },
+      plugins: [
+        svelte({ configFile: path.join(project, "sveltekit.config.js") }),
+        tailwind(),
+        {
+          name: "archive-routes-fixture",
+          configureServer(vite) {
+            vite.middlewares.use(async (req, res, next) => {
+              if (req.url === "/favicon.ico") {
+                res.statusCode = 204;
+                res.end();
+                return;
+              }
+              const pathname = (req.url || "").split("?")[0];
+              if (pathname.startsWith("/api/v1/download/")) {
+                const sessionId = decodeURIComponent(
+                  pathname.slice("/api/v1/download/".length),
+                );
+                if (sessionId === "export-session-refused") {
+                  downloadRequests.push({
+                    sessionId,
+                    method: req.method,
+                    status: 403,
+                    bytes: 0,
+                  });
+                  res.statusCode = 403;
+                  res.setHeader("Content-Type", "text/plain");
+                  res.setHeader("Content-Length", "0");
+                  res.end();
+                  return;
+                }
+                const session = sessions[sessionId];
+                if (!session) {
+                  downloadRequests.push({
+                    sessionId,
+                    method: req.method,
+                    status: 404,
+                    bytes: 0,
+                  });
+                  res.statusCode = 404;
+                  res.end();
+                  return;
+                }
+                downloadRequests.push({
+                  sessionId,
+                  method: req.method,
+                  status: 200,
+                  bytes: session.bytes.byteLength,
+                });
+                res.statusCode = 200;
+                res.setHeader("Content-Type", session.type);
+                res.setHeader(
+                  "Content-Disposition",
+                  `attachment; filename="${session.filename}"`,
+                );
+                res.setHeader(
+                  "Content-Length",
+                  String(session.bytes.byteLength),
+                );
+                if (req.method !== "HEAD") res.end(session.bytes);
+                else res.end();
+                return;
+              }
+              const entries = {
+                "/new.html": path.join(fixture, "main.js"),
+                "/detail.html": path.join(fixture, "detail-main.js"),
+              };
+              const entrySource = entries[pathname];
+              if (!entrySource) return next();
+              try {
+                const entry = "/@fs/" + entrySource.replaceAll("\\", "/");
+                res.setHeader("Content-Type", "text/html");
+                res.end(
+                  await vite.transformIndexHtml(
+                    pathname,
+                    `<html><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`,
+                  ),
+                );
+              } catch (error) {
+                next(error);
+              }
+            });
+          },
+        },
+      ],
+      optimizeDeps: {
+        noDiscovery: true,
+        include: [
+          "svelte",
+          "svelte/store",
+          "@bufbuild/protobuf",
+          "@bufbuild/protobuf/codegenv2",
+          "@bufbuild/protobuf/wkt",
+          "@lucide/svelte",
+          "bits-ui",
+          "paneforge",
+          "svelte-sonner",
+          "tailwind-merge",
+          "tailwind-variants",
+          "ansi-to-html",
+        ],
+      },
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        hmr: false,
+        fs: { allow: [project, fixture, cache] },
+      },
     });
-    await setTheme(page, view.theme);
-    evidence.views.push({
-      route: "/servers/[id]",
-      name: view.name,
-      width: view.width,
-      height: view.height,
-      theme: view.theme,
-    });
+    await server.listen();
+    base = `http://127.0.0.1:${server.httpServer.address().port}`;
+    const launched = await launchReviewBrowser({ headless: true });
+    browser = launched.browser;
+    evidence.browser = { ...launched.metadata, browserCache };
 
-    // A running server is refused rather than silently stopped.
-    if ((await page.getByRole("button", { name: "Stop", exact: true }).count()) > 0) {
-      await openExport(page);
-      await page.getByTestId("archive-export-running").waitFor();
-      assert.equal(
-        await page.getByTestId("archive-prepare").isDisabled(),
-        true,
-        "a live server must not prepare an export",
-      );
-      await page.screenshot({
-        path: path.join(out, `detail-export-refused-${view.name}.png`),
-        fullPage: true,
+    for (const view of views) {
+      const page = await browser.newPage({
+        viewport: { width: view.width, height: view.height },
       });
-      await closeExport(page);
-
-      await page.getByRole("button", { name: "Stop", exact: true }).click();
-      await page
-        .getByRole("button", { name: "Start Server", exact: true })
-        .waitFor({ timeout: 5 * 60 * 1000 });
-    }
-
-    await page.screenshot({
-      path: path.join(out, `detail-${view.name}.png`),
-      fullPage: true,
-    });
-  }
-
-  const zipPath = await downloadArchive(page, "zip", "desktop-light");
-  const tarPath = await downloadArchive(page, "tar.gz", "desktop-light");
-
-  for (const view of [
-    { name: "desktop-dark", width: 1440, height: 1000, theme: "dark" },
-    { name: "desktop-light", width: 1440, height: 1000, theme: "light" },
-    { name: "narrow-dark", width: 390, height: 900, theme: "dark" },
-    { name: "narrow-light", width: 390, height: 900, theme: "light" },
-  ]) {
-    await page.setViewportSize({ width: view.width, height: view.height });
-    await setTheme(page, view.theme);
-    evidence.views.push({
-      route: "/servers/new",
-      name: view.name,
-      width: view.width,
-      height: view.height,
-      theme: view.theme,
-    });
-    await previewArchive(page, zipPath, "zip", view.name);
-    await previewArchive(page, tarPath, "tar.gz", view.name);
-  }
-
-  assert.deepEqual(evidence.errors, [], "the production routes must not throw");
-  await page.screenshot({ path: path.join(out, "result.png") });
-} catch (error) {
-  runError = error;
-} finally {
-  const cleanupErrors = [];
-  for (const [name, action] of [["browser", () => browser?.close()]]) {
-    try {
-      await action();
-    } catch (error) {
-      cleanupErrors.push({ name, error });
-    }
-  }
-  if (cleanupErrors.length > 0) {
-    const details = cleanupErrors
-      .map(({ name, error }) => `${name}: ${error?.message ?? error}`)
-      .join("; ");
-    if (runError) {
-      runError.message = `${runError.message}\nCleanup also failed: ${details}`;
-      runError.cause = runError.cause ?? cleanupErrors[0].error;
-    } else {
-      runError = new AggregateError(
-        cleanupErrors.map(({ error }) => error),
-        `Fixture cleanup failed: ${details}`,
+      page.setDefaultTimeout(60_000);
+      const pageErrors = [];
+      const consoleErrors = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      page.on("console", (message) => {
+        if (message.type() === "error") consoleErrors.push(message.text());
+      });
+      evidence.views.push({
+        name: view.name,
+        viewport: { width: view.width, height: view.height },
+        theme: view.theme,
+        routeOrder: ["/servers/[id]", "/servers/new"],
+      });
+      try {
+        await exerciseDetail(page, view);
+        await exerciseNewRoute(page, view);
+      } finally {
+        for (const message of pageErrors) {
+          evidence.checks.pageErrors.push({ view: view.name, message });
+        }
+        for (const message of consoleErrors) {
+          evidence.checks.consoleErrors.push({ view: view.name, message });
+        }
+        await page.close();
+      }
+      assert.deepEqual(
+        evidence.checks.pageErrors.filter((entry) => entry.view === view.name),
+        [],
+        `${view.name}: page errors`,
+      );
+      assert.deepEqual(
+        evidence.checks.consoleErrors.filter(
+          (entry) => entry.view === view.name,
+        ),
+        [],
+        `${view.name}: console errors`,
       );
     }
+    evidence.downloadRequests = downloadRequests;
+  } finally {
+    await browser?.close();
+    await server?.close();
+    await fs.rm(cache, { recursive: true, force: true });
   }
+  evidence.artifacts = artifacts;
+  await fs.writeFile(
+    path.join(out, "results.json"),
+    JSON.stringify(evidence, null, 2),
+  );
+  await assertArtifactsComplete();
+  console.log(
+    "PASS: real /servers/[id] and /servers/new normal-route fixture states at desktop/narrow light/dark, authenticated ZIP and tar.gz downloads, refused and unacknowledged cases, keyboard focus return, theme/contrast/overflow/clipping checks",
+  );
+} catch (error) {
+  await fs.mkdir(out, { recursive: true }).catch(() => {});
+  await fs
+    .writeFile(
+      path.join(out, "results.json"),
+      JSON.stringify(
+        { ...evidence, failed: error?.message ?? String(error) },
+        null,
+        2,
+      ),
+    )
+    .catch(() => {});
+  throw error;
 }
-await fs.writeFile(
-  path.join(out, "results.json"),
-  JSON.stringify(evidence, null, 2),
-);
-if (runError) throw runError;
-console.log(
-  "PASS: normal /servers/[id] and /servers/new routes, login/layout, refused and unacknowledged export, authorized ZIP and tar.gz transfers, and both archive previews",
-);

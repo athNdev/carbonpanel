@@ -175,7 +175,11 @@ export const rpcClient = {
 				fileCount: 12,
 				expandedBytes: 1048576n,
 				requiredBytes: 2097152n,
-				availableBytes: payload.nodeId ? 4194304n : undefined,
+				availableBytes: payload.nodeId
+					? globalThis.__archiveCapacityMode === 'insufficient'
+						? 1048576n
+						: 4194304n
+					: undefined,
 				destinations: globalThis.__wizardArchiveDestinations || [
 					{ id: 'node-1', name: 'Fixture Node' }
 				],
@@ -205,6 +209,10 @@ export const rpcClient = {
 			}
 			return Promise.resolve(result);
 		},
+		listServers() {
+			record('listServers', {});
+			return Promise.resolve({ servers: [] });
+		},
 		getServer(payload) {
 			record('getServer', payload);
 			if (globalThis.__wizardPreparingPolls > 0) {
@@ -212,7 +220,25 @@ export const rpcClient = {
 				return Promise.resolve({ server: { id: payload.id, status: 1 } });
 			}
 			return Promise.resolve({
-				server: { id: payload.id, containerId: 'fixture-container', status: failedStart ? 7 : 5 }
+				server: {
+					id: payload.id,
+					name: 'Fixture Archive Server',
+					description: 'Disposable route fixture',
+					containerId: 'fixture-container',
+					status:
+						globalThis.__fixtureServerRunning || globalThis.location?.search?.includes('running=1')
+							? 3
+							: failedStart
+								? 7
+								: 5,
+					nodeId: 'node-1',
+					port: 25565,
+					maxPlayers: 8,
+					memory: 3072,
+					mcVersion: '1.20.6',
+					modLoader: 3,
+					loaderVersion: '0.16.0'
+				}
 			});
 		},
 		startServer(payload) {

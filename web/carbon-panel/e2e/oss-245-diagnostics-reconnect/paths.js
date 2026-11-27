@@ -2,3 +2,7 @@
 export function resolve(path) {
 	return path;
 }
+
+export function asset(path) {
+	return path;
+}
