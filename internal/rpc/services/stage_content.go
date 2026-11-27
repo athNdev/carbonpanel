@@ -235,7 +235,10 @@ func discardStagedContent(ctx context.Context, store *storage.Store, server *sto
 }
 
 func stageContentError(err error) error {
-	if connect.CodeOf(err) == connect.CodeAborted {
+	switch connect.CodeOf(err) {
+	case connect.CodeAborted, connect.CodeFailedPrecondition:
+		// Admission refusals already carry an operator-facing retry reason
+		// (publication in progress, archive export in progress). Keep it.
 		return err
 	}
 	switch {

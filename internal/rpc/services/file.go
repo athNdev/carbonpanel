@@ -591,12 +591,6 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		}), nil
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
-
 	if err := acc.WriteFile(msg.Path, msg.Content); err != nil {
 		if nodestorage.IsSymlink(err) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -633,13 +627,15 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
-	if !msg.GetStage() {
-		releaseWrite, err := s.beginDataWrite(server.ID)
-		if err != nil {
-			return nil, err
-		}
-		defer releaseWrite()
+	// One shared lease covers every path in this request, staged or live.
+	// Releasing it per item would let a publication take exclusive ownership
+	// between items and split what the operator submitted as one bulk delete.
+	releaseWrite, err := s.beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
 	}
+	defer releaseWrite()
+
 	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
 		return nil, storageError(err)
@@ -656,14 +652,6 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	if msg.GetStage() {
-		// One shared lease covers every path in this request. Releasing it per
-		// item would let a publication take exclusive ownership between items
-		// and split what the operator submitted as one bulk delete.
-		releaseWrite, err := s.beginDataWrite(server.ID)
-		if err != nil {
-			return nil, err
-		}
-		defer releaseWrite()
 		for _, p := range paths {
 			if _, err := stageContentBytesHeld(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil, ""); err != nil {
 				return nil, stageContentError(err)
@@ -671,12 +659,6 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		}
 		return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 	}
-
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 
 	for _, p := range paths {
 		info, err := acc.Stat(p)
@@ -1696,13 +1678,9 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 
 // createArchiveViaAccessor writes a zip through nodestorage.ForNode. It never
 // calls dataRootFor or os.MkdirAll, so a transport-only node cannot grow a
-// controller-local tree (ADR 0005).
+// controller-local tree (ADR 0005). The caller already holds the shared
+// data-write lease for this request.
 func (s *FileService) createArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.CreateArchiveRequest) (*connect.Response[v1.CreateArchiveResponse], error) {
-	releaseWrite, err := s.beginDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 	acc, err := s.resolveAccessor(ctx, info, server)
 	if err != nil {
 		return nil, storageError(err)

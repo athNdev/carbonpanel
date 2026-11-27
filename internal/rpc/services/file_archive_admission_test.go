@@ -73,6 +73,42 @@ func TestDirectFileWriteIsRefusedDuringArchiveExport(t *testing.T) {
 	}
 }
 
+// A staged single-file upload during an archive export is refused by the same
+// admission as a live write. It must keep the retryable FailedPrecondition
+// guidance instead of being remapped to Internal.
+func TestStagedFileUploadKeepsArchiveExportRetryGuidance(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	dataRoot := t.TempDir()
+	server := &storage.Server{
+		ID: "file-staged-export-server", Name: "Staged Export", NodeID: "local",
+		Status: storage.StatusStopped, DataPath: dataRoot,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(dataRoot, "server.properties")
+	require.NoError(t, os.WriteFile(live, []byte("motd=original\n"), 0o644))
+
+	files := NewFileService(store, nil, nil, nil, logger.New())
+	t.Cleanup(files.Stop)
+	fence, err := module.TryBeginServerModuleArchive(server.ID)
+	require.NoError(t, err)
+	t.Cleanup(fence.Release)
+
+	_, err = files.UpdateFile(ctx, connect.NewRequest(&v1.UpdateFileRequest{
+		ServerId: server.ID, Path: "server.properties", Content: []byte("motd=staged\n"), Stage: true,
+	}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.Contains(t, err.Error(), "archive export is in progress")
+	body, readErr := os.ReadFile(live)
+	require.NoError(t, readErr)
+	require.Equal(t, "motd=original\n", string(body), "a staged upload must not change the live file")
+	rows, listErr := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, rows)
+}
+
 func TestCreateFolderRefusalDoesNotAllocateServerData(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
