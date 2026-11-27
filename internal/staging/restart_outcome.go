@@ -29,7 +29,9 @@ type RestartPublication struct {
 	// RuntimeIdentityUnresolved records a replacement Docker created whose
 	// canonical identity could not be saved. The runtime may contain the batch,
 	// so nothing may be compensated, acknowledged or cleaned up until a retry
-	// reconciles the tracked container identity.
+	// reconciles the tracked container identity. The durable identity-unresolved
+	// marker authorizes that retry to adopt the canonical container this
+	// dispatch created, then verify it like any other dispatch.
 	RuntimeIdentityUnresolved bool
 	// RuntimePreflight records a typed Docker failure that ended before any
 	// container mutation. The old container may still be running; that alone is
@@ -56,19 +58,67 @@ func (p *RestartPublication) BeginDispatch(ctx context.Context) error {
 	return p.Commit.BeginDispatch(ctx, p.Configs)
 }
 
+// replacementIdentityAttempts bounds the idempotent write of a created
+// replacement's identity. Repeating the same identity cannot duplicate a
+// mutation, so a transient database failure is retried; a permanent phase or
+// attempt refusal is not.
+const (
+	replacementIdentityAttempts   = 3
+	replacementIdentityRetryDelay = 50 * time.Millisecond
+)
+
 // RecordReplacement stores the identity Docker returned at creation. A retry
 // may verify exactly this identity; it is never inferred from discovery. The
 // write uses a bounded context detached from caller cancellation: once Docker
 // has created the replacement, losing that identity to an abandoned request
 // would leave the retry unable to verify the container that may already hold
-// this batch.
+// this batch. A transient failure is retried idempotently; if the identity
+// still cannot be persisted, the record is explicitly marked
+// identity-unresolved so a retry can adopt and verify the canonical container
+// instead of refusing every attempt with no path.
 func (p *RestartPublication) RecordReplacement(ctx context.Context, containerID string) error {
 	if p == nil || p.Commit == nil {
 		return nil
 	}
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	return p.Commit.RecordReplacement(recordCtx, containerID)
+	var recordErr error
+	for attempt := 0; attempt < replacementIdentityAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-recordCtx.Done():
+				recordErr = recordCtx.Err()
+			case <-time.After(replacementIdentityRetryDelay):
+				recordErr = p.Commit.RecordReplacement(recordCtx, containerID)
+			}
+		} else {
+			recordErr = p.Commit.RecordReplacement(recordCtx, containerID)
+		}
+		if recordErr == nil {
+			return nil
+		}
+		if errors.Is(recordErr, storage.ErrPublicationTransition) || errors.Is(recordErr, storage.ErrPublicationStaleAttempt) {
+			// A permanent refusal means the record already holds different
+			// evidence. Do not overwrite it with an unresolved marker: retain
+			// the batch and let the recorded phase decide the retry.
+			p.RuntimeIdentityUnresolved = true
+			return fmt.Errorf("failed to record replacement identity %q: %w", containerID, recordErr)
+		}
+		if recordCtx.Err() != nil {
+			break
+		}
+	}
+	// Docker created a replacement and the exact identity is not durable. The
+	// runtime may contain this batch, so nothing may be compensated or
+	// acknowledged. Persist the explicit unresolved marker that lets a retry
+	// adopt the created container; if even that write fails, escalate with the
+	// batch id instead of leaving an unstated dead end.
+	p.RuntimeIdentityUnresolved = true
+	identityErr := fmt.Errorf("failed to record replacement identity %q: %w", containerID, recordErr)
+	if markerErr := p.Commit.markIdentityUnresolved(ctx); markerErr != nil {
+		return errors.Join(identityErr, markerErr)
+	}
+	return identityErr
 }
 
 type restartConfigStore interface {
@@ -117,11 +167,11 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	}
 	if p.RuntimeIdentityUnresolved {
 		// Docker created a replacement but its canonical ID could not be saved.
-		// The runtime may contain this batch, so retain and seal it; a retry
-		// must observe the exact replacement identity captured at creation
-		// before finalizing. Container discovery alone is not evidence.
+		// The runtime may contain this batch, so retain and seal it; the
+		// identity-unresolved record lets a retry adopt the created canonical
+		// container and verify it before finalizing.
 		return errors.Join(p.Commit.sealRetained(ctx),
-			errors.New("container replacement succeeded but its canonical identity could not be saved; retry the lifecycle operation to reconcile the replacement before finalizing"))
+			errors.New("container replacement succeeded but its canonical identity could not be saved; retry the lifecycle operation to adopt and verify the replacement before finalizing"))
 	}
 	if p.RuntimeAccepted {
 		// The tracked runtime accepted the publication even though a later
@@ -172,22 +222,31 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	if p.Commit.HasPriorRuntimeState() {
 		// Compensation restored only this attempt's rows. Durable applied rows
 		// from an earlier attempt and their recovery tree remain; keep the batch
-		// sealed so admission cannot add a new file against that tree.
-		if failed == nil && sealErr == nil && p.Commit.publication != nil {
-			if err := p.Commit.store.AbandonUpdatePublication(recoveryCtx, p.Commit.batchID, p.Commit.publication.attempt()); err != nil {
+		// sealed so admission cannot add a new file against that tree. A
+		// recorded dispatch is never abandoned: only identity verification may
+		// settle its runtime outcome.
+		if failed == nil && sealErr == nil {
+			if err := p.Commit.abandonPreparation(recoveryCtx); err != nil {
 				return errors.Join(sealErr, failed, err)
 			}
 		}
 		return errors.Join(sealErr, failed)
 	}
 	if failed == nil && sealErr == nil {
-		// The attempt never recorded a runtime dispatch and fully compensated.
-		// Abandon its record, then release the claim so a later stage can create
-		// a fresh attempt.
-		if p.Commit.publication != nil {
-			if err := p.Commit.store.AbandonUpdatePublication(recoveryCtx, p.Commit.batchID, p.Commit.publication.attempt()); err != nil {
+		if p.Commit.NeedsIdentityVerification() {
+			if !p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated {
+				// The dispatch is unverified. Keep the batch sealed so
+				// admission cannot append work to it.
+				return errors.Join(sealErr, errors.New("recorded runtime dispatch retained; the batch stays sealed until its replacement identity is verified"))
+			}
+			// Every attempt ended in a typed preflight, which proves no
+			// container mutation began. That is the only case in which a
+			// dispatched record may be released without identity verification.
+			if err := p.Commit.abandonPreflightDispatch(recoveryCtx); err != nil {
 				return errors.Join(sealErr, err)
 			}
+		} else if err := p.Commit.abandonPreparation(recoveryCtx); err != nil {
+			return errors.Join(sealErr, err)
 		}
 		failed = p.Commit.unsealRetained(ctx)
 	}

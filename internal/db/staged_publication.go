@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -38,6 +39,12 @@ const (
 	// durably before the Docker call. The outcome is unverified until the
 	// recorded expected replacement identity is observed again.
 	PublicationDispatched PublicationPhase = "dispatched"
+	// PublicationIdentityUnresolved means a runtime dispatch created a
+	// replacement whose exact identity could not be persisted. The runtime may
+	// contain the batch, so nothing is compensated or cleaned up. A retry may
+	// adopt the canonical container created by that dispatch as the expected
+	// identity, then verify it like any other dispatch.
+	PublicationIdentityUnresolved PublicationPhase = "identity_unresolved"
 	// PublicationVerified means a positive runtime outcome was recorded. A
 	// retry owes cleanup and bookkeeping only.
 	PublicationVerified PublicationPhase = "verified"
@@ -124,7 +131,7 @@ func (s *Store) BeginUpdatePublication(ctx context.Context, batchID, serverID, b
 		attempt := 1
 		if !missing {
 			switch existing.Phase {
-			case PublicationDispatched, PublicationVerified, PublicationCleaned:
+			case PublicationDispatched, PublicationIdentityUnresolved, PublicationVerified, PublicationCleaned:
 				return fmt.Errorf("%w: batch %s is %s; resolve the recorded runtime outcome first", ErrPublicationTransition, batchID, existing.Phase)
 			}
 			attempt = existing.Attempt + 1
@@ -224,6 +231,51 @@ func (s *Store) RecordUpdatePublicationReplacement(ctx context.Context, batchID 
 	return nil
 }
 
+// MarkUpdatePublicationIdentityUnresolved records that a dispatch created a
+// replacement whose exact identity could not be persisted. It is idempotent
+// and only applies to that dispatch attempt; the record then proves a retry may
+// adopt the canonical container created by this dispatch.
+func (s *Store) MarkUpdatePublicationIdentityUnresolved(ctx context.Context, batchID string, attempt int) error {
+	return s.publishTransition(ctx, batchID, attempt,
+		[]PublicationPhase{PublicationDispatched}, PublicationIdentityUnresolved, nil)
+}
+
+// AdoptUpdatePublicationIdentity records the canonical container a retry
+// observed as the expected identity of an identity-unresolved dispatch, and
+// returns the record to the dispatched phase so normal identity verification
+// can acknowledge it. It refuses an empty or baseline container: those do not
+// prove this dispatch created a replacement. It is idempotent for the same
+// identity.
+func (s *Store) AdoptUpdatePublicationIdentity(ctx context.Context, batchID string, attempt int, containerID string) error {
+	if strings.TrimSpace(containerID) == "" {
+		return fmt.Errorf("%w: an observed canonical container identity is required", ErrPublicationTransition)
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var record ServerUpdatePublication
+		if err := tx.Where("batch_id = ?", batchID).First(&record).Error; err != nil {
+			return err
+		}
+		if record.Attempt != attempt {
+			return fmt.Errorf("%w: batch %s attempt %d is not %d", ErrPublicationStaleAttempt, batchID, record.Attempt, attempt)
+		}
+		if record.ExpectedContainerID != "" {
+			if record.ExpectedContainerID == containerID {
+				return nil
+			}
+			return fmt.Errorf("%w: batch %s already recorded replacement %s", ErrPublicationTransition, batchID, record.ExpectedContainerID)
+		}
+		if record.Phase != PublicationIdentityUnresolved {
+			return fmt.Errorf("%w: batch %s is %s, not identity-unresolved", ErrPublicationTransition, batchID, record.Phase)
+		}
+		if record.BaselineContainerID != "" && record.BaselineContainerID == containerID {
+			return fmt.Errorf("%w: observed container %s is the recorded baseline, not a replacement", ErrPublicationTransition, containerID)
+		}
+		return tx.Model(&ServerUpdatePublication{}).
+			Where("batch_id = ? AND attempt = ? AND phase = ?", batchID, attempt, PublicationIdentityUnresolved).
+			Updates(map[string]any{"phase": PublicationDispatched, "expected_container_id": containerID}).Error
+	})
+}
+
 // MarkUpdatePublicationVerified records the positive runtime outcome and the
 // batch acknowledgement in one transaction. It is idempotent. A failure leaves
 // both the phase and the batch unacknowledged so a retry cannot run cleanup
@@ -267,16 +319,59 @@ func (s *Store) MarkUpdatePublicationCleaned(ctx context.Context, batchID string
 }
 
 // AbandonUpdatePublication releases a preparation attempt that never recorded a
-// runtime dispatch. It refuses once dispatch intent exists.
+// runtime dispatch. It refuses once dispatch intent exists, because the runtime
+// outcome is unverified and only identity verification may settle it.
 func (s *Store) AbandonUpdatePublication(ctx context.Context, batchID string, attempt int) error {
 	res := s.db.WithContext(ctx).Model(&ServerUpdatePublication{}).
 		Where("batch_id = ? AND attempt = ? AND phase IN ?", batchID, attempt,
-			[]PublicationPhase{PublicationPreparing, PublicationPrepared, PublicationApplying, PublicationDispatched}).
+			[]PublicationPhase{PublicationPreparing, PublicationPrepared, PublicationApplying}).
 		Update("phase", PublicationAbandoned)
 	if res.Error != nil {
 		return res.Error
 	}
-	return nil
+	if res.RowsAffected != 0 {
+		return nil
+	}
+	var record ServerUpdatePublication
+	if err := s.db.WithContext(ctx).Where("batch_id = ?", batchID).First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: batch %s has no publication record", ErrPublicationTransition, batchID)
+		}
+		return err
+	}
+	if record.Attempt == attempt && record.Phase == PublicationAbandoned {
+		return nil
+	}
+	return fmt.Errorf("%w: batch %s attempt %d is %s and cannot be abandoned", ErrPublicationTransition, batchID, record.Attempt, record.Phase)
+}
+
+// AbandonPreflightDispatch releases a dispatched attempt only after a typed
+// Docker preflight proved that no container mutation began. AbandonUpdatePublication
+// refuses the dispatched phase generically because an unverified or ambiguous
+// dispatch must be settled by identity verification; this method exists only for
+// that provable no-mutation case and is idempotent for an already abandoned
+// attempt.
+func (s *Store) AbandonPreflightDispatch(ctx context.Context, batchID string, attempt int) error {
+	res := s.db.WithContext(ctx).Model(&ServerUpdatePublication{}).
+		Where("batch_id = ? AND attempt = ? AND phase = ?", batchID, attempt, PublicationDispatched).
+		Update("phase", PublicationAbandoned)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 0 {
+		return nil
+	}
+	var record ServerUpdatePublication
+	if err := s.db.WithContext(ctx).Where("batch_id = ?", batchID).First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: batch %s has no publication record", ErrPublicationTransition, batchID)
+		}
+		return err
+	}
+	if record.Attempt == attempt && record.Phase == PublicationAbandoned {
+		return nil
+	}
+	return fmt.Errorf("%w: batch %s attempt %d is %s, not a preflight-refused dispatch", ErrPublicationTransition, batchID, record.Attempt, record.Phase)
 }
 
 func (s *Store) publishTransition(ctx context.Context, batchID string, attempt int, from []PublicationPhase, to PublicationPhase, fields map[string]any) error {

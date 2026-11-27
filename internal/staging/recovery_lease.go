@@ -62,6 +62,11 @@ func retainRecoveryLease(serverID string, lease *datawrite.Lease) {
 // live writes may have started. Only the APPLYING phase does; preparing and
 // prepared prove no live write began, and dispatched/verified/cleaned are
 // resolved by identity rather than by restoring files.
+//
+// A failed read does not prove the phase is not APPLYING. Returning false on
+// error would release the exclusive lease and let an ordinary save land under
+// a snapshot that a retry may still restore over it, so an unreadable record is
+// treated as pending and the lease stays retained (fail closed).
 func publicationRecoveryPending(ctx context.Context, store *storage.Store, batchID string) bool {
 	if store == nil || batchID == "" {
 		return false
@@ -69,5 +74,8 @@ func publicationRecoveryPending(ctx context.Context, store *storage.Store, batch
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recoveryLeaseTimeout)
 	defer cancel()
 	record, err := store.GetUpdatePublication(readCtx, batchID)
-	return err == nil && record != nil && record.Phase == storage.PublicationApplying
+	if err != nil {
+		return true
+	}
+	return record != nil && record.Phase == storage.PublicationApplying
 }

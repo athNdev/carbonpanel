@@ -142,7 +142,7 @@ func preparePublicationRecovery(ctx context.Context, acc nodestorage.Accessor, p
 			return false, err
 		}
 		return true, pub.beginNext(ctx)
-	case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+	case storage.PublicationDispatched, storage.PublicationIdentityUnresolved, storage.PublicationVerified, storage.PublicationCleaned:
 		return false, fmt.Errorf("batch %s has a recorded runtime dispatch (%s); resolve it before reusing recovery", batchID, pub.phase())
 	default:
 		return false, fmt.Errorf("batch %s has no durable publication phase", batchID)

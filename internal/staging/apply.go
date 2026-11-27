@@ -367,7 +367,15 @@ func (c *NextRestartCommit) AppliedConfigsThisAttempt() int {
 // different or equal canonical container only repairs the tracked ID and is
 // never publication evidence.
 func (c *NextRestartCommit) NeedsIdentityVerification() bool {
-	return c != nil && c.publication != nil && c.publication.phase() == storage.PublicationDispatched
+	if c == nil || c.publication == nil {
+		return false
+	}
+	switch c.publication.phase() {
+	case storage.PublicationDispatched, storage.PublicationIdentityUnresolved:
+		return true
+	default:
+		return false
+	}
 }
 
 // ExpectedReplacementID is the replacement identity captured at creation for
@@ -397,10 +405,25 @@ func (c *NextRestartCommit) VerifyExpectedReplacement(ctx context.Context, canon
 	if !c.NeedsIdentityVerification() {
 		return false, nil
 	}
-	expected := c.ExpectedReplacementID()
 	baseline := ""
 	if c.publication.record != nil {
 		baseline = c.publication.record.BaselineContainerID
+	}
+	expected := c.ExpectedReplacementID()
+	if expected == "" && c.publication.phase() == storage.PublicationIdentityUnresolved {
+		// The identity write for a created replacement failed. A retry may
+		// adopt the canonical container this dispatch created as the expected
+		// identity, but only from that explicit durable marker and never the
+		// baseline container (an in-place dispatch, which stays sealed).
+		if canonicalID == "" || canonicalID == baseline {
+			return false, nil
+		}
+		if err := c.store.AdoptUpdatePublicationIdentity(ctx, c.batchID, c.publication.attempt(), canonicalID); err != nil {
+			return false, err
+		}
+		c.publication.record.Phase = storage.PublicationDispatched
+		c.publication.record.ExpectedContainerID = canonicalID
+		expected = canonicalID
 	}
 	if canonicalID == "" || expected == "" || expected == baseline || canonicalID != expected {
 		return false, nil
@@ -467,6 +490,23 @@ func (c *NextRestartCommit) RecordReplacement(ctx context.Context, containerID s
 		return nil
 	}
 	return c.store.RecordUpdatePublicationReplacement(ctx, c.batchID, c.publication.attempt(), containerID)
+}
+
+// markIdentityUnresolved durably records that this dispatch created a
+// replacement whose exact identity could not be persisted. The marker is what
+// authorizes a retry to adopt the created canonical container; without it the
+// dispatch would stay at an empty expected identity and refuse every retry.
+func (c *NextRestartCommit) markIdentityUnresolved(ctx context.Context) error {
+	if c == nil || c.publication == nil || c.publication.phase() != storage.PublicationDispatched {
+		return nil
+	}
+	markerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := c.store.MarkUpdatePublicationIdentityUnresolved(markerCtx, c.batchID, c.publication.attempt()); err != nil {
+		return fmt.Errorf("batch %s could not record its unresolved replacement identity; inspect the runtime before retrying the lifecycle: %w", c.batchID, err)
+	}
+	c.publication.record.Phase = storage.PublicationIdentityUnresolved
+	return nil
 }
 
 // IsPriorConfig reports whether a snapshot config row was already applied
@@ -617,7 +657,7 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	}
 	if publicationRecord != nil {
 		switch publicationRecord.Phase {
-		case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+		case storage.PublicationDispatched, storage.PublicationIdentityUnresolved, storage.PublicationVerified, storage.PublicationCleaned:
 			if len(content) > 0 || hasStagedConfig(configs) {
 				// A row joined a batch whose runtime outcome is already
 				// recorded. It cannot be covered by that dispatch.
@@ -802,7 +842,7 @@ func (c *NextRestartCommit) NeedsRuntimePublication() bool {
 	}
 	if c.publication != nil {
 		switch c.publication.phase() {
-		case storage.PublicationDispatched, storage.PublicationVerified, storage.PublicationCleaned:
+		case storage.PublicationDispatched, storage.PublicationIdentityUnresolved, storage.PublicationVerified, storage.PublicationCleaned:
 			// A dispatch is resolved by identity verification; a verified
 			// publication owes bookkeeping only.
 			return false
@@ -889,6 +929,34 @@ func (c *NextRestartCommit) HasPriorRuntimeState() bool {
 		}
 	}
 	return false
+}
+
+// abandonPreparation releases the durable record only when no runtime dispatch
+// was recorded. A dispatched or identity-unresolved attempt is unverified and
+// must be settled by identity verification, never erased by compensation.
+func (c *NextRestartCommit) abandonPreparation(ctx context.Context) error {
+	if c == nil || c.publication == nil {
+		return nil
+	}
+	switch c.publication.phase() {
+	case storage.PublicationPreparing, storage.PublicationPrepared, storage.PublicationApplying:
+		return c.store.AbandonUpdatePublication(ctx, c.batchID, c.publication.attempt())
+	default:
+		return nil
+	}
+}
+
+// abandonPreflightDispatch releases a dispatched attempt whose typed Docker
+// preflight proved no container mutation began. Callers must only use it with
+// that proof; an uncertain dispatch is retained and resolved by identity.
+func (c *NextRestartCommit) abandonPreflightDispatch(ctx context.Context) error {
+	if c == nil || c.publication == nil {
+		return nil
+	}
+	if c.publication.phase() != storage.PublicationDispatched {
+		return nil
+	}
+	return c.store.AbandonPreflightDispatch(ctx, c.batchID, c.publication.attempt())
 }
 
 // commitNextRestartFilesHeld publishes the already-selected next-restart rows.
