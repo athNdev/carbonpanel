@@ -71,6 +71,7 @@
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
 - [Scheduler — How to check + Read next](scheduler-how-to-check.md) — Use the scheduler and task tests; for recovery behavior, use the fault harness
 - [Scheduler — Shape + Rules](scheduler-shape.md) — The scheduler owns cron expressions and lifecycle actions such as start, stop,
+- [Server archive console and preflight](server-archive-console.md) — Export and create-from-archive controls bind preview and create to the current upload and a concrete enabled destination.
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
 - [Server lifecycle policy — Policy](server-lifecycle-policy.md) — Start admission uses the smaller of the daemon memory and positive operator cap,
