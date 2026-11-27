@@ -8,6 +8,7 @@ import { test } from "node:test";
 import path from "node:path";
 
 import {
+  LOGIN_SELECTORS,
   PLAN_SCHEMA,
   RECORD_SCHEMA,
   artifactPath,
@@ -225,6 +226,34 @@ test("preview facts require the rendered archive panel and a clean finding list"
 test("the driver record schema is stable for the Python verifier", () => {
   assert.equal(RECORD_SCHEMA, "archive-ui-acceptance-run-v1");
   assert.equal(PLAN_SCHEMA, "archive-ui-acceptance-plan-v1");
+});
+
+// Regression: the copy audit rewrote the login placeholders, which used to be
+// the driver's selectors, and the refusal phase timed out before signing in.
+// Keep the driver on the stable attributes the login form actually renders.
+test("login selectors are stable test ids the login page exposes", async () => {
+  const loginPage = await fs.readFile(
+    new URL("../web/carbon-panel/src/routes/login/+page.svelte", import.meta.url),
+    "utf8",
+  );
+  const seen = [];
+  for (const selector of [LOGIN_SELECTORS.username, LOGIN_SELECTORS.password]) {
+    const match = /^input\[data-testid="([a-z0-9-]+)"\]$/.exec(selector);
+    assert.ok(match, `login selector ${selector} must select an input by data-testid`);
+    const testId = match[1];
+    assert.match(
+      loginPage,
+      new RegExp(`data-testid="${testId}"`),
+      `login page must expose ${testId}`,
+    );
+    seen.push(testId);
+  }
+  assert.deepEqual(seen, ["auth-login-username", "auth-login-password"]);
+  assert.doesNotMatch(
+    `${LOGIN_SELECTORS.username} ${LOGIN_SELECTORS.password}`,
+    /placeholder/,
+    "login selectors must not depend on placeholder copy",
+  );
 });
 
 test("readHead reports the exact checkout", () => {
