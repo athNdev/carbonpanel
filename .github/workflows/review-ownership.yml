@@ -19,7 +19,9 @@ jobs:
       # both platforms must report their own result for a dependency bump.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Playwright install-deps uses the Microsoft apt repo, which returns
+        # HTTP 403 for Ubuntu 26.04 (ubuntu-latest); use the supported noble leg.
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

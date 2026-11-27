@@ -50,7 +50,9 @@ concurrency:
 jobs:
   journeys:
     name: Modpacks journeys (disposable controller)
-    runs-on: ubuntu-latest
+    # Playwright install-deps uses the Microsoft apt repo, which returns HTTP
+    # 403 for Ubuntu 26.04 (ubuntu-latest); the noble repo is still published.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       PANEL_REVIEW_USER: reviewer
