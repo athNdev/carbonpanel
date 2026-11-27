@@ -1137,7 +1137,7 @@ func TestInterruptedApplyingAttemptRecoversItsOwnWrites(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	batch, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
-	failPublishingSecondFile(t, store, server, data, rows)
+	require.Error(t, failPublishingSecondFile(t, store, server, data, rows))
 
 	written, err := os.ReadFile(filepath.Join(data, "first.txt"))
 	require.NoError(t, err)
@@ -1189,7 +1189,7 @@ func TestFailedApplyingAttemptKeepsTheLeaseUntilRetry(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, server))
 	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
 	_, rows := stageTwoFileBatch(t, store, data, server.ID, "first.txt", "second.txt")
-	failPublishingSecondFile(t, store, server, data, rows)
+	require.Error(t, failPublishingSecondFile(t, store, server, data, rows))
 
 	_, err := datawrite.TryShared(server.ID)
 	require.ErrorIs(t, err, datawrite.ErrExclusiveHeld,

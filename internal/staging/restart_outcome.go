@@ -170,7 +170,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 	// accepted, so only the preflight-only case may disregard an unresolved
 	// identity marker left by the same attempt.
 	preflightOnly := p.RuntimePreflight && !p.RuntimeInPlaceMayHaveMutated
-	if p.RuntimeIdentityUnresolved && !(preflightOnly && p.Commit.ExpectedReplacementID() == "") {
+	if p.RuntimeIdentityUnresolved && (!preflightOnly || p.Commit.ExpectedReplacementID() != "") {
 		// Docker created a replacement but its canonical ID could not be saved.
 		// The runtime may contain this batch, so retain and seal it; the
 		// identity-unresolved record lets a retry adopt the created canonical
