@@ -233,6 +233,73 @@ test('server archive UI rehearsal keeps the RPC job and adds a read-only disposa
   assert.doesNotMatch(ui, /contents: write|packages: write|id-token: write/);
 });
 
+// Job ids are the only two-space keys under `jobs:`; their bodies contain
+// everything indented deeper. Slice one job's body for step-level assertions.
+function jobSection(source, name) {
+  const marker = `\n  ${name}:\n`;
+  const start = source.indexOf(marker);
+  assert.ok(start >= 0, `job ${name} is missing`);
+  const body = source.slice(start + marker.length);
+  const next = body.search(/\n  [A-Za-z0-9_-]+:\n/);
+  return next < 0 ? body : body.slice(0, next);
+}
+
+test('backend lint gate compares against a git base instead of the PR diff API', () => {
+  const section = jobSection(read('ci.yml'), 'lint-backend');
+  const steps = section
+    .split(/\n(?=      - )/)
+    .filter((part) => part.includes('golangci/golangci-lint-action'));
+  const ifLine = (step) => (step.match(/^        if:\s*(.+)$/m) ?? [])[1] ?? '';
+
+  assert.equal(steps.length, 3, 'expected event-specific lint gate steps');
+  for (const step of steps) assert.match(step, /version: v2\.13\.2/);
+
+  // Pull requests use the exact base commit, not the action's diff API (which
+  // rejects PRs over 20,000 lines before linting starts).
+  const pr = steps.find((step) => ifLine(step) === "github.event_name == 'pull_request'");
+  assert.ok(pr, 'pull request lint step is missing');
+  assert.match(pr, /only-new-issues:\s*'false'/);
+  assert.match(
+    pr,
+    /^\s+args:\s*--new-from-rev=\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\}\}\s*$/m
+  );
+
+  // Pushes gate the commits introduced by this push via the previous tip.
+  const push = steps.find((step) => /github\.event_name == 'push'/.test(ifLine(step)));
+  assert.ok(push, 'push lint step is missing');
+  assert.match(push, /only-new-issues:\s*'false'/);
+  assert.match(push, /github\.event\.before != ''/);
+  assert.match(push, /github\.event\.before != '0000000000000000000000000000000000000000'/);
+  assert.match(
+    push,
+    /^\s+args:\s*--new-from-rev=\$\{\{\s*github\.event\.before\s*\}\}\s*$/m
+  );
+
+  // No usable base falls back to the previous behavior rather than an empty or
+  // all-zero revision.
+  const fallback = steps.find((step) => /github\.event_name != 'pull_request'/.test(ifLine(step)));
+  assert.ok(fallback, 'fallback lint step is missing');
+  assert.match(fallback, /only-new-issues:\s*'true'/);
+  assert.doesNotMatch(fallback, /--new-from-rev=/);
+
+  for (const step of steps) {
+    const args = (step.match(/^\s+args:\s*(.+)$/m) ?? [])[1] ?? '';
+    if (!args.includes('--new-from-rev=')) continue;
+    const revision = args.slice(args.indexOf('--new-from-rev=') + '--new-from-rev='.length).trim();
+    assert.ok(revision, `empty --new-from-rev in step: ${step}`);
+    assert.doesNotMatch(revision, /^['"]?0+['"]?$/, `all-zero --new-from-rev in step: ${step}`);
+    assert.doesNotMatch(step, /only-new-issues:\s*'true'/);
+  }
+
+  // The full-debt report remains, independent of the changed-line gate.
+  const report = section
+    .split(/\n(?=      - )/)
+    .find((part) => part.includes('- name: Record full lint debt'));
+  assert.ok(report, 'full lint debt report step is missing');
+  assert.match(report, /if: always\(\)/);
+  assert.match(report, /golangci-lint run/);
+});
+
 test('server archive UI path filters cover the frontend surfaces the job builds', () => {
   const source = read('server-archive-rehearsal.yml');
   const filterStart = source.indexOf('    paths:\n');

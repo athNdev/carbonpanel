@@ -390,7 +390,7 @@ flowchart LR
     end
 ```
 
-- **`ci.yml` — Backend Test Suite**: runs on every push to `main` and every PR into `main` against **Go 1.25.0**. It runs the full backend test suite (`make test`, i.e. `go test ./...`), so CI, the Makefile, and local dev all agree on what "the test suite" means. It also runs `go vet ./...` and `golangci-lint` (scoped to new/changed code via `only-new-issues`, since the codebase has a pre-existing baseline of findings that are out of scope to fix en masse).
+- **`ci.yml` — Backend Test Suite**: runs on every push to `main` and every PR into `main` against **Go 1.25.0**. It runs the full backend test suite (`make test`, i.e. `go test ./...`), so CI, the Makefile, and local dev all agree on what "the test suite" means. It also runs `go vet ./...` and `golangci-lint` (scoped to changed lines via `--new-from-rev` against the PR base SHA or the previous push commit, since the codebase has a pre-existing baseline of findings that are out of scope to fix en masse).
 - **`ci.yml` — Proto Lint**: runs `buf lint` against the proto schemas.
 - **`ci.yml` — Frontend Quality Gate**: runs `bun install --frozen-lockfile`, `bun run check` (SvelteKit/TS type diagnostics), `bun run test` (Bun's built-in test runner over `src/**/*.test.ts`), and `bun run build` (production Vite build).
 - **`cd.yml` — Docker Hub CD**: builds and pushes a multi-arch (`linux/amd64`, `linux/arm64`) image via Buildx with GHA layer caching. For pushes to `main` it now triggers on `workflow_run` of `ci.yml` (only when the CI run was a push to `main` that **succeeded**), so a broken `:latest` image can no longer be published from a commit that failed CI. Tag pushes (`v*`) and manual `workflow_dispatch` still publish directly.

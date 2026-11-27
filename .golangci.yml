@@ -26,9 +26,9 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 
-# CI gates on new code only (golangci-lint-action's only-new-issues), so the
-# pre-existing baseline does not block a change. Pay the baseline down with an
-# explicit full audit:
+# CI gates only changed lines (--new-from-rev against the PR base SHA or the
+# previous push commit), so the pre-existing baseline does not block a change.
+# Pay the baseline down with an explicit full audit:
 #
 #   golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 ./...
 #
