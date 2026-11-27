@@ -2511,13 +2511,16 @@ func unsafeDataRemoval(path string) bool {
 }
 
 // A completed request ID may suppress the mutation callback. It cannot
-// acknowledge fresh staged changes that were published by this attempt.
+// acknowledge fresh staged changes that were published by this attempt. The
+// dispatch intent is written inside the journaled callback so a suppressed
+// request cannot leave a durable dispatch for bytes that were never sent to a
+// runtime.
 func (s *ServerService) runPublicationMutation(ctx context.Context, publication *staging.RestartPublication, server *storage.Server, kind, requestID string, mutate func() error) error {
-	if err := publication.BeginDispatch(ctx); err != nil {
-		return err
-	}
 	ran := false
 	err := s.runJournaledMutation(ctx, server, kind, requestID, func() error {
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr)
+		}
 		ran = true
 		return mutate()
 	})
@@ -2641,9 +2644,6 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	// replacement. For staged replacement, keep it frozen until config loading
 	// succeeds and RecreateContainer owns the stop/remove transition.
 	if server.Status == storage.StatusPaused && server.ContainerID != "" && !needsStagedRecreate {
-		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
-		}
 		if err := s.runPublicationMutation(ctx, &publication, server, "start_unpause", requestID, func() error {
 			publication.RuntimeAttempted = true
 			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
@@ -3203,8 +3203,15 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			server.AppliedRepoDigest = repoDigest
 		}
 		if err := s.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": containerID, "applied_image_id": server.AppliedImageID, "applied_repo_digest": server.AppliedRepoDigest}); err != nil {
+			// A recorded replacement identity is recovery evidence. Keep the
+			// created container: it may already contain the staged bytes and it
+			// is the only object that identity can verify on retry. The deferred
+			// resolution seals the batch. Without that evidence the container is
+			// untracked and is removed instead of becoming an orphan.
 			s.log.Error("Failed to update server with container ID: %v", err)
-			_ = dockerCli.RemoveContainer(ctx, containerID)
+			if !publication.Commit.NeedsIdentityVerification() {
+				_ = dockerCli.RemoveContainer(ctx, containerID)
+			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 		}
 
@@ -3261,6 +3268,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr))
 		}
 		publication.RuntimeAttempted = true
+		publication.RuntimeInPlaceMayHaveMutated = true
 		if err := dockerCli.UnpauseContainer(ctx, server.ContainerID); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
 		}
@@ -3272,7 +3280,18 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		publication.RuntimeAttempted = true
 		return dockerCli.RestartContainer(ctx, server.ContainerID, 2*time.Second)
 	}); err != nil {
-		if publication.HasChanges() {
+		// Record what the in-place attempt actually proved. A typed preflight
+		// means Docker never stopped or started the container; every other
+		// failure may already have exposed the staged bytes and survives any
+		// later fallback preflight.
+		if publication.RuntimeAttempted {
+			if errors.Is(err, docker.ErrRecreatePreflight) {
+				publication.RuntimePreflight = true
+			} else {
+				publication.RuntimeInPlaceMayHaveMutated = true
+			}
+		}
+		if publication.HasChanges() && !publication.RuntimePreflight {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart staged server: %w", err))
 		}
 		s.log.Warn("Failed to restart container directly (%v), attempting recreation", err)
@@ -3282,6 +3301,10 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 				return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
 			}
 			s.prepareServerConfig(ctx, server, serverConfig)
+			// The fallback is a separate runtime attempt. It starts without the
+			// in-place preflight's proof; only its own typed preflight may
+			// restore it.
+			publication.RuntimePreflight = false
 			publication.RuntimeAttempted = true
 			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 			if recResult != nil && recResult.NewContainerID != "" {
@@ -3320,8 +3343,12 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 				}), nil
 			}
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(recErr, &outcomeErr) && outcomeErr.Operation == nil {
-				publication.RuntimeIdentityUnresolved = true
+			if errors.As(recErr, &outcomeErr) {
+				if outcomeErr.Operation == nil {
+					publication.RuntimeIdentityUnresolved = true
+				} else {
+					publication.RuntimePreflight = outcomeErr.Preflight
+				}
 			}
 			err = errors.Join(err, recErr)
 		} else {

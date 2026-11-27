@@ -18,11 +18,13 @@ func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 	for _, tc := range []struct {
 		name                           string
 		attempted, accepted, preflight bool
+		inPlace                        bool
 		timedOut                       bool
 		wantUndo                       bool
 	}{
 		{name: "failure before runtime mutation", wantUndo: true},
 		{name: "typed preflight leaves old container untouched", attempted: true, preflight: true, wantUndo: true},
+		{name: "in-place mutation survives a fallback preflight", attempted: true, preflight: true, inPlace: true},
 		{name: "transport timeout after request", attempted: true, timedOut: true},
 		{name: "definite failure after request", attempted: true},
 		{name: "accepted operation", attempted: true, accepted: true},
@@ -44,6 +46,7 @@ func TestRestartPublicationCompensatesOnlyBeforeRuntimeMutation(t *testing.T) {
 			publication := RestartPublication{
 				Commit: commit, Configs: applied,
 				RuntimeAttempted: tc.attempted, RuntimeAccepted: tc.accepted, RuntimePreflight: tc.preflight,
+				RuntimeInPlaceMayHaveMutated: tc.inPlace,
 			}
 			if tc.attempted || tc.accepted {
 				require.NoError(t, publication.BeginDispatch(ctx))
@@ -811,6 +814,42 @@ func TestPreDispatchInterruptedWithoutContainerResumesStandardCreation(t *testin
 	stored, err := store.GetUpdatePublication(ctx, batch)
 	require.NoError(t, err)
 	require.Equal(t, storage.PublicationCleaned, stored.Phase)
+}
+
+func TestRecordReplacementSurvivesCanceledRequestContext(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "cancel-identity", Name: "cancel-identity", DataPath: data, ContainerID: "old-id"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(commit.Finish)
+	publication := &RestartPublication{Commit: commit, RuntimeAttempted: true}
+	require.NoError(t, publication.BeginDispatch(ctx))
+
+	// Docker created the replacement and the caller's request was cancelled in
+	// the same window. The exact identity must still be durable so a retry can
+	// verify the container that may already contain the staged bytes.
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.NoError(t, publication.RecordReplacement(canceled, "created-after-cancel"))
+
+	record, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, "created-after-cancel", record.ExpectedContainerID)
+
+	commit.Finish()
+	retry, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	t.Cleanup(retry.Finish)
+	require.True(t, retry.NeedsIdentityVerification())
+	verified, err := retry.VerifyExpectedReplacement(ctx, "created-after-cancel")
+	require.NoError(t, err)
+	require.True(t, verified, "the recorded replacement identity must survive caller cancellation")
 }
 
 func TestUnrelatedCanonicalDriftRefusesAcknowledgement(t *testing.T) {

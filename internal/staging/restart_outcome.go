@@ -35,6 +35,12 @@ type RestartPublication struct {
 	// container mutation. The old container may still be running; that alone is
 	// not evidence about a failed replacement.
 	RuntimePreflight bool
+	// RuntimeInPlaceMayHaveMutated records an in-place runtime request (a
+	// restart or unpause of the existing container) that may have exposed the
+	// staged bytes. A later fallback's typed preflight cannot erase it: that
+	// preflight proves only that the replacement was not mutated, not that the
+	// in-place request was never accepted.
+	RuntimeInPlaceMayHaveMutated bool
 }
 
 func (p *RestartPublication) HasChanges() bool {
@@ -51,12 +57,18 @@ func (p *RestartPublication) BeginDispatch(ctx context.Context) error {
 }
 
 // RecordReplacement stores the identity Docker returned at creation. A retry
-// may verify exactly this identity; it is never inferred from discovery.
+// may verify exactly this identity; it is never inferred from discovery. The
+// write uses a bounded context detached from caller cancellation: once Docker
+// has created the replacement, losing that identity to an abandoned request
+// would leave the retry unable to verify the container that may already hold
+// this batch.
 func (p *RestartPublication) RecordReplacement(ctx context.Context, containerID string) error {
 	if p == nil || p.Commit == nil {
 		return nil
 	}
-	return p.Commit.RecordReplacement(ctx, containerID)
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return p.Commit.RecordReplacement(recordCtx, containerID)
 }
 
 type restartConfigStore interface {
@@ -120,7 +132,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		}
 		return nil
 	}
-	if p.RuntimeAttempted && !p.RuntimePreflight {
+	if p.RuntimeAttempted && (!p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated) {
 		// Seal admission before returning: the applied rows and their recovery
 		// tree belong to this attempt, and a new staged row must not be appended
 		// to the same batch before a retry resolves it.
@@ -133,7 +145,7 @@ func (p *RestartPublication) Resolve(ctx context.Context, store restartConfigSto
 		// container, so rollback would let that replacement outlive the rows.
 		return errors.Join(sealErr, errors.New("staged changes retained because the replacement may contain them; retry the lifecycle operation"))
 	}
-	if p.Commit.NeedsIdentityVerification() && !p.RuntimePreflight {
+	if p.Commit.NeedsIdentityVerification() && (!p.RuntimePreflight || p.RuntimeInPlaceMayHaveMutated) {
 		// A durable dispatch intent exists but this attempt did not positively
 		// observe its outcome. Never compensate or clean up over it; a retry
 		// must verify the exact recorded replacement identity first.

@@ -1707,8 +1707,15 @@ func (c *Client) UnpauseContainer(ctx context.Context, containerID string) error
 
 // Stops and starts a container with an optional delay between operations
 func (c *Client) RestartContainer(ctx context.Context, containerID string, delay time.Duration) error {
-	if _, err := c.StopContainer(ctx, containerID); err != nil {
+	found, err := c.StopContainer(ctx, containerID)
+	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+	if !found {
+		// Nothing was stopped and no start was attempted: Docker has no such
+		// container, so the caller can safely fall back to recreation without
+		// treating the restart as a possibly accepted runtime mutation.
+		return fmt.Errorf("%w: container %s is absent before the restart", ErrRecreatePreflight, containerID)
 	}
 
 	if delay > 0 {
