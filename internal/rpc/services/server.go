@@ -2671,7 +2671,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	if server.Status == storage.StatusPaused && server.ContainerID != "" && !needsStagedRecreate {
 		if err := s.runPublicationMutation(ctx, &publication, server, "start_unpause", requestID, func() error {
 			publication.RuntimeAttempted = true
-			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
+			return resumePausedContainer(ctx, dockerCli, server.ContainerID)
 		}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server: %w", err))
 		}
@@ -2791,8 +2791,15 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			server.AppliedRepoDigest = repoDigest
 		}
 		if err := s.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": containerID, "applied_image_id": server.AppliedImageID, "applied_repo_digest": server.AppliedRepoDigest}); err != nil {
+			// A recorded replacement identity is recovery evidence. Keep the
+			// created container: it may already contain the staged bytes and it
+			// is the only object that identity can verify on retry. The deferred
+			// resolution seals the batch. Without that evidence the container is
+			// untracked and is removed instead of becoming an orphan.
 			s.log.Error("Failed to update server with container ID: %v", err)
-			_ = dockerCli.RemoveContainer(ctx, containerID)
+			if !publication.Commit.NeedsIdentityVerification() {
+				_ = dockerCli.RemoveContainer(ctx, containerID)
+			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 		}
 	}
@@ -2894,6 +2901,26 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
 	}), nil
+}
+
+// resumePausedContainer is the idempotent unpause step for lifecycle requests.
+// Docker refuses an unpause when the container is not frozen. A completed
+// unpause whose status write was interrupted leaves the database PAUSED while
+// the container is already running, so a new request ID must observe the
+// running state and continue instead of failing the lifecycle. Only an observed
+// non-paused state is accepted; any other refusal stays an error.
+func resumePausedContainer(ctx context.Context, dockerCli *docker.Client, containerID string) error {
+	if err := dockerCli.UnpauseContainer(ctx, containerID); err != nil {
+		observed, observeErr := dockerCli.GetContainerStatus(ctx, containerID)
+		if observeErr != nil {
+			return errors.Join(err, fmt.Errorf("failed to verify the container state after the unpause was refused: %w", observeErr))
+		}
+		if observed != storage.StatusPaused {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // rollbackPausedResume keeps the persisted PAUSED intent aligned with Docker
@@ -3330,9 +3357,20 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		if err := s.runPublicationMutation(ctx, &publication, server, "restart_unpause", requestID, func() error {
 			publication.RuntimeAttempted = true
 			publication.RuntimeInPlaceMayHaveMutated = true
-			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
+			return resumePausedContainer(ctx, dockerCli, server.ContainerID)
 		}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
+		}
+		// Record RUNNING before the restart so an interruption after the
+		// unpause is recovered by a new request ID instead of being stranded
+		// as PAUSED over a running container. A failed write is an error, not
+		// a success claim; the retained publication can be retried.
+		server.Status = storage.StatusRunning
+		if err := s.store.UpdateServerStatus(ctx, server.ID, server.Status); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server resumed but status could not be saved before restarting: %w", err))
+		}
+		if s.proxy != nil && server.ProxyHostname != "" {
+			_ = s.proxy.UpdateServerRoute(server)
 		}
 	}
 

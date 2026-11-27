@@ -34,6 +34,7 @@ Dispatch is idempotent, so one attempt records it once even when several journal
 every journaled step, not per step kind: before any live write or dispatch, start and restart refuse a request ID that already completed any step kind, so a
 replay cannot select the unpause, create, recreate or in-place restart step that the current state would now imply. A completed replay mutates no container,
 writes no dispatch or replacement identity, and leaves fresh rows and config staged in the open, unsealed batch; a new request ID is required to publish them.
+A completed restart unpause records RUNNING before the restart, and an unpause refused because the container already runs is accepted only after observing a non-paused state; an interrupted status write is therefore recovered by a new request ID, while a failed status write is an error.
 A suppressed callback or a journal identity-binding refusal likewise writes no dispatch and mutates no container, and fresh rows stay retryable. The replacement identity is persisted
 with a bounded context detached from caller cancellation, so a created container stays verifiable after the request is cancelled. A created container is
 never removed because persisting its server fields failed: it may already contain the staged bytes and is retained under the recorded identity for an
