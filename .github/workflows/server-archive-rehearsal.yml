@@ -208,9 +208,6 @@ jobs:
       - name: Install the pinned readiness client
         run: npm ci --prefix scripts/qualify-compose-client --ignore-scripts --no-audit --no-fund
 
-      - name: Install the pinned browser and its disposable dependencies
-        run: node scripts/review/setup-browser.mjs --with-deps
-
       - name: Validate the harness offline
         run: |
           set -euo pipefail
@@ -219,6 +216,9 @@ jobs:
           bash -n scripts/qualify-server-archive-hosted.sh
           node --check scripts/qualify-archive-ui-hosted.mjs
           node --check scripts/qualify-archive-player.mjs
+
+      - name: Install the pinned browser and its disposable dependencies
+        run: node scripts/review/setup-browser.mjs --with-deps
 
       - name: Run the disposable controller, engine and production UI
         env:
