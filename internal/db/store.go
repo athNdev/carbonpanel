@@ -473,6 +473,19 @@ func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string)
 	return s.SaveServerConfig(ctx, config)
 }
 
+// applyServerFieldsToConfig mirrors the system fields that a server row owns.
+// SyncServerConfigWithServer writes them, and the UpdateServer preflight applies
+// the same projection to the proposed config so the effective targets it
+// compares match what the sync will persist.
+func applyServerFieldsToConfig(config *ServerConfig, server *Server) {
+	stringPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	config.Type = stringPtr(NormalizeModLoaderForType(server.ModLoader))
+	config.Version = stringPtr(server.MCVersion)
+	config.ServerPort = intPtr(server.Port)
+	config.MaxPlayers = intPtr(server.MaxPlayers)
+}
+
 // SyncServerConfigWithServer updates system fields in ServerConfig based on Server settings
 func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) error {
 	// Get or create config
@@ -485,12 +498,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	stringPtr := func(s string) *string { return &s }
-	intPtr := func(i int) *int { return &i }
-	config.Type = stringPtr(NormalizeModLoaderForType(server.ModLoader))
-	config.Version = stringPtr(server.MCVersion)
-	config.ServerPort = intPtr(server.Port)
-	config.MaxPlayers = intPtr(server.MaxPlayers)
+	applyServerFieldsToConfig(config, server)
 
 	return s.SaveServerConfig(ctx, config)
 }

@@ -1851,6 +1851,23 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}), nil
 }
 
+// preflightReviewedModRuntimeTarget refuses an UpdateServer that would move the
+// effective Docker runtime target while a reviewed mod candidate is staged. It
+// runs before the write phase, so a refusal leaves the committed server and
+// config rows paired; otherwise the config sync's guard would fail after the
+// server row was already saved and every later read or lifecycle call would
+// fail on the inconsistent pair.
+func (s *ServerService) preflightReviewedModRuntimeTarget(ctx context.Context, current *storage.Server, currentConfig *storage.ServerConfig, proposed *storage.Server, proposedConfig *storage.ServerConfig) error {
+	err := s.store.RefuseReviewedModRuntimeChange(ctx, current, currentConfig, proposed, proposedConfig)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, storage.ErrStagedModVersionChange) {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check the reviewed mod runtime target: %w", err))
+}
+
 // UpdateServer updates a server
 func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v1.UpdateServerRequest]) (*connect.Response[v1.UpdateServerResponse], error) {
 	transition, err := beginServerLifecycleTransition(req.Msg.Id)
@@ -1865,6 +1882,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+	currentConfig, err := s.store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		if !errors.Is(err, storage.ErrServerConfigNotFound) {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
+		}
+		currentConfig = nil
+	}
 
 	var modpack *storage.IndexedModpack
 	if msg.ModpackId != "" {
@@ -1874,12 +1898,21 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	// Mutate a copy so the reviewed-mod runtime-target preflight can refuse
+	// before any server or config row changes. `server` stays the committed
+	// state the preflight compares against.
+	proposed := *server
+	var proposedConfig *storage.ServerConfig
+	if currentConfig != nil {
+		cfg := *currentConfig
+		proposedConfig = &cfg
+	}
 	// Check if container recreation is needed
 	needsRecreation := false
-	originalMemory := server.Memory
-	originalModLoader := server.ModLoader
-	originalMCVersion := server.MCVersion
-	originalDockerImage := server.DockerImage
+	originalMemory := proposed.Memory
+	originalModLoader := proposed.ModLoader
+	originalMCVersion := proposed.MCVersion
+	originalDockerImage := proposed.DockerImage
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
 		canonical, imageErr := docker.CanonicalServerImage(msg.DockerImage)
 		if imageErr != nil {
@@ -1894,17 +1927,18 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
-	// Update fields
+	// Update fields on the proposed copy. Nothing here may write.
+	memoryChanged := false
 	if msg.Name != "" {
-		server.Name = msg.Name
+		proposed.Name = msg.Name
 	}
 	if msg.Description != "" {
-		server.Description = msg.Description
+		proposed.Description = msg.Description
 	}
-	if msg.Port != nil && int(*msg.Port) != server.Port {
+	if msg.Port != nil && int(*msg.Port) != proposed.Port {
 		newPort := int(*msg.Port)
 
-		if server.ProxyHostname != "" {
+		if proposed.ProxyHostname != "" {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cannot change port for proxy-enabled servers"))
 		}
 
@@ -1917,7 +1951,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			s.log.Error("Failed to check port: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check port availability"))
 		}
-		if existing != nil && existing.ID != server.ID {
+		if existing != nil && existing.ID != proposed.ID {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port already in use"))
 		}
 
@@ -1925,92 +1959,92 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port is already in use by the proxy server"))
 		}
 
-		if err := s.checkNodeHostPort(ctx, server.NodeID, newPort); err != nil {
+		if err := s.checkNodeHostPort(ctx, proposed.NodeID, newPort); err != nil {
 			return nil, err
 		}
 
-		server.Port = newPort
+		proposed.Port = newPort
 		needsRecreation = true
 	}
 	if msg.MaxPlayers > 0 {
-		server.MaxPlayers = int(msg.MaxPlayers)
+		proposed.MaxPlayers = int(msg.MaxPlayers)
 		needsRecreation = true
 	}
 	if msg.Memory > 0 && int(msg.Memory) != originalMemory {
 		if int(msg.Memory) > originalMemory {
 			s.capacityMu.Lock()
 			capacityLockHeld = true
-			if err := s.checkNodeMemoryCapacity(ctx, server.NodeID, int64(msg.Memory)-int64(originalMemory)); err != nil {
+			if err := s.checkNodeMemoryCapacity(ctx, proposed.NodeID, int64(msg.Memory)-int64(originalMemory)); err != nil {
 				return nil, err
 			}
 		}
-		server.Memory = int(msg.Memory)
+		proposed.Memory = int(msg.Memory)
 		needsRecreation = true
-		if err := s.store.UpdateServerConfigMemory(ctx, server.ID, int(msg.Memory)); err != nil {
-			s.log.Error("Failed to update server config memory: %v", err)
-		}
+		memoryChanged = true
 	}
 	if msg.ModLoader != "" {
 		newLoader := parseModLoaderString(msg.ModLoader)
 		if newLoader != originalModLoader {
-			server.ModLoader = newLoader
-			server.TPSCommand = minecraft.GetTPSCommand(server.ModLoader)
+			proposed.ModLoader = newLoader
+			proposed.TPSCommand = minecraft.GetTPSCommand(proposed.ModLoader)
 			needsRecreation = true
 		}
 	}
 	if msg.McVersion != "" && msg.McVersion != originalMCVersion {
-		server.MCVersion = msg.McVersion
+		proposed.MCVersion = msg.McVersion
 		needsRecreation = true
 	}
 	if msg.LoaderVersion != nil {
-		loaderVersion, err := validateLoaderVersion(server.ModLoader, *msg.LoaderVersion)
+		loaderVersion, err := validateLoaderVersion(proposed.ModLoader, *msg.LoaderVersion)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		if loaderVersion != server.LoaderVersion {
-			server.LoaderVersion = loaderVersion
+		if loaderVersion != proposed.LoaderVersion {
+			proposed.LoaderVersion = loaderVersion
 			// The loader build is baked into the container at creation, so a
 			// change only takes effect on the next recreate.
 			needsRecreation = true
 		}
 	}
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
-		server.DockerImage = msg.DockerImage
+		proposed.DockerImage = msg.DockerImage
 		needsRecreation = true
 	}
 	if msg.AutoStart != nil {
-		server.AutoStart = *msg.AutoStart
+		proposed.AutoStart = *msg.AutoStart
 	}
 	if msg.Detached != nil {
-		server.Detached = *msg.Detached
+		proposed.Detached = *msg.Detached
 	}
 	if msg.TpsCommand != nil {
-		server.TPSCommand = *msg.TpsCommand
+		proposed.TPSCommand = *msg.TpsCommand
 	}
 	if msg.AutoHibernate != nil {
-		server.AutoHibernate = *msg.AutoHibernate
+		proposed.AutoHibernate = *msg.AutoHibernate
 	}
 	if msg.IdleTimeoutMinutes != nil {
 		if int(*msg.IdleTimeoutMinutes) < 0 {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid idle timeout %d", *msg.IdleTimeoutMinutes))
 		}
-		server.IdleTimeoutMinutes = int(*msg.IdleTimeoutMinutes)
+		proposed.IdleTimeoutMinutes = int(*msg.IdleTimeoutMinutes)
 	}
 	if msg.AutoDeepSleep != nil {
-		server.AutoDeepSleep = *msg.AutoDeepSleep
+		proposed.AutoDeepSleep = *msg.AutoDeepSleep
 	}
 	if msg.DeepSleepTimeoutMinutes != nil {
 		if int(*msg.DeepSleepTimeoutMinutes) < 0 {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid deep sleep timeout %d", *msg.DeepSleepTimeoutMinutes))
 		}
-		server.DeepSleepTimeoutMinutes = int(*msg.DeepSleepTimeoutMinutes)
+		proposed.DeepSleepTimeoutMinutes = int(*msg.DeepSleepTimeoutMinutes)
 	}
 
 	var rollbackAdditional bool
+	var replaceAdditionalPorts bool
+	var additionalPorts []*v1.AdditionalPort
+	var previousAdditionalPorts []storage.HostPort
 	// Handle additional ports update
 	if len(msg.AdditionalPorts) > 0 {
 		// Validate additional ports
-		var additionalPorts []*v1.AdditionalPort
 		usedPorts := make(map[string]bool)
 
 		for _, protoPort := range msg.AdditionalPorts {
@@ -2038,7 +2072,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			usedPorts[portKey] = true
 
 			// The game port is TCP. A UDP publish of the same number is a different bind.
-			if protocol == "tcp" && int(protoPort.HostPort) == server.Port {
+			if protocol == "tcp" && int(protoPort.HostPort) == proposed.Port {
 				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("additional port %d conflicts with main server port", protoPort.HostPort))
 			}
 			if s.config.Proxy.Enabled && slices.Contains(s.config.Proxy.ListenPorts, int(protoPort.HostPort)) {
@@ -2054,24 +2088,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			})
 		}
 
-		if err := s.checkAdditionalHostPorts(ctx, server.NodeID, additionalPorts); err != nil {
+		if err := s.checkAdditionalHostPorts(ctx, proposed.NodeID, additionalPorts); err != nil {
 			return nil, err
 		}
-		proxied := server.ProxyHostname != ""
-		previousPorts := hostPorts(server.AdditionalPorts, proxied)
-		if err := s.store.ReplaceAdditionalPortLeases(ctx, server.NodeID, server.ID, hostPorts(additionalPorts, proxied)); err != nil {
-			if errors.Is(err, storage.ErrPortLeaseHeld) {
-				return nil, connect.NewError(connect.CodeInvalidArgument, err)
-			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reserve additional ports: %w", err))
-		}
-		rollbackAdditional = true
-		defer func() {
-			if rollbackAdditional {
-				_ = s.store.ReplaceAdditionalPortLeases(context.WithoutCancel(ctx), server.NodeID, server.ID, previousPorts)
-			}
-		}()
-		server.AdditionalPorts = additionalPorts
+		proxied := proposed.ProxyHostname != ""
+		previousAdditionalPorts = hostPorts(proposed.AdditionalPorts, proxied)
+		replaceAdditionalPorts = true
+		proposed.AdditionalPorts = additionalPorts
 		needsRecreation = true
 	}
 
@@ -2080,7 +2103,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		if err := s.checkDockerPrivilegedOverrides(ctx, msg.DockerOverrides); err != nil {
 			return nil, err
 		}
-		if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, server.DataPath); err != nil {
+		if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, proposed.DataPath); err != nil {
 			return nil, err
 		}
 
@@ -2091,50 +2114,85 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 		}
 
-		server.DockerOverrides = msg.DockerOverrides
+		proposed.DockerOverrides = msg.DockerOverrides
 		needsRecreation = true
 	}
 
 	// Handle modpack version update
+	saveModpackConfig := false
 	if modpack != nil {
-		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
-		if err != nil {
-			s.log.Error("Failed to get server config: %v", err)
-			serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+		if proposedConfig == nil {
+			proposedConfig = s.store.CreateDefaultServerConfig(proposed.ID)
 		}
 
 		modpackURL := modpack.WebsiteURL
 		// A re-attached pack replaces the previous display loader.
 		loader, version := s.resolveAttachedModpack(ctx, modpack, msg.ModpackVersionId)
-		server.ModpackLoader = loader
+		proposed.ModpackLoader = loader
 
 		switch modpack.Indexer {
 		case "fuego", "manual":
-			server.ModLoader = storage.ModLoaderAutoCurseForge
+			proposed.ModLoader = storage.ModLoaderAutoCurseForge
 			needsRecreation = true
 
 			if msg.ModpackVersionId != "" {
 				versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, msg.ModpackVersionId)
-				serverConfig.CFPageURL = &versionedURL
+				proposedConfig.CFPageURL = &versionedURL
 			} else {
-				serverConfig.CFPageURL = &modpackURL
+				proposedConfig.CFPageURL = &modpackURL
 			}
 		case "modrinth":
-			server.ModLoader = storage.ModLoaderModrinth
+			proposed.ModLoader = storage.ModLoaderModrinth
 			needsRecreation = true
 
-			configureModrinthModpack(serverConfig, modpack.IndexerID, version)
+			configureModrinthModpack(proposedConfig, modpack.IndexerID, version)
 		}
+		saveModpackConfig = true
+	}
 
-		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+	// Refuse a runtime-target move before any server or config row changes. A
+	// refused request leaves the committed pair untouched, so later reads and
+	// lifecycle calls still see a consistent config.
+	if err := s.preflightReviewedModRuntimeTarget(ctx, server, currentConfig, &proposed, proposedConfig); err != nil {
+		return nil, err
+	}
+
+	// Commit phase: every write follows the preflight.
+	if replaceAdditionalPorts {
+		if err := s.store.ReplaceAdditionalPortLeases(ctx, proposed.NodeID, proposed.ID, hostPorts(additionalPorts, proposed.ProxyHostname != "")); err != nil {
+			if errors.Is(err, storage.ErrPortLeaseHeld) {
+				return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reserve additional ports: %w", err))
+		}
+		rollbackAdditional = true
+		defer func() {
+			if rollbackAdditional {
+				_ = s.store.ReplaceAdditionalPortLeases(context.WithoutCancel(ctx), proposed.NodeID, proposed.ID, previousAdditionalPorts)
+			}
+		}()
+	}
+	if saveModpackConfig {
+		if err := s.store.UpdateServerConfig(ctx, proposedConfig); err != nil {
 			s.log.Error("Failed to update server config with modpack settings: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save modpack configuration: %w", err))
 		}
 	}
+	if memoryChanged {
+		// Runs after the modpack save so its read-modify-write preserves the
+		// modpack fields.
+		if err := s.store.UpdateServerConfigMemory(ctx, proposed.ID, proposed.Memory); err != nil {
+			s.log.Error("Failed to update server config memory: %v", err)
+		}
+	}
 
+	server = &proposed
 	// Save server updates first
 	if err := s.store.UpdateServer(ctx, server); err != nil {
 		s.log.Error("Failed to update server: %v", err)
+		if errors.Is(err, storage.ErrStagedModVersionChange) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 	}
 	rollbackAdditional = false

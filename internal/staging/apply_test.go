@@ -759,6 +759,40 @@ func TestPublicationRefusesLegacyReviewedRowWithoutDurableApproval(t *testing.T)
 	}
 }
 
+func TestPublicationRefusesLegacyReviewedRowWithoutRuntimeTarget(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "legacy-runtime-target", Name: "legacy-runtime-target", DataPath: data,
+		MCVersion: "1.21.1", ModLoader: storage.ModLoaderFabric, Status: storage.StatusRunning,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o755))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o644))
+
+	batchID := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageReviewedModRow(t, store, data, batchID, server, "candidate")
+	// Simulate a reviewed row admitted before the durable runtime target was
+	// recorded. Its metadata still looks valid, which must not be trusted.
+	require.NoError(t, store.DB().Model(&storage.StagedContentChange{}).
+		Where("server_id = ?", server.ID).
+		Updates(map[string]any{"reviewed_runtime_loader": "", "reviewed_runtime_version": ""}).Error)
+
+	_, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.ErrorIs(t, err, storage.ErrStagedModRuntimeTargetChanged)
+	require.Contains(t, err.Error(), "no durable runtime target")
+	require.Contains(t, err.Error(), "review and stage the update again")
+
+	got, readErr := os.ReadFile(live)
+	require.NoError(t, readErr)
+	require.Equal(t, "installed", string(got), "a legacy row must not publish before any live write")
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, storage.StagedStatusStaged, rows[0].Status)
+}
+
 func TestPublicationRefusesStagedPayloadDivergence(t *testing.T) {
 	for _, publication := range []struct {
 		name   string

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -49,6 +50,63 @@ func reviewedRuntimeTargetTx(tx *gorm.DB, serverID string) (ModLoader, string, e
 		return "", "", err
 	}
 	return config.EffectiveRuntimeTarget(&server)
+}
+
+// RefuseReviewedModRuntimeChange refuses a proposed server/config pair when it
+// would move the effective Docker runtime target while a reviewed mod candidate
+// is staged. UpdateServer calls it before any write so a refusal leaves the
+// committed server and config rows untouched; the store guard remains the
+// backstop for other writers.
+//
+// It compares the effective targets rather than raw field inequality, so a
+// no-op or non-runtime update still succeeds. A proposal that touches no
+// runtime input passes even when the current target cannot be resolved, which
+// matches the guard's behavior for unrelated config saves.
+func (s *Store) RefuseReviewedModRuntimeChange(ctx context.Context, current *Server, currentConfig *ServerConfig, proposed *Server, proposedConfig *ServerConfig) error {
+	if current == nil || proposed == nil || currentConfig == nil || proposedConfig == nil {
+		return nil
+	}
+	hasStaged, err := s.HasStagedReviewedModCandidates(ctx, current.ID)
+	if err != nil || !hasStaged {
+		return err
+	}
+	// The sync in UpdateServer overwrites the system fields from the proposed
+	// server row; project them before deciding whether the request can move the
+	// target and before resolving it.
+	projected := *proposedConfig
+	applyServerFieldsToConfig(&projected, proposed)
+	if !serverRuntimeInputsChanged(current, proposed) && !configRuntimeInputsChanged(currentConfig, &projected) {
+		return nil
+	}
+	oldLoader, oldGame, oldErr := currentConfig.EffectiveRuntimeTarget(current)
+	newLoader, newGame, newErr := projected.EffectiveRuntimeTarget(proposed)
+	if oldErr == nil && newErr == nil && oldLoader == newLoader && oldGame == newGame {
+		return nil
+	}
+	return fmt.Errorf("%w: apply or discard the staged reviewed mod update before changing the Docker runtime target, or review and stage the mod update again for the new target", ErrStagedModVersionChange)
+}
+
+// serverRuntimeInputsChanged reports whether server fields that Docker reads at
+// creation can move the effective runtime target independently of the config.
+func serverRuntimeInputsChanged(current, proposed *Server) bool {
+	if current.DockerImage != proposed.DockerImage {
+		return true
+	}
+	return !proto.Equal(current.DockerOverrides, proposed.DockerOverrides)
+}
+
+// configRuntimeInputsChanged reports whether the proposed config diff touches a
+// runtime-relevant field.
+func configRuntimeInputsChanged(current, proposed *ServerConfig) bool {
+	currentMap, err := ServerConfigToMap(current)
+	if err != nil {
+		return true
+	}
+	proposedMap, err := ServerConfigToMap(proposed)
+	if err != nil {
+		return true
+	}
+	return configChangesReviewedModRuntime(DiffMaps(currentMap, proposedMap))
 }
 
 // ReviewedModRuntimeTarget loads the configuration used at container creation.

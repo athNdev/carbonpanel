@@ -9,6 +9,9 @@ code_refs:
   - internal/staging/apply.go
   - internal/db/staged_content.go
   - internal/db/staged_config.go
+  - internal/db/store.go
+  - internal/db/runtime_target.go
+  - internal/rpc/services/server.go
 sources:
   - title: ADR 0053
     resource: ../../docs/adr/0053-reviewed-mod-update-application.md
@@ -29,6 +32,12 @@ exclusively from before the undo snapshot through rollback.
   uploads keep their path. Staging uses the effective Docker `ServerConfig`
   target, not the stale `Server` projection, and a runtime rollback or direct
   runtime-target save is refused while a reviewed candidate is staged.
+- A direct config save takes SQLite's writer lock before the staged-candidate
+  guard reads, so a concurrent commit cannot cause an unretryable busy
+  snapshot. `UpdateServer` preflights the same effective-target check before
+  writing and refuses a move with `FailedPrecondition` and apply-or-discard
+  guidance, keeping the server/config pair consistent; the store guard remains
+  the backstop for other writers.
 - Publication revalidates the persisted row target against the current
   effective target before any live-tree mutation. A moved target is a typed
   `FailedPrecondition` refusal that preserves live and staged bytes.
