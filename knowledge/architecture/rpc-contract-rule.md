@@ -40,6 +40,10 @@ stored. Every string property, including a provider error, is capped at 512
 bytes. An audit write failure is logged and never changes the RPC response or
 the log stream.
 
+Administrative identity and node mutations write one bounded activity row with
+no secrets; the coverage inventory and explicit deferred classes live in
+[admin action audits](admin-action-audits.md).
+
 Node discovery is the first compatibility migration: both transports use the
 same twelve-second scan and best-effort known-node count. ScanNodes requires
 nodes/read globally; the compatibility route preserves numeric JSON fields and

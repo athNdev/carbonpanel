@@ -276,3 +276,166 @@ func resolveAlias(path string) string {
 	}
 	return path
 }
+
+var (
+	auditRowID = regexp.MustCompile(`^\|\s*(A\d{2,3})\s*\|`)
+	auditSpan  = regexp.MustCompile("`([^`]+)`")
+)
+
+var auditDispositions = []string{"Added", "Covered", "Deferred", "Internal"}
+
+// CheckAuditInventory verifies the OSS-358 admin-action inventory. Every
+// entry-point and audit-write citation must resolve to an existing file and
+// symbol, every non-empty covering test must exist in the cited _test.go file,
+// and every event literal must exist in the activity or world-view source.
+func CheckAuditInventory(root, inventoryPath string) ([]Problem, error) {
+	body, err := os.ReadFile(filepath.Join(root, inventoryPath))
+	if err != nil {
+		return nil, err
+	}
+	return CheckAuditInventoryText(root, string(body))
+}
+
+// CheckAuditInventoryText is CheckAuditInventory for an in-memory document.
+func CheckAuditInventoryText(root, text string) ([]Problem, error) {
+	var problems []Problem
+	seen := map[string]bool{}
+	rows := 0
+
+	for i, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, "\r")
+		match := auditRowID.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		rows++
+		id := match[1]
+		where := fmt.Sprintf("line %d (%s)", i+1, id)
+		if seen[id] {
+			problems = append(problems, Problem{Row: where, Detail: "duplicate admin-audit id"})
+		}
+		seen[id] = true
+
+		cells := strings.Split(line, "|")
+		if len(cells) < 10 {
+			problems = append(problems, Problem{Row: where, Detail: fmt.Sprintf("row has %d cells, want 10", len(cells))})
+			continue
+		}
+
+		entry := firstAuditSpan(cells[3])
+		if entry == "" {
+			problems = append(problems, Problem{Row: where, Detail: "entry point has no code span"})
+		} else if detail := checkAuditPathSymbol(root, entry); detail != "" {
+			problems = append(problems, Problem{Row: where, Detail: "entry point: " + detail})
+		}
+
+		event := strings.TrimSpace(cells[5])
+		if event != "`none`" && event != "none" {
+			literal := firstAuditSpan(cells[5])
+			if literal == "" {
+				problems = append(problems, Problem{Row: where, Detail: "activity event has no code span"})
+			} else if detail := checkAuditEvent(root, literal); detail != "" {
+				problems = append(problems, Problem{Row: where, Detail: detail})
+			}
+		}
+
+		auditWrite := firstAuditSpan(cells[6])
+		if auditWrite != "" && auditWrite != "none" {
+			if detail := checkAuditPathSymbol(root, auditWrite); detail != "" {
+				problems = append(problems, Problem{Row: where, Detail: "audit write: " + detail})
+			}
+		}
+
+		testRef := firstAuditSpan(cells[7])
+		if testRef != "" && testRef != "—" && testRef != "-" {
+			if detail := checkAuditTest(root, testRef); detail != "" {
+				problems = append(problems, Problem{Row: where, Detail: "covering test: " + detail})
+			}
+		}
+
+		disposition := strings.Trim(strings.TrimSpace(cells[8]), "*")
+		recognised := false
+		for _, want := range auditDispositions {
+			if disposition == want {
+				recognised = true
+				break
+			}
+		}
+		if !recognised {
+			problems = append(problems, Problem{Row: where, Detail: fmt.Sprintf("unknown disposition %q", disposition)})
+		}
+	}
+
+	if rows == 0 {
+		return nil, fmt.Errorf("the admin audit inventory contains no rows")
+	}
+	sort.SliceStable(problems, func(a, b int) bool { return problems[a].Row < problems[b].Row })
+	return problems, nil
+}
+
+func firstAuditSpan(cell string) string {
+	match := auditSpan.FindStringSubmatch(cell)
+	if match == nil {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
+}
+
+func splitAuditReference(ref string) (string, string) {
+	ref = strings.TrimSpace(ref)
+	if idx := strings.LastIndexByte(ref, ':'); idx >= 0 {
+		return ref[:idx], ref[idx+1:]
+	}
+	return ref, ""
+}
+
+func checkAuditPathSymbol(root, ref string) string {
+	path, symbol := splitAuditReference(ref)
+	if path == "" {
+		return fmt.Sprintf("reference %q has no path", ref)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("path %q does not exist", path)
+	}
+	if symbol == "" {
+		return ""
+	}
+	if !strings.Contains(string(body), symbol+"(") {
+		return fmt.Sprintf("symbol %q not found in %s", symbol, path)
+	}
+	return ""
+}
+
+func checkAuditEvent(root, literal string) string {
+	path := "internal/activity/activity.go"
+	if strings.HasPrefix(literal, "world_view.") {
+		path = "internal/worldview/service.go"
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("event source %q does not exist", path)
+	}
+	if !strings.Contains(string(body), `"`+literal+`"`) {
+		return fmt.Sprintf("event %q not declared in %s", literal, path)
+	}
+	return ""
+}
+
+func checkAuditTest(root, ref string) string {
+	path, testName := splitAuditReference(ref)
+	if path == "" || testName == "" {
+		return fmt.Sprintf("reference %q must be a _test.go path plus test name", ref)
+	}
+	if !strings.HasSuffix(path, "_test.go") {
+		return fmt.Sprintf("covering test path %q is not a _test.go file", path)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("test file %q does not exist", path)
+	}
+	if !strings.Contains(string(body), "func "+testName+"(") {
+		return fmt.Sprintf("test %q not found in %s", testName, path)
+	}
+	return ""
+}

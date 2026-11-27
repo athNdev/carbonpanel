@@ -50,6 +50,43 @@ func TestFeatureMatrixCitesExistingSource(t *testing.T) {
 	}
 }
 
+func TestAdminAuditInventoryIsSourceBacked(t *testing.T) {
+	root := repoRoot(t)
+	const inventory = "docs/plans/oss358-admin-action-audit-inventory.md"
+	if _, err := os.Stat(filepath.Join(root, inventory)); err != nil {
+		t.Skipf("%s is not present in this checkout: %v", inventory, err)
+	}
+
+	problems, err := CheckAuditInventory(root, inventory)
+	if err != nil {
+		t.Fatalf("CheckAuditInventory: %v", err)
+	}
+	for _, problem := range problems {
+		t.Errorf("%s", problem)
+	}
+}
+
+func TestAdminAuditInventoryReportsMissingCoveringTest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "x.go"), []byte("func Foo() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "x_test.go"), []byte("func Present(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text := "| A01 | Test | `internal/x.go:Foo` | `x:y` | `none` | `none` | `internal/x_test.go:Missing` | **Covered** |\n"
+	problems, err := CheckAuditInventoryText(root, text)
+	if err != nil {
+		t.Fatalf("CheckAuditInventoryText: %v", err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Detail, `test "Missing" not found`) {
+		t.Fatalf("problems = %v, want the missing covering-test defect", problems)
+	}
+}
+
 func TestArchitectureSeamsAreCitedAndExist(t *testing.T) {
 	root := repoRoot(t)
 	const design = "DESIGN.md"
