@@ -4,6 +4,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import { clone } from '@bufbuild/protobuf';
+import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
+import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 
@@ -16,4 +18,20 @@ import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
  */
 export function snapshotServerForm(source: UpdateServerRequest): UpdateServerRequest {
 	return clone(UpdateServerRequestSchema, source);
+}
+
+/**
+ * Independent deep snapshot of Docker overrides for the dirty comparison.
+ *
+ * The comparison cannot use `$state.snapshot`: that helper deep-clones plain
+ * objects with `copy[key] = ...`, which silently drops an own `__proto__` map
+ * key (a legal Docker environment/label name) into the prototype setter.
+ * protobuf-es's clone reads the reactive proxy directly and keeps those keys.
+ * `undefined` stays `undefined`; an absent field must compare equal.
+ */
+export function snapshotDockerOverrides(
+	source: DockerOverrides | undefined
+): DockerOverrides | undefined {
+	if (source === undefined) return undefined;
+	return clone(DockerOverridesSchema, source);
 }

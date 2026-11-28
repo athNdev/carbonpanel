@@ -54,7 +54,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import { getUniqueDockerImages } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
-	import { snapshotServerForm } from '$lib/components/server-settings-snapshot';
+	import {
+		snapshotDockerOverrides,
+		snapshotServerForm
+	} from '$lib/components/server-settings-snapshot';
 
 	interface Props {
 		server: Server;
@@ -147,8 +150,8 @@ one at https://mozilla.org/MPL/2.0/.
 			form.autoDeepSleep !== baseline.autoDeepSleep ||
 			form.deepSleepTimeoutMinutes !== baseline.deepSleepTimeoutMinutes ||
 			safeToString(form.additionalPorts) !== safeToString(baseline.additionalPorts) ||
-			safeToString($state.snapshot(form.dockerOverrides)) !==
-				safeToString($state.snapshot(baseline.dockerOverrides))
+			safeToString(snapshotDockerOverrides(form.dockerOverrides)) !==
+				safeToString(snapshotDockerOverrides(baseline.dockerOverrides))
 		);
 	}
 
