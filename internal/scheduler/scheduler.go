@@ -1343,7 +1343,7 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 				if !strings.EqualFold(zone, "UTC") {
 					loaded, err := time.LoadLocation(zone)
 					if err != nil {
-						return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+						return nil, fmt.Errorf("unknown timezone %q: %w; use an IANA zone name and ensure the runtime image includes tzdata", task.Timezone, err)
 					}
 					location = loaded
 				}

@@ -73,6 +73,9 @@ FROM alpine:3.24.4
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 
+# Named cron timezones are loaded with time.LoadLocation at runtime.
+RUN apk --no-cache add tzdata
+
 WORKDIR /app
 
 COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

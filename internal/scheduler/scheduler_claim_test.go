@@ -117,6 +117,21 @@ func TestInvalidTimezoneDisableDoesNotClobberCorrectedSchedule(t *testing.T) {
 	require.Empty(t, executions)
 }
 
+func TestCalculateNextRunUnknownTimezoneIsActionable(t *testing.T) {
+	s := &Scheduler{
+		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		log:        logger.New(),
+	}
+
+	_, err := s.CalculateNextRun(&storage.ScheduledTask{
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "Not/AZone",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Not/AZone")
+	require.Contains(t, err.Error(), "IANA")
+	require.Contains(t, err.Error(), "tzdata")
+}
+
 func TestCalculateNextRunCronTimezonePrecedence(t *testing.T) {
 	s := &Scheduler{
 		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
