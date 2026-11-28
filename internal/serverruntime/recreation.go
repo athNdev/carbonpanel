@@ -83,10 +83,15 @@ func ReconcileContainerIdentity(ctx context.Context, store recreationStore, clie
 	if resolved.ID == server.ContainerID {
 		return false, nil
 	}
+	// Persist through the resolved identity, including the UpdateServer
+	// fallback used by stores without a field-only writer. Restore the prior
+	// value on failure so the caller never keeps a phantom id.
+	previous := server.ContainerID
+	server.ContainerID = resolved.ID
 	if err := persistRecovery(ctx, store, server, map[string]any{"container_id": resolved.ID}); err != nil {
+		server.ContainerID = previous
 		return false, fmt.Errorf("resolved container %s for server %s but could not save it: %w", resolved.ID, server.ID, err)
 	}
-	server.ContainerID = resolved.ID
 	return true, nil
 }
 
