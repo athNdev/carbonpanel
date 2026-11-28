@@ -14,6 +14,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestRecordReplacementVerifiesTheCreatedIdentityInTheSameCall pins the
+// in-process identity: after the durable replacement write succeeds, the same
+// publication call must acknowledge that replacement, not the baseline that
+// Docker may have replaced.
+func TestRecordReplacementVerifiesTheCreatedIdentityInTheSameCall(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{
+		ID: "replacement-same-call", Name: "replacement-same-call",
+		DataPath: data, ContainerID: "baseline", Status: storage.StatusRunning,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+	batch := openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+	stageFile(t, store, data, batch, server.ID, "file.txt", "new")
+
+	commit, err := CommitNextRestartFiles(ctx, store, server, nil)
+	require.NoError(t, err)
+	applied, err := commit.ApplyConfigs(ctx, store)
+	require.NoError(t, err)
+	publication := &RestartPublication{
+		Commit: commit, Configs: applied, RuntimeAttempted: true, RuntimeAccepted: true,
+	}
+	require.NoError(t, publication.BeginDispatch(ctx))
+	require.NoError(t, publication.RecordReplacement(ctx, "created-replacement"))
+	require.NoError(t, publication.Resolve(ctx, store, nil))
+
+	record, err := store.GetUpdatePublication(ctx, batch)
+	require.NoError(t, err)
+	require.Contains(t, []storage.PublicationPhase{storage.PublicationVerified, storage.PublicationCleaned}, record.Phase)
+	require.Equal(t, "created-replacement", record.ExpectedContainerID)
+	require.Equal(t, "created-replacement", record.VerifiedContainerID,
+		"the verified identity must be the replacement captured at creation, not the baseline")
+}
+
 // TestIdentityWriteFailureMarksUnresolvedAndRetryAdoptsReplacement is the
 // regression for a created replacement whose identity write fails after
 // dispatch. Previously the phase stayed dispatched with an empty expected

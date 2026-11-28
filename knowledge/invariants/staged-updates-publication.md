@@ -39,7 +39,7 @@ A suppressed callback or a journal identity-binding refusal likewise writes no d
 with a bounded context detached from caller cancellation and a short idempotent retry; a typed Docker preflight never records the unchanged baseline as a replacement, and if the identity still cannot be persisted the record becomes `identity-unresolved` and a retry may adopt the canonical container that dispatch created (never the baseline) before verifying it. A created container is
 never removed because persisting its server fields failed: it may already contain the staged bytes and is retained under the recorded identity for an
 identity-verifying retry. A retry acknowledges only that exact identity for that attempt; reconciling another canonical
-container may repair the tracked id but is never publication evidence. A newly applied batch-owned row is refused, not covered by an older runtime. A
+container may repair the tracked id but is never publication evidence. A successful durable replacement write also updates the in-memory expected identity, so the same publication call verifies the created replacement instead of the baseline. A newly applied batch-owned row is refused, not covered by an older runtime. A
 pre-dispatch interruption with no container resumes ordinary creation. An in-place restart failure that may have mutated the existing container is retained
 even when a later fallback's preflight proves the replacement untouched; only when every attempt ended before mutation may the attempt compensate. An
 unverified or ambiguous dispatch seals the batch and runs no cleanup; a verified publication is finalize-only and leaves the operator's explicit start or restart in control.

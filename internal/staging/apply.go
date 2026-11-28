@@ -495,7 +495,11 @@ func (c *NextRestartCommit) RecordReplacement(ctx context.Context, containerID s
 		// replacement would later refuse every retry at the identity check.
 		return nil
 	}
-	return c.store.RecordUpdatePublicationReplacement(ctx, c.batchID, c.publication.attempt(), containerID)
+	if err := c.store.RecordUpdatePublicationReplacement(ctx, c.batchID, c.publication.attempt(), containerID); err != nil {
+		return err
+	}
+	c.publication.record.ExpectedContainerID = containerID
+	return nil
 }
 
 // markIdentityUnresolved durably records that this dispatch created a
