@@ -163,12 +163,14 @@ export interface PolicyFormState {
 	idleMinutes: number;
 }
 
+// Mirrors scheduler.DefaultModUpdatesPerRun. A persisted policy that omits the
+// field uses the same budget the scheduler actually applies.
 export const DEFAULT_POLICY_STATE: PolicyFormState = {
 	enabled: false,
 	cron: '0 3 * * *',
 	timezone: 'UTC',
 	excludedProjects: '',
-	maxPerRun: 5,
+	maxPerRun: 10,
 	skipWhenRunning: true,
 	window: 'next_restart',
 	idleMinutes: 15
@@ -178,7 +180,7 @@ export const DEFAULT_POLICY_STATE: PolicyFormState = {
 // for a legacy task without the new config shape.
 export function policyFromPersistedTask(
 	task: { config?: string; status?: number; cronExpr?: string; timezone?: string } | null,
-	enabledStatus: number
+	_enabledStatus: number
 ): PolicyFormState {
 	if (!task) return { ...DEFAULT_POLICY_STATE };
 	try {
@@ -196,7 +198,9 @@ export function policyFromPersistedTask(
 			idleMinutes: Number(config.idle_minutes) || DEFAULT_POLICY_STATE.idleMinutes
 		};
 	} catch {
-		return { ...DEFAULT_POLICY_STATE, enabled: task.status === enabledStatus };
+		// Malformed policy JSON is not evidence of an opt-in. Fail closed and
+		// let the operator explicitly re-enable the schedule.
+		return { ...DEFAULT_POLICY_STATE, enabled: false };
 	}
 }
 

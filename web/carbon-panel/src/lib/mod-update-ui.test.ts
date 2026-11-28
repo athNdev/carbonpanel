@@ -284,12 +284,32 @@ test('a disabled first save reloads unchecked and idle duration is persisted', (
 	assert.deepEqual(JSON.parse(fromConfig), {
 		enabled: false,
 		excluded_projects: [],
-		max_updates_per_run: 5,
+		max_updates_per_run: 10,
 		skip_when_running: true,
 		window: 'idle',
 		idle_minutes: 30
 	});
 	assert.deepEqual(policyFromPersistedTask(null, 1), DEFAULT_POLICY_STATE);
+});
+
+test('an absent persisted max uses the scheduler default and round-trips it', () => {
+	const state = policyFromPersistedTask({ config: JSON.stringify({ enabled: true }) }, 0);
+	assert.equal(state.enabled, true);
+	assert.equal(state.maxPerRun, 10, 'the scheduler applies 10 when the field is absent');
+	const saved = JSON.parse(buildPolicyConfig(state));
+	assert.equal(
+		saved.max_updates_per_run,
+		10,
+		're-saving an absent field must keep the applied budget'
+	);
+});
+
+test('malformed persisted policy fails closed and legacy empty config stays unset', () => {
+	const malformed = policyFromPersistedTask({ config: '{not-json', status: 1 }, 1);
+	assert.equal(malformed.enabled, false, 'task status is not evidence of an opt-in');
+	const legacyEmpty = policyFromPersistedTask({ config: '', status: 1 }, 1);
+	assert.equal(legacyEmpty.enabled, false, 'an empty legacy config stays a valid unset policy');
+	assert.equal(legacyEmpty.maxPerRun, 10);
 });
 
 test('policy config is opt-in, excludes blank IDs and bounds the batch', () => {

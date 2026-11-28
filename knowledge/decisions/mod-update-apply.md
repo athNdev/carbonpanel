@@ -28,7 +28,11 @@ the installed fingerprint and provider release, downloads the exact candidate
 bytes with a SHA-512 check, and stages them into the server's open batch without
 writing the live mods directory or restarting the server.
 
-JSON-backed `mod_update` policies use the same planner; save waits for the task list, and policy edits preserve schedule state with opt-outs starting disabled.
+JSON-backed `mod_update` policies use the same planner; save waits for the task list, and policy edits preserve schedule state with opt-outs starting disabled. The policy editor's default per-run budget is the scheduler's
+effective default (10), so an absent or zero `max_updates_per_run` displays and
+re-saves the budget that actually runs. Malformed policy JSON fails closed as
+disabled even when the task status says enabled; an empty legacy config is a
+valid unset policy, not a reason to re-enable it.
 
 # Consequences
 

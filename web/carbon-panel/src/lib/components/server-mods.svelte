@@ -113,7 +113,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let policyCron = $state('0 3 * * *');
 	let policyTimezone = $state('UTC');
 	let policyExcluded = $state('');
-	let policyMax = $state(5);
+	let policyMax = $state(DEFAULT_POLICY_STATE.maxPerRun);
 	let policySkipRunning = $state(true);
 	let policyWindow = $state<'next_restart' | 'idle'>('next_restart');
 	let policyIdleMinutes = $state(15);
