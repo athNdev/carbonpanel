@@ -45,7 +45,9 @@ valid unset policy, not a reason to re-enable it.
 - A required or incompatible dependency on the fetched release refuses the
   update even when its version id, filename and SHA-512 match the preview.
 - A temporary release lookup is a retryable download refusal; a confirmed
-  missing, withdrawn or invalid release is a provider refusal. A per-item
+  missing, withdrawn or invalid release is a provider refusal. A download
+  response with 5xx, 408, 425 or 429 is likewise transient, so the bounded
+  retry path runs; other 4xx responses are definitive. A per-item
   staging storage/IO failure leaves earlier rows committed and returns a retryable policy error; validation refusals stay per-item.
 - Publishing, backup, rollback, apply windows and per-server serialization are
   the existing staged-batch guarantees. Durable approval, the data-write lease

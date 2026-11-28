@@ -152,6 +152,10 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 		if resp.StatusCode >= 500 {
 			return nil, 0, "transient_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 		}
+		switch resp.StatusCode {
+		case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+			return nil, 0, "transient_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
+		}
 		return nil, 0, "refused_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 	}
 	readLimit := int64(maxModUpdateBytes)

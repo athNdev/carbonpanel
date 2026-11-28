@@ -68,6 +68,22 @@ func fetcherAgainstServer(t *testing.T, body string, version *modrinth.Version) 
 	}
 }
 
+func fetcherAgainstStatus(t *testing.T, status int, version *modrinth.Version) providerModCandidateFetcher {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+	target, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	return providerModCandidateFetcher{
+		versions: versionLookupFixture{version: version},
+		client: &http.Client{Transport: hostRewriteTransport{
+			base: http.DefaultTransport, target: target,
+		}},
+	}
+}
+
 type hostMapTransport struct {
 	hosts map[string]string
 	base  http.RoundTripper
@@ -143,6 +159,19 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_download", outcome)
+	})
+
+	t.Run("download timeout and rate-limit statuses are transient", func(t *testing.T) {
+		for _, status := range []int{http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests} {
+			fetcher := fetcherAgainstStatus(t, status, candidateVersion(allowedURL, candidateHash("next")))
+			_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+			require.Error(t, err)
+			require.Equal(t, "transient_download", outcome, "HTTP %d must be retried", status)
+		}
+		fetcher := fetcherAgainstStatus(t, http.StatusBadRequest, candidateVersion(allowedURL, candidateHash("next")))
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		require.Error(t, err)
+		require.Equal(t, "refused_download", outcome, "a definitive 4xx stays a refusal")
 	})
 
 	t.Run("unlisted or incompatible release is refused", func(t *testing.T) {
