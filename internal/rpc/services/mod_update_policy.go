@@ -44,11 +44,6 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	root, err := os.OpenRoot(dataRoot)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	defer func() { _ = root.Close() }()
 	modsDir := minecraft.GetModsPath(dataRoot, runtimeServer.ModLoader)
 	if modsDir == "" {
 		return 0, 0, nil, errors.New("this server type does not support mods")

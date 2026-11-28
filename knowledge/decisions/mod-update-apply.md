@@ -52,6 +52,9 @@ valid unset policy, not a reason to re-enable it.
   and window checks are in [Reviewed mod update publication](mod-update-publication.md).
 - The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot stage a duplicate or an unchecked jar.
+- A scheduled policy reads the mod inventory without opening the server data
+  root, so a server whose directory does not exist yet reports an empty
+  inventory instead of a planner failure.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
 - Journaled admission recomputes and persists the normalized runtime target; a

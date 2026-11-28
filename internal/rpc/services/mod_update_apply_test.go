@@ -806,6 +806,24 @@ func TestReviewedModUpdateRefusesDependencyAddedAfterPreview(t *testing.T) {
 	require.Empty(t, stagedFiles(t, server.DataPath))
 }
 
+// A scheduled policy on a server whose data root has not been allocated yet
+// must report an empty inventory instead of failing on the missing directory.
+// The policy planner is a read path; it does not create the data root.
+func TestScheduledModUpdatePolicyWithoutDataRootReportsEmptyInventory(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-no-root", storage.StatusStopped)
+	server.DataPath = filepath.Join(t.TempDir(), "not-created")
+	require.NoError(t, store.UpdateServer(ctx, server))
+
+	svc := NewModService(store, nil, um, logger.New())
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.NoError(t, err)
+	require.Zero(t, staged)
+	require.Zero(t, refused)
+	require.Nil(t, reasons)
+	require.NoDirExists(t, server.DataPath)
+}
+
 func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-policy", storage.StatusStopped)
