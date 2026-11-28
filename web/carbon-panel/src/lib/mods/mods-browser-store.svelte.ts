@@ -422,6 +422,12 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 		async installServerItems(options: {
 			items: InstallItem[];
 			root: { platform: string; id: string; title: string; version: string; depCount: number };
+			/**
+			 * File the root mod itself installs as. The server's `installed`
+			 * list may contain only dependencies, which must never be recorded
+			 * as the selected mod being installed.
+			 */
+			rootFileName: string;
 			unresolvedCount?: number;
 		}): Promise<{ success: boolean; message: string; errors: string[] }> {
 			const seq = installSequence.next();
@@ -447,6 +453,8 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 				}
 				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Local non-reactive lookup, discarded after mapping outcomes.
 				const installedFiles = new Set(response.installed);
+				const rootInstalled = installedFiles.has(options.rootFileName);
+				const succeeded = response.success && rootInstalled;
 				// The server names each failed item inside its error strings
 				// ("skipped <name>: …"); attribute per item when possible and
 				// keep the blanket errors[0] only for a single failed item.
@@ -465,7 +473,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 								detail: detailFor(item)
 							}
 				);
-				if (response.success) {
+				if (succeeded) {
 					const key = sessionKeyFor(options.root);
 					sessionInstalled = [
 						...sessionInstalled.filter((entry) => entry.key !== key),
@@ -480,8 +488,11 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 					sessionSummaryOpen = true;
 				}
 				return {
-					success: response.success,
-					message: response.message,
+					success: succeeded,
+					message:
+						response.success && !rootInstalled
+							? `The selected mod file ${options.rootFileName} was not installed; the server installed only its dependencies.`
+							: response.message,
 					errors: response.errors
 				};
 			} finally {

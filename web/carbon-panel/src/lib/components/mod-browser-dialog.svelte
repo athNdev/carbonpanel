@@ -444,6 +444,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					version: selectedVersion.version_number || selectedVersion.name,
 					depCount: (selectedVersion.dependencies || []).length
 				},
+				rootFileName: selectedVersion.file_name,
 				unresolvedCount: unresolved.length
 			});
 			if (staleAfter()) {

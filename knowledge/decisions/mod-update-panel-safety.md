@@ -21,6 +21,10 @@ code_refs:
 - The browser compares the server, Minecraft version, and loader context after
   dependency planning and before the install request. A changed context refuses
   the install instead of using a stale lookup.
+- A server install is successful only when the selected version's own file
+  appears in the server's installed list. A dependency-only response keeps the
+  per-item outcome rows visible, does not record the root mod as installed and
+  reports failure even when the server reported `success`.
 
 # Consequences
 

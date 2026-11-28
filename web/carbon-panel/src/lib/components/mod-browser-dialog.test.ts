@@ -34,6 +34,17 @@ test('mod install posts file_name so the backend accepts it', () => {
 	);
 });
 
+test('install names the selected root file so a dependency-only response is not success', () => {
+	assert.ok(
+		content.includes('rootFileName: selectedVersion.file_name'),
+		'the dialog must tell the store which installed file is the selected mod'
+	);
+	assert.ok(
+		store.includes('installedFiles.has(options.rootFileName)'),
+		'the store must require the root file in the installed list'
+	);
+});
+
 test('install button offers Install and Install with all dependencies', () => {
 	assert.ok(
 		content.includes("'Install with all dependencies'") && content.includes("'Install'"),

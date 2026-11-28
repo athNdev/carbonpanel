@@ -196,7 +196,8 @@ describe('mods browser store — detail region', () => {
 		await store.submitSearch();
 		const run = store.installServerItems({
 			items: [{ name: 'm', file_name: 'm.jar', download_url: 'u' }],
-			root: { platform: 'modrinth', id: 'm', title: 'm', version: '1', depCount: 0 }
+			root: { platform: 'modrinth', id: 'm', title: 'm', version: '1', depCount: 0 },
+			rootFileName: 'm.jar'
 		});
 		assert.equal(store.installing, true);
 		await store.selectResult(result('other'));
@@ -236,7 +237,8 @@ describe('mods browser store — install region', () => {
 				{ name: 'Root', file_name: 'root.jar', download_url: 'u1' },
 				{ name: 'Dep', file_name: 'dep.jar', download_url: 'u2' }
 			],
-			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 1 }
+			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 1 },
+			rootFileName: 'root.jar'
 		});
 		assert.deepEqual(
 			store.installOutcomes.map((row) => [row.label, row.tone]),
@@ -248,11 +250,80 @@ describe('mods browser store — install region', () => {
 		assert.match(store.installOutcomes[1].detail ?? '', /Not installed/);
 	});
 
+	test('a dependency-only install is never recorded as the root mod (E10)', async () => {
+		const store = makeStore({
+			install: async () => ({
+				success: true,
+				installed: ['dep.jar'],
+				errors: [],
+				message: 'Installed'
+			})
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
+
+		const response = await store.installServerItems({
+			items: [
+				{ name: 'Root', file_name: 'root.jar', download_url: 'u1' },
+				{ name: 'Dep', file_name: 'dep.jar', download_url: 'u2' }
+			],
+			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 1 },
+			rootFileName: 'root.jar'
+		});
+
+		assert.equal(response.success, false, 'only the dependency was installed');
+		assert.match(response.message, /root\.jar/);
+		assert.match(response.message, /dependencies/);
+		assert.equal(store.sessionCount, 0, 'the root mod must not be recorded as installed');
+		assert.deepEqual(
+			store.installOutcomes.map((row) => [row.label, row.tone]),
+			[
+				['Root', 'red'],
+				['Dep', 'green']
+			],
+			'per-item outcome rows stay visible'
+		);
+	});
+
+	test('the root mod is recorded when only a dependency failed', async () => {
+		const store = makeStore({
+			install: async () => ({
+				success: true,
+				installed: ['root.jar'],
+				errors: ['failed to save dep: disk full'],
+				message: 'Installed'
+			})
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
+
+		const response = await store.installServerItems({
+			items: [
+				{ name: 'Root', file_name: 'root.jar', download_url: 'u1' },
+				{ name: 'Dep', file_name: 'dep.jar', download_url: 'u2' }
+			],
+			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 1 },
+			rootFileName: 'root.jar'
+		});
+
+		assert.equal(response.success, true);
+		assert.equal(store.sessionCount, 1);
+		assert.equal(store.sessionInstalled[0].key, 'modrinth:root');
+		assert.deepEqual(
+			store.installOutcomes.map((row) => [row.label, row.tone]),
+			[
+				['Root', 'green'],
+				['Dep', 'red']
+			]
+		);
+	});
+
 	test('unresolved dependencies are appended and never silently dropped (E9)', async () => {
 		const store = await openWithResults();
 		await store.installServerItems({
 			items: [{ name: 'Root', file_name: 'root.jar', download_url: 'u' }],
 			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 1 },
+			rootFileName: 'root.jar',
 			unresolvedCount: 1
 		});
 		store.appendOutcomes([
@@ -269,10 +340,20 @@ describe('mods browser store — install region', () => {
 	});
 
 	test('a successful install appends exactly one session entry', async () => {
-		const store = await openWithResults();
+		const store = makeStore({
+			install: async () => ({
+				success: true,
+				installed: ['root.jar'],
+				errors: [],
+				message: 'Installed'
+			})
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
 		await store.installServerItems({
 			items: [{ name: 'Root', file_name: 'root.jar', download_url: 'u' }],
-			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '2.0', depCount: 2 }
+			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '2.0', depCount: 2 },
+			rootFileName: 'root.jar'
 		});
 		assert.equal(store.sessionCount, 1);
 		assert.equal(store.sessionInstalled[0].key, 'modrinth:root');
@@ -292,7 +373,8 @@ describe('mods browser store — install region', () => {
 		await store.selectResult(store.results[0]);
 		const run = store.installServerItems({
 			items: [{ name: 'm', file_name: 'm.jar', download_url: 'u' }],
-			root: { platform: 'modrinth', id: 'm', title: 'm', version: '1', depCount: 0 }
+			root: { platform: 'modrinth', id: 'm', title: 'm', version: '1', depCount: 0 },
+			rootFileName: 'm.jar'
 		});
 		store.closeDialog();
 		assert.equal(store.installing, false, 'CLOSE must reset the install region');
@@ -329,13 +411,15 @@ describe('mods browser store — install region', () => {
 		await store.submitSearch();
 		const runA = store.installServerItems({
 			items: [{ name: 'a', file_name: 'a.jar', download_url: 'u' }],
-			root: { platform: 'modrinth', id: 'a', title: 'a', version: '1', depCount: 0 }
+			root: { platform: 'modrinth', id: 'a', title: 'a', version: '1', depCount: 0 },
+			rootFileName: 'a.jar'
 		});
 		store.closeDialog();
 		store.openDialog();
 		const runB = store.installServerItems({
 			items: [{ name: 'b', file_name: 'b.jar', download_url: 'u' }],
-			root: { platform: 'modrinth', id: 'b', title: 'b', version: '2', depCount: 0 }
+			root: { platform: 'modrinth', id: 'b', title: 'b', version: '2', depCount: 0 },
+			rootFileName: 'b.jar'
 		});
 		assert.equal(store.installing, true, 'install B owns the region');
 		first.resolve({ success: true, installed: ['a.jar'], errors: [], message: 'ok' });
@@ -370,13 +454,21 @@ describe('mods browser store — install region', () => {
 		});
 		store.setTarget(serverTarget);
 		await store.submitSearch();
-		await store.installServerItems({
+		const response = await store.installServerItems({
 			items: [
 				{ name: 'root-mod', file_name: 'root.jar', download_url: 'u1' },
 				{ name: 'dep-mod', file_name: 'dep.jar', download_url: 'u2' }
 			],
-			root: { platform: 'modrinth', id: 'root-mod', title: 'root-mod', version: '1', depCount: 1 }
+			root: { platform: 'modrinth', id: 'root-mod', title: 'root-mod', version: '1', depCount: 1 },
+			rootFileName: 'root.jar'
 		});
+		assert.equal(response.success, false);
+		assert.equal(
+			response.message,
+			'Failed to install selected mods',
+			'a server-reported failure keeps its own message'
+		);
+		assert.equal(store.sessionCount, 0);
 		assert.match(store.installOutcomes[0].detail ?? '', /HTTP 404/);
 		assert.match(store.installOutcomes[1].detail ?? '', /disk full/);
 	});
