@@ -13,7 +13,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { Download, Trash2, Loader2, Package, RefreshCw, Upload } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import DatapackBrowserDialog from '$lib/components/datapack-browser-dialog.svelte';
 
@@ -65,7 +65,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Uploaded datapack ${file.name}`);
 			await load();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Upload failed');
+			if (!wasRpcErrorToasted(e)) {
+				toast.error(e instanceof Error ? e.message : 'Upload failed');
+			}
 		} finally {
 			uploading = false;
 		}
@@ -97,7 +99,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Removed ${fileName}`);
 			await load();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Delete failed');
+			if (!wasRpcErrorToasted(e)) {
+				toast.error(e instanceof Error ? e.message : 'Delete failed');
+			}
 		} finally {
 			deleting = { ...deleting, [fileName]: false };
 		}

@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { create } from '@bufbuild/protobuf';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ListBackupsRequestSchema,
@@ -44,9 +44,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			backups = response.backups;
 		} catch (error) {
 			loadError = error instanceof Error ? error.message : 'Failed to load backups';
-			toast.error(
-				'Failed to load backups: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					'Failed to load backups: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			}
 		} finally {
 			loading = false;
 		}
@@ -71,9 +73,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success('Backup deleted');
 			await loadBackups();
 		} catch (error) {
-			toast.error(
-				'Failed to delete backup: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					'Failed to delete backup: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			}
 		} finally {
 			acting = null;
 		}
@@ -100,9 +104,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(response.message || 'Backup restored');
 			await loadBackups();
 		} catch (error) {
-			toast.error(
-				'Failed to restore backup: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					'Failed to restore backup: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			}
 		} finally {
 			acting = null;
 		}
@@ -117,9 +123,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(response.message || 'Backup created');
 			await loadBackups();
 		} catch (error) {
-			toast.error(
-				'Failed to create backup: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					'Failed to create backup: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			}
 		} finally {
 			acting = null;
 		}
@@ -132,9 +140,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(locked ? 'Backup locked' : 'Backup unlocked');
 			await loadBackups();
 		} catch (error) {
-			toast.error(
-				'Failed to update lock: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					'Failed to update lock: ' + (error instanceof Error ? error.message : 'Unknown error')
+				);
+			}
 		} finally {
 			acting = null;
 		}

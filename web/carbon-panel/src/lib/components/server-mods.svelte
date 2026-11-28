@@ -23,7 +23,7 @@ one at https://mozilla.org/MPL/2.0/.
 		Ban,
 		RefreshCw
 	} from '@lucide/svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { Mod } from '$lib/proto/carbonpanel/v1/mod_pb';
@@ -140,7 +140,9 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (_e) {
 			if (isCurrent()) {
 				updateStatus = checkUpdates ? 'Update check failed. Try again.' : '';
-				toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
+				if (!wasRpcErrorToasted(_e)) {
+					toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
+				}
 			}
 		} finally {
 			if (isCurrent()) {
@@ -184,7 +186,7 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message === 'Upload cancelled') {
 				toast.info('Upload cancelled');
-			} else {
+			} else if (!wasRpcErrorToasted(error)) {
 				toast.error('Failed to upload mod');
 			}
 		} finally {
@@ -217,7 +219,7 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
 		} catch (_e) {
-			toast.error('Failed to toggle mod');
+			if (!wasRpcErrorToasted(_e)) toast.error('Failed to toggle mod');
 		}
 	}
 
@@ -240,7 +242,7 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success('Mod deleted');
 			await loadMods();
 		} catch (_e) {
-			toast.error('Failed to delete mod');
+			if (!wasRpcErrorToasted(_e)) toast.error('Failed to delete mod');
 		} finally {
 			pendingDelete = null;
 		}
@@ -260,7 +262,7 @@ one at https://mozilla.org/MPL/2.0/.
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (_e) {
-			toast.error('Failed to download mod');
+			if (!wasRpcErrorToasted(_e)) toast.error('Failed to download mod');
 		}
 	}
 
