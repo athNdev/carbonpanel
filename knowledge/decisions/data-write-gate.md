@@ -47,18 +47,13 @@ commits.
   being remapped to an internal failure.
 - A bulk staged delete holds one shared lease for every item, so a publication
   cannot acquire between items and split the operator's request.
-- A local or remote archive creation holds the shared lease from before the
-  transport decision through the accessor write.
+- A local or remote archive creation holds the shared lease from before the transport decision through the accessor write.
 - Fabric optimization installs hold a per-server install lock (and a
   mods-directory lock for direct installs) across provider lookup, downloads and
   cleanup, with the shared lease taken inside it. No lifecycle or publication
   path takes the install lock, so there is no ordering cycle.
-- A staged publication waits for direct writers already in flight, including a
-  remote archive download or extraction, instead of reading a partial tree.
+- A staged publication waits for in-flight direct writers, including a remote archive download or extraction, instead of reading a partial tree.
 - Direct writes do not create per-file journal rows; the journal and this gate cover different concerns.
 - The guard cannot close an out-of-band writer that bypasses the panel; the final writer is not an atomic compare-and-swap.
-- The per-server gate registry drops an entry once its last lease or admission
-  attempt is gone, so failed and completed requests cannot accumulate idle
-  gates. Server config admission resolves the server before taking the lease,
-  so an invalid server ID creates no gate entry.
+- An idle per-server gate is dropped after its last lease or admission attempt, so failed and completed requests do not accumulate entries; config admission resolves the server before taking the lease.
 - The module archive-export fence from PR #681 must eventually merge with this gate for one per-server owner.

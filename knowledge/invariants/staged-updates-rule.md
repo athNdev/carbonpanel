@@ -49,13 +49,7 @@ the live pending marker kept beside the cache (the cache directory name joined
 with the marker file name). A pack therefore cannot publish over the scheduler's
 pending-update state.
 
-Client-only mod jars and archives that are not datapacks are rejected before
-any staged byte is kept.
-
-A completed upload session whose staged admission is refused with `Aborted` or
-`FailedPrecondition` remains available for the same retry; only other staging
-failures clean the session up. This covers a publication or archive export that
-releases the path before the operator retries.
+Client-only mod jars and archives that are not datapacks are rejected before any staged byte is kept. A completed upload session refused with `Aborted` or `FailedPrecondition` stays retryable; other staging failures clean it up.
 
 Publication, recovery, retry and modpack semantics are in
 [Staged server updates — Publication](staged-updates-publication.md).

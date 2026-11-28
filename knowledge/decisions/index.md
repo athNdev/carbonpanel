@@ -70,6 +70,7 @@
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
 - [Reviewed mod update application](mod-update-apply.md) — Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
+- [Reviewed mod update client and scheduled policy](mod-update-client.md) — The Mods tab and policy editor bind requests to the captured server, use the scheduler's effective default budget, and fail closed on malformed policy.
 - [Reviewed mod update publication](mod-update-publication.md) — A staged reviewed mod row carries durable approval and publishes under the data-write lease and window checks.
 - [Runtime artifact format support](runtime-artifact-formats.md) — Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
 - [Runtime artifact format support — Alternatives + Consequence](runtime-artifact-formats-alternatives.md) — Publishing converted VHDX/VMDK/VDI images from qemu-img output would claim

@@ -28,11 +28,7 @@ the installed fingerprint and provider release, downloads the exact candidate
 bytes with a SHA-512 check, and stages them into the server's open batch without
 writing the live mods directory or restarting the server.
 
-JSON-backed `mod_update` policies use the same planner; save waits for the task list, and policy edits preserve schedule state with opt-outs starting disabled. The policy editor's default per-run budget is the scheduler's
-effective default (10), so an absent or zero `max_updates_per_run` displays and
-re-saves the budget that actually runs. Malformed policy JSON fails closed as
-disabled even when the task status says enabled; an empty legacy config is a
-valid unset policy, not a reason to re-enable it.
+JSON-backed `mod_update` policies use the same planner; save waits for the task list, and policy edits preserve schedule state with opt-outs starting disabled. Editor defaults, malformed-policy handling and the staging request identity are in [Reviewed mod update client](mod-update-client.md).
 
 # Consequences
 
@@ -44,25 +40,16 @@ valid unset policy, not a reason to re-enable it.
   actual live copy, and two matching copies are refused as ambiguous.
 - A required or incompatible dependency on the fetched release refuses the
   update even when its version id, filename and SHA-512 match the preview.
-- A temporary release lookup is a retryable download refusal; a confirmed
-  missing, withdrawn or invalid release is a provider refusal. A download
-  response with 5xx, 408, 425 or 429 is likewise transient, so the bounded
-  retry path runs; other 4xx responses are definitive. A per-item
-  staging storage/IO failure leaves earlier rows committed and returns a retryable policy error; validation refusals stay per-item.
+- A temporary release lookup is retryable; a confirmed missing, withdrawn or
+  invalid release is a provider refusal. A download response with 5xx, 408, 425
+  or 429 is transient, and other 4xx are definitive. Staging storage/IO
+  failures keep earlier rows and return retryable errors; validation stays per-item.
 - Publishing, backup, rollback, apply windows and per-server serialization are
-  the existing staged-batch guarantees. Durable approval, the data-write lease
-  and window checks are in [Reviewed mod update publication](mod-update-publication.md).
+  existing guarantees; the data-write lease and window checks are in [Reviewed mod update publication](mod-update-publication.md).
 - The update flow extends `UpdateMod` instead of adding an RPC, so it reuses `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot stage a duplicate or an unchecked jar.
-- A scheduled policy reads the mod inventory without opening the server data
-  root, so a server whose directory does not exist yet reports an empty
-  inventory instead of a planner failure.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
-- The Mods tab binds one staging request to the captured server id and request
-  generation. A response that lands after navigation, or after a newer request,
-  writes no status or selection and starts no refresh for the newly selected
-  server.
 - Journaled admission recomputes and persists the normalized runtime target; a
   moved target or direct non-staged runtime save is refused while a candidate is
   staged. An open-batch file is `already_staged` before download and spends no
