@@ -312,7 +312,7 @@ func TestMinecraftConstraintMatch(t *testing.T) {
 		{"1.20.1 or 1.21.1", "1.21.1", true, true},
 		{"1.21-RC1 or 1.21.1", "1.21.1", true, true},
 		{"[1.21,1.22)", "1.21.1", false, false}, // Maven ranges stay unknown
-		{"1.21-RC1", "1.21.1", false, true},    // dotted pre-release bound is understood but does not match
+		{"1.21-RC1", "1.21.1", false, true},     // dotted pre-release bound is understood but does not match
 		{">=1.21.11-pre1", "1.21.11-pre1", true, true},
 		{">=1.21.11-pre1", "1.21.11", true, true},
 		{">=1.21.11", "1.21.11-pre1", false, true},
@@ -371,17 +371,35 @@ func TestScanContentCompatibility_AmbiguousDependencyMetadataFailsClosed(t *test
 }
 
 func TestScanContentCompatibility_UnknownModLoaderFailsClosed(t *testing.T) {
-	root := t.TempDir()
-	mods := filepath.Join(root, "mods")
-	if err := os.MkdirAll(mods, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeModJar(t, mods, "some-mod.jar", "fabric.mod.json", `{"depends":{"minecraft":"*"}}`)
+	const reason = "unknown mod loader: compatibility cannot be verified"
+	for _, directory := range []string{"mods", "plugins"} {
+		t.Run(directory, func(t *testing.T) {
+			root := t.TempDir()
+			contentDir := filepath.Join(root, directory)
+			if err := os.MkdirAll(contentDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeModJar(t, contentDir, "some-mod.jar", "fabric.mod.json", `{"depends":{"minecraft":"*"}}`)
 
-	reports := ScanContentCompatibility(root, models.ModLoader("totally-unknown-loader"), "1.21.1")
-	for _, r := range reports {
-		if r.Status == ModCompatCompatible {
-			t.Fatalf("%s reported compatible for unknown mod loader; must fail closed: %+v", r.File, r)
-		}
+			reports := ScanContentCompatibility(root, models.ModLoader("totally-unknown-loader"), "1.21.1")
+			if len(reports) != 1 {
+				t.Fatalf("reports = %+v, want the %s jar reported", reports, directory)
+			}
+			got := reports[0]
+			if got.File != "some-mod.jar" {
+				t.Fatalf("file = %q, want some-mod.jar", got.File)
+			}
+			if got.Status != ModCompatIncompatible {
+				t.Fatalf("%s: status = %s, want incompatible", got.File, got.Status)
+			}
+			if got.Reason != reason {
+				t.Fatalf("%s: reason = %q, want %q", got.File, got.Reason, reason)
+			}
+		})
+	}
+
+	// A loader with no conventional content still reports nothing.
+	if reports := ScanContentCompatibility(t.TempDir(), models.ModLoader("totally-unknown-loader"), "1.21.1"); reports != nil {
+		t.Fatalf("empty unknown loader reports = %+v, want nil", reports)
 	}
 }

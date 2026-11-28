@@ -88,22 +88,26 @@ func contentFamilyFor(loader models.ModLoader) contentFamily {
 func ScanContentCompatibility(dataRoot string, loader models.ModLoader, targetVersion string) []ModCompatReport {
 	info := GetModLoaderInfo(loader)
 	if info.Description == "Unknown mod loader" {
-		if info.ModsDirectory == "" {
-			return nil
+		// The loader is unknown, so GetModLoaderInfo cannot name a content
+		// directory. Probe the conventional roots instead of skipping them:
+		// jars there are content the panel cannot verify, so they fail closed.
+		var reports []ModCompatReport
+		for _, directory := range []string{"mods", "plugins"} {
+			jars, err := jarNames(filepath.Join(dataRoot, directory))
+			if err != nil {
+				continue
+			}
+			for _, name := range jars {
+				reports = append(reports, ModCompatReport{
+					File:   name,
+					Status: ModCompatIncompatible,
+					Reason: "unknown mod loader: compatibility cannot be verified",
+				})
+			}
 		}
-		dir := filepath.Join(dataRoot, info.ModsDirectory)
-		names, err := jarNames(dir)
-		if err != nil || len(names) == 0 {
-			return nil
-		}
-		reports := make([]ModCompatReport, 0, len(names))
-		for _, name := range names {
-			reports = append(reports, ModCompatReport{
-				File:   name,
-				Status: ModCompatIncompatible,
-				Reason: "unknown mod loader: compatibility cannot be verified",
-			})
-		}
+		slices.SortStableFunc(reports, func(a, b ModCompatReport) int {
+			return strings.Compare(a.File, b.File)
+		})
 		return reports
 	}
 	family := contentFamilyFor(loader)
