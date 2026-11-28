@@ -3,32 +3,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { create } from '@bufbuild/protobuf';
+import { clone } from '@bufbuild/protobuf';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 
-function clonePlain<T>(value: T): T {
-	if (Array.isArray(value)) {
-		return value.map((entry) => clonePlain(entry)) as T;
-	}
-	if (value !== null && typeof value === 'object') {
-		const clone: Record<string, unknown> = {};
-		for (const [key, entry] of Object.entries(value)) {
-			if (key === '$typeName') continue;
-			clone[key] = clonePlain(entry);
-		}
-		return clone as T;
-	}
-	return value;
-}
-
 /**
- * Deep plain snapshot of the form state. `$typeName` is dropped so that
- * rebuilding a message from a snapshot always compiles a fresh, independent
- * form object instead of aliasing the snapshot it came from. The clone is
- * recursive rather than a JSON round-trip so int64 fields such as
- * `dockerOverrides.memoryLimit` keep their `bigint` values.
+ * Independent deep snapshot of the form state, built with protobuf-es's own
+ * message clone. The snapshot is a fresh message that does not alias the form
+ * it came from, while int64 fields such as `dockerOverrides.memoryLimit` keep
+ * their `bigint` values and user map keys such as `$typeName` or `__proto__`
+ * survive intact.
  */
 export function snapshotServerForm(source: UpdateServerRequest): UpdateServerRequest {
-	return create(UpdateServerRequestSchema, clonePlain(source));
+	return clone(UpdateServerRequestSchema, source);
 }
