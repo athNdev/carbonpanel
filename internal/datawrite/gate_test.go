@@ -208,6 +208,37 @@ func TestExclusiveDrainReservationRefusesNewSharedWriters(t *testing.T) {
 	}
 }
 
+// TestGateEntriesAreRemovedAfterLastRelease guards the map lifetime: an idle
+// server must not retain a gate entry after its last lease, including refusals
+// that only observed an occupied path.
+func TestGateEntriesAreRemovedAfterLastRelease(t *testing.T) {
+	const server = "gate-lifetime-cleanup"
+	for attempt := 0; attempt < 5; attempt++ {
+		shared, err := TryShared(server)
+		if err != nil {
+			t.Fatalf("shared lease: %v", err)
+		}
+		shared.Release()
+
+		exclusive, err := AcquireExclusive(context.Background(), server)
+		if err != nil {
+			t.Fatalf("exclusive lease: %v", err)
+		}
+		if _, err := TryShared(server); !errors.Is(err, ErrExclusiveHeld) {
+			t.Fatalf("shared lease during publication = %v, want ErrExclusiveHeld", err)
+		}
+		exclusive.Release()
+	}
+
+	gates.Lock()
+	_, retained := gates.byServer[server]
+	retainedCount := len(gates.byServer)
+	gates.Unlock()
+	if retained {
+		t.Fatalf("released gate entry retained (%d total entries)", retainedCount)
+	}
+}
+
 func TestGatesArePerServer(t *testing.T) {
 	first, err := AcquireExclusive(context.Background(), "gate-server-a")
 	if err != nil {

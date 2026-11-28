@@ -57,4 +57,8 @@ commits.
   remote archive download or extraction, instead of reading a partial tree.
 - Direct writes do not create per-file journal rows; the journal and this gate cover different concerns.
 - The guard cannot close an out-of-band writer that bypasses the panel; the final writer is not an atomic compare-and-swap.
+- The per-server gate registry drops an entry once its last lease or admission
+  attempt is gone, so failed and completed requests cannot accumulate idle
+  gates. Server config admission resolves the server before taking the lease,
+  so an invalid server ID creates no gate entry.
 - The module archive-export fence from PR #681 must eventually merge with this gate for one per-server owner.

@@ -42,7 +42,10 @@ type gate struct {
 	exclusive bool
 	draining  bool
 	shared    int
-	changed   chan struct{}
+	// refs counts the leases and in-flight acquisitions that still hold a
+	// pointer to this entry. The entry is removed when the last ref is gone.
+	refs    int
+	changed chan struct{}
 }
 
 var gates = struct {
@@ -58,7 +61,28 @@ func gateFor(serverID string) *gate {
 		entry = &gate{changed: make(chan struct{})}
 		gates.byServer[serverID] = entry
 	}
+	entry.refs++
 	return entry
+}
+
+// dropGateRef releases one hold on the entry and removes it once no lease or
+// acquisition can still observe it. Callers must hold no gate.mu when calling.
+func dropGateRef(serverID string, entry *gate) {
+	if entry == nil {
+		return
+	}
+	gates.Lock()
+	defer gates.Unlock()
+	if current, ok := gates.byServer[serverID]; !ok || current != entry {
+		return
+	}
+	entry.mu.Lock()
+	entry.refs--
+	remove := entry.refs == 0 && entry.shared == 0 && !entry.exclusive && !entry.draining
+	entry.mu.Unlock()
+	if remove {
+		delete(gates.byServer, serverID)
+	}
 }
 
 // Lease is one claim on a server data path. Release is idempotent.
@@ -98,6 +122,7 @@ func (l *Lease) Release() {
 		close(gate.changed)
 		gate.changed = make(chan struct{})
 		gate.mu.Unlock()
+		dropGateRef(l.serverID, gate)
 	})
 }
 
@@ -110,11 +135,13 @@ func TryShared(serverID string) (*Lease, error) {
 	}
 	gate := gateFor(serverID)
 	gate.mu.Lock()
-	defer gate.mu.Unlock()
 	if gate.exclusive || gate.draining {
+		gate.mu.Unlock()
+		dropGateRef(serverID, gate)
 		return nil, fmt.Errorf("%w: %s", ErrExclusiveHeld, serverID)
 	}
 	gate.shared++
+	gate.mu.Unlock()
 	return &Lease{gate: gate, serverID: serverID}, nil
 }
 
@@ -130,6 +157,7 @@ func AcquireExclusive(ctx context.Context, serverID string) (*Lease, error) {
 	gate.mu.Lock()
 	if gate.exclusive || gate.draining {
 		gate.mu.Unlock()
+		dropGateRef(serverID, gate)
 		return nil, fmt.Errorf("%w: %s", ErrExclusiveBusy, serverID)
 	}
 	if gate.shared == 0 {
@@ -154,6 +182,7 @@ func AcquireExclusive(ctx context.Context, serverID string) (*Lease, error) {
 			close(gate.changed)
 			gate.changed = make(chan struct{})
 			gate.mu.Unlock()
+			dropGateRef(serverID, gate)
 			return nil, ctx.Err()
 		}
 		gate.mu.Lock()

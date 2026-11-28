@@ -118,12 +118,6 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	}
 	defer transition.Release()
 
-	releaseWrite, err := beginDataWrite(req.Msg.ServerId)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
-
 	msg := req.Msg
 
 	// Get server info
@@ -131,6 +125,12 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
+
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
 
 	// Get existing config
 	config, err := s.store.GetServerConfig(ctx, msg.ServerId)
