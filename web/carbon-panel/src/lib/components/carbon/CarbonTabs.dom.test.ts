@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: MPL-2.0
 // Real-DOM coverage for keeping a selected tab inside a narrow scroll strip.
 
 import test from 'node:test';
