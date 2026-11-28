@@ -48,9 +48,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		indicatorWidth = button.offsetWidth;
 		// Keep a selected tab visible after programmatic selection or resize,
 		// without scrolling any ancestor or moving the page vertically.
-		if (button.offsetLeft < container.scrollLeft) container.scrollLeft = button.offsetLeft;
-		else if (button.offsetLeft + button.offsetWidth > container.scrollLeft + container.clientWidth)
-			container.scrollLeft = button.offsetLeft + button.offsetWidth - container.clientWidth;
+		// offsetLeft is relative to the offset parent, not necessarily this scroll
+		// container, so compare the tab's viewport rect with the container's
+		// client area instead. A stale offset parent or transform used to leave a
+		// deep-linked tab clipped at narrow widths.
+		const containerRect = container.getBoundingClientRect();
+		const buttonRect = button.getBoundingClientRect();
+		const containerLeft = containerRect.left + container.clientLeft;
+		const left = buttonRect.left - containerLeft;
+		const right = buttonRect.right - containerLeft;
+		if (left < 0) container.scrollLeft += left;
+		else if (right > container.clientWidth) container.scrollLeft += right - container.clientWidth;
 	}
 
 	$effect(() => {
