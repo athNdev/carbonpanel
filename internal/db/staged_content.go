@@ -32,9 +32,9 @@ var ErrDuplicateStagedTarget = errors.New("staged target already exists in this 
 // target; requiring a separate batch is the smallest safe closure.
 var ErrModpackBatchConflict = errors.New("a modpack update cannot share a batch with separately staged file or mod content")
 
-// normalizedStagedTarget matches the publication-time target identity: case,
+// NormalizedStagedTarget matches the publication-time target identity: case,
 // separator and trailing-separator aliases name the same live file.
-func normalizedStagedTarget(value string) string {
+func NormalizedStagedTarget(value string) string {
 	return strings.TrimSuffix(strings.ToLower(path.Clean(strings.ReplaceAll(value, "\\", "/"))), "/")
 }
 
@@ -48,9 +48,9 @@ func rejectDuplicateStagedTarget(tx *gorm.DB, row *StagedContentChange, batchID 
 		Find(&rows).Error; err != nil {
 		return err
 	}
-	target := normalizedStagedTarget(row.TargetPath)
+	target := NormalizedStagedTarget(row.TargetPath)
 	for _, existing := range rows {
-		if existing.ID == row.ID || normalizedStagedTarget(existing.TargetPath) != target {
+		if existing.ID == row.ID || NormalizedStagedTarget(existing.TargetPath) != target {
 			continue
 		}
 		return fmt.Errorf("%w: %q is already staged in batch %s as row %s; discard that item before staging it again",
@@ -202,26 +202,37 @@ func validateStagedApprovedReleaseIdentity(row *StagedContentChange) error {
 	return nil
 }
 
+// validateStagedContentAdmission enforces the invariants shared by every
+// staged-content write: a known server, kind, action and target, plus staged
+// bytes for anything that is not a delete. Both admission paths use it so a
+// caller cannot bypass one set of rules by choosing the other entry point.
+func validateStagedContentAdmission(row *StagedContentChange) error {
+	if row == nil || row.ServerID == "" || row.Kind == "" || row.Action == "" || row.TargetPath == "" {
+		return fmt.Errorf("staged content requires a server, kind, action, and target")
+	}
+	if row.Action != StagedActionDelete && row.StagePath == "" {
+		return fmt.Errorf("staged content file is required")
+	}
+	switch row.Kind {
+	case StagedKindMod, StagedKindDatapack, StagedKindFile, StagedKindModpack, StagedKindModule:
+	default:
+		return fmt.Errorf("unknown staged content kind %q", row.Kind)
+	}
+	switch row.Action {
+	case StagedActionInstall, StagedActionReplace, StagedActionDelete:
+	default:
+		return fmt.Errorf("unknown staged content action %q", row.Action)
+	}
+	return nil
+}
+
 // AddStagedContent joins the server's one open batch and records a content
 // edit. It does not copy bytes or touch the live tree; the caller writes the
 // staged file first. A new batch uses the next-restart window and does not
 // retarget a batch that is already open.
 func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) (*StagedContentChange, error) {
-	if row == nil || row.ServerID == "" || row.Kind == "" || row.Action == "" || row.TargetPath == "" {
-		return nil, fmt.Errorf("staged content requires a server, kind, action, and target")
-	}
-	if row.Action != StagedActionDelete && row.StagePath == "" {
-		return nil, fmt.Errorf("staged content file is required")
-	}
-	switch row.Kind {
-	case StagedKindMod, StagedKindDatapack, StagedKindFile, StagedKindModpack, StagedKindModule:
-	default:
-		return nil, fmt.Errorf("unknown staged content kind %q", row.Kind)
-	}
-	switch row.Action {
-	case StagedActionInstall, StagedActionReplace, StagedActionDelete:
-	default:
-		return nil, fmt.Errorf("unknown staged content action %q", row.Action)
+	if err := validateStagedContentAdmission(row); err != nil {
+		return nil, err
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		batch, err := ensureOpenBatch(tx, row.ServerID, UpdateWindowNextRestart)
@@ -472,15 +483,18 @@ func checkReviewedContentWindow(tx *gorm.DB, batch *ServerUpdateBatch, window Up
 }
 
 // AddStagedContentToBatch inserts only into the reviewed, still-open batch
-// with the same window and no independently scheduled config row.
+// with the same window and no independently scheduled config row. It applies
+// the same admission rules as AddStagedContent and always persists the row as
+// staged: a caller cannot orphan it with a terminal status.
 func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentChange, batchID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
+	if err := validateStagedContentAdmission(row); err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Write first to serialize with config admission. Nothing is visible
 		// until commit, and a refusal rolls this insert back.
 		row.BatchID = batchID
-		if row.Status == "" {
-			row.Status = StagedStatusStaged
-		}
+		row.Status = StagedStatusStaged
 		if err := ensureStagedModApprovalAdmission(row); err != nil {
 			return err
 		}
