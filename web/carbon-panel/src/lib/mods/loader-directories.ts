@@ -24,3 +24,14 @@ export function contentDirectoryFor(loader: ModLoader): 'mods' | 'plugins' {
 export function isPluginLoader(loader: ModLoader): boolean {
 	return PLUGIN_LOADERS.has(loader);
 }
+
+/**
+ * Catalogs the mods browser offers for a loader. CurseForge browsing targets
+ * its Minecraft "Mods" class, so it is not offered for plugin-capable loaders:
+ * there is no verified CurseForge plugin class/loader query to route to, and a
+ * hardcoded mod-class search would return content that cannot be installed as a
+ * plugin. Such targets browse Modrinth and Hangar's plugin indexes instead.
+ */
+export function catalogPlatformsFor(loader: ModLoader): Array<'modrinth' | 'curseforge'> {
+	return isPluginLoader(loader) ? ['modrinth'] : ['modrinth', 'curseforge'];
+}

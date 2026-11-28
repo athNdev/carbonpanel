@@ -258,6 +258,25 @@ test('two conflicting pin sets for one project get unique outcome keys', async (
 	);
 });
 
+test('plugin-capable loaders cannot browse the CurseForge mod catalog', () => {
+	// CurseForge search is pinned to the Minecraft mod class. For a Paper-family
+	// target the tab would return mods that cannot install as plugins, so the
+	// switcher drops it and a stale selection falls back to Modrinth.
+	assert.ok(
+		content.includes('catalogPlatformsFor(gameLoader)'),
+		'the platform tabs must come from the loader-aware helper'
+	);
+	assert.ok(
+		!/\{\s*id:\s*'curseforge',\s*label:\s*'CurseForge'\s*\}/.test(content),
+		'the unconditional CurseForge tab must be gone'
+	);
+	assert.match(
+		content,
+		/store\.platform === 'curseforge'[\s\S]*?store\.setPlatform\('modrinth'\)/,
+		'a CurseForge selection left over on a plugin target must reset to Modrinth'
+	);
+});
+
 test('the install context is revalidated after dependency planning', () => {
 	const context: ModInstallContext = {
 		serverId: 'server-1',

@@ -52,7 +52,10 @@ test('an edit to a submitted field during the request survives the response refr
 		next.currentValues.get('motd'),
 		'an untouched field stays clean'
 	);
-	assert.notEqual(next.originalValues.get('view-distance'), next.currentValues.get('view-distance'));
+	assert.notEqual(
+		next.originalValues.get('view-distance'),
+		next.currentValues.get('view-distance')
+	);
 });
 
 test('an edit to a previously clean field during the request survives the response refresh', () => {

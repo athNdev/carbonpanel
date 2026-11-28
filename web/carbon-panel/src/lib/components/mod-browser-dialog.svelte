@@ -62,7 +62,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		matchFilterSuggestions,
 		type FilterSuggestion
 	} from '$lib/mods/filter-vocabulary';
-	import { contentDirectoryFor, isPluginLoader } from '$lib/mods/loader-directories';
+	import {
+		catalogPlatformsFor,
+		contentDirectoryFor,
+		isPluginLoader
+	} from '$lib/mods/loader-directories';
 
 	interface Props {
 		open: boolean;
@@ -212,10 +216,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let suggestions = $derived(matchFilterSuggestions(FILTER_VOCABULARY, filterInput));
 
-	const catalogPlatforms = [
-		{ id: 'modrinth', label: 'Modrinth' },
-		{ id: 'curseforge', label: 'CurseForge' }
-	];
+	const PLATFORM_LABELS = { modrinth: 'Modrinth', curseforge: 'CurseForge' } as const;
+	const catalogPlatforms = $derived(
+		catalogPlatformsFor(gameLoader).map((id) => ({ id, label: PLATFORM_LABELS[id] }))
+	);
 
 	// Store-backed state the template reads directly.
 	let selectedMod = $derived(store.selectedResult);
@@ -507,6 +511,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				mcVersion: server.mcVersion,
 				side: defaultSide()
 			});
+			// A plugin-capable loader cannot browse CurseForge's mod class; a
+			// target change after a CurseForge selection must fall back to
+			// Modrinth (and its merged Hangar plugin results) instead of
+			// searching a catalog the switcher no longer offers.
+			if (
+				!catalogPlatformsFor(gameLoader).includes('curseforge') &&
+				store.platform === 'curseforge'
+			) {
+				void store.setPlatform('modrinth');
+			}
 			if (rebuildFilters) {
 				activeFilters = buildDefaultFilters();
 				if (open) store.openDialog();

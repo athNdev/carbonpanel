@@ -16,7 +16,11 @@ import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
 import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-import { dockerOverridesFingerprint, serverFormDiffersFromBaseline, snapshotServerForm } from './server-settings-snapshot';
+import {
+	dockerOverridesFingerprint,
+	serverFormDiffersFromBaseline,
+	snapshotServerForm
+} from './server-settings-snapshot';
 
 test('snapshotServerForm clones a form whose Docker overrides contain int64 bigints', () => {
 	const memoryLimit = 9_007_199_254_740_993n;
