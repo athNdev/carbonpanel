@@ -28,7 +28,10 @@ log scanning, as a broken server.
    stored row is not touched before this gate.
 3. Unreadable files, missing metadata and unparseable constraints are
    "unknown" and fail open — the panel refuses only what it can prove is
-   broken. Forge-style ranges are not yet parsed and report unknown.
+   broken. Forge-style ranges are not yet parsed and report unknown. This
+   fail-open applies to a readable location: when the server's storage cannot
+   be inspected at all (a transport-only node with no storage adapter), the
+   change is refused with `FailedPrecondition` rather than skipping the gate.
 4. The gate is a pre-flight, not a wrapper: modpack-driven provisioning keeps
    its own path, and a failed recreation after a passed gate still uses the
    existing recovery flow.

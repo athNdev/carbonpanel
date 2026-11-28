@@ -15,6 +15,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 )
 
 // maxListedIncompatible bounds the per-file list in the version-change
@@ -25,13 +26,23 @@ const maxListedIncompatible = 10
 // refuseVersionIncompatibleContent is the UpdateServer pre-flight gate for a
 // Minecraft version change. It refuses the change with failed_precondition
 // when installed mods, plugins, or datapacks declare themselves incompatible
-// with the target version. The gate fails open: a storage location the panel
-// cannot read, unreadable archives, and content without readable metadata
-// never block a version change — the gate exists to catch the common case
-// before a failed recreation persists the new version row.
+// with the target version. The gate fails open for a readable location whose
+// content it cannot parse: unreadable archives and content without readable
+// metadata never block a version change — the gate exists to catch the common
+// case before a failed recreation persists the new version row.
+//
+// A server whose storage the panel cannot inspect at all (a transport-only
+// node with no storage adapter) fails closed instead: there is no way to
+// prove the installed content is compatible, so the change is refused rather
+// than silently skipping the gate before a recreation.
 func (s *ServerService) refuseVersionIncompatibleContent(ctx context.Context, server *storage.Server, targetVersion string) error {
 	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
+		if nodestorage.IsUnavailable(err) {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"content compatibility cannot be inspected on this server's storage; refusing the Minecraft %s version change: %w",
+				targetVersion, err))
+		}
 		if s.log != nil {
 			s.log.Warn("Skipping content compatibility check for server %s: %v", server.ID, err)
 		}

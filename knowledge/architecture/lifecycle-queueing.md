@@ -43,7 +43,9 @@ compatibility with the target (fabric/quilt depends, plugin api-version,
 datapack pack format). When the request changes the loader too, the scan uses
 the destination loader without mutating the stored server. Incompatible files
 refuse the change with a per-file list; unknown or unparseable content fails
-open. ADR 0055 is the contract.
+open, except a transport-only node with no storage adapter: its storage cannot
+be inspected, so the change is refused with `FailedPrecondition` instead of
+skipping the gate. ADR 0055 is the contract.
 
 Fabric bare versions are exact requirements; Quilt bare versions are caret
 ranges, while an explicit Quilt `=` pin is exact. Quilt dependency entries are

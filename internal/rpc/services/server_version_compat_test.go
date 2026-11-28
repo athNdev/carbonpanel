@@ -175,6 +175,69 @@ func TestUpdateServerVersionChangeProceedsWhenContentUnknown(t *testing.T) {
 	assert.Equal(t, "1.21.1", updated.MCVersion)
 }
 
+// TestUpdateServerRefusesVersionChangeWhenNodeStorageUninspectable guards the
+// transport-only residual: a remote node with no storage adapter returns the
+// typed nodestorage refusal from dataRootFor. Skipping the gate there would
+// silently let an uninspectable version change proceed, so the change must be
+// refused with failed_precondition like any other unproven-incompatible case.
+func TestUpdateServerRefusesVersionChangeWhenNodeStorageUninspectable(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	log := logger.New()
+	dockerClient, err := docker.NewClient("tcp://127.0.0.1:1", log)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dockerClient.Close() })
+
+	require.NoError(t, store.CreateNode(ctx, &storage.Node{
+		ID: "remote-bare", Name: "remote-bare", Host: "tcp://10.0.0.8:2375", Enabled: true,
+	}))
+
+	server := &storage.Server{
+		ID: "srv-compat-remote-bare", Name: "Compat Remote Bare", NodeID: "remote-bare",
+		Port: 25596, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderFabric, MCVersion: "1.21.1",
+		ContainerID: "tracked", Status: storage.StatusStopped,
+		DataPath: filepath.Join("srv", "servers", "remote-bare"),
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+
+	svc := newVersionCompatService(t, store, dockerClient, log)
+	_, err = svc.UpdateServer(ctx, connect.NewRequest(&v1.UpdateServerRequest{
+		Id: server.ID, McVersion: "1.20.1",
+	}))
+	require.Error(t, err, "an uninspectable storage location must not pass silently")
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "error = %v", err)
+	assert.Contains(t, err.Error(), "content compatibility cannot be inspected on this server's storage")
+
+	// The refusal is pre-flight: the stored version is untouched.
+	updated, err := store.GetServer(ctx, server.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "1.21.1", updated.MCVersion)
+}
+
+// TestVersionCompatGateFailsOpenOnNodeResolutionError keeps the documented
+// fail-open behavior for ordinary storage errors that are not the typed
+// transport refusal (for example an unresolvable node reference).
+func TestVersionCompatGateFailsOpenOnNodeResolutionError(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &storage.Server{
+		ID: "srv-compat-missing-node", Name: "Compat Missing Node", NodeID: "no-such-node",
+		Port: 25597, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderFabric, MCVersion: "1.21.1",
+		DataPath: filepath.Join("srv", "servers", "missing-node"),
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+
+	svc := newVersionCompatService(t, store, nil, logger.New())
+	require.NoError(t, svc.refuseVersionIncompatibleContent(ctx, server, "1.20.1"),
+		"non-transport storage errors must keep failing open")
+}
+
 // TestUpdateServerRefusesIncompatibleDatapackDowngrade covers the datapack
 // half of the gate: a pack built for a newer format than the target release
 // supports is refused.
