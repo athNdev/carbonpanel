@@ -16,11 +16,15 @@ sources:
 ---
 # Shape
 
-Every admin mutation writes at most one activity row after the store or runtime
-mutation succeeds. The actor comes from the request context, never the request
-payload. `writeAudit` in `internal/rpc/services` bounds string properties and
-logs a failed insert without returning it, so auditing never changes the
-operation result.
+Every audited admin mutation in the covered classes writes at most one activity
+row after the store or runtime mutation succeeds. The actor comes from the
+request context, never the request payload. `writeAudit` in
+`internal/rpc/services` bounds string properties and `SubjectID`, and logs a
+failed insert without returning it, so auditing never changes the operation
+result.
+
+The inventory's **Deferred** rows are explicit gaps: those mutations do not
+write an admin activity row in this slice and are not claimed as audited.
 
 Added coverage in the OSS-358 bounded slice: node create/update/delete and TLS
 credential clear; user create/update/delete; role create/update/delete,
@@ -45,4 +49,6 @@ node credential revocation) are explicit gaps; no event schema is guessed until
 their property and secret policy is reviewed.
 
 `internal/docscheck` checks the inventory: every cited entry point, audit
-location and covering test must still exist.
+location and covering test must still exist. An **Added** row must name a
+declared event, a write site that references it, and a test that asserts the
+activity row.

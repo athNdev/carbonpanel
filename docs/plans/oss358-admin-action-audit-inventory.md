@@ -26,8 +26,11 @@ get new audit rows in this slice.
   not receive a per-call admin audit row.
 
 Every code span below is checked by `internal/docscheck`: entry-point and
-audit-write paths/symbols must exist, and every named test must exist in the
-cited `_test.go` file.
+audit-write paths/symbols must exist, every event literal in an event cell must
+be declared, and every named test must exist in the cited `_test.go` file and
+assert a stored activity row. An **Added** row must also cite an audit-write
+function that references its event. A missing inventory file fails the check
+instead of skipping it.
 
 ## Admin-mutating RPCs and actions
 
@@ -83,11 +86,11 @@ cited `_test.go` file.
 | A48 | Stop module | `internal/rpc/services/module.go:StopModule` | `modules:stop` on module | `none` | `none` | `—` | **Deferred** |
 | A49 | Restart module | `internal/rpc/services/module.go:RestartModule` | `modules:restart` on module | `none` | `none` | `—` | **Deferred** |
 | A50 | Recreate module | `internal/rpc/services/module.go:RecreateModule` | `modules:restart` on module | `none` | `none` | `—` | **Deferred** |
-| A51 | Import uploaded mod | `internal/rpc/services/mod.go:ImportUploadedMod` | `mods:create` on server | `mod.install` | `internal/rpc/services/mod.go:auditMod` | `internal/rpc/services/mod_browse_test.go:TestModBrowseServiceInstallMatchesSharedOperation` | **Covered** |
-| A52 | Update mod enabled state | `internal/rpc/services/mod.go:UpdateMod` | `mods:update` on server | `mod.update` | `internal/rpc/services/mod.go:auditMod` | `internal/rpc/services/mod_update_preview_test.go:TestModUpdatePreviewUsesEnabledAndDisabledFileBytes` | **Covered** |
+| A51 | Import uploaded mod | `internal/rpc/services/mod.go:ImportUploadedMod` | `mods:create` on server | `mod.install` | `internal/rpc/services/mod.go:auditMod` | `internal/rpc/services/admin_audit_mod_test.go:TestImportUploadedModWritesAuditRow` | **Covered** |
+| A52 | Update mod enabled state | `internal/rpc/services/mod.go:UpdateMod` | `mods:update` on server | `mod.update` | `internal/rpc/services/mod.go:auditMod` | `internal/rpc/services/admin_audit_mod_test.go:TestUpdateModWritesAuditRow` | **Covered** |
 | A53 | Delete mod | `internal/rpc/services/mod.go:DeleteMod` | `mods:delete` on server | `mod.remove` | `internal/rpc/services/mod.go:auditMod` | `—` | **Covered** |
 | A54 | Install Fabric optimization stack | `internal/rpc/services/mod.go:InstallFabricOptimizationStack` | `mods:update` on server | `mod.install` | `internal/rpc/services/mod.go:auditMod` | `—` | **Covered** |
-| A55 | Install mods from browse | `internal/rpc/services/mod_browse.go:InstallMods` | `mods:create` global | `mod.install` | `internal/rpc/handlers/mod_search.go:auditModInstall` | `internal/rpc/services/mod_browse_test.go:TestModBrowseServiceInstallMatchesSharedOperation` | **Covered** |
+| A55 | Install mods from browse | `internal/rpc/services/mod_browse.go:InstallMods` | `mods:create` global | `mod.install` | `internal/rpc/handlers/mod_search.go:auditModInstall` | `internal/rpc/services/admin_audit_mod_test.go:TestModBrowseServiceInstallWritesAuditRow` | **Covered** |
 | A56 | Install datapack | `internal/rpc/services/datapack.go:InstallDatapack` | `mods:create` on server | `none` | `none` | `—` | **Deferred** |
 | A57 | Upload datapack | `internal/rpc/services/datapack.go:UploadDatapack` | `mods:create` on server | `none` | `none` | `—` | **Deferred** |
 | A58 | Delete datapack | `internal/rpc/services/datapack.go:DeleteDatapack` | `mods:delete` on server | `none` | `none` | `—` | **Deferred** |
@@ -130,7 +133,7 @@ cited `_test.go` file.
 | A95 | Pardon player | `internal/rpc/services/player.go:PardonPlayer` | `players:moderate` on server | `player.pardon` | `internal/rpc/services/player.go:auditPlayer` | `—` | **Covered** |
 | A96 | Set player operator | `internal/rpc/services/player.go:SetOperator` | `players:moderate:op` on server | `player.op` / `player.deop` | `internal/rpc/services/player.go:auditPlayer` | `—` | **Covered** |
 | A97 | Set whitelist entry | `internal/rpc/services/player.go:SetWhitelistEntry` | `players:access:write` on server | `player.whitelist.add` / `player.whitelist.remove` | `internal/rpc/services/player.go:auditPlayer` | `internal/rpc/services/player_lookup_test.go:TestSetWhitelistManualAddByNameBeforeFirstJoin` | **Covered** |
-| A98 | Bulk player action | `internal/rpc/services/player.go:BulkPlayerAction` | `players:bulk` on server | `player.bulk` | `internal/rpc/services/player.go:auditPlayer` | `internal/rpc/services/player_test.go:TestBulkPartialResultsArePerTarget` | **Covered** |
+| A98 | Bulk player action | `internal/rpc/services/player.go:BulkPlayerAction` | `players:bulk` on server | `player.bulk` | `internal/rpc/services/player.go:auditPlayer` | `internal/rpc/services/player_test.go:TestBulkReplayDoesNotReapplyMutations` | **Covered** |
 | A99 | Undo player action | `internal/rpc/services/player.go:UndoPlayerAction` | `players:moderate` on server | `player.undo` | `internal/rpc/services/player.go:auditPlayer` | `internal/rpc/services/player_test.go:TestUndoAuditSurvivesClientCancellationAfterMutation` | **Covered** |
 | A100 | Refresh player skin | `internal/rpc/services/player.go:RefreshPlayerSkin` | `players:skin:refresh` on server | `player.skin.refresh` | `internal/rpc/services/player.go:auditPlayer` | `—` | **Covered** |
 | A101 | Import world | `internal/rpc/services/world.go:ImportWorld` | `worlds:create` global | `none` | `none` | `—` | **Deferred** |
@@ -190,6 +193,9 @@ permissions/assign/unassign (6), node create/update/delete/TLS-clear (4).
 
 - This is source inspection plus in-process tests. It is not deployed-console,
   live Docker, external identity-provider or multi-node evidence.
+- Rejected mutations do not write audit rows. `DeleteUser` and `DeleteInvite`
+  return not-found for a missing id instead of recording a misleading deleted
+  row; tests cover those no-op deletes and the other representative refusals.
 - No new event was invented for the deferred classes. Backup, task, module,
   proxy, config, content-catalog and world-lifecycle rows need a property
   schema reviewed for secrets (for example provider URLs, repository
