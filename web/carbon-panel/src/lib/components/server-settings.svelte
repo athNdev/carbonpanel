@@ -54,6 +54,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { getUniqueDockerImages } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
+	import { snapshotServerForm } from '$lib/components/server-settings-snapshot';
 
 	interface Props {
 		server: Server;
@@ -114,20 +115,9 @@ one at https://mozilla.org/MPL/2.0/.
 	 */
 	let baseline = $state<UpdateServerRequest>(serverFormValues(server));
 
-	/**
-	 * Deep plain snapshot of the form state. `$typeName` is dropped so that
-	 * rebuilding a message from a snapshot always compiles a fresh, independent
-	 * form object instead of aliasing the snapshot it came from.
-	 */
+	/** Capture an independent plain snapshot of the reactive form state. */
 	function snapshotForm(source: UpdateServerRequest): UpdateServerRequest {
-		return create(
-			UpdateServerRequestSchema,
-			JSON.parse(
-				JSON.stringify($state.snapshot(source), (key, value) =>
-					key === '$typeName' ? undefined : value
-				)
-			)
-		);
+		return snapshotServerForm($state.snapshot(source));
 	}
 
 	/** Field-by-field comparison of the form against its captured baseline. */
