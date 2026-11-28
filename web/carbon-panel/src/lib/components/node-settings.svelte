@@ -58,6 +58,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let showDetectedDialog = $state(false);
 	let detectedDaemons = $state<DetectedDaemon[]>([]);
 	let addingDaemonHost = $state<string | null>(null);
+	// The Auto-detect trigger disables itself while scanning, which moves focus to
+	// the document body before the dialog opens. Keep the clicked control so the
+	// dialog can return focus to it on close.
+	let detectedDialogTrigger = $state<HTMLElement | null>(null);
 
 	// Dialog state
 	let showAddDialog = $state(false);
@@ -153,7 +157,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return host.trim().toLowerCase().replace(/\/+$/, '');
 	}
 
-	async function handleAutoDetect() {
+	async function handleAutoDetect(event?: MouseEvent) {
+		if (event?.currentTarget instanceof HTMLElement) {
+			detectedDialogTrigger = event.currentTarget;
+		}
 		scanning = true;
 		try {
 			const data = await rpcClient.node.scanNodes({}, silentCallOptions);
@@ -886,6 +893,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	description="Auto-detect found reachable Docker daemons on this host's network. Register the ones you want the placement engine to use — you can adjust names, IPs, and limits later."
 	size="xl"
 	hasFooter={false}
+	restoreFocusTo={detectedDialogTrigger}
 >
 	<div class="max-h-[50vh] space-y-3 overflow-y-auto">
 		{#each detectedDaemons as d (d.host)}
