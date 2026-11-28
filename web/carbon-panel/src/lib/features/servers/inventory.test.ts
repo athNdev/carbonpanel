@@ -83,6 +83,17 @@ test('late lists cannot resurrect deletion or replace a newer detail observation
 	assert.equal(inventory.get('deleted'), undefined);
 });
 
+test('invalidation and a newer rename fence an older list snapshot', async () => {
+	const { inventory, lists } = fixture();
+	inventory.upsert(server('a', 'before'));
+	const old = inventory.refresh();
+	inventory.invalidate('a');
+	inventory.upsert(server('a', 'after'));
+	lists[0].resolve([server('a', 'before')]);
+	await old;
+	assert.equal(inventory.get('a')?.name, 'after');
+});
+
 test('a newer complete list may clear stale playable fields and zero metrics', async () => {
 	const { inventory, lists } = fixture();
 	inventory.upsert(
