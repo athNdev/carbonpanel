@@ -185,6 +185,29 @@ test('every gh-calling publication step carries its own GH_TOKEN', () => {
   assert.deepEqual(offenders, [], `gh-calling steps without GH_TOKEN: ${offenders.join(', ')}`);
 });
 
+test('node VM arm64 acceptance runs at exact same-repo PR heads without secrets', () => {
+  const source = read('node-vm-arm64-acceptance.yml');
+  assert.match(source, /on:\n  workflow_dispatch:/);
+  assert.match(source, /\n  pull_request:\n    paths:\n/);
+  assert.doesNotMatch(source, /pull_request_target/);
+  assert.match(source, /github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(source, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /EVENT_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /persist-credentials: false/);
+  assert.match(source, /permissions:\n  contents: read/);
+  assert.match(source, /disk_size:\n/);
+  assert.match(source, /--disk-size "\$DISK_SIZE"/);
+  assert.match(
+    readFileSync(join(root, 'scripts', 'node_vm_arm64_acceptance.py'), 'utf8'),
+    /--restrict-user-network/
+  );
+  assert.match(
+    readFileSync(join(root, 'scripts', 'node_vm_arm64_acceptance.py'), 'utf8'),
+    /--disk-size/
+  );
+  assert.equal((source.match(/secrets\./g) ?? []).length, 0);
+});
+
 test('verify-publication-ref gate sets GH_TOKEN in its own step env', () => {
   const step = parseSteps(read('release.yml')).find(
     (candidate) => candidate.name === 'Verify trusted ref and exact main CI for an explicit publication'

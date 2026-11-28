@@ -4,7 +4,7 @@ title: Node VM artifact
 description: Reproducible, secret-free QCOW2/cloud-init node VM builds with pinned provenance, scoped first-boot enrollment and staged rollback; fixture-only, not published.
 status: draft
 owners: [oss-runtime]
-code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
+code_refs: [packaging/node-vm, scripts/node_vm_build.py, scripts/node_vm_integrity.py, scripts/node_vm_upgrade.py, scripts/node_vm_verify_image.py, scripts/node_vm_boot_qual.py, scripts/test_node_vm_build.py, scripts/test_node_vm_integrity.py, scripts/test_node_vm_upgrade.py, scripts/test_node_vm_enroll.py, scripts/test_node_vm_verify_image.py, scripts/test_node_vm_boot_qual.py, internal/rpc/oss377_managed_fixture_test.go, packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md]
 sources:
   - title: ADR 0035 node VM artifact
     resource: ../../docs/adr/0035-node-vm-artifact.md

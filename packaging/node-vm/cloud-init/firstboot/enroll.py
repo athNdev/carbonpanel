@@ -27,11 +27,13 @@ second encoder.
 """
 import argparse
 import base64
+import binascii
 import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -67,6 +69,38 @@ FORBIDDEN_BUNDLE_FIELDS = frozenset({
     "password", "passphrase", "secret_s", "s",
 })
 
+# Fields written by safe_bundle(); every saved identity must carry all of them.
+BUNDLE_FIELDS = frozenset({
+    "node_label", "enrollment_salt", "enrollment_secret_digest", "csr_pre",
+    "csr_pre_signature", "approved_public_key_spki", "approved_key_fingerprint",
+    "node_id", "bootstrap_scopes", "object_id_binding", "contract_ref",
+    "contract_is_shared", "fork_allowed",
+})
+REQUIRED_BUNDLE_FIELDS = BUNDLE_FIELDS
+BOOTSTRAP_SCOPES = ("BeginEnrollmentChallenge", "ClaimEnrollment")
+
+# Bounds reject malformed or oversized records before any crypto work. The salt
+# and secret bounds are overridden by the checked-in policy when it is loaded.
+MAX_SECRET_BYTES = 64
+MAX_SALT_BYTES = 64
+MAX_SPKI_BYTES = 4096
+MAX_CSR_PRE_BYTES = 16384
+MAX_CSR_PRE_SIGNATURE_BYTES = 64
+MAX_BUNDLE_BYTES = 64 * 1024
+MAX_KEY_BYTES = 64 * 1024
+MAX_TEXT_BYTES = 1024
+MAX_NODE_LABEL_BYTES = 256
+MAX_BOOTSTRAP_SCOPES = 8
+
+# RFC 8410 fixes the DER SubjectPublicKeyInfo prefix and algorithm OID for
+# Ed25519. A stored key or CSR with any other algorithm is refused before it is
+# asked to verify anything.
+ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+ED25519_SPKI_BYTES = len(ED25519_SPKI_PREFIX) + 32
+ED25519_OID = bytes.fromhex("2b6570")
+ED25519_SIGNATURE_BYTES = 64
+IDENTITY_FILES = ("node.key", "enrollment-bundle.json", "enrollment-secret.bin")
+
 
 class KeyPair:
     """Minimal interface: Ed25519 SPKI, SHA-256 fingerprint, sign()/verify()."""
@@ -78,6 +112,13 @@ class KeyPair:
 
     def fingerprint(self):
         return hashlib.sha256(self.spki_der()).hexdigest()
+
+    def csr_pre(self, node_id):
+        raise NotImplementedError
+
+    def verify_csr(self, csr_pre):
+        """Assert CSR_PRE is a self-signed request for this key's public key."""
+        raise NotImplementedError
 
     def sign(self, context):
         raise NotImplementedError
@@ -96,6 +137,15 @@ class FakeKeyPair(KeyPair):
     def spki_der(self):
         return b"SYNTHETIC-SPKI::" + self._label
 
+    def csr_pre(self, node_id):
+        return b"SYNTHETIC-CSR::" + node_id.encode("ascii")
+
+    def verify_csr(self, csr_pre):
+        # Offline fixtures do not carry DER; OpenSSLKeyPair owns the real parse,
+        # self-signature and approved-key assertions.
+        if not isinstance(csr_pre, bytes) or not csr_pre:
+            raise ValueError("enrollment CSR_PRE is missing")
+
     def sign(self, context):
         return hashlib.sha256(b"SYNTHETIC-SIG::" + self._label + b"::" + context).digest()
 
@@ -103,57 +153,158 @@ class FakeKeyPair(KeyPair):
         return self.sign(context) == signature
 
 
+def _der_tlv(data, offset, limit):
+    """Read one canonical DER tag/length/value header inside data[:limit]."""
+    if offset < 0 or offset + 2 > limit:
+        raise ValueError("truncated DER header")
+    tag = data[offset]
+    first = data[offset + 1]
+    pos = offset + 2
+    if first & 0x80:
+        count = first & 0x7f
+        if count == 0 or count > 4 or pos + count > limit:
+            raise ValueError("invalid DER length")
+        length = int.from_bytes(data[pos:pos + count], "big")
+        if length < 0x80 or data[pos] == 0:
+            # DER requires the shortest long-form length: no redundant leading
+            # zero and never a long form for a value below 0x80.
+            raise ValueError("non-minimal DER length")
+        pos += count
+    else:
+        length = first
+    end = pos + length
+    if end > limit:
+        raise ValueError("truncated DER value")
+    return tag, pos, length, end
+
+
+def _parse_csr_pre(csr_pre):
+    """Return the signed TBS bytes, signature OID and signature of a PKCS#10 DER."""
+    if not isinstance(csr_pre, bytes) or not csr_pre:
+        raise ValueError("enrollment CSR_PRE is missing")
+    tag, content, _, end = _der_tlv(csr_pre, 0, len(csr_pre))
+    if tag != 0x30:
+        raise ValueError("enrollment CSR_PRE is not a PKCS#10 SEQUENCE")
+    if end != len(csr_pre):
+        raise ValueError("enrollment CSR_PRE is not a single valid DER PKCS#10 request")
+    info_tag, _, _, info_end = _der_tlv(csr_pre, content, end)
+    if info_tag != 0x30:
+        raise ValueError("enrollment CSR_PRE certification request info is malformed")
+    tbs = csr_pre[content:info_end]
+    alg_tag, alg_content, _, alg_end = _der_tlv(csr_pre, info_end, end)
+    if alg_tag != 0x30:
+        raise ValueError("enrollment CSR_PRE signature algorithm is malformed")
+    oid_tag, oid_content, _, oid_end = _der_tlv(csr_pre, alg_content, alg_end)
+    if oid_tag != 0x06:
+        raise ValueError("enrollment CSR_PRE signature algorithm is malformed")
+    if oid_end != alg_end:
+        # RFC 8410 requires absent AlgorithmIdentifier parameters for Ed25519;
+        # the shared Go authority rejects a non-empty parameters field.
+        raise ValueError(
+            "enrollment CSR_PRE signature algorithm parameters are not permitted",
+        )
+    signature_algorithm = csr_pre[oid_content:oid_end]
+    sig_tag, sig_content, sig_length, sig_end = _der_tlv(csr_pre, alg_end, end)
+    if sig_tag != 0x03 or sig_end != end or sig_length < 2 or csr_pre[sig_content] != 0:
+        raise ValueError("enrollment CSR_PRE signature is malformed")
+    return tbs, signature_algorithm, csr_pre[sig_content + 1:sig_end]
+
+
 class OpenSSLKeyPair(KeyPair):
-    """Ed25519 key generated with the openssl CLI available in cloud images.
+    """An Ed25519 key stored in the root-only guest identity directory."""
 
-    Only constructed by main() on a real VM; offline fixtures never invoke it.
-    """
+    def __init__(self, private_key_path):
+        self._priv = Path(private_key_path)
+        done = subprocess.run(
+            ["openssl", "pkey", "-in", str(self._priv), "-pubout", "-outform", "DER"],
+            capture_output=True,
+        )
+        if done.returncode != 0:
+            raise ValueError("stored node key is not a readable private key")
+        if (len(done.stdout) != ED25519_SPKI_BYTES
+                or not done.stdout.startswith(ED25519_SPKI_PREFIX)):
+            raise ValueError("stored node key is not an Ed25519 key")
+        self._pub_der = done.stdout
 
-    def __init__(self):
-        self._dir = tempfile.mkdtemp(prefix="carbon-enroll-key-")
-        os.chmod(self._dir, 0o700)
-        self._priv = Path(self._dir) / "node.key"
-        self._pub_der = Path(self._dir) / "node.spki.der"
+    @classmethod
+    def generate(cls, private_key_path):
         subprocess.run(
-            ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(self._priv)],
+            ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(private_key_path)],
             check=True, capture_output=True,
         )
-        os.chmod(self._priv, 0o600)
-        subprocess.run(
-            ["openssl", "pkey", "-in", str(self._priv), "-pubout", "-outform", "DER",
-             "-out", str(self._pub_der)],
-            check=True, capture_output=True,
-        )
+        os.chmod(private_key_path, 0o600)
+        return cls(private_key_path)
 
     def spki_der(self):
-        return self._pub_der.read_bytes()
+        return self._pub_der
+
+    def csr_pre(self, node_id):
+        return subprocess.run(
+            ["openssl", "req", "-new", "-key", str(self._priv), "-subj", "/CN=" + node_id,
+             "-outform", "DER"],
+            check=True, capture_output=True,
+        ).stdout
+
+    def verify_csr(self, csr_pre):
+        """Parse PKCS#10, verify its self-signature and bind the approved key.
+
+        This mirrors the shared authority: x509.ParseCertificateRequest,
+        CheckSignature, Ed25519-only public key and MarshalPKIXPublicKey equal
+        to the approved SPKI. No reserialized CSR bytes are compared.
+        """
+        tbs, signature_algorithm, signature = _parse_csr_pre(csr_pre)
+        if signature_algorithm != ED25519_OID:
+            raise ValueError("enrollment CSR_PRE signature algorithm is not Ed25519")
+        if len(signature) != ED25519_SIGNATURE_BYTES:
+            raise ValueError("enrollment CSR_PRE signature is not Ed25519-sized")
+        with tempfile.TemporaryDirectory() as tmp:
+            csr = Path(tmp) / "csr.der"
+            csr.write_bytes(csr_pre)
+            pub = subprocess.run(
+                ["openssl", "req", "-inform", "DER", "-in", str(csr), "-noout", "-pubkey"],
+                capture_output=True,
+            )
+        if pub.returncode != 0:
+            raise ValueError("enrollment CSR_PRE public key cannot be read")
+        spki = subprocess.run(
+            ["openssl", "pkey", "-pubin", "-outform", "DER"],
+            input=pub.stdout, capture_output=True,
+        )
+        if spki.returncode != 0:
+            raise ValueError("enrollment CSR_PRE public key algorithm is not recognized")
+        if spki.stdout != self._pub_der:
+            raise ValueError("enrollment CSR_PRE public key does not match the approved key")
+        # The CSR key is the approved key, so this also proves the approved key
+        # signed the request. OpenSSL 3.0's `req -verify` exit status is not
+        # reliable, so verify the extracted TBS bytes directly instead.
+        if not self.verify(tbs, signature):
+            raise ValueError(
+                "enrollment CSR_PRE self-signature does not verify with the approved key",
+            )
 
     def sign(self, context):
-        with tempfile.NamedTemporaryFile() as ctx, tempfile.NamedTemporaryFile() as sig:
-            ctx.write(context)
-            ctx.flush()
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp) / "context"
+            sig = Path(tmp) / "signature"
+            ctx.write_bytes(context)
             subprocess.run(
                 ["openssl", "pkeyutl", "-sign", "-inkey", str(self._priv),
-                 "-rawin", "-in", ctx.name, "-out", sig.name],
+                 "-rawin", "-in", str(ctx), "-out", str(sig)],
                 check=True, capture_output=True,
             )
-            return sig.read()
+            return sig.read_bytes()
 
     def verify(self, context, signature):
-        with tempfile.NamedTemporaryFile() as pub, tempfile.NamedTemporaryFile() as ctx, \
-                tempfile.NamedTemporaryFile() as sig:
-            subprocess.run(
-                ["openssl", "pkey", "-pubin", "-inform", "DER", "-in",
-                 str(self._pub_der), "-out", pub.name],
-                check=True, capture_output=True,
-            )
-            ctx.write(context)
-            ctx.flush()
-            sig.write(signature)
-            sig.flush()
+        with tempfile.TemporaryDirectory() as tmp:
+            pub = Path(tmp) / "public.der"
+            ctx = Path(tmp) / "context"
+            sig = Path(tmp) / "signature"
+            pub.write_bytes(self._pub_der)
+            ctx.write_bytes(context)
+            sig.write_bytes(signature)
             done = subprocess.run(
-                ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", pub.name,
-                 "-rawin", "-in", ctx.name, "-sigfile", sig.name],
+                ["openssl", "pkeyutl", "-verify", "-pubin", "-keyform", "DER",
+                 "-inkey", str(pub), "-rawin", "-in", str(ctx), "-sigfile", str(sig)],
                 capture_output=True,
             )
             return done.returncode == 0
@@ -256,8 +407,8 @@ def canonical_context(node_id, enrollment_id, challenge_id, server_nonce,
         ",".join(canonical_capability_names(capabilities)).encode("ascii"),
         _as_bytes(channel_context, "channel_context"),
     ]
-    if any(b"\x00" in part for part in parts[1:7]):
-        raise ValueError("NUL byte in a delimited claim context field")
+    if any(b"\x00" in parts[i] for i in (1, 2, 3, 5, 6)):
+        raise ValueError("NUL byte in a text claim context field")
     return b"\x00".join(parts)
 
 
@@ -290,15 +441,7 @@ def sign_claim(keypair, context):
     """Fresh post-challenge signature by the operator-approved Ed25519 key only."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment signing is Ed25519-only")
-    if not isinstance(context, bytes):
-        raise ValueError("claim context must be raw bytes")
-    if not context.startswith(SIGNING_DOMAIN + b"\x00"):
-        raise ValueError("claim context is not a carbon-panel-enroll-v1 context")
-    # The old canonical-JSON encoding is explicitly refused; its bytes cannot
-    # verify against the shared ClaimContextRaw encoder.
-    remainder = context[len(SIGNING_DOMAIN) + 1:]
-    if remainder.startswith(b"{") or b'\x00{"' in context or b'"node_id"' in context:
-        raise ValueError("canonical-JSON claim context refused; use shared NUL encoding")
+    _check_claim_context(context)
     return keypair.sign(context)
 
 
@@ -306,46 +449,61 @@ def verify_claim(keypair, context, signature):
     """Verify a fresh SIG_CLAIM over the exact shared context (Ed25519 only)."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment verification is Ed25519-only")
-    expected = canonical_context(*_claim_fields(context))
-    if context != expected:
-        raise ValueError("claim context does not match shared ClaimContextRaw encoding")
+    _check_claim_context(context)
     return bool(keypair.verify(context, signature))
 
 
-def _claim_fields(context):
-    """Parse a NUL-delimited context into canonical_context() arguments."""
-    fields = context.split(b"\x00")
-    if len(fields) != 8 or fields[0] != SIGNING_DOMAIN:
+def verify_csr_pre(keypair, csr_pre, signature):
+    """Verify the saved CSR_PRE and its detached proof with the stored key."""
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment verification is Ed25519-only")
+    if not isinstance(csr_pre, bytes) or not csr_pre:
+        raise ValueError("enrollment CSR_PRE is missing")
+    if csr_pre.lstrip().startswith(b"{"):
+        raise ValueError(
+            "enrollment CSR_PRE is legacy signed JSON, not PKCS#10 DER; "
+            "operator re-provisioning is required with no automatic migration",
+        )
+    keypair.verify_csr(csr_pre)
+    return bool(keypair.verify(csr_pre, signature))
+
+
+def _check_claim_context(context):
+    # The server verifies the exact context constructed from its stored fields.
+    # The opaque nonce and channel bytes may contain NUL and are not parsed here.
+    prefix = SIGNING_DOMAIN + b"\x00"
+    if not isinstance(context, bytes) or not context.startswith(prefix):
         raise ValueError("malformed NUL-delimited claim context")
-    return (fields[1], fields[2], fields[3], fields[4], fields[5],
-            fields[6].decode("ascii").split(",") if fields[6] else [], fields[7])
+    if context[len(prefix):].startswith(b"{"):
+        raise ValueError("canonical-JSON claim context refused; use shared NUL encoding")
+    if context.count(b"\x00") < 7:
+        raise ValueError("malformed NUL-delimited claim context")
 
 
-def build_preregistration_bundle(node_label, salt, secret, keypair, policy):
+def build_preregistration_bundle(node_id, node_label, salt, secret, keypair, policy):
     """Build the digest-only exportable bundle. S and the private key never enter it."""
     if getattr(keypair, "algorithm", None) != ED25519:
         raise ValueError("enrollment key generation is Ed25519-only")
+    expected = _policy_fields(policy)
     digest = compute_digest(salt, secret)
-    csr_pre = {
+    csr_pre = keypair.csr_pre(node_id)
+    bundle = {
+        "node_id": node_id,
         "node_label": node_label,
         "enrollment_salt": _b64(salt),
         "enrollment_secret_digest": digest,
         "approved_public_key_spki": _b64(keypair.spki_der()),
         "approved_key_fingerprint": keypair.fingerprint(),
+        "csr_pre": _b64(csr_pre),
+        "csr_pre_signature": _b64(keypair.sign(csr_pre)),
     }
-    csr_pre_bytes = json.dumps(csr_pre, sort_keys=True, separators=(",", ":")).encode()
-    bundle = dict(csr_pre)
-    bundle["csr_pre"] = _b64(csr_pre_bytes)
-    bundle["csr_pre_signature"] = _b64(keypair.sign(csr_pre_bytes))
-    # The policy document nests the scoped fields under "policy"; accept either
-    # shape so the same module works with the checked-in file and flat test data.
-    scoped = policy.get("policy", policy)
-    bundle["node_id"] = derive_node_id(node_label + "::" + str(policy.get("artifact_revision", "first-boot")))
-    bundle["bootstrap_scopes"] = list(policy.get("bootstrap_scopes", scoped["bootstrap_scopes"]))
-    bundle["object_id_binding"] = policy.get("object_id_binding", scoped["object_id_binding"])
-    bundle["contract_ref"] = policy["contract_ref"]
-    bundle["contract_is_shared"] = bool(policy["contract_is_shared"])
-    bundle["fork_allowed"] = bool(policy["fork_allowed"])
+    bundle["bootstrap_scopes"] = list(expected["bootstrap_scopes"])
+    bundle["object_id_binding"] = expected["object_id_binding"]
+    bundle["contract_ref"] = expected["contract_ref"]
+    bundle["contract_is_shared"] = expected["contract_is_shared"]
+    bundle["fork_allowed"] = expected["fork_allowed"]
+    # A newly written record must pass the same policy checks as a reused one.
+    _validate_bundle_schema(bundle, expected)
     return bundle, digest, secret
 
 
@@ -366,13 +524,7 @@ def assert_bundle_has_no_secret(bundle, secret, salt=None):
 
 def safe_bundle(bundle):
     """Return a copy with only allowlisted, non-secret fields."""
-    allowed = {
-        "node_label", "enrollment_salt", "enrollment_secret_digest", "csr_pre",
-        "csr_pre_signature", "approved_public_key_spki", "approved_key_fingerprint",
-        "node_id", "bootstrap_scopes", "object_id_binding", "contract_ref",
-        "contract_is_shared", "fork_allowed",
-    }
-    return {k: v for k, v in bundle.items() if k in allowed}
+    return {k: v for k, v in bundle.items() if k in BUNDLE_FIELDS}
 
 
 def write_identity(bundle, secret, out_dir):
@@ -389,18 +541,21 @@ def write_identity(bundle, secret, out_dir):
     return str(bundle_path), str(secret_path)
 
 
-def first_boot_identity(instance_id, node_label, policy, rng=None, keypair=None,
+def first_boot_identity(instance_id, node_label, policy, keypair, rng=None,
                         rng_salt=None):
     """Pure orchestration of first-boot identity; deterministic when deps injected."""
-    keypair = keypair or OpenSSLKeyPair()
-    scoped = policy.get("policy", policy)
-    secret = generate_secret(scoped["first_boot"]["generate_secret_bits"], rng)
-    salt = generate_salt(scoped["first_boot"]["generate_salt_bytes"], rng_salt or rng)
+    # Validate the same strict secret/salt bounds that saved-identity reuse
+    # enforces BEFORE consuming entropy, so generation can never persist a
+    # record that load_identity() rejects on the next boot.
+    secret_bytes, salt_bytes = _identity_sizes(policy)
+    random_bytes = generate_secret(secret_bytes * 8, rng)
+    # The shared ClaimEnrollmentRequest carries the secret in a protobuf string.
+    secret = base64.urlsafe_b64encode(random_bytes).rstrip(b"=")
+    salt = generate_salt(salt_bytes, rng_salt or rng)
     node_id = derive_node_id(instance_id)
     bundle, digest, secret = build_preregistration_bundle(
-        node_label, salt, secret, keypair, policy,
+        node_id, node_label, salt, secret, keypair, policy,
     )
-    bundle["node_id"] = node_id
     assert_bundle_has_no_secret(bundle, secret, salt)
     return {"node_id": node_id, "secret": secret, "salt": salt,
             "digest": digest, "bundle": safe_bundle(bundle)}
@@ -408,6 +563,248 @@ def first_boot_identity(instance_id, node_label, policy, rng=None, keypair=None,
 
 def _load_policy(path):
     return json.loads(Path(path).read_text())
+
+
+def _bounded_b64(bundle, name, min_bytes, max_bytes):
+    """Decode one canonical, bounded standard-base64 bundle field."""
+    value = bundle.get(name)
+    if not isinstance(value, str) or not value:
+        raise ValueError("enrollment bundle field %s must be a non-empty base64 string" % name)
+    if len(value) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError("enrollment bundle field %s exceeds its %d-byte bound" % (name, max_bytes))
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("enrollment bundle field %s is not valid base64" % name) from None
+    if not min_bytes <= len(raw) <= max_bytes:
+        raise ValueError(
+            "enrollment bundle field %s must decode to %d-%d bytes" % (name, min_bytes, max_bytes),
+        )
+    if _b64(raw) != value:
+        raise ValueError("enrollment bundle field %s is not canonical base64" % name)
+    return raw
+
+
+def _bounded_b64url(secret, min_bytes, max_bytes):
+    """Decode the root-only secret as canonical, bounded unpadded base64url."""
+    if not isinstance(secret, bytes) or not secret:
+        raise ValueError("enrollment secret must be non-empty unpadded base64url")
+    if len(secret) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError("enrollment secret exceeds its %d-byte bound" % max_bytes)
+    padded = secret + b"=" * (-len(secret) % 4)
+    try:
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("enrollment secret is not valid unpadded base64url") from None
+    if not min_bytes <= len(raw) <= max_bytes:
+        raise ValueError("enrollment secret must decode to %d-%d bytes" % (min_bytes, max_bytes))
+    if base64.urlsafe_b64encode(raw).rstrip(b"=") != secret:
+        raise ValueError("enrollment secret is not canonical unpadded base64url")
+    return raw
+
+
+def _bounded_text(value, name, max_bytes, allow_empty=False):
+    """Require a bounded UTF-8 string without NUL bytes."""
+    if not isinstance(value, str) or (not value and not allow_empty):
+        raise ValueError("%s must be a non-empty string" % name)
+    if "\x00" in value:
+        raise ValueError("%s must not contain NUL" % name)
+    try:
+        raw = value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("%s must be UTF-8" % name) from None
+    if len(raw) > max_bytes:
+        raise ValueError("%s exceeds its %d-byte bound" % (name, max_bytes))
+    return value
+
+
+def _read_bounded(path, max_bytes, name):
+    """Read at most max_bytes from a file, refusing an oversized value."""
+    with open(path, "rb") as handle:
+        data = handle.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError("%s exceeds its size bound" % name)
+    return data
+
+
+def _policy_fields(policy):
+    """The contract fields every saved or newly written record must match."""
+    if policy is None:
+        raise ValueError("enrollment policy is required to validate saved identity")
+    if not isinstance(policy, dict):
+        raise ValueError("enrollment policy must be a JSON object")
+    scoped = policy.get("policy", policy)
+    if not isinstance(scoped, dict):
+        raise ValueError("enrollment policy must be a JSON object")
+    contract_ref = _bounded_text(
+        policy.get("contract_ref"), "enrollment policy contract_ref", MAX_TEXT_BYTES,
+    )
+    binding = _bounded_text(
+        policy.get("object_id_binding", scoped.get("object_id_binding")),
+        "enrollment policy object_id_binding", MAX_TEXT_BYTES,
+    )
+    scopes = policy.get("bootstrap_scopes", scoped.get("bootstrap_scopes"))
+    if not isinstance(scopes, list) or not scopes or len(scopes) > MAX_BOOTSTRAP_SCOPES:
+        raise ValueError("enrollment policy bootstrap_scopes must be a bounded non-empty list")
+    for scope in scopes:
+        _bounded_text(scope, "enrollment policy bootstrap scope", MAX_TEXT_BYTES)
+    if list(scopes) != list(BOOTSTRAP_SCOPES):
+        raise ValueError("enrollment policy bootstrap_scopes are not the bounded enrollment scopes")
+    if policy.get("contract_is_shared") is not True:
+        raise ValueError("enrollment policy contract_is_shared must be true")
+    if policy.get("fork_allowed") is not False:
+        raise ValueError("enrollment policy fork_allowed must be false")
+    return {
+        "contract_ref": contract_ref,
+        "object_id_binding": binding,
+        "bootstrap_scopes": list(scopes),
+        "contract_is_shared": True,
+        "fork_allowed": False,
+    }
+
+
+def _identity_sizes(policy):
+    """Expected secret and salt byte counts from the first-boot policy."""
+    scoped = policy.get("policy", policy) if isinstance(policy, dict) else None
+    first_boot = scoped.get("first_boot") if isinstance(scoped, dict) else None
+    if not isinstance(first_boot, dict):
+        raise ValueError("enrollment policy first_boot sizes are missing")
+    try:
+        secret_bits = int(first_boot.get("generate_secret_bits"))
+        salt_bytes = int(first_boot.get("generate_salt_bytes"))
+    except (TypeError, ValueError):
+        raise ValueError("enrollment policy secret/salt size is invalid") from None
+    if secret_bits < 256 or secret_bits > MAX_SECRET_BYTES * 8 or secret_bits % 8:
+        raise ValueError("enrollment policy secret size is invalid")
+    if salt_bytes < 16 or salt_bytes > MAX_SALT_BYTES:
+        raise ValueError("enrollment policy salt size is invalid")
+    return secret_bits // 8, salt_bytes
+
+
+def _require_sha256_hex(bundle, name):
+    value = bundle.get(name)
+    if (not isinstance(value, str) or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)):
+        raise ValueError("enrollment bundle field %s must be a lowercase SHA-256 hex digest" % name)
+    return value
+
+
+def _validate_bundle_schema(bundle, expected):
+    """Require the complete saved preregistration record and policy metadata."""
+    if not isinstance(bundle, dict):
+        raise ValueError("enrollment bundle must be a JSON object")
+    missing = sorted(REQUIRED_BUNDLE_FIELDS - set(bundle))
+    if missing:
+        raise ValueError("enrollment bundle is missing required fields: %s" % ", ".join(missing))
+    _bounded_text(
+        bundle.get("node_id"), "enrollment bundle field node_id", MAX_TEXT_BYTES,
+    )
+    _bounded_text(
+        bundle.get("node_label"), "enrollment bundle field node_label",
+        MAX_NODE_LABEL_BYTES, allow_empty=True,
+    )
+    for name in ("object_id_binding", "contract_ref"):
+        _bounded_text(bundle.get(name), "enrollment bundle field %s" % name, MAX_TEXT_BYTES)
+    scopes = bundle.get("bootstrap_scopes")
+    if not isinstance(scopes, list) or not scopes or len(scopes) > MAX_BOOTSTRAP_SCOPES:
+        raise ValueError("enrollment bundle bootstrap_scopes must be a bounded non-empty list")
+    for scope in scopes:
+        _bounded_text(scope, "enrollment bundle bootstrap scope", MAX_TEXT_BYTES)
+    if scopes != expected["bootstrap_scopes"]:
+        raise ValueError(
+            "enrollment bundle bootstrap_scopes do not match the checked-in policy",
+        )
+    for name in ("contract_ref", "object_id_binding"):
+        if bundle[name] != expected[name]:
+            raise ValueError(
+                "enrollment bundle field %s does not match the checked-in policy" % name,
+            )
+    if bundle.get("contract_is_shared") is not True:
+        raise ValueError("enrollment bundle contract_is_shared must be true")
+    if bundle.get("fork_allowed") is not False:
+        raise ValueError("enrollment bundle fork_allowed must be false")
+    _require_sha256_hex(bundle, "enrollment_secret_digest")
+    _require_sha256_hex(bundle, "approved_key_fingerprint")
+
+
+def load_identity(out, node_id, node_label, policy=None):
+    """Load and validate an already-published identity; never writes or regenerates."""
+    if out.is_symlink() or not stat.S_ISDIR(out.stat().st_mode):
+        raise ValueError("enrollment state must be a local directory")
+    if os.name == "posix" and out.stat().st_mode & 0o077:
+        raise ValueError("enrollment state directory must be private")
+    expected = _policy_fields(policy)
+    secret_bytes, salt_bytes = _identity_sizes(policy)
+    max_sizes = {
+        "node.key": MAX_KEY_BYTES,
+        "enrollment-bundle.json": MAX_BUNDLE_BYTES,
+        "enrollment-secret.bin": 4 * ((secret_bytes + 2) // 3),
+    }
+    for name in IDENTITY_FILES:
+        try:
+            info = (out / name).lstat()
+        except FileNotFoundError:
+            raise ValueError(
+                "incomplete saved enrollment identity (missing %s); operator review or "
+                "re-provisioning is required and no automatic migration is performed" % name,
+            ) from None
+        if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and info.st_mode & 0o077):
+            raise ValueError("enrollment identity files must be private regular files")
+        if info.st_size > max_sizes[name]:
+            raise ValueError("enrollment identity file %s exceeds its size bound" % name)
+    data = _read_bounded(out / "enrollment-bundle.json", MAX_BUNDLE_BYTES, "enrollment bundle")
+    try:
+        bundle = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("enrollment bundle is not valid JSON") from None
+    _validate_bundle_schema(bundle, expected)
+    secret = _read_bounded(
+        out / "enrollment-secret.bin", max_sizes["enrollment-secret.bin"],
+        "enrollment secret",
+    )
+    _bounded_b64url(secret, secret_bytes, secret_bytes)
+    salt = _bounded_b64(bundle, "enrollment_salt", salt_bytes, salt_bytes)
+    spki = _bounded_b64(bundle, "approved_public_key_spki", 1, MAX_SPKI_BYTES)
+    csr_pre = _bounded_b64(bundle, "csr_pre", 1, MAX_CSR_PRE_BYTES)
+    csr_pre_signature = _bounded_b64(
+        bundle, "csr_pre_signature", 1, MAX_CSR_PRE_SIGNATURE_BYTES,
+    )
+    assert_bundle_has_no_secret(bundle, secret, salt)
+    if bundle["node_id"] != node_id or bundle["node_label"] != node_label:
+        raise ValueError("enrollment identity does not match guest state")
+    keypair = OpenSSLKeyPair(out / "node.key")
+    if (bundle["approved_key_fingerprint"] != keypair.fingerprint()
+            or spki != keypair.spki_der()
+            or bundle["enrollment_secret_digest"] != compute_digest(salt, secret)):
+        raise ValueError("enrollment identity does not match guest state")
+    if not verify_csr_pre(keypair, csr_pre, csr_pre_signature):
+        raise ValueError("enrollment CSR_PRE proof does not verify with the stored key")
+    return bundle
+
+
+def ensure_identity(out, instance_id, node_label, policy):
+    node_id = derive_node_id(instance_id)
+    if out.exists() or out.is_symlink():
+        return load_identity(out, node_id, node_label, policy)
+    # Fail before key generation or any staged write when the policy sizes are
+    # unusable; first_boot_identity repeats this check for direct callers.
+    _identity_sizes(policy)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".enrollment-", dir=out.parent) as tmp:
+        # Publish the key, secret, and bundle together. A failed first boot can
+        # retry without replacing any already-published identity.
+        staged = Path(tmp) / "identity"
+        staged.mkdir(mode=0o700)
+        keypair = OpenSSLKeyPair.generate(staged / "node.key")
+        identity = first_boot_identity(instance_id, node_label, policy, keypair)
+        write_identity(identity["bundle"], identity["secret"], staged)
+        try:
+            staged.rename(out)
+        except OSError:
+            if not out.exists():
+                raise
+            return load_identity(out, node_id, node_label, policy)
+        return identity["bundle"]
 
 
 def main(argv=None):
@@ -421,15 +818,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     policy = _load_policy(args.policy)
-    identity = first_boot_identity(args.instance_id, args.node_label, policy)
-    bundle_path, _ = write_identity(identity["bundle"], identity["secret"], args.out_dir)
+    out = Path(args.out_dir)
+    bundle = ensure_identity(out, args.instance_id, args.node_label, policy)
     # stdout carries only public metadata; never the secret, key or digest-only
     # bundle contents (the operator reads the local 0600 file out of band).
     print(json.dumps({
-        "node_id": identity["node_id"],
-        "approved_key_fingerprint": identity["bundle"]["approved_key_fingerprint"],
-        "bundle_path": bundle_path,
-        "contract_ref": identity["bundle"]["contract_ref"],
+        "node_id": bundle["node_id"],
+        "approved_key_fingerprint": bundle["approved_key_fingerprint"],
+        "bundle_path": str(out / "enrollment-bundle.json"),
+        "contract_ref": bundle["contract_ref"],
     }, sort_keys=True))
     return 0
 

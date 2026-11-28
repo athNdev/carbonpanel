@@ -4,6 +4,8 @@
 # of the shared image or its seed.
 version: 2
 ethernets:
-  ens160:
+  uplinks:
+    match:
+      name: "en*"
     dhcp4: true
     dhcp6: false

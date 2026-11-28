@@ -4,7 +4,7 @@ title: Shared enrollment boundary
 description: One mode-agnostic production package owns managed-node enrollment, canonical claim signing, issuance and the three authorization domains.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/noderuntime/enroll, internal/noderuntime/native/agent.go, internal/nodeinstall, internal/rpc/node_control_enrollment_fixture_test.go, internal/rpc/enrollment_integration_test.go]
+code_refs: [internal/noderuntime/enroll, internal/noderuntime/native/agent.go, internal/nodeinstall, internal/rpc/node_control_enrollment_fixture_test.go, internal/rpc/enrollment_integration_test.go, internal/rpc/oss377_managed_fixture_test.go]
 sources:
   - title: ADR 0019 node control contract
     resource: ../../docs/adr/0019-node-control-contract.md
