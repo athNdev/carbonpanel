@@ -264,6 +264,46 @@ test('dockerOverridesFingerprint treats missing overrides as absent', () => {
 	assert.equal(dockerOverridesFingerprint(null), undefined);
 });
 
+test('a snapshot failure cannot wedge Save because saving is cleared in finally', () => {
+	const component = readFileSync(new URL('./server-settings.svelte', import.meta.url), 'utf8');
+	const start = component.indexOf('async function saveSettings');
+	const end = component.indexOf('async function handleSave', start);
+	assert.ok(start > -1 && end > start, 'saveSettings must be present');
+
+	const body = component.slice(start, end);
+	const tryAt = body.indexOf('try {');
+	const snapshotAt = body.indexOf('snapshotForm(formData)');
+	const rpcAt = body.indexOf('await rpcClient.server.updateServer');
+	const finallyAt = body.indexOf('} finally {');
+
+	// Structural check rather than a whole-file string: the capture must sit
+	// between the try opening and the RPC await, so its failure reaches the
+	// catch/finally path and cannot leave `saving` stuck at true.
+	assert.ok(tryAt > -1, 'saveSettings must guard the request with try');
+	assert.ok(snapshotAt > tryAt, 'the form snapshot must be captured inside the try');
+	assert.ok(rpcAt > snapshotAt, 'the snapshot must still be captured before the RPC await');
+	assert.ok(finallyAt > rpcAt, 'the finally block must follow the RPC');
+
+	const open = body.indexOf('{', finallyAt);
+	let depth = 0;
+	let close = -1;
+	for (let i = open; i < body.length; i += 1) {
+		if (body[i] === '{') depth += 1;
+		else if (body[i] === '}') {
+			depth -= 1;
+			if (depth === 0) {
+				close = i;
+				break;
+			}
+		}
+	}
+	assert.ok(close > open, 'the finally block must be balanced');
+	assert.match(body.slice(open + 1, close), /saving = false/);
+
+	// The successful save still moves the baseline to the sent snapshot.
+	assert.match(body, /await rpcClient\.server\.updateServer\(request\);[\s\S]*baseline = sent;/);
+});
+
 test('the settings form hands the reactive source straight to the snapshot helpers', () => {
 	const component = readFileSync(new URL('./server-settings.svelte', import.meta.url), 'utf8');
 

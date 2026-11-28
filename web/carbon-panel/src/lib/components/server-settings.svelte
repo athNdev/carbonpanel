@@ -399,10 +399,13 @@ one at https://mozilla.org/MPL/2.0/.
 	async function saveSettings(rethrow: boolean): Promise<void> {
 		if (!isDirty) return;
 		saving = true;
-		// Capture what this request sends before awaiting it: edits typed while
-		// the request is in flight stay dirty against the sent baseline.
-		const sent = snapshotForm(formData);
 		try {
+			// Capture what this request sends before awaiting it: edits typed while
+			// the request is in flight stay dirty against the sent baseline. Keeping
+			// the capture inside `try` means a snapshot failure still clears
+			// `saving` in `finally` and shows the failure toast instead of wedging
+			// the Save button and the editor.
+			const sent = snapshotForm(formData);
 			const request = create(UpdateServerRequestSchema, formData);
 			await rpcClient.server.updateServer(request);
 			baseline = sent;
