@@ -2,11 +2,10 @@
 // Real-DOM coverage for the auth settings session-timeout field: clearing the
 // field must surface the existing validation state, not throw a page error.
 
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-expect-error -- Bun supplies this test-only module; the app tsconfig omits Bun types.
 import { mock } from 'bun:test';
-import { readable } from 'svelte/store';
 import '../../../test/dom-setup.mjs';
 
 mock.module('$app/navigation', () => ({
@@ -46,26 +45,65 @@ const authConfig = {
 };
 
 const updateRequests: Array<{ sessionTimeout?: number }> = [];
-mock.module('$lib/api/rpc-client', () => ({
-	rpcClient: {
-		auth: {
-			getAuthConfig: async () => authConfig,
-			updateAuthSettings: async (req: { sessionTimeout?: number }) => {
-				updateRequests.push(req);
-				return { config: authConfig };
-			}
-		}
-	},
-	silentCallOptions: {}
-}));
 
-const authStoreValue = { canLinkOidc: false, user: null, permissions: [] };
-mock.module('$lib/stores/auth', () => ({
-	authStore: Object.assign(readable(authStoreValue), { getSessionRevision: () => 0 }),
-	currentUser: readable(null),
-	canAccessSettings: readable(true),
-	canUpdateSettings: readable(true)
-}));
+// Keep the real RPC singleton and auth store, replacing only the methods and
+// state this test drives. Module-level mocks are process-global in Bun and
+// would otherwise leak into later test files.
+const { rpcClient } = await import('$lib/api/rpc-client');
+const { authStore } = await import('$lib/stores/auth');
+const authClient = rpcClient.auth as unknown as {
+	getAuthConfig: () => Promise<typeof authConfig>;
+	updateAuthSettings: (req: { sessionTimeout?: number }) => Promise<{ config: typeof authConfig }>;
+	getAuthStatus: () => Promise<{
+		localAuthEnabled: boolean;
+		oidcEnabled: boolean;
+		firstUserSetup: boolean;
+		allowRegistration: boolean;
+		anonymousAccessEnabled: boolean;
+	}>;
+	getCurrentUser: () => Promise<{
+		user: null;
+		permissions: Array<{ resource: string; action: string }>;
+		canLinkOidc: boolean;
+	}>;
+};
+const realAuthMethods = {
+	getAuthConfig: authClient.getAuthConfig.bind(authClient),
+	updateAuthSettings: authClient.updateAuthSettings.bind(authClient),
+	getAuthStatus: authClient.getAuthStatus.bind(authClient),
+	getCurrentUser: authClient.getCurrentUser.bind(authClient)
+};
+Object.assign(authClient, {
+	getAuthConfig: async () => authConfig,
+	updateAuthSettings: async (req: { sessionTimeout?: number }) => {
+		updateRequests.push(req);
+		return { config: authConfig };
+	},
+	getAuthStatus: async () => ({
+		localAuthEnabled: false,
+		oidcEnabled: false,
+		firstUserSetup: false,
+		allowRegistration: false,
+		anonymousAccessEnabled: true
+	}),
+	getCurrentUser: async () => ({
+		user: null,
+		permissions: [{ resource: 'settings', action: 'update' }],
+		canLinkOidc: false
+	})
+});
+
+// The component gates its editors on canUpdateSettings; load the real store
+// with the settings-update permission instead of replacing the module.
+await authStore.checkAuthStatus();
+
+after(async () => {
+	try {
+		await authStore.logout();
+	} finally {
+		Object.assign(authClient, realAuthMethods);
+	}
+});
 
 const { mount, unmount } = await import('svelte');
 const { default: AuthSettings } = await import('./auth-settings.svelte');

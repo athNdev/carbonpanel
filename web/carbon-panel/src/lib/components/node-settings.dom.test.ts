@@ -2,11 +2,10 @@
 // Real-DOM coverage for node dialog focus return. Closing a dialog must put
 // keyboard focus back on the control that opened it.
 
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-expect-error -- Bun supplies this test-only module; the app tsconfig omits Bun types.
 import { mock } from 'bun:test';
-import { readable } from 'svelte/store';
 import '../../../test/dom-setup.mjs';
 
 mock.module('$app/navigation', () => ({
@@ -32,14 +31,6 @@ mock.module('svelte-sonner', () => ({
 	toast: { error: () => {}, success: () => {}, info: () => {} }
 }));
 
-const authStoreValue = { canLinkOidc: false, user: null, permissions: [] };
-mock.module('$lib/stores/auth', () => ({
-	authStore: Object.assign(readable(authStoreValue), { getSessionRevision: () => 0 }),
-	currentUser: readable(null),
-	canAccessSettings: readable(true),
-	canUpdateSettings: readable(true)
-}));
-
 const { create } = await import('@bufbuild/protobuf');
 const { NodeSchema, NodeStatus } = await import('$lib/proto/carbonpanel/v1/node_pb');
 const node = create(NodeSchema, {
@@ -58,17 +49,27 @@ const scanCandidates = [
 	{ host: 'tcp://10.0.0.5:2376', port: 2376, reachable: true, latencyMs: 5n, source: 'scan' }
 ];
 
-const nodeClient = {
+// Keep the real RPC singleton and replace only the methods this test drives,
+// so no process-global module mock leaks into later test files.
+const { rpcClient } = await import('$lib/api/rpc-client');
+const nodeClient = rpcClient.node as unknown as Record<string, unknown>;
+const realNodeMethods = {
+	listNodes: rpcClient.node.listNodes.bind(rpcClient.node),
+	scanNodes: rpcClient.node.scanNodes.bind(rpcClient.node),
+	pingNode: rpcClient.node.pingNode.bind(rpcClient.node),
+	createNode: rpcClient.node.createNode.bind(rpcClient.node),
+	updateNode: rpcClient.node.updateNode.bind(rpcClient.node)
+};
+Object.assign(nodeClient, {
 	listNodes: async () => ({ nodes: [node] }),
 	scanNodes: () => scanResult,
 	pingNode: async () => ({}),
 	createNode: async () => ({}),
 	updateNode: async () => ({})
-};
-mock.module('$lib/api/rpc-client', () => ({
-	rpcClient: { node: nodeClient },
-	silentCallOptions: {}
-}));
+});
+after(() => {
+	Object.assign(nodeClient, realNodeMethods);
+});
 
 const { mount, unmount } = await import('svelte');
 const { default: NodeSettings } = await import('./node-settings.svelte');
