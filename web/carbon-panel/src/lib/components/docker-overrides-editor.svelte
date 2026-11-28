@@ -19,6 +19,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { DockerOverrides, VolumeMount } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { create } from '@bufbuild/protobuf';
+	import {
+		normalizeDockerOverrides,
+		formatDockerOverrides
+	} from '$lib/components/docker-overrides';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 
@@ -67,7 +71,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			jsonText = JSON.stringify(overrides || {}, null, 2);
+			jsonText = formatDockerOverrides(overrides);
 		}
 	});
 
@@ -76,7 +80,9 @@ one at https://mozilla.org/MPL/2.0/.
 			// Parse JSON and update overrides
 			try {
 				const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-				overrides = Object.keys(parsed).length > 0 ? parsed : undefined;
+				// The editor owns the plain-object boundary: the form must hold
+				// a real message so save/clone and the dirty fingerprint agree.
+				overrides = normalizeDockerOverrides(parsed);
 				jsonError = '';
 				jsonMode = false;
 				onchange?.(overrides);
