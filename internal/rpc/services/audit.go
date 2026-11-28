@@ -55,9 +55,9 @@ func (s *ServerService) audit(ctx context.Context, fields auditFields, propertie
 
 // writeAudit is the shared append path for services that do not otherwise own
 // a ServerService. It keeps the same guarantees as ServerService.audit: the
-// actor comes only from the request context, string properties are bounded,
-// and a failed audit is logged but never returned or allowed to change the
-// operation being audited.
+// actor comes only from the request context, string properties and SubjectID
+// are bounded, and a failed audit is logged but never returned or allowed to
+// change the operation being audited.
 func writeAudit(ctx context.Context, store *storage.Store, log *logger.Logger, fields auditFields, properties map[string]any) {
 	if store == nil {
 		return
@@ -95,7 +95,7 @@ func writeAudit(ctx context.Context, store *storage.Store, log *logger.Logger, f
 		IP:         fields.IP,
 		Event:      fields.Event,
 		SubjectTyp: fields.SubjectTyp,
-		SubjectID:  fields.SubjectID,
+		SubjectID:  boundAuditString(fields.SubjectID),
 		ServerID:   fields.ServerID,
 		Properties: props,
 		RequestID:  strings.TrimSpace(fields.RequestID),

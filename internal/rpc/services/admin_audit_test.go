@@ -369,6 +369,144 @@ func TestAuthAdminMutationsWriteAuditRows(t *testing.T) {
 	requireAuditRowForActor(t, store, activity.EventAuthTokenRevoked, "api_token", tokenID, user.ID, user.Username)
 }
 
+func requireNoAuditRows(t *testing.T, store *storage.Store, events ...string) {
+	t.Helper()
+	for _, event := range events {
+		if rows := adminAuditRows(t, store, event); len(rows) != 0 {
+			t.Fatalf("%s audit rows = %d, want none after a refused mutation", event, len(rows))
+		}
+	}
+}
+
+func TestRefusedAdminMutationsWriteNoAuditRow(t *testing.T) {
+	const password = "CorrectHorseBatteryStaple9!"
+
+	t.Run("invalid node host update", func(t *testing.T) {
+		store := setupTestStore(t)
+		t.Cleanup(func() { _ = store.Close() })
+		svc := NewNodeService(store, nil, logger.New())
+		ctx := adminAuditActor()
+		created, err := svc.CreateNode(ctx, connect.NewRequest(&v1.CreateNodeRequest{
+			Name: "refusal-node", Host: "unix:///var/run/docker.sock",
+		}))
+		if err != nil {
+			t.Fatalf("CreateNode: %v", err)
+		}
+		badHost := "ftp://example.invalid:21"
+		if _, err := svc.UpdateNode(ctx, connect.NewRequest(&v1.UpdateNodeRequest{
+			Id: created.Msg.Node.Id, Host: &badHost,
+		})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("invalid host update error = %v, want InvalidArgument", err)
+		}
+		requireNoAuditRows(t, store, activity.EventNodeUpdate)
+	})
+
+	t.Run("system role delete", func(t *testing.T) {
+		svc := setupRoleTestService(t)
+		role := &storage.Role{ID: "role-system-refusal", Name: "system-refusal", IsSystem: true}
+		if err := svc.store.CreateRole(context.Background(), role); err != nil {
+			t.Fatalf("CreateRole fixture: %v", err)
+		}
+		if _, err := svc.DeleteRole(adminAuditActor(), connect.NewRequest(&v1.DeleteRoleRequest{
+			Id: role.ID,
+		})); err == nil || connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Fatalf("system role delete error = %v, want PermissionDenied", err)
+		}
+		requireNoAuditRows(t, svc.store, activity.EventRoleDelete)
+	})
+
+	t.Run("non-owner API token delete", func(t *testing.T) {
+		store, manager := newAuditAuthFixture(t)
+		svc := NewAuthService(store, manager, nil, nil, logger.New())
+		owner, err := manager.CreateLocalUser(context.Background(), "token-owner-refusal", "", password)
+		if err != nil {
+			t.Fatalf("CreateLocalUser owner: %v", err)
+		}
+		other, err := manager.CreateLocalUser(context.Background(), "token-other-refusal", "", password)
+		if err != nil {
+			t.Fatalf("CreateLocalUser other: %v", err)
+		}
+		ownerCtx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: owner.ID, Username: owner.Username})
+		token, err := svc.CreateAPIToken(ownerCtx, connect.NewRequest(&v1.CreateAPITokenRequest{Name: "refusal-token"}))
+		if err != nil {
+			t.Fatalf("CreateAPIToken: %v", err)
+		}
+		otherCtx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: other.ID, Username: other.Username})
+		if _, err := svc.DeleteAPIToken(otherCtx, connect.NewRequest(&v1.DeleteAPITokenRequest{
+			Id: token.Msg.ApiToken.Id,
+		})); err == nil || connect.CodeOf(err) != connect.CodeNotFound {
+			t.Fatalf("non-owner token delete error = %v, want NotFound", err)
+		}
+		requireNoAuditRows(t, store, activity.EventAuthTokenRevoked)
+	})
+
+	t.Run("invalid invite role", func(t *testing.T) {
+		store, manager := newAuditAuthFixture(t)
+		svc := NewAuthService(store, manager, nil, nil, logger.New())
+		if _, err := svc.CreateInvite(adminAuditActor(), connect.NewRequest(&v1.CreateInviteRequest{
+			Description: "bad role", Roles: []string{"role-that-does-not-exist"},
+		})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("invalid invite role error = %v, want InvalidArgument", err)
+		}
+		requireNoAuditRows(t, store, activity.EventInviteCreate)
+	})
+
+	t.Run("weak password user create", func(t *testing.T) {
+		store, manager := newAuditAuthFixture(t)
+		svc := NewUserService(store, manager, logger.New())
+		if _, err := svc.CreateUser(adminAuditActor(), connect.NewRequest(&v1.CreateUserRequest{
+			Username: "weak-user", Password: "short",
+		})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("weak password create error = %v, want InvalidArgument", err)
+		}
+		requireNoAuditRows(t, store, activity.EventUserCreate)
+	})
+}
+
+func TestMissingDeleteTargetsWriteNoAuditRow(t *testing.T) {
+	store, manager := newAuditAuthFixture(t)
+	userSvc := NewUserService(store, manager, logger.New())
+	if _, err := userSvc.DeleteUser(adminAuditActor(), connect.NewRequest(&v1.DeleteUserRequest{
+		Id: "user-that-does-not-exist",
+	})); err == nil || connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("missing user delete error = %v, want NotFound", err)
+	}
+	requireNoAuditRows(t, store, activity.EventUserDelete)
+
+	authSvc := NewAuthService(store, manager, nil, nil, logger.New())
+	if _, err := authSvc.DeleteInvite(adminAuditActor(), connect.NewRequest(&v1.DeleteInviteRequest{
+		Id: "invite-that-does-not-exist",
+	})); err == nil || connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("missing invite delete error = %v, want NotFound", err)
+	}
+	requireNoAuditRows(t, store, activity.EventInviteDelete)
+}
+
+func TestAuditBoundsSubjectID(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	long := strings.Repeat("s", auditPropertyStringMaxBytes+64)
+	writeAudit(adminAuditActor(), store, logger.New(), auditFields{
+		Event:      activity.EventNodeCreate,
+		SubjectTyp: "node",
+		SubjectID:  long,
+	}, nil)
+
+	rows := adminAuditRows(t, store, activity.EventNodeCreate)
+	if len(rows) != 1 {
+		t.Fatalf("node.create audit rows = %d, want one", len(rows))
+	}
+	if len(rows[0].SubjectID) > auditPropertyStringMaxBytes {
+		t.Fatalf("subject id length = %d, want <= %d", len(rows[0].SubjectID), auditPropertyStringMaxBytes)
+	}
+	if rows[0].SubjectID == long {
+		t.Fatal("subject id was not bounded")
+	}
+	if got, want := rows[0].SubjectID, boundAuditString(long); got != want {
+		t.Fatalf("subject id = %q, want bounded value %q", got, want)
+	}
+}
+
 func TestAdminAuditFailureDoesNotBreakMutation(t *testing.T) {
 	store := setupTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })

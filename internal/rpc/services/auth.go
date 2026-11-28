@@ -30,6 +30,7 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 var _ carbonpanelv1connect.AuthServiceHandler = (*AuthService)(nil)
@@ -598,6 +599,9 @@ func (s *AuthService) GetInvite(ctx context.Context, req *connect.Request[v1.Get
 
 func (s *AuthService) DeleteInvite(ctx context.Context, req *connect.Request[v1.DeleteInviteRequest]) (*connect.Response[v1.DeleteInviteResponse], error) {
 	if err := s.store.DeleteRegistrationInvite(ctx, req.Msg.Id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("invite not found"))
+		}
 		s.log.Error("Failed to delete invite: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete invite"))
 	}

@@ -263,6 +263,9 @@ func (s *UserService) DeleteUser(ctx context.Context, req *connect.Request[v1.De
 	}
 
 	if err := s.store.DeleteUser(ctx, msg.Id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
+		}
 		s.log.Error("Failed to delete user: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete user"))
 	}

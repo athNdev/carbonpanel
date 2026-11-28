@@ -1078,7 +1078,14 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 		if err := tx.Where("user_id = ?", id).Delete(&UserRole{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&User{}, "id = ?", id).Error
+		result := tx.Delete(&User{}, "id = ?", id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 }
 
@@ -1504,7 +1511,14 @@ func (s *Store) IncrementInviteUseCount(ctx context.Context, id string) error {
 }
 
 func (s *Store) DeleteRegistrationInvite(ctx context.Context, id string) error {
-	return s.db.WithContext(ctx).Delete(&RegistrationInvite{}, "id = ?", id).Error
+	result := s.db.WithContext(ctx).Delete(&RegistrationInvite{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // SystemSetting operations
