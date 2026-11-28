@@ -79,6 +79,37 @@ export interface UnresolvedDependency {
 	reason: string;
 }
 
+/** A yellow outcome row for the dialog's per-item install results. */
+export interface UnresolvedOutcomeRow {
+	key: string;
+	label: string;
+	tone: 'yellow';
+	tag: 'Unresolved';
+	detail: string;
+}
+
+/**
+ * One outcome row per unresolved dependency, with a key that is unique across
+ * the whole list. The same project can surface more than once with different
+ * conflicting pin sets, so keying by project alone makes duplicate `{#each}`
+ * keys and breaks the dialog render; the reason carries that conflict identity.
+ */
+export function unresolvedOutcomeRows(unresolved: UnresolvedDependency[]): UnresolvedOutcomeRow[] {
+	const used = new Map<string, number>();
+	return unresolved.map((dep) => {
+		const identity = `dep:${dep.projectId}:${dep.reason}`;
+		const seen = used.get(identity) ?? 0;
+		used.set(identity, seen + 1);
+		return {
+			key: seen === 0 ? identity : `${identity}:${seen}`,
+			label: dep.title,
+			tone: 'yellow',
+			tag: 'Unresolved',
+			detail: dep.reason
+		};
+	});
+}
+
 export interface InstallItem {
 	name: string;
 	file_name: string;

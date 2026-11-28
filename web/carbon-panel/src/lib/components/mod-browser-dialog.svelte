@@ -48,6 +48,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import {
 		MAX_DEPENDENCY_DEPTH,
 		sameModInstallContext,
+		unresolvedOutcomeRows,
 		type DependencyPlanResult,
 		type InstallItem,
 		type ModInstallContext,
@@ -452,15 +453,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				return;
 			}
 			// Unresolved dependencies become outcome rows, never a silent skip (E9).
-			store.appendOutcomes(
-				unresolved.map((dep) => ({
-					key: `dep:${dep.projectId}`,
-					label: dep.title,
-					tone: 'yellow' as const,
-					tag: 'Unresolved',
-					detail: dep.reason
-				}))
-			);
+			store.appendOutcomes(unresolvedOutcomeRows(unresolved));
 
 			if (response.success) {
 				toast.success(response.message || `Installed ${mod.title}`);

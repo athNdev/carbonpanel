@@ -18,6 +18,9 @@ code_refs:
   project with a different pin becomes an `unresolved` conflict entry instead
   of silently reusing or dropping a pin. Repeated unpinned requests stay a
   normal dedupe.
+- Every unresolved entry becomes its own outcome row, keyed by project and
+  conflict identity. Two different conflicting pin sets for one project must
+  never share a row key; `unresolvedOutcomeRows` owns that mapping.
 - The browser compares the server, Minecraft version, and loader context after
   dependency planning and before the install request. A changed context refuses
   the install instead of using a stale lookup.

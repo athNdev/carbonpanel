@@ -12,7 +12,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sameModInstallContext, type ModInstallContext } from '../mods/dependency-plan';
+import {
+	buildDependencyPlan,
+	sameModInstallContext,
+	unresolvedOutcomeRows,
+	type ModInstallContext
+} from '../mods/dependency-plan';
 
 const dialogPath = path.resolve(import.meta.dirname, 'mod-browser-dialog.svelte');
 const content = fs.readFileSync(dialogPath, 'utf-8');
@@ -188,12 +193,13 @@ test('closing the dialog mid-install cannot wedge the install button (E7)', () =
 });
 
 test('unresolved dependencies surface in the install outcomes (E9)', () => {
+	const dependencyPlan = fs.readFileSync(path.join(modsDir, 'dependency-plan.ts'), 'utf-8');
 	assert.ok(
-		content.includes('store.appendOutcomes'),
+		content.includes('store.appendOutcomes(unresolvedOutcomeRows(unresolved))'),
 		'the dialog appends unresolved dependencies to the outcome list'
 	);
 	assert.ok(
-		content.includes("tag: 'Unresolved'"),
+		dependencyPlan.includes("tag: 'Unresolved'"),
 		'unresolved rows are spelled out, not silently dropped'
 	);
 });
@@ -206,6 +212,49 @@ test('dialog state resets when the target server identity changes (E22)', () => 
 	assert.ok(
 		content.includes('syncedTargetKey'),
 		'the target sync is guarded so it only fires on real changes'
+	);
+});
+
+test('two conflicting pin sets for one project get unique outcome keys', async () => {
+	// Three requests for one project: the first pin resolves, each later
+	// different pin is a separate conflict. Keying the rows by project alone
+	// would duplicate the `{#each}` key and abort the dialog render.
+	const plan = await buildDependencyPlan({
+		deps: [
+			{ project_id: 'pinned-api', version_id: 'a-id', dependency_type: 'required' },
+			{ project_id: 'pinned-api', version_id: 'b-id', dependency_type: 'required' },
+			{ project_id: 'pinned-api', version_id: 'c-id', dependency_type: 'required' }
+		],
+		platform: 'modrinth',
+		loader: 'fabric',
+		mcVersion: '1.21.1',
+		selection: { 'pinned-api': true },
+		getVersions: async () => ({
+			versions: ['a-id', 'b-id', 'c-id'].map((id) => ({
+				id,
+				version_number: id,
+				name: id,
+				version_type: 'release',
+				file_name: `${id}.jar`,
+				download_url: `https://cdn/${id}.jar`,
+				file_size: 1,
+				dependencies: []
+			}))
+		})
+	});
+
+	assert.equal(plan.unresolved.length, 2, 'each distinct conflicting pin set is surfaced');
+	const rows = unresolvedOutcomeRows(plan.unresolved);
+	assert.equal(rows.length, 2);
+	assert.equal(
+		new Set(rows.map((row) => row.key)).size,
+		2,
+		'the same project with two conflicts must not share an outcome key'
+	);
+	assert.ok(rows.every((row) => row.tag === 'Unresolved' && row.tone === 'yellow'));
+	assert.ok(
+		content.includes('store.appendOutcomes(unresolvedOutcomeRows(unresolved))'),
+		'the dialog must build the rows with the unique-key helper'
 	);
 });
 
