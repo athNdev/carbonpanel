@@ -3,6 +3,7 @@ package staging
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,6 +63,7 @@ func legacyRuntimeConfigRow(t *testing.T, store *storage.Store, serverID string)
 		Status:    storage.StagedStatusStaged,
 		CreatedAt: time.Now(),
 	}
+	require.True(t, json.Valid([]byte(row.Payload)), "legacy fixture payload must be valid JSON, not an escaped raw string: %s", row.Payload)
 	require.NoError(t, store.DB().Create(row).Error)
 	return row
 }
