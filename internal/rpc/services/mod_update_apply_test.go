@@ -1260,6 +1260,123 @@ func TestDuplicateSelectionDownloadsOnceAndRefusesConflictingWindow(t *testing.T
 	require.Equal(t, 0, batch.IdleMinutes)
 }
 
+// sameNamedCopyLookup resolves both an enabled and a disabled copy of the same
+// filename from their distinct installed digests.
+type sameNamedCopyLookup struct{}
+
+func (sameNamedCopyLookup) VersionsByFileHash(_ context.Context, hashes []string) (map[string]modrinth.Version, error) {
+	out := make(map[string]modrinth.Version, len(hashes))
+	for _, hash := range hashes {
+		switch hash {
+		case installedModDigest("enabled"), installedModDigest("disabled"):
+			v := versionFor("project-same", hash, "mod.jar")
+			v.ID = "installed-" + hash[:8]
+			v.DatePublished = "2025-01-01T00:00:00Z"
+			out[hash] = v
+		}
+	}
+	return out, nil
+}
+
+func (sameNamedCopyLookup) CompatibleUpdatesByFileHash(_ context.Context, hashes []string, _, _ string) (map[string]modrinth.Version, error) {
+	candidate := versionFor("project-same", installedModDigest("next"), "mod-2.jar")
+	candidate.ID = "update-same"
+	candidate.DatePublished = "2025-02-01T00:00:00Z"
+	out := make(map[string]modrinth.Version, len(hashes))
+	for _, hash := range hashes {
+		out[hash] = candidate
+	}
+	return out, nil
+}
+
+func (sameNamedCopyLookup) GetProjects(context.Context, []string) ([]modrinth.ProjectDetails, error) {
+	return []modrinth.ProjectDetails{{ID: "project-same", ServerSide: "required"}}, nil
+}
+
+func sameNamedCopySelection(installed string) *v1.ModUpdateSelection {
+	return &v1.ModUpdateSelection{
+		ModId:              "same-name",
+		FileName:           "mod.jar",
+		InstalledSha512:    installedModDigest(installed),
+		CandidateVersionId: "update-same",
+		CandidateSha512:    installedModDigest("next"),
+		CandidateFilename:  "mod-2.jar",
+	}
+}
+
+// An enabled and a disabled copy share a filename but resolve to different
+// live targets. Selection identity follows the resolved copy, so both stage
+// instead of one being silently deduped by name.
+func TestReviewedModUpdateStagesEnabledAndDisabledSameNamedCopies(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-same-name-copies", storage.StatusStopped)
+	require.NoError(t, os.MkdirAll(filepath.Join(server.DataPath, "mods"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(server.DataPath, "mods_disabled"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, "mods", "mod.jar"), []byte("enabled"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, "mods_disabled", "mod.jar"), []byte("disabled"), 0o600))
+
+	fetcher := &modUpdateFetchFixture{data: []byte("next")}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(sameNamedCopyLookup{})
+	svc.SetModCandidateFetcher(fetcher)
+	request := &v1.UpdateModRequest{
+		ServerId: server.ID,
+		UpdateSelections: []*v1.ModUpdateSelection{
+			sameNamedCopySelection("enabled"),
+			sameNamedCopySelection("disabled"),
+		},
+		UpdateWindow: v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART,
+	}
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	outcomes := map[string]int{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetOutcome()]++
+	}
+	require.Equal(t, 2, outcomes["staged"], "both same-named copies must stage: %+v", res.Msg.GetStagedUpdates())
+	require.Equal(t, 2, fetcher.calls)
+
+	rows, err := store.ListBatchContent(ctx, res.Msg.GetUpdateBatchId())
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	targets := []string{rows[0].TargetPath, rows[1].TargetPath}
+	require.ElementsMatch(t, []string{"mods/mod.jar", "mods_disabled/mod.jar"}, targets)
+}
+
+// If both same-named copies hold the reviewed bytes, resolution cannot choose
+// one. The selection is refused as drift rather than applied to either copy.
+func TestReviewedModUpdateRefusesAmbiguousSameNamedCopies(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-same-name-ambiguous", storage.StatusStopped)
+	require.NoError(t, os.MkdirAll(filepath.Join(server.DataPath, "mods"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(server.DataPath, "mods_disabled"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, "mods", "mod.jar"), []byte("installed"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, "mods_disabled", "mod.jar"), []byte("installed"), 0o600))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	fetcher := &modUpdateFetchFixture{data: []byte("next")}
+	svc.SetModCandidateFetcher(fetcher)
+	selection := modUpdateRequest(server.ID, installedModDigest("installed")).UpdateSelections[0]
+	request := &v1.UpdateModRequest{
+		ServerId:         server.ID,
+		UpdateSelections: []*v1.ModUpdateSelection{selection, selection},
+		UpdateWindow:     v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART,
+	}
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	outcomes := map[string]int{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetOutcome()]++
+	}
+	require.Equal(t, 1, outcomes["refused_drift"], "the ambiguous copy must be refused: %+v", res.Msg.GetStagedUpdates())
+	require.Equal(t, 0, outcomes["staged"])
+	require.Empty(t, res.Msg.GetUpdateBatchId())
+	require.Equal(t, 0, fetcher.calls, "an ambiguous selection must not download or stage")
+}
+
 func TestCumulativeCandidateBudgetIsEnforced(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-budget", storage.StatusStopped)

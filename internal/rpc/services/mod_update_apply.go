@@ -198,6 +198,17 @@ type stagedModUpdate struct {
 	StagedID string
 	Outcome  string
 	Reason   string
+	// targetPath is the resolved live file this selection names. Two copies
+	// with the same filename resolve to different enabled/disabled paths.
+	targetPath string
+}
+
+// modUpdateSelectionKey identifies a reviewed selection before its live path is
+// resolved. The filename alone would conflate an enabled copy with a disabled
+// copy of the same name; the installed digest distinguishes them.
+func modUpdateSelectionKey(selection *v1.ModUpdateSelection) string {
+	return strings.ToLower(strings.TrimSpace(selection.GetFileName())) + "\x00" +
+		strings.ToLower(strings.TrimSpace(selection.GetInstalledSha512()))
 }
 
 // modUpdateOutcomeRetryable marks a pre-fetch already-staged decision that the
@@ -235,12 +246,15 @@ func (s *ModService) currentBatchHoldsAlreadyStaged(ctx context.Context, serverI
 	present := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindMod {
-			present[row.FileName] = true
+			present[storage.NormalizedStagedTarget(row.TargetPath)] = true
 		}
 	}
 	stale := false
 	for i := range results {
-		if results[i].Outcome != "already_staged" || present[results[i].FileName] {
+		if results[i].Outcome != "already_staged" {
+			continue
+		}
+		if present[storage.NormalizedStagedTarget(results[i].targetPath)] {
 			continue
 		}
 		markModUpdateRetryable(&results[i])
@@ -318,19 +332,21 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	}
 	// One live target appears once. A duplicated filename is skipped before
 	// any provider work so a repeated submission cannot repeat a download or
-	// create two staged rows for the same file.
+	// create two staged rows for the same file. The installed digest keeps an
+	// enabled copy and a disabled copy with the same name distinct.
 	results := make([]stagedModUpdate, 0, len(selections))
-	seenTargets := make(map[string]bool, len(selections))
+	seenSelections := make(map[string]bool, len(selections))
 	unique := make([]*v1.ModUpdateSelection, 0, len(selections))
 	for _, sel := range selections {
-		if seenTargets[sel.GetFileName()] {
+		key := modUpdateSelectionKey(sel)
+		if seenSelections[key] {
 			results = append(results, stagedModUpdate{
 				ModID: sel.GetModId(), FileName: sel.GetFileName(),
 				Outcome: "already_selected", Reason: "this file was already selected in this request",
 			})
 			continue
 		}
-		seenTargets[sel.GetFileName()] = true
+		seenSelections[key] = true
 		unique = append(unique, sel)
 	}
 	selections = unique
@@ -395,7 +411,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		}
 		for _, row := range rows {
 			if row.Kind == storage.StagedKindMod {
-				alreadyStagedBeforeFetch[row.FileName] = true
+				alreadyStagedBeforeFetch[storage.NormalizedStagedTarget(row.TargetPath)] = true
 			}
 		}
 	}
@@ -404,18 +420,21 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	// preview owns project, dependency and version-selection policy, so apply
 	// cannot reuse a decision that became stale while the operator reviewed.
 	previewMods := make([]*v1.Mod, 0, len(selections))
+	previewKeys := make([]string, 0, len(selections))
 	locations := make(map[string]string, len(selections))
 	resolutionFailures := make(map[string]string)
 	for _, sel := range selections {
+		key := modUpdateSelectionKey(sel)
 		installed, enabled, reason, err := reviewedInstalledModLocation(ctx, root, base, sel.GetFileName(), sel.GetInstalledSha512())
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		if reason != "" {
-			resolutionFailures[sel.GetFileName()] = reason
+			resolutionFailures[key] = reason
 			continue
 		}
-		locations[sel.GetFileName()] = installed
+		locations[key] = installed
+		previewKeys = append(previewKeys, key)
 		previewMods = append(previewMods, &v1.Mod{
 			Id: sel.GetModId(), ServerId: server.ID, FileName: sel.GetFileName(), Enabled: enabled,
 		})
@@ -425,28 +444,30 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			return nil, nil, nil, err
 		}
 	}
-	previewByFile := make(map[string]*v1.InstalledModUpdate, len(previewMods))
-	for _, mod := range previewMods {
-		previewByFile[mod.FileName] = mod.UpdatePreview
+	previewBySelection := make(map[string]*v1.InstalledModUpdate, len(previewMods))
+	for i, mod := range previewMods {
+		previewBySelection[previewKeys[i]] = mod.UpdatePreview
 	}
 
 	ready := make([]readyModUpdate, 0, len(selections))
 	var transient error
 	var totalBytes int64
 	for _, sel := range selections {
+		key := modUpdateSelectionKey(sel)
 		result := stagedModUpdate{ModID: sel.GetModId(), FileName: sel.GetFileName()}
-		if alreadyStagedBeforeFetch[sel.GetFileName()] {
+		installed := locations[key]
+		result.targetPath = installed
+		if installed != "" && alreadyStagedBeforeFetch[storage.NormalizedStagedTarget(installed)] {
 			result.Outcome, result.Reason = "already_staged", "this file already has an update in the open batch"
 			results = append(results, result)
 			continue
 		}
-		if reason, failed := resolutionFailures[sel.GetFileName()]; failed {
+		if reason, failed := resolutionFailures[key]; failed {
 			result.Outcome, result.Reason = "refused_drift", reason
 			results = append(results, result)
 			continue
 		}
-		installed := locations[sel.GetFileName()]
-		preview := previewByFile[sel.GetFileName()]
+		preview := previewBySelection[key]
 		if installed == "" || preview == nil || strings.EqualFold(sel.GetInstalledSha512(), "") {
 			result.Outcome, result.Reason = "refused_drift", "the reviewed file is not a valid installed mod"
 			results = append(results, result)
@@ -584,7 +605,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		}
 		for _, row := range rows {
 			if row.Kind == storage.StagedKindMod {
-				alreadyStaged[row.FileName] = true
+				alreadyStaged[storage.NormalizedStagedTarget(row.TargetPath)] = true
 			}
 		}
 		// The pre-fetch snapshot may have been taken against a batch that was
@@ -593,7 +614,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		// retryable and leave it for a resubmission instead of staging it here.
 		for i := range results {
 			result := &results[i]
-			if result.Outcome != "already_staged" || alreadyStaged[result.FileName] {
+			if result.Outcome != "already_staged" || alreadyStaged[storage.NormalizedStagedTarget(result.targetPath)] {
 				continue
 			}
 			markModUpdateRetryable(result)
@@ -603,7 +624,8 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			item := ready[i]
 			sel := item.selection
 			outcome := &results[item.resultIndex]
-			if alreadyStaged[sel.GetFileName()] {
+			target := storage.NormalizedStagedTarget(item.targetPath)
+			if alreadyStaged[target] {
 				outcome.Outcome, outcome.Reason = "already_staged", "this file already has an update in the open batch"
 				continue
 			}
@@ -630,7 +652,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 				continue
 			}
 			outcome.Outcome, outcome.StagedID = "staged", row.ID
-			alreadyStaged[sel.GetFileName()] = true
+			alreadyStaged[target] = true
 		}
 		return nil
 	}); err != nil {
