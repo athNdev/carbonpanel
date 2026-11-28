@@ -403,12 +403,15 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		}
 		target := minecraft.DefaultLevelName + "/datapacks/" + filename
 		if _, stageErr := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindDatapack, storage.StagedActionInstall, target, filename, data); stageErr != nil {
-			if connect.CodeOf(stageErr) == connect.CodeAborted {
+			mapped := stageContentError(stageErr)
+			switch connect.CodeOf(mapped) {
+			case connect.CodeAborted, connect.CodeFailedPrecondition:
 				// Admission was refused before staging. The completed upload
-				// remains available so the caller can retry.
-				return nil, stageErr
+				// remains available so the caller can retry after the
+				// publication or archive export finishes.
+				return nil, mapped
 			}
-			return fail(stageContentError(stageErr))
+			return fail(mapped)
 		}
 		pack := withPackFormat(&v1.InstalledDatapack{
 			FileName:    filename,

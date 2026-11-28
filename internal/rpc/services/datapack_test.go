@@ -21,6 +21,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
@@ -190,6 +191,36 @@ func TestDatapackWritesShareDataGate(t *testing.T) {
 	_, err = s.DeleteDatapack(ctx, connect.NewRequest(&v1.DeleteDatapackRequest{ServerId: server.ID, FileName: "existing.zip"}))
 	require.NoError(t, err)
 	require.NoFileExists(t, existing)
+}
+
+// A staged datapack upload refused by the archive-export admission must keep the
+// completed upload session. The operator retries after the export finishes and
+// the same session must stage without uploading the bytes again.
+func TestStagedDatapackUploadKeepsSessionOnArchiveExportRefusal(t *testing.T) {
+	ctx := context.Background()
+	s, um, server := newUploadTestService(t)
+	data := zipArchiveBytes(t, map[string]string{
+		"pack.mcmeta":      `{"pack":{"pack_format":34}}`,
+		"data/minecraft/x": "",
+	})
+	session := uploadSession(t, um, "staged-export.zip", data)
+	req := connect.NewRequest(&v1.UploadDatapackRequest{
+		ServerId:        server.ID,
+		UploadSessionId: session,
+		Stage:           true,
+	})
+
+	fence, err := module.TryBeginServerModuleArchive(server.ID)
+	require.NoError(t, err)
+	_, err = s.UploadDatapack(ctx, req)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "%v", err)
+	require.Contains(t, err.Error(), "archive export is in progress")
+
+	fence.Release()
+	res, err := s.UploadDatapack(ctx, req)
+	require.NoError(t, err, "the export refusal must leave the upload session available for retry")
+	require.True(t, res.Msg.GetStaged())
+	require.NoFileExists(t, filepath.Join(minecraft.GetDatapacksPath(server.DataPath, ""), "staged-export.zip"))
 }
 
 func TestUploadDatapack(t *testing.T) {
