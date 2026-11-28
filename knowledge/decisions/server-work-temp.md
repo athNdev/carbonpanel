@@ -31,6 +31,7 @@ a 64 MiB noexec tmpfs.
 
 `TMPDIR` and `-Djava.io.tmpdir` point at `/data/.tmp`. Do not send modpack
 downloads, extracts, or native-library work back to `/tmp`. When the panel
-can see the data path, the directory is mode 01777 so the game user can
-write it without a hard-coded uid. On a remote daemon the directory is a
-bind mount created with the container. World backups omit `.tmp`.
+can see the data path — locally or through a controller mount of the node's
+shared storage — the directory is created at mode 01777 so the game user can
+write it without a hard-coded uid. When the panel cannot see it, the container
+bind creates it on the node. World backups omit `.tmp`.

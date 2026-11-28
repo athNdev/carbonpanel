@@ -46,7 +46,8 @@ requires a reachable controller mount and confines creation to that server.
 `/tmp` stays a 64 MiB noexec tmpfs. Modpack downloads, archive extracts, and
 native libraries such as Netty and c2me use `/data/.tmp` on the server data
 bind. That directory is on the same disk as the world, it is executable, and
-the panel creates it mode 01777 when it can see the data path. A remote
-daemon creates the same directory from the container bind, on the node that
-holds the world. `TMPDIR` and `-Djava.io.tmpdir` both point there. Scheduled
-world backups skip `.tmp`.
+the panel creates it mode 01777 when it can see the data path — including
+through a controller mount of a remote node's shared storage. A remote daemon
+whose storage the panel cannot see creates the same directory from the
+container bind, on the node that holds the world. `TMPDIR` and
+`-Djava.io.tmpdir` both point there. Scheduled world backups skip `.tmp`.
