@@ -304,9 +304,16 @@ func (s *Store) MarkUpdatePublicationVerified(ctx context.Context, batchID strin
 			}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&ServerUpdateBatch{}).
+		ack := tx.Model(&ServerUpdateBatch{}).
 			Where("id = ? AND status = ? AND published_at IS NULL", batchID, UpdateBatchOpen).
-			Updates(map[string]any{"published_at": now, "sealed_at": now}).Error
+			Updates(map[string]any{"published_at": now, "sealed_at": now})
+		if ack.Error != nil {
+			return ack.Error
+		}
+		if ack.RowsAffected != 1 {
+			return fmt.Errorf("%w: batch %s is not the open unacknowledged batch", ErrPublicationTransition, batchID)
+		}
+		return nil
 	})
 }
 

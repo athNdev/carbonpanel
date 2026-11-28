@@ -43,6 +43,9 @@ container may repair the tracked id but is never publication evidence. A newly a
 pre-dispatch interruption with no container resumes ordinary creation. An in-place restart failure that may have mutated the existing container is retained
 even when a later fallback's preflight proves the replacement untouched; only when every attempt ended before mutation may the attempt compensate. An
 unverified or ambiguous dispatch seals the batch and runs no cleanup; a verified publication is finalize-only and leaves the operator's explicit start or restart in control.
+Verifying a dispatch acknowledges exactly one open, unacknowledged batch row in
+the same transaction; when no row closes, the verified phase rolls back and the
+dispatch stays unverified for retry.
 Generic compensation never abandons a dispatch; abandon accepts only preparing/prepared/applying, while a dispatched or identity-unresolved attempt with an empty recorded identity is released only by the explicit typed-preflight transition. A preflight may ignore an identity-unresolved marker from the same attempt, but never a recorded replacement identity or an in-place request that may have been accepted. See [publication identity resolution](../decisions/publication-identity-unresolved.md).
 
 Interrupted recovery uses only the controller-owned snapshot (owned row ids, targets and backup digests), validating ownership and every backup reference
