@@ -121,6 +121,142 @@ func TestRestartFallbackHonorsStoppedReplacementStartIntent(t *testing.T) {
 	}
 }
 
+func TestStagedStartPreflightFailureRestagesConfigWhileOldContainerRuns(t *testing.T) {
+	ctx := context.Background()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			http.NotFound(w, r)
+		case strings.Contains(r.URL.Path, "/images/create"):
+			http.Error(w, `{"message":"registry unavailable"}`, http.StatusInternalServerError)
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
+			_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`))
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	svc, _ := newDockerPrivilegeTestService(t)
+	_ = svc.docker.Close()
+	client, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), svc.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	svc.docker, svc.pool = client, nil
+	ensureLocalTestNode(t, svc.store, "test-node")
+	started := time.Now().Add(-time.Hour).Truncate(time.Second)
+	server := &storage.Server{ID: "server", Name: "Server", NodeID: "test-node", ContainerID: "original", Port: 25751, Memory: 1024, Status: storage.StatusRunning, DataPath: t.TempDir(), LastStarted: &started}
+	if err := svc.store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.SaveServerConfig(ctx, svc.store.CreateDefaultServerConfig(server.ID)); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := svc.store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "new spec"}, storage.UpdateWindowNextRestart, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID})); err == nil {
+		t.Fatal("StartServer() error = nil, want preflight failure")
+	}
+	got, err := svc.store.GetStagedConfigChange(context.Background(), staged.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != storage.StagedStatusStaged {
+		t.Fatalf("staged config status = %s, want staged after a preflight failure", got.Status)
+	}
+	live, err := svc.store.GetServerConfig(context.Background(), server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.MOTD != nil && *live.MOTD == "new spec" {
+		t.Fatal("preflight failure left the staged config applied to the live row")
+	}
+}
+
+func TestStagedStartPreflightRetainsAppliedSnapshotWhileStopped(t *testing.T) {
+	ctx := context.Background()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			_, _ = w.Write([]byte(`{"MemTotal":17179869184}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			http.NotFound(w, r)
+		case strings.Contains(r.URL.Path, "/images/create"):
+			http.Error(w, `{"message":"registry unavailable"}`, http.StatusInternalServerError)
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
+			_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":false,"Status":"exited"}}`))
+		case r.Method == http.MethodPost || r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	svc, _ := newDockerPrivilegeTestService(t)
+	_ = svc.docker.Close()
+	client, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), svc.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	svc.docker, svc.pool = client, nil
+	ensureLocalTestNode(t, svc.store, "test-node")
+	started := time.Now().Add(-time.Hour).Truncate(time.Second)
+	server := &storage.Server{ID: "server", Name: "Server", NodeID: "test-node", ContainerID: "original", Port: 25751, Memory: 1024, Status: storage.StatusStopped, DataPath: t.TempDir(), LastStarted: &started}
+	if err := svc.store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.SaveServerConfig(ctx, svc.store.CreateDefaultServerConfig(server.ID)); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := svc.store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "applied spec"}, storage.UpdateWindowNextRestart, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.store.ApplyStagedConfigChange(ctx, staged.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A retained wake can leave DEEPSLEEP and the reconciler can record STOPPED;
+	// neither status proves the prior replacement never embedded the snapshot.
+	_, err = svc.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+	if err == nil {
+		t.Fatal("StartServer() error = nil, want preflight failure")
+	}
+	got, err := svc.store.GetStagedConfigChange(context.Background(), staged.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != storage.StagedStatusApplied {
+		t.Fatalf("staged config status = %s, want applied after prior publication evidence", got.Status)
+	}
+	live, err := svc.store.GetServerConfig(context.Background(), server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.MOTD == nil || *live.MOTD != "applied spec" {
+		t.Fatalf("live config = %+v, want the prior applied spec retained", live.MOTD)
+	}
+}
+
 func TestLifecycleRPCPersistsPartialRecreationAfterCancellation(t *testing.T) {
 	for _, operation := range []string{"update", "recreate", "restart fallback", "staged start", "staged restart", "proxy"} {
 		for _, cancelRequest := range []bool{false, true} {

@@ -5,3 +5,4 @@ web/carbon-panel/src/lib/design-system/tokens.css text eol=lf
 # OSS-407: keep the byte-compared generated descriptor LF on every checkout.
 # Windows core.autocrlf=true otherwise converts it and reds TestContentDescriptorArtifact.
 internal/mcp/family_content_descriptors.json text eol=lf
+internal/mcp/catalog_data.go text eol=lf

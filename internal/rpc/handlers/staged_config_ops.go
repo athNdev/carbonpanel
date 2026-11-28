@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 )
 
@@ -73,6 +74,22 @@ func (o *StagedConfigOperations) List(ctx context.Context, serverID string, stat
 	return changes, nil
 }
 
+func (o *StagedConfigOperations) beginChange(ctx context.Context, stagedID string) (*datawrite.Lease, error) {
+	row, err := o.store.GetStagedConfigChange(ctx, stagedID)
+	if err != nil {
+		return nil, stagedError(http.StatusBadRequest, fmt.Sprintf("failed to read staged change: %v", err))
+	}
+	return beginStagedConfigWrite(row.ServerID)
+}
+
+func beginStagedConfigWrite(serverID string) (*datawrite.Lease, error) {
+	write, err := datawrite.TryShared(serverID)
+	if err != nil {
+		return nil, stagedError(http.StatusConflict, err.Error())
+	}
+	return write, nil
+}
+
 // Stage records a config diff. An empty apply mode defaults to on_restart.
 func (o *StagedConfigOperations) Stage(ctx context.Context, serverID string, changes map[string]any, mode storage.StagedApplyMode, cronExpr string) (*storage.StagedConfigChange, error) {
 	if !o.Ready() {
@@ -82,7 +99,15 @@ func (o *StagedConfigOperations) Stage(ctx context.Context, serverID string, cha
 	if mode == "" {
 		mode = storage.StagedApplyOnRestart
 	}
+	write, err := beginStagedConfigWrite(serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer write.Release()
 	staged, err := o.store.StageConfigChange(ctx, serverID, changes, mode, strings.TrimSpace(cronExpr))
+	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+		return nil, stagedError(http.StatusConflict, err.Error())
+	}
 	if err != nil {
 		return nil, stagedError(http.StatusBadRequest, fmt.Sprintf("failed to stage config change: %v", err))
 	}
@@ -94,6 +119,11 @@ func (o *StagedConfigOperations) Apply(ctx context.Context, stagedID string) (*s
 	if !o.Ready() {
 		return nil, stagedError(http.StatusInternalServerError, "store not initialized")
 	}
+	write, err := o.beginChange(ctx, stagedID)
+	if err != nil {
+		return nil, err
+	}
+	defer write.Release()
 	applied, err := o.store.ApplyStagedConfigChange(ctx, stagedID)
 	if errors.Is(err, storage.ErrActiveOperation) {
 		return nil, stagedError(http.StatusConflict, err.Error())
@@ -109,6 +139,11 @@ func (o *StagedConfigOperations) Rollback(ctx context.Context, stagedID string) 
 	if !o.Ready() {
 		return nil, stagedError(http.StatusInternalServerError, "store not initialized")
 	}
+	write, err := o.beginChange(ctx, stagedID)
+	if err != nil {
+		return nil, err
+	}
+	defer write.Release()
 	rolledBack, err := o.store.RollbackStagedConfigChange(ctx, stagedID)
 	if errors.Is(err, storage.ErrActiveOperation) {
 		return nil, stagedError(http.StatusConflict, err.Error())
@@ -124,6 +159,11 @@ func (o *StagedConfigOperations) Discard(ctx context.Context, stagedID string) e
 	if !o.Ready() {
 		return stagedError(http.StatusInternalServerError, "store not initialized")
 	}
+	write, err := o.beginChange(ctx, stagedID)
+	if err != nil {
+		return err
+	}
+	defer write.Release()
 	if err := o.store.DiscardStagedConfigChange(ctx, stagedID); err != nil {
 		return stagedError(http.StatusBadRequest, fmt.Sprintf("failed to discard staged change: %v", err))
 	}

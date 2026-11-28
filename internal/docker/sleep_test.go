@@ -272,12 +272,20 @@ func TestDeepSleepManager_PreparesReplacementBeforeWakeAndRecordsStart(t *testin
 	store.servers["srv-sleep"].Status = db.StatusDeepSleep
 
 	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
-	mgr.SetWakePreparer(func(ctx context.Context, server *db.Server) error {
+	completed := false
+	mgr.SetWakePreparer(func(ctx context.Context, server *db.Server) (WakeCompletion, error) {
 		server.ContainerID = "replacement-container"
-		return store.UpdateServer(ctx, server)
+		return func(started bool, wakeErr error) error {
+			require.True(t, started)
+			require.NoError(t, wakeErr)
+			require.Equal(t, db.StatusRunning, store.servers[server.ID].Status)
+			completed = true
+			return nil
+		}, store.UpdateServer(ctx, server)
 	})
 
 	require.NoError(t, mgr.WakeServer(ctx, "srv-sleep"))
+	require.True(t, completed)
 	controller.mu.Lock()
 	starts := append([]string(nil), controller.starts...)
 	controller.mu.Unlock()
@@ -557,4 +565,24 @@ func TestDeepSleepManager_NilStoreGuards(t *testing.T) {
 	err = mgr.WakeServer(ctx, "srv-sleep")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "store is nil")
+}
+
+func TestWakeReturnsBothStartAndPublicationRecoveryFailures(t *testing.T) {
+	ctx := context.Background()
+	controller, commander, store := newDeepSleepHarness()
+	store.servers["srv-sleep"].Status = db.StatusDeepSleep
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
+	startErr := errors.New("start could not complete")
+	recoveryErr := errors.New("failed to restage content")
+	controller.startErr = startErr
+	mgr.SetWakePreparer(func(context.Context, *db.Server) (WakeCompletion, error) {
+		return func(attempted bool, err error) error {
+			require.True(t, attempted)
+			require.ErrorIs(t, err, startErr)
+			return recoveryErr
+		}, nil
+	})
+	err := mgr.WakeServer(ctx, "srv-sleep")
+	require.ErrorIs(t, err, startErr)
+	require.ErrorIs(t, err, recoveryErr)
 }

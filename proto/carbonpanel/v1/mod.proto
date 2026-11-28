@@ -12,6 +12,7 @@ syntax = "proto3";
 package carbonpanel.v1;
 
 import "google/protobuf/timestamp.proto";
+import "carbonpanel/v1/config.proto";
 
 option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
 
@@ -67,6 +68,29 @@ message InstalledModUpdate {
   string candidate_filename = 11;
 }
 
+// One operator-reviewed replacement. The service re-verifies the installed
+// fingerprint and the provider release before it stages any bytes.
+message ModUpdateSelection {
+  string mod_id = 1;
+  string file_name = 2;
+  string installed_sha512 = 3;
+  string candidate_version_id = 4;
+  string candidate_sha512 = 5;
+  string candidate_filename = 6;
+}
+
+// Per-selection outcome of a staging request.
+message StagedModUpdate {
+  string mod_id = 1;
+  string file_name = 2;
+  string staged_id = 3;
+  // staged, already_staged, already_selected, retryable, transient_download,
+  // refused_drift, refused_provider, refused_download, refused_checksum,
+  // refused_stale_preview, refused_limit, error
+  string outcome = 4;
+  string reason = 5;
+}
+
 // Server mods request
 message ListModsRequest {
   string server_id = 1;
@@ -114,11 +138,19 @@ message UpdateModRequest {
   optional string display_name = 3;
   optional string description = 4;
   optional bool enabled = 5;
+  // A reviewed provider update stages exact replacement bytes into the
+  // server's open batch. This reuses this procedure's mods/update scope.
+  repeated ModUpdateSelection update_selections = 6;
+  ConfigApplyWindow update_window = 7;
+  int64 update_apply_at_unix = 8;
+  int32 update_idle_minutes = 9;
 }
 
 // Updated mod
 message UpdateModResponse {
   Mod mod = 1;
+  repeated StagedModUpdate staged_updates = 2;
+  string update_batch_id = 3;
 }
 
 // Mod to delete

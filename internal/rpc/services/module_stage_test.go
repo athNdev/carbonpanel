@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -61,4 +62,83 @@ func TestUpdateModuleStageLeavesTheLiveModule(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, storage.StagedKindModule, rows[0].Kind)
+}
+
+// A staged module edit shares the data-write gate. While a publication owns the
+// path, the admission is retryable Aborted with the same operator wording as
+// direct file writes, not an internal error.
+func TestUpdateModuleStageReportsActivePublication(t *testing.T) {
+	ctx := context.Background()
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	store, err := storage.NewSQLiteStore(&config.Config{
+		Database: config.DatabaseConfig{
+			Path:           fmt.Sprintf("file:%s?mode=memory&cache=shared", dbName),
+			AutoMigrate:    true,
+			MaxConnections: 5,
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &storage.Server{ID: "mod-stage-publishing", Name: "mod-stage-publishing", DataPath: t.TempDir(), Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.DB().Create(&storage.Module{
+		ID: "map-publishing", Name: "map-publishing", ServerID: server.ID, TemplateID: "tpl", Status: "stopped", Config: "old",
+	}).Error)
+
+	publication, err := datawrite.AcquireExclusive(ctx, server.ID)
+	require.NoError(t, err)
+	t.Cleanup(publication.Release)
+
+	svc := NewModuleService(store, nil, nil, nil, nil, nil, nil, logger.New())
+	next := "new"
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-publishing", Config: &next, Stage: true}))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), "%v", err)
+	require.Contains(t, err.Error(), "a staged update is being published")
+	require.ErrorContains(t, err, "retry after it finishes")
+
+	publication.Release()
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-publishing", Config: &next, Stage: true}))
+	require.NoError(t, err, "the same stage succeeds after the publication releases the path")
+}
+
+// TestUpdateModuleStageRefusesASecondEdit maps a duplicate module target to the
+// same FailedPrecondition admission code as file staging, with an actionable
+// message, instead of an internal error.
+func TestUpdateModuleStageRefusesASecondEdit(t *testing.T) {
+	ctx := context.Background()
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	store, err := storage.NewSQLiteStore(&config.Config{
+		Database: config.DatabaseConfig{
+			Path:           fmt.Sprintf("file:%s?mode=memory&cache=shared", dbName),
+			AutoMigrate:    true,
+			MaxConnections: 5,
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &storage.Server{ID: "mod-stage-dup", Name: "mod-stage-dup", DataPath: t.TempDir(), Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.DB().Create(&storage.Module{
+		ID: "map-dup", Name: "map-dup", ServerID: server.ID, TemplateID: "tpl", Status: "stopped", Config: "old",
+	}).Error)
+
+	svc := NewModuleService(store, nil, nil, nil, nil, nil, nil, logger.New())
+	first := "new"
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-dup", Config: &first, Stage: true}))
+	require.NoError(t, err)
+
+	second := "newer"
+	_, err = svc.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: "map-dup", Config: &second, Stage: true}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "%v", err)
+	require.ErrorIs(t, err, storage.ErrDuplicateStagedTarget)
+	require.Contains(t, err.Error(), "already staged")
+
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the duplicate module edit must not be committed")
 }

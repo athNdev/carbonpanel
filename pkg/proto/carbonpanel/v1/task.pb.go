@@ -35,30 +35,32 @@ type TaskType int32
 
 const (
 	TaskType_TASK_TYPE_UNSPECIFIED    TaskType = 0
-	TaskType_TASK_TYPE_COMMAND        TaskType = 1 // Execute an RCON command
-	TaskType_TASK_TYPE_BACKUP         TaskType = 2 // Create a backup
-	TaskType_TASK_TYPE_RESTART        TaskType = 3 // Restart the server
-	TaskType_TASK_TYPE_START          TaskType = 4 // Start the server
-	TaskType_TASK_TYPE_STOP           TaskType = 5 // Stop the server
-	TaskType_TASK_TYPE_SCRIPT         TaskType = 6 // Run a custom script
-	TaskType_TASK_TYPE_WEBHOOK        TaskType = 7 // Send an HTTP webhook
-	TaskType_TASK_TYPE_MODPACK_UPDATE TaskType = 8 // Check and pull modpack updates from source (e.g. Git)
-	TaskType_TASK_TYPE_CHUNKY_PREGEN  TaskType = 9 // Automated background Chunky radius pre-generation task runner
+	TaskType_TASK_TYPE_COMMAND        TaskType = 1  // Execute an RCON command
+	TaskType_TASK_TYPE_BACKUP         TaskType = 2  // Create a backup
+	TaskType_TASK_TYPE_RESTART        TaskType = 3  // Restart the server
+	TaskType_TASK_TYPE_START          TaskType = 4  // Start the server
+	TaskType_TASK_TYPE_STOP           TaskType = 5  // Stop the server
+	TaskType_TASK_TYPE_SCRIPT         TaskType = 6  // Run a custom script
+	TaskType_TASK_TYPE_WEBHOOK        TaskType = 7  // Send an HTTP webhook
+	TaskType_TASK_TYPE_MODPACK_UPDATE TaskType = 8  // Check and pull modpack updates from source (e.g. Git)
+	TaskType_TASK_TYPE_CHUNKY_PREGEN  TaskType = 9  // Automated background Chunky radius pre-generation task runner
+	TaskType_TASK_TYPE_MOD_UPDATE     TaskType = 10 // Opt-in automatic/scheduled mod updates using the shared planner
 )
 
 // Enum value maps for TaskType.
 var (
 	TaskType_name = map[int32]string{
-		0: "TASK_TYPE_UNSPECIFIED",
-		1: "TASK_TYPE_COMMAND",
-		2: "TASK_TYPE_BACKUP",
-		3: "TASK_TYPE_RESTART",
-		4: "TASK_TYPE_START",
-		5: "TASK_TYPE_STOP",
-		6: "TASK_TYPE_SCRIPT",
-		7: "TASK_TYPE_WEBHOOK",
-		8: "TASK_TYPE_MODPACK_UPDATE",
-		9: "TASK_TYPE_CHUNKY_PREGEN",
+		0:  "TASK_TYPE_UNSPECIFIED",
+		1:  "TASK_TYPE_COMMAND",
+		2:  "TASK_TYPE_BACKUP",
+		3:  "TASK_TYPE_RESTART",
+		4:  "TASK_TYPE_START",
+		5:  "TASK_TYPE_STOP",
+		6:  "TASK_TYPE_SCRIPT",
+		7:  "TASK_TYPE_WEBHOOK",
+		8:  "TASK_TYPE_MODPACK_UPDATE",
+		9:  "TASK_TYPE_CHUNKY_PREGEN",
+		10: "TASK_TYPE_MOD_UPDATE",
 	}
 	TaskType_value = map[string]int32{
 		"TASK_TYPE_UNSPECIFIED":    0,
@@ -71,6 +73,7 @@ var (
 		"TASK_TYPE_WEBHOOK":        7,
 		"TASK_TYPE_MODPACK_UPDATE": 8,
 		"TASK_TYPE_CHUNKY_PREGEN":  9,
+		"TASK_TYPE_MOD_UPDATE":     10,
 	}
 )
 
@@ -2661,7 +2664,7 @@ const file_carbonpanel_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"last_check\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tlastCheck\x129\n" +
 	"\n" +
-	"next_check\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tnextCheck*\xfa\x01\n" +
+	"next_check\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tnextCheck*\x94\x02\n" +
 	"\bTaskType\x12\x19\n" +
 	"\x15TASK_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TASK_TYPE_COMMAND\x10\x01\x12\x14\n" +
@@ -2672,7 +2675,9 @@ const file_carbonpanel_v1_task_proto_rawDesc = "" +
 	"\x10TASK_TYPE_SCRIPT\x10\x06\x12\x15\n" +
 	"\x11TASK_TYPE_WEBHOOK\x10\a\x12\x1c\n" +
 	"\x18TASK_TYPE_MODPACK_UPDATE\x10\b\x12\x1b\n" +
-	"\x17TASK_TYPE_CHUNKY_PREGEN\x10\t*t\n" +
+	"\x17TASK_TYPE_CHUNKY_PREGEN\x10\t\x12\x18\n" +
+	"\x14TASK_TYPE_MOD_UPDATE\x10\n" +
+	"*t\n" +
 	"\n" +
 	"TaskStatus\x12\x1b\n" +
 	"\x17TASK_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +

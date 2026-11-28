@@ -26,6 +26,11 @@ The shared redirect policy clones the supplied client, preserves its redirect
 limit or callback, and removes API keys, authorization and cookies when scheme,
 host or port changes. The original client and supplied header map are not mutated.
 
+Fabric optimization metadata and jar downloads use the same
+connection-guarded, credential-protecting client as reviewed-mod fetches and
+World Library imports. A provider URL is statically checked before any request
+or write, and the jar is written to a temporary file before an atomic replace.
+
 # Consequences
 
 The community proxy receives no official API key, including slug lookup.

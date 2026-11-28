@@ -20,6 +20,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
@@ -804,6 +805,14 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 	if server == nil {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "cannot install mods without a target server"}
 	}
+	write, err := datawrite.TryShared(server.ID)
+	if errors.Is(err, datawrite.ErrExclusiveHeld) {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusConflict, Message: err.Error()}
+	}
+	if err != nil {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: err.Error()}
+	}
+	defer write.Release()
 
 	modsDir, err := modsDirectory(ctx, m.store, server, true, m.storageResolver)
 	if err != nil {

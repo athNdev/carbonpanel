@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
@@ -40,6 +41,129 @@ func setupTaskTestService(t *testing.T) (*TaskService, *storage.Server) {
 	require.NoError(t, store.CreateServer(context.Background(), server))
 
 	return taskSvc, server
+}
+
+func TestModUpdateTaskCreateHonorsOptInAndPolicyEditsKeepStatus(t *testing.T) {
+	svc, server := setupTaskTestService(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		config string
+		status v1.TaskStatus
+	}{
+		{`{"enabled":false,"window":"next_restart"}`, v1.TaskStatus_TASK_STATUS_DISABLED},
+		{`{"enabled":true,"window":"next_restart"}`, v1.TaskStatus_TASK_STATUS_ENABLED},
+	} {
+		created, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+			ServerId: server.ID, Name: "Automatic mod updates", TaskType: v1.TaskType_TASK_TYPE_MOD_UPDATE,
+			Schedule: v1.ScheduleType_SCHEDULE_TYPE_CRON, CronExpr: "0 3 * * *", Config: tc.config,
+		}))
+		require.NoError(t, err)
+		task := created.Msg.GetTask()
+		require.Equal(t, tc.status, task.GetStatus())
+		if tc.status == v1.TaskStatus_TASK_STATUS_DISABLED {
+			require.Nil(t, task.GetNextRun())
+		} else {
+			require.NotNil(t, task.GetNextRun())
+		}
+		for _, status := range []v1.TaskStatus{v1.TaskStatus_TASK_STATUS_PAUSED, v1.TaskStatus_TASK_STATUS_DISABLED} {
+			_, err := svc.ToggleTask(ctx, connect.NewRequest(&v1.ToggleTaskRequest{Id: task.GetId(), Status: status}))
+			require.NoError(t, err)
+			editedConfig := `{"enabled":true,"window":"idle","idle_minutes":15}`
+			updated, err := svc.UpdateTask(ctx, connect.NewRequest(&v1.UpdateTaskRequest{Id: task.GetId(), Config: &editedConfig}))
+			require.NoError(t, err)
+			require.Equal(t, status, updated.Msg.GetTask().GetStatus())
+			stored, err := svc.store.GetScheduledTask(ctx, task.GetId())
+			require.NoError(t, err)
+			require.Equal(t, status, dbTaskStatusToProto(stored.Status))
+		}
+	}
+}
+
+func TestModUpdatePolicyEditCannotOverwriteConcurrentPause(t *testing.T) {
+	svc, server := setupTaskTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	created, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+		ServerId: server.ID, Name: "Automatic mod updates", TaskType: v1.TaskType_TASK_TYPE_MOD_UPDATE,
+		Schedule: v1.ScheduleType_SCHEDULE_TYPE_CRON, CronExpr: "0 3 * * *", Config: `{"enabled":true}`,
+	}))
+	require.NoError(t, err)
+	taskID := created.Msg.GetTask().GetId()
+	var paused bool
+	require.NoError(t, svc.store.DB().Callback().Update().Before("gorm:update").Register("fixture:pause-before-policy-update", func(tx *gorm.DB) {
+		if paused {
+			return
+		}
+		if _, ok := tx.Statement.Dest.(*storage.ScheduledTask); !ok {
+			return
+		}
+		paused = true
+		_, err := svc.ToggleTask(ctx, connect.NewRequest(&v1.ToggleTaskRequest{
+			Id: taskID, Status: v1.TaskStatus_TASK_STATUS_PAUSED,
+		}))
+		require.NoError(t, err)
+	}))
+	editedConfig := `{"enabled":true,"window":"idle","idle_minutes":15}`
+	request := connect.NewRequest(&v1.UpdateTaskRequest{Id: taskID, Config: &editedConfig})
+	_, err = svc.UpdateTask(ctx, request)
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err))
+	require.True(t, paused)
+	stored, err := svc.store.GetScheduledTask(ctx, taskID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusPaused, stored.Status)
+	require.Equal(t, `{"enabled":true}`, stored.Config)
+	updated, err := svc.UpdateTask(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStatus_TASK_STATUS_PAUSED, updated.Msg.GetTask().GetStatus())
+	require.Nil(t, updated.Msg.GetTask().GetNextRun())
+}
+
+func TestModUpdatePolicyEditPreservesConcurrentDeadline(t *testing.T) {
+	svc, server := setupTaskTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	created, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+		ServerId: server.ID, Name: "Automatic mod updates", TaskType: v1.TaskType_TASK_TYPE_MOD_UPDATE,
+		Schedule: v1.ScheduleType_SCHEDULE_TYPE_INTERVAL, IntervalSecs: 60, Config: `{"enabled":true}`,
+	}))
+	require.NoError(t, err)
+	before, err := svc.store.GetScheduledTask(ctx, created.Msg.GetTask().GetId())
+	require.NoError(t, err)
+	run := time.Now().UTC().Truncate(time.Second)
+	next := run.Add(2 * time.Hour)
+	var advanced bool
+	require.NoError(t, svc.store.DB().Callback().Update().Before("gorm:update").Register("fixture:advance-before-policy-update", func(tx *gorm.DB) {
+		if advanced {
+			return
+		}
+		if _, ok := tx.Statement.Dest.(*storage.ScheduledTask); !ok {
+			return
+		}
+		advanced = true
+		require.NoError(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run, "", nil))
+	}))
+	config := `{"enabled":true,"window":"idle","idle_minutes":18}`
+	unchangedInterval := int32(60)
+	response, err := svc.UpdateTask(ctx, connect.NewRequest(&v1.UpdateTaskRequest{
+		Id: before.ID, IntervalSecs: &unchangedInterval, Config: &config,
+	}))
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.True(t, next.Equal(response.Msg.GetTask().GetNextRun().AsTime()))
+	require.True(t, run.Equal(response.Msg.GetTask().GetLastRun().AsTime()))
+	require.Equal(t, config, response.Msg.GetTask().GetConfig())
+
+	newInterval := int32(900)
+	response, err = svc.UpdateTask(ctx, connect.NewRequest(&v1.UpdateTaskRequest{
+		Id: before.ID, IntervalSecs: &newInterval,
+	}))
+	require.NoError(t, err)
+	recalculated := response.Msg.GetTask().GetNextRun().AsTime()
+	require.WithinDuration(t, time.Now().Add(15*time.Minute), recalculated, time.Minute)
+	require.ErrorIs(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run, "", nil), storage.ErrModUpdateScheduleChanged)
+	stored, err := svc.store.GetScheduledTask(ctx, before.ID)
+	require.NoError(t, err)
+	require.True(t, recalculated.Equal(*stored.NextRun))
 }
 
 func TestTaskService_CreateTask_CronValidation(t *testing.T) {
@@ -74,7 +198,21 @@ func TestTaskService_CreateTask_CronValidation(t *testing.T) {
 	assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
 	assert.Contains(t, connectErr.Message(), "invalid cron expression")
 
-	// 3. Cron task with valid cron syntax must succeed and calculate NextRun
+	// 3. Cron task with valid syntax but no future occurrence must fail.
+	_, err = svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+		ServerId: server.ID,
+		Name:     "impossible-cron-task",
+		Schedule: v1.ScheduleType_SCHEDULE_TYPE_CRON,
+		CronExpr: "0 3 31 2 *",
+		TaskType: v1.TaskType_TASK_TYPE_BACKUP,
+	}))
+	require.Error(t, err)
+	connectErr, ok = err.(*connect.Error)
+	require.True(t, ok)
+	assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	assert.Contains(t, connectErr.Message(), "no future occurrence")
+
+	// 4. Cron task with valid cron syntax must succeed and calculate NextRun
 	res, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
 		ServerId: server.ID,
 		Name:     "valid-cron-task",

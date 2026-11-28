@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
 	"github.com/robfig/cron/v3"
 
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/command"
 	appconfig "github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
@@ -43,6 +45,32 @@ import (
 // ErrTaskAlreadyRunning is returned when a manual trigger races an
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
+
+// errInvalidTaskSchedule distinguishes an invalid schedule definition from a
+// transient failure while persisting a valid schedule. Only the former may
+// disable a task.
+var errInvalidTaskSchedule = errors.New("invalid task schedule")
+
+// ModUpdatePlanner stages reviewed compatible releases. The concrete owner
+// lives in the RPC service layer; the scheduler keeps only this interface so
+// manual and scheduled updates use one operation without an import cycle or a
+// process-global provider. A nil planner fails closed.
+type ModUpdatePlanner interface {
+	StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (staged int, refused int, reasons []string, err error)
+}
+
+// maxAutomaticModUpdatesPerRun bounds a single policy run. The value is also
+// used as an allocation capacity in the planner, so an oversized persisted
+// config must never reach it unchecked.
+const maxAutomaticModUpdatesPerRun = 50
+
+// DefaultModUpdatesPerRun is the budget used when a policy omits its limit.
+const DefaultModUpdatesPerRun = 10
+
+type modUpdateRunBudget struct {
+	staged    int
+	exhausted bool
+}
 
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
@@ -63,6 +91,12 @@ type Scheduler struct {
 	// Execution tracking
 	runningExecutions map[string]context.CancelFunc // executionID -> cancel func
 	executionMu       sync.RWMutex
+	// A claimed execution exists in storage before its worker registers a
+	// cancel function. pendingExecutions closes that handoff window;
+	// pendingCancellations records a cancel that arrived first so the worker
+	// can refuse to start instead of overwriting a cancelled outcome.
+	pendingExecutions    map[string]bool
+	pendingCancellations map[string]bool
 
 	// In-flight task tracking to prevent double-dispatching
 	runningTasks   map[string]bool // taskID -> bool
@@ -70,6 +104,10 @@ type Scheduler struct {
 
 	// Cron parser
 	cronParser cron.Parser
+
+	// now supplies the scheduler clock. Nil means time.Now; tests replace it so
+	// repeated cron advances are deterministic.
+	now func() time.Time
 
 	// Stats
 	lastCheck time.Time
@@ -100,6 +138,15 @@ type Scheduler struct {
 	// root so scheduled and RPC starts contend on the same node key. Nil fails
 	// closed at the acquire helper.
 	admission *serverruntime.AdmissionCoordinator
+
+	// modUpdatePlanner is injected at composition root. It is the same planner
+	// the manual review-and-apply RPC uses, so a schedule cannot fork policy.
+	modUpdatePlanner ModUpdatePlanner
+}
+
+// SetModUpdatePlanner supplies the shared manual/scheduled mod update planner.
+func (s *Scheduler) SetModUpdatePlanner(planner ModUpdatePlanner) {
+	s.modUpdatePlanner = planner
 }
 
 // Config holds scheduler configuration
@@ -146,20 +193,23 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 	}
 
 	return &Scheduler{
-		store:             store,
-		docker:            docker,
-		sender:            sender,
-		appConfig:         appCfg,
-		metrics:           metricsCollector,
-		log:               log,
-		checkInterval:     cfg.CheckInterval,
-		stopChan:          make(chan struct{}),
-		runningExecutions: make(map[string]context.CancelFunc),
-		runningTasks:      make(map[string]bool),
-		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
-		snapshotEngine:    snapEngine,
-		admission:         admission,
-		storageResolver:   cfg.StorageResolver,
+		store:                store,
+		docker:               docker,
+		sender:               sender,
+		appConfig:            appCfg,
+		metrics:              metricsCollector,
+		log:                  log,
+		checkInterval:        cfg.CheckInterval,
+		stopChan:             make(chan struct{}),
+		runningExecutions:    make(map[string]context.CancelFunc),
+		pendingExecutions:    make(map[string]bool),
+		pendingCancellations: make(map[string]bool),
+		runningTasks:         make(map[string]bool),
+		cronParser:           cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		now:                  time.Now,
+		snapshotEngine:       snapEngine,
+		admission:            admission,
+		storageResolver:      cfg.StorageResolver,
 	}
 }
 
@@ -386,17 +436,76 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			continue
 		}
 
-		// Update next run time immediately to prevent re-querying from DB if check runs again before task finishes
-		s.updateNextRun(task)
+		// Advance the schedule before dispatch. If it cannot be advanced the
+		// task must not run: a still-due row would otherwise be claimed again
+		// on every tick. Disable it with the reason in the log.
+		//
+		// Every due mod policy, including recurring cron and interval slots,
+		// records its execution in the same durable write as the slot claim. An
+		// interruption before the async dispatch then leaves a recoverable
+		// running record instead of a silently consumed slot, and a failed
+		// insert leaves the slot due. An event-driven policy has no due slot.
+		var claim *storage.TaskExecution
+		if task.TaskType == storage.TaskTypeModUpdate && task.Schedule != storage.ScheduleTypeEvent {
+			claim = newScheduledExecution(task, time.Now())
+			// The row becomes running inside updateNextRun. Register the
+			// handoff before that write so CancelExecution can find it even
+			// before the asynchronous worker starts.
+			s.registerPendingExecution(claim.ID)
+		}
+		if err := s.updateNextRun(task, claim); err != nil {
+			switch {
+			case errors.Is(err, storage.ErrModUpdateScheduleChanged):
+				s.log.Debug("Task %s: schedule changed while claiming its due slot", task.Name)
+			case errors.Is(err, errInvalidTaskSchedule):
+				s.log.Error("Task %s: invalid schedule, refusing dispatch: %v", task.Name, err)
+				var dbErr error
+				if task.TaskType == storage.TaskTypeModUpdate {
+					dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
+				} else {
+					dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+						Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
+				}
+				if dbErr != nil {
+					s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+				}
+			default:
+				s.log.Error("Task %s: cannot persist schedule, leaving it due: %v", task.Name, err)
+			}
+			if claim != nil {
+				s.forgetPendingExecution(claim.ID)
+			}
+			s.releaseTask(task.ID)
+			continue
+		}
+
+		// A policy edit may win immediately after the atomic slot claim. Read
+		// the current revision before planning and refuse the stale snapshot.
+		if task.TaskType == storage.TaskTypeModUpdate {
+			claimedTask, err := s.revalidateModUpdateClaim(ctx, task)
+			if err != nil {
+				s.log.Error("Task %s: mod update policy changed after claiming its due slot, refusing dispatch: %v", task.Name, err)
+				if claim != nil {
+					s.failClaimedExecution(ctx, claim, "mod update policy changed after claiming its due slot; the stale policy was not dispatched")
+					s.forgetPendingExecution(claim.ID)
+				}
+				s.releaseTask(task.ID)
+				continue
+			}
+			task = claimedTask
+		}
 
 		// Execute task asynchronously
 		s.wg.Add(1)
-		go func(t *storage.ScheduledTask) {
+		go func(t *storage.ScheduledTask, claimed *storage.TaskExecution) {
 			defer s.wg.Done()
 			defer s.releaseTask(t.ID)
+			if claimed != nil {
+				defer s.forgetPendingExecution(claimed.ID)
+			}
 			// A scheduled run is owned by the scheduler, not by any caller.
-			_, _ = s.executeTask(context.Background(), t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
-		}(task)
+			_, _ = s.executeTask(context.Background(), t, "scheduled", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, claimed)
+		}(task, claim)
 	}
 }
 
@@ -450,7 +559,7 @@ func (s *Scheduler) TriggerTask(ctx context.Context, taskID string) (*storage.Ta
 
 	// Thread the caller context so an RPC cancel (or client disconnect)
 	// actually interrupts the task instead of the work outliving the request.
-	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, nil)
 	return execution, err
 }
 
@@ -506,25 +615,37 @@ func (s *Scheduler) HandleServerEvent(ctx context.Context, event events.Event) {
 // type is threaded through to webhook executors so the rendered payload
 // reflects which event triggered the delivery.
 func (s *Scheduler) executeTaskForEvent(ctx context.Context, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) {
-	_, _ = s.executeTask(ctx, task, "event", eventType, eventData)
+	_, _ = s.executeTask(ctx, task, "event", eventType, eventData, nil)
 }
 
 // executeTask runs a single task. eventTrigger names the event that drove an
-// event-triggered run (empty for scheduled/manual runs).
-func (s *Scheduler) executeTask(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any) (*storage.TaskExecution, error) {
-	return s.executeTaskAtDepth(ctx, task, trigger, eventType, eventData, 0)
+// event-triggered run (empty for scheduled/manual runs). claimed is the durable
+// execution recorded with a scheduled slot claim; nil means this call records
+// its own execution.
+func (s *Scheduler) executeTask(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, claimed *storage.TaskExecution) (*storage.TaskExecution, error) {
+	return s.executeTaskAtDepth(ctx, task, trigger, eventType, eventData, 0, claimed)
 }
 
 // maxChainDepth caps reaction-chain nesting (MINE-142).
 const maxChainDepth = 4
 
-func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, depth int) (*storage.TaskExecution, error) {
+func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.ScheduledTask, trigger string, eventType v1.TriggeredEventType, eventData map[string]any, depth int, claimed *storage.TaskExecution) (*storage.TaskExecution, error) {
+	if claimed != nil {
+		// Direct callers and tests may reach executeTask without the dispatch
+		// registration; make the handoff visible before the first terminal
+		// write can be considered.
+		s.registerPendingExecution(claimed.ID)
+		defer s.forgetPendingExecution(claimed.ID)
+	}
 
 	// Check if server exists
 	server, err := s.store.GetServer(ctx, task.ServerID)
 	if err != nil {
 		s.log.Error("Task %s: server not found: %v", task.Name, err)
-		return nil, err
+		if claimed != nil {
+			s.failClaimedExecution(ctx, claimed, "task execution could not start: server lookup failed")
+		}
+		return claimed, err
 	}
 
 	// Check if server is online (if required). Webhook tasks always fire â€”
@@ -534,18 +655,38 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		s.log.Debug("Task %s: skipped (server offline)", task.Name)
 
 		// Create skipped execution record
-		execution := &storage.TaskExecution{
-			ID:        uuid.New().String(),
-			TaskID:    task.ID,
-			ServerID:  task.ServerID,
-			Status:    storage.ExecutionStatusSkipped,
-			StartedAt: time.Now(),
-			Trigger:   trigger,
-			Error:     "server offline",
+		execution := claimed
+		if execution == nil {
+			now := time.Now()
+			execution = &storage.TaskExecution{
+				ID:        uuid.New().String(),
+				TaskID:    task.ID,
+				ServerID:  task.ServerID,
+				Status:    storage.ExecutionStatusSkipped,
+				StartedAt: now,
+				EndedAt:   &now,
+				Trigger:   trigger,
+				Error:     "server offline",
+			}
+			if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
+				s.log.Error("Task %s: failed to record skipped execution: %v", task.Name, err)
+			}
+		} else {
+			// The claim is still running. A cancellation may have won the
+			// handoff and storage may be transiently unavailable, so use the
+			// guarded, bounded terminal write instead of an unconditional save:
+			// it keeps a cancellation and never leaves the claim running.
+			if cancelled := s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusSkipped, "server offline"); cancelled {
+				// The cancellation won the handoff. Keep the cancelled outcome
+				// and do not start child steps the operator cancelled.
+				if trigger != "scheduled" {
+					if err := s.updateNextRun(task, nil); err != nil {
+						s.log.Error("Task %s: failed to advance schedule after cancelled skip: %v", task.Name, err)
+					}
+				}
+				return execution, nil
+			}
 		}
-		now := time.Now()
-		execution.EndedAt = &now
-		s.store.CreateTaskExecution(ctx, execution)
 
 		// Skipped steps still fan out to children (each child applies its
 		// own online gate), so chains degrade to per-step skip records.
@@ -556,23 +697,31 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Update next run time if not already updated at dispatch
 		if trigger != "scheduled" {
-			s.updateNextRun(task)
+			if err := s.updateNextRun(task, nil); err != nil {
+				s.log.Error("Task %s: failed to advance schedule after skip: %v", task.Name, err)
+			}
 		}
 		return execution, nil
 	}
 
 	// Create execution record
-	execution := &storage.TaskExecution{
-		ID:        uuid.New().String(),
-		TaskID:    task.ID,
-		ServerID:  task.ServerID,
-		Status:    storage.ExecutionStatusRunning,
-		StartedAt: time.Now(),
-		Trigger:   trigger,
-	}
-	if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
-		s.log.Error("Task %s: failed to create execution record: %v", task.Name, err)
-		return nil, err
+	execution := claimed
+	if execution == nil {
+		execution = &storage.TaskExecution{
+			ID:        uuid.New().String(),
+			TaskID:    task.ID,
+			ServerID:  task.ServerID,
+			Status:    storage.ExecutionStatusRunning,
+			StartedAt: time.Now(),
+			Trigger:   trigger,
+		}
+		// Register the handoff before the row becomes visible in storage.
+		s.registerPendingExecution(execution.ID)
+		if err := s.store.CreateTaskExecution(ctx, execution); err != nil {
+			s.forgetPendingExecution(execution.ID)
+			s.log.Error("Task %s: failed to create execution record: %v", task.Name, err)
+			return nil, err
+		}
 	}
 
 	// Create cancellable context with timeout
@@ -582,10 +731,20 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	// Track running execution
-	s.executionMu.Lock()
-	s.runningExecutions[execution.ID] = cancel
-	s.executionMu.Unlock()
+	// Activate the worker exactly once. A cancellation that arrived while the
+	// claimed row was visible but no worker was registered wins here: do not
+	// invoke the planner and keep the cancelled outcome.
+	if !s.activateExecution(execution.ID, cancel) {
+		cancel()
+		now := time.Now()
+		execution.Status = storage.ExecutionStatusCancelled
+		execution.Error = "execution cancelled"
+		execution.EndedAt = &now
+		execution.Duration = now.Sub(execution.StartedAt).Milliseconds()
+		s.persistTerminalExecution(ctx, execution)
+		s.log.Info("Task %s: cancelled before execution started", task.Name)
+		return execution, context.Canceled
+	}
 
 	defer func() {
 		cancel()
@@ -606,9 +765,16 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		retries = 0
 	}
 
+	var modBudget modUpdateRunBudget
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
-		if execErr == nil || attempt >= retries || execCtx.Err() != nil {
+		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData, &modBudget)
+		// A staged-batch conflict is an admission refusal owned by another
+		// lifecycle operation, not a transient planner failure; retrying the
+		// same slot would only repeat it.
+		if errors.Is(execErr, storage.ErrUpdateBatchConflict) {
+			break
+		}
+		if execErr == nil || attempt >= retries || execCtx.Err() != nil || modBudget.exhausted {
 			break
 		}
 
@@ -657,7 +823,7 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		s.log.Info("Task %s: completed successfully", task.Name)
 	}
 
-	s.store.UpdateTaskExecution(ctx, execution)
+	s.persistTerminalExecution(ctx, execution)
 
 	// Reaction chain (MINE-142): run enabled children in step order when the
 	// parent succeeded, or when it failed but allows continuation. A child
@@ -671,7 +837,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 	// Update next run time if not already updated at dispatch
 	if trigger != "scheduled" {
-		s.updateNextRun(task)
+		if err := s.updateNextRun(task, nil); err != nil {
+			s.log.Error("Task %s: failed to advance schedule after execution: %v", task.Name, err)
+		}
 	}
 
 	return execution, execErr
@@ -700,7 +868,7 @@ func (s *Scheduler) runChildChain(ctx context.Context, parent *storage.Scheduled
 			case <-timer.C:
 			}
 		}
-		_, childErr := s.executeTaskAtDepth(ctx, child, trigger, eventType, eventData, depth+1)
+		_, childErr := s.executeTaskAtDepth(ctx, child, trigger, eventType, eventData, depth+1, nil)
 		if childErr != nil && !child.ContinueOnFailure {
 			s.log.Warn("Task %s: chain aborted at step %s: %v", parent.Name, child.Name, childErr)
 			return child.Name, nil
@@ -721,13 +889,18 @@ func (s *Scheduler) recordChainStop(ctx context.Context, execution *storage.Task
 		execution.Output += "\n"
 	}
 	execution.Output += note
-	if err := s.store.UpdateTaskExecution(ctx, execution); err != nil {
+	// Chain-stop bookkeeping is not an outcome. Write only the output column so
+	// a terminal status, error or end time owned by a cancellation or another
+	// writer is never overwritten.
+	if updated, err := s.store.UpdateTaskExecutionOutput(ctx, execution.ID, execution.Output); err != nil {
 		s.log.Error("Task execution %s: failed to record chain stop: %v", execution.ID, err)
+	} else if !updated {
+		s.log.Debug("Task execution %s: chain stop was not recorded on a missing row", execution.ID)
 	}
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any, modBudget *modUpdateRunBudget) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -745,6 +918,8 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 		return s.executeWebhookTask(ctx, server, task, eventType, eventData)
 	case storage.TaskTypeModpackUpdate:
 		return s.executeModpackUpdateTask(ctx, server, task)
+	case storage.TaskTypeModUpdate:
+		return s.executeModUpdateTask(ctx, server, task, modBudget)
 	case storage.TaskTypeChunkyPregen:
 		return s.executeChunkyPregen(ctx, server, task)
 	default:
@@ -752,16 +927,73 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	}
 }
 
+// registerPendingExecution records a claimed execution before its worker owns
+// a cancel function. It is idempotent and never clears a cancellation that
+// already won the handoff.
+func (s *Scheduler) registerPendingExecution(executionID string) {
+	if executionID == "" {
+		return
+	}
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+	if s.pendingExecutions == nil {
+		s.pendingExecutions = make(map[string]bool)
+	}
+	if _, active := s.runningExecutions[executionID]; !active {
+		s.pendingExecutions[executionID] = true
+	}
+}
+
+// forgetPendingExecution drops handoff bookkeeping after a worker starts or a
+// claim is abandoned. It does not touch an active worker.
+func (s *Scheduler) forgetPendingExecution(executionID string) {
+	if executionID == "" {
+		return
+	}
+	s.executionMu.Lock()
+	delete(s.pendingExecutions, executionID)
+	delete(s.pendingCancellations, executionID)
+	s.executionMu.Unlock()
+}
+
+// activateExecution makes a worker the owner of its execution. It returns
+// false when a cancellation won the handoff, in which case the worker must not
+// invoke the task planner.
+func (s *Scheduler) activateExecution(executionID string, cancel context.CancelFunc) bool {
+	s.executionMu.Lock()
+	defer s.executionMu.Unlock()
+	delete(s.pendingExecutions, executionID)
+	if s.pendingCancellations[executionID] {
+		delete(s.pendingCancellations, executionID)
+		return false
+	}
+	if s.runningExecutions == nil {
+		s.runningExecutions = make(map[string]context.CancelFunc)
+	}
+	s.runningExecutions[executionID] = cancel
+	return true
+}
+
 // CancelExecution cancels a running execution
 func (s *Scheduler) CancelExecution(executionID string) error {
-	s.executionMu.RLock()
-	cancel, exists := s.runningExecutions[executionID]
-	s.executionMu.RUnlock()
-
-	if exists {
+	s.executionMu.Lock()
+	if cancel, exists := s.runningExecutions[executionID]; exists {
+		s.executionMu.Unlock()
 		cancel()
 		return nil
 	}
+	if s.pendingExecutions[executionID] {
+		// The worker has not activated yet. Record the intent and let it
+		// observe the cancellation at the handoff instead of writing a
+		// terminal state the worker could later overwrite.
+		if s.pendingCancellations == nil {
+			s.pendingCancellations = make(map[string]bool)
+		}
+		s.pendingCancellations[executionID] = true
+		s.executionMu.Unlock()
+		return nil
+	}
+	s.executionMu.Unlock()
 
 	// If not running in active memory, check if it was left orphaned in storage
 	if s.store != nil {
@@ -777,8 +1009,21 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 			} else {
 				exec.Duration = now.Sub(exec.StartedAt).Milliseconds()
 			}
-			if updateErr := s.store.UpdateTaskExecution(ctx, exec); updateErr != nil {
+			// The row was running when it was read, but an active worker may
+			// have finished it since. Only cancel while it is still running so
+			// this orphan path never overwrites someone else's outcome.
+			updated, updateErr := s.store.UpdateTaskExecutionIfRunning(ctx, exec)
+			if updateErr != nil {
 				return fmt.Errorf("failed to cancel orphaned execution: %w", updateErr)
+			}
+			if !updated {
+				current, getErr := s.store.GetTaskExecution(ctx, executionID)
+				if getErr != nil || current == nil {
+					s.log.Warn("Task execution %s: cancellation found no running row to update: %v", executionID, getErr)
+				} else {
+					s.log.Info("Task execution %s: cancellation kept the existing %s outcome", executionID, current.Status)
+				}
+				return fmt.Errorf("execution not found or already finished")
 			}
 			return nil
 		}
@@ -787,36 +1032,166 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return fmt.Errorf("execution not found or already finished")
 }
 
-// updateNextRun calculates and updates the next run time for a task
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
+// newScheduledExecution builds the execution record that a scheduled dispatch
+// records with its due-slot claim. The row is inserted in the same transaction
+// as the claim, so it exists before asynchronous dispatch starts.
+func newScheduledExecution(task *storage.ScheduledTask, now time.Time) *storage.TaskExecution {
+	return &storage.TaskExecution{
+		ID:        uuid.New().String(),
+		TaskID:    task.ID,
+		ServerID:  task.ServerID,
+		Status:    storage.ExecutionStatusRunning,
+		StartedAt: now,
+		Trigger:   "scheduled",
+	}
+}
+
+// persistTerminalExecution writes an outcome only while the durable row is
+// still running. A cancel that won the handoff keeps its cancelled outcome.
+// The write has its own bounded context because a manual run's RPC context can
+// be cancelled after the client disconnects while the row still needs its
+// terminal outcome.
+func (s *Scheduler) persistTerminalExecution(ctx context.Context, execution *storage.TaskExecution) {
+	if execution == nil {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	updated, err := s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
+	if err != nil {
+		s.log.Error("Task execution %s: failed to record outcome: %v", execution.ID, err)
+		return
+	}
+	if !updated {
+		s.log.Debug("Task execution %s: kept an outcome written by a cancellation", execution.ID)
+	}
+}
+
+// failClaimedExecution records a terminal failure for a slot claim that was
+// refused or could not start, so the consumed slot is never silent and no
+// execution stays stuck in running until the next process start.
+func (s *Scheduler) failClaimedExecution(ctx context.Context, execution *storage.TaskExecution, reason string) {
+	s.persistClaimedOutcome(ctx, execution, storage.ExecutionStatusFailed, reason)
+}
+
+// persistClaimedOutcome writes a terminal outcome for a claimed execution and
+// reports whether a pending cancellation won the handoff. A cancellation that
+// won is kept instead of the requested status. The write has its own bounded
+// context so caller cancellation cannot abandon the claim, and it retries
+// briefly because storage may recover during the retry window. It is guarded on
+// the row still running, so a late write cannot overwrite an outcome another
+// writer already recorded.
+func (s *Scheduler) persistClaimedOutcome(ctx context.Context, execution *storage.TaskExecution, status storage.ExecutionStatus, reason string) bool {
+	if execution == nil {
+		return false
+	}
+	s.executionMu.Lock()
+	cancelled := s.pendingCancellations[execution.ID]
+	if cancelled {
+		delete(s.pendingCancellations, execution.ID)
+	}
+	s.executionMu.Unlock()
+
+	now := time.Now()
+	if cancelled {
+		execution.Status = storage.ExecutionStatusCancelled
+		execution.Error = "execution cancelled"
+	} else {
+		execution.Status = status
+		execution.Error = reason
+	}
+	execution.EndedAt = &now
+	execution.Duration = now.Sub(execution.StartedAt).Milliseconds()
+
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		updated, err := s.store.UpdateTaskExecutionIfRunning(writeCtx, execution)
+		if err == nil {
+			if !updated {
+				s.log.Debug("Task execution %s: kept an outcome written by a cancellation", execution.ID)
+			}
+			return cancelled
+		}
+		lastErr = err
+		if writeCtx.Err() != nil {
+			break
+		}
+		s.log.Warn("Task execution %s: terminal write failed (attempt %d), retrying: %v", execution.ID, attempt+1, lastErr)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-writeCtx.Done():
+			timer.Stop()
+		}
+	}
+	s.log.Error("Task execution %s: failed to record outcome after retries: %v", execution.ID, lastErr)
+	return cancelled
+}
+
+// updateNextRun calculates and updates the next run time for a task. It uses
+// CalculateNextRun so dispatch and explicit recalculation honor the same
+// per-task timezone and cannot drift apart. claimed, when non-nil, is recorded
+// in the same durable write as a mod-update slot claim.
+func (s *Scheduler) updateNextRun(task *storage.ScheduledTask, claimed *storage.TaskExecution) error {
 	ctx := context.Background()
 	now := time.Now()
-	var nextRun *time.Time
-
-	switch task.Schedule {
-	case storage.ScheduleTypeCron:
-		if task.CronExpr != "" {
-			schedule, err := s.cronParser.Parse(task.CronExpr)
-			if err == nil {
-				next := schedule.Next(now)
-				nextRun = &next
-			}
+	advance := func(nextRun *time.Time, persistStatus storage.TaskStatus) error {
+		if task.TaskType == storage.TaskTypeModUpdate {
+			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now, persistStatus, claimed)
 		}
-	case storage.ScheduleTypeInterval:
-		if task.IntervalSecs > 0 {
-			next := now.Add(time.Duration(task.IntervalSecs) * time.Second)
-			nextRun = &next
-		}
-	case storage.ScheduleTypeOnce:
-		// Once tasks don't repeat, disable after execution
-		task.Status = storage.TaskStatusDisabled
-		nextRun = nil
-	case storage.ScheduleTypeEvent:
-		// Event-triggered tasks have no time-based next run.
-		nextRun = nil
+		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
+	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
+		persistStatus := storage.TaskStatus("")
+		if task.Schedule == storage.ScheduleTypeOnce {
+			persistStatus = storage.TaskStatusDisabled
+		}
+		if err := advance(nil, persistStatus); err != nil {
+			return fmt.Errorf("clear next run: %w", err)
+		}
+		if task.Schedule == storage.ScheduleTypeOnce {
+			// The one-shot slot and its terminal status are claimed in one
+			// guarded write. Keep the in-memory claim equal to the persisted
+			// state so the dispatch observes one consistent state.
+			task.Status = storage.TaskStatusDisabled
+			task.NextRun = nil
+		}
+		return nil
+	}
+	nextRun, err := s.CalculateNextRun(task)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errInvalidTaskSchedule, err)
+	}
+	if err := advance(nextRun, ""); err != nil {
+		return fmt.Errorf("store next run: %w", err)
+	}
+	return nil
+}
 
-	s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+// revalidateModUpdateClaim reads the policy revision after the slot claim.
+// An edit that commits between the claim and this read fails closed instead
+// of reaching the planner with the stale snapshot.
+func (s *Scheduler) revalidateModUpdateClaim(ctx context.Context, claimed *storage.ScheduledTask) (*storage.ScheduledTask, error) {
+	current, err := s.store.GetScheduledTask(ctx, claimed.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.TaskType != claimed.TaskType || current.Status != claimed.Status || current.Config != claimed.Config || !sameScheduledTaskTiming(current, claimed) {
+		return nil, fmt.Errorf("%w: policy revision changed", storage.ErrModUpdateScheduleChanged)
+	}
+	return current, nil
+}
+
+func sameScheduledTaskTiming(a, b *storage.ScheduledTask) bool {
+	if a.Schedule != b.Schedule || a.CronExpr != b.CronExpr || a.Timezone != b.Timezone || a.IntervalSecs != b.IntervalSecs {
+		return false
+	}
+	if a.RunAt == nil || b.RunAt == nil {
+		return a.RunAt == nil && b.RunAt == nil
+	}
+	return a.RunAt.Equal(*b.RunAt)
 }
 
 // Task type executors
@@ -1059,51 +1434,82 @@ func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage
 	})
 }
 
-type stagedLifecycleStore interface {
-	stagedConfigStore
-	GetServerConfig(ctx context.Context, serverID string) (*storage.ServerConfig, error)
-	GetGlobalSettings(ctx context.Context) (*storage.ServerConfig, bool, error)
-	UpdateServer(ctx context.Context, server *storage.Server) error
-	ClearEphemeralConfigFields(ctx context.Context, serverID string) error
-}
-
 type stagedLifecycleDocker interface {
 	RecreateContainer(ctx context.Context, oldContainerID string, server *storage.Server, serverConfig *storage.ServerConfig) (*docker.RecreateContainerResult, error)
 	StartContainer(ctx context.Context, containerID string) error
+	ResolveContainer(ctx context.Context, serverID string) (*container.Summary, error)
 }
 
 // recreateForPendingStagedConfig ensures scheduled lifecycle operations cannot
 // start an old container and advance LastStarted past an applied on-restart
 // change. A replacement ID is persisted even when Docker reports a partial
 // recreate failure, allowing the next attempt to recover from the right object.
-func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
+func recreateForPendingStagedConfig(ctx context.Context, store *storage.Store, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
+	return prepareStagedLifecycle(ctx, store, dockerClient, log, server, startReplacement, markStarted, recreateModule, nil, resolvers...)
+}
+
+func prepareStagedLifecycle(ctx context.Context, store *storage.Store, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, transfer func(*staging.RestartPublication), resolvers ...*nodestorage.Resolver) (handled bool, retErr error) {
 	var resolver *nodestorage.Resolver
 	if len(resolvers) > 0 {
 		resolver = resolvers[0]
 	}
-	undoFiles := func() {}
-	contentReady := false
-	if concrete, ok := store.(*storage.Store); ok {
-		undo, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
-		if fileErr != nil {
-			return true, fmt.Errorf("failed to apply staged content: %w", fileErr)
-		}
-		if undo != nil {
-			undoFiles = undo
-			contentReady = true
-		}
-	}
-	appliedRecords, err := ApplyOnRestartStagedConfigRecords(ctx, store, server.ID)
+	publication := &staging.RestartPublication{}
+	commit, err := staging.CommitNextRestartFiles(ctx, store, server, recreateModule, resolver)
 	if err != nil {
-		undoFiles()
+		return true, fmt.Errorf("failed to apply staged content: %w", err)
+	}
+	publication.Commit = commit
+	defer func() {
+		if retErr == nil && handled && transfer != nil {
+			transfer(publication)
+			return
+		}
+		if finishErr := publication.Resolve(ctx, store, retErr); finishErr != nil {
+			handled = true
+			retErr = errors.Join(retErr, finishErr)
+		}
+	}()
+	appliedRecords, err := publication.Commit.ApplyConfigs(ctx, store)
+	publication.Configs = appliedRecords
+	if err != nil {
 		return true, fmt.Errorf("failed to apply staged server configuration: %w", err)
 	}
+	appliedNow := publication.Commit.AppliedConfigsThisAttempt()
 	pending, err := HasPendingRestartStagedConfigRecreate(ctx, store, server.ID, server.LastStarted)
 	if err != nil {
-		undoFiles()
 		return true, fmt.Errorf("failed to check staged configuration recovery: %w", err)
 	}
-	if len(appliedRecords) == 0 && !pending && !contentReady {
+	// An acknowledged publication only owes cleanup. It must not recreate the
+	// container again; the caller's normal start/wake proceeds on the current
+	// replacement and the deferred Resolve finishes the batch.
+	needsPublication := publication.Commit.NeedsRuntimePublication()
+	// An unverified dispatch is pending work even when it owes no runtime
+	// publication: a file-only batch records the dispatch without needing a new
+	// container. Returning "no work" here would skip the identity check, and the
+	// deferred Resolve would then reject the dispatch and block the wake.
+	needsIdentityVerification := publication.Commit.NeedsIdentityVerification()
+	if appliedNow == 0 && !pending && !needsPublication && !needsIdentityVerification {
+		return false, nil
+	}
+	if needsIdentityVerification {
+		// A dispatch intent is durable but its outcome was not verified. Repair
+		// the tracked identity if the canonical container differs, then accept
+		// only the exact replacement identity captured at creation. Discovery of
+		// any other container is identity repair, never publication evidence.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, store, dockerClient, server); reconcileErr != nil {
+			return true, errors.Join(publication.Commit.Retain(ctx), reconcileErr)
+		}
+		verified, verifyErr := publication.Commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return true, verifyErr
+		}
+		if !verified {
+			return true, errors.Join(publication.Commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, publication.Commit.ExpectedReplacementID()))
+		}
+		// The runtime is verified. Let the caller's normal lifecycle operate on
+		// that container; this attempt owes cleanup, not another replacement.
+		publication.RuntimeAccepted = true
 		return false, nil
 	}
 
@@ -1116,43 +1522,46 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	}
 	serverruntime.PrepareConfig(ctx, store, server, serverConfig)
 
+	if err := publication.BeginDispatch(ctx); err != nil {
+		return true, fmt.Errorf("failed to record staged publication dispatch: %w", err)
+	}
+	publication.RuntimeAttempted = true
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
 	if recreateErr != nil {
 		var outcomeErr *serverruntime.RecreationError
-		if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
+		if errors.As(recreateErr, &outcomeErr) {
+			if outcomeErr.Operation == nil {
+				publication.RuntimeIdentityUnresolved = true
+			}
+			// A typed preflight ended before any container mutation; the old
+			// container may still be running and that is not evidence about the
+			// failed replacement. Record the flag before any identity write.
+			publication.RuntimePreflight = outcomeErr.Preflight
+		}
+	}
+	if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+		if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+			return true, errors.Join(recordErr, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+		}
+	}
+	if recreateErr != nil {
+		if publication.RuntimeIdentityUnresolved {
 			// Docker already runs the applied spec. Preserve the pending marker
 			// for retry/reconciliation rather than roll back only the database.
 			return true, fmt.Errorf("replacement container created but ID could not be saved: %w", recreateErr)
-		}
-		undoFiles()
-		// Rollback newly applied staged configs on container recreate failure (SCH-1)
-		for _, rec := range appliedRecords {
-			if _, rbErr := store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil && log != nil {
-				log.Error("Failed to auto-rollback staged config %s after scheduled recreate error: %v", rec.ID, rbErr)
-			} else if log != nil {
-				log.Warn("Auto-rolled back staged config %s due to scheduled recreate failure on server %s", rec.ID, server.ID)
-			}
 		}
 		return true, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr)
 	}
 	if startReplacement && !result.WasRunning {
 		if err := serverruntime.Start(ctx, store, dockerClient, server); err != nil {
-			server.Status = storage.StatusError
-			_ = store.UpdateServer(ctx, server)
-			undoFiles()
-			for _, rec := range appliedRecords {
-				if _, rbErr := store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil && log != nil {
-					log.Error("Failed to auto-rollback staged config %s after scheduled start failure: %v", rec.ID, rbErr)
-				} else if log != nil {
-					log.Warn("Auto-rolled back staged config %s due to scheduled start failure on server %s", rec.ID, server.ID)
-				}
-			}
 			return true, fmt.Errorf("failed to start recreated server: %w", err)
 		}
 	}
-	if concrete, ok := store.(*storage.Store); ok {
-		_ = staging.FinishNextRestartBatch(ctx, concrete, server.ID)
-	}
+	// A reached-and-running replacement was positively observed. A stopped
+	// replacement created for a deep-sleep wake is acknowledged by the wake
+	// completion once its start is observed; a caller with no completion owner
+	// accepts the created replacement directly.
+	publication.RuntimeAccepted = startReplacement || result.WasRunning || transfer == nil
 	if err := store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
 		return true, fmt.Errorf("server restarted but temporary config could not be cleared: %w", err)
 	}
@@ -1162,29 +1571,51 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	server.Status = storage.StatusStarting
 	now := time.Now()
 	server.LastStarted = &now
-	if err := store.UpdateServer(ctx, server); err != nil {
+	if err := serverruntime.PersistStarted(ctx, store, server); err != nil {
 		return true, fmt.Errorf("server restarted but status could not be saved: %w", err)
 	}
 	return true, nil
 }
 
+// stagedWakeCompletion is the real DeepSleep wake completion callback. A
+// successful recreate already mutated the runtime, so a later start failure
+// must not erase that fact or the stopped replacement can outlive a config
+// rollback.
+func stagedWakeCompletion(ctx context.Context, store *storage.Store, p *staging.RestartPublication) docker.WakeCompletion {
+	return func(startAttempted bool, wakeErr error) error {
+		if startAttempted {
+			p.RuntimeAttempted = true
+		}
+		if wakeErr == nil {
+			// A nil wake error is a positive runtime observation: the
+			// replacement contains the batch and was started (or was already
+			// running). It may acknowledge the publication.
+			p.RuntimeAccepted = true
+		}
+		return p.Resolve(ctx, store, wakeErr)
+	}
+}
+
 // PrepareDeepSleepWake applies restart-only staged changes and replaces the
 // stopped container before DeepSleepManager starts it. The manager records
 // LastStarted only after Docker reports the replacement running.
-func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Server) error {
+func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Server) (docker.WakeCompletion, error) {
 	if server == nil || server.ID == "" {
-		return fmt.Errorf("server ID is required")
+		return nil, fmt.Errorf("server ID is required")
 	}
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
-		return err
+		return nil, err
 	}
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, s.storageResolver)
+	var complete docker.WakeCompletion
+	handled, err := prepareStagedLifecycle(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, func(p *staging.RestartPublication) {
+		complete = stagedWakeCompletion(ctx, s.store, p)
+	}, s.storageResolver)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !handled && dockerCli != nil {
 		needsCreate := server.ContainerID == ""
@@ -1196,26 +1627,26 @@ func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Se
 		if needsCreate {
 			if resolved, resolveErr := dockerCli.ResolveContainer(ctx, server.ID); resolveErr == nil && resolved != nil && resolved.ID != "" {
 				server.ContainerID = resolved.ID
-				if err := s.store.UpdateServer(ctx, server); err != nil {
-					return fmt.Errorf("resolved container for deep-sleep wake but ID could not be saved: %w", err)
+				if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
+					return nil, fmt.Errorf("resolved container for deep-sleep wake but ID could not be saved: %w", err)
 				}
 			} else {
 				serverConfig, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 				if cfgErr != nil || serverConfig == nil {
-					return fmt.Errorf("failed to get server configuration for deep-sleep wake container creation: %w", cfgErr)
+					return nil, fmt.Errorf("failed to get server configuration for deep-sleep wake container creation: %w", cfgErr)
 				}
 				containerID, createErr := dockerCli.CreateContainer(ctx, server, serverConfig)
 				if createErr != nil {
-					return fmt.Errorf("failed to create missing container during deep-sleep wake: %w", createErr)
+					return nil, fmt.Errorf("failed to create missing container during deep-sleep wake: %w", createErr)
 				}
 				server.ContainerID = containerID
-				if err := s.store.UpdateServer(ctx, server); err != nil {
-					return fmt.Errorf("created container for deep-sleep wake but ID could not be saved: %w", err)
+				if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
+					return nil, fmt.Errorf("created container for deep-sleep wake but ID could not be saved: %w", err)
 				}
 			}
 		}
 	}
-	return nil
+	return complete, nil
 }
 
 func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server, _ *storage.ScheduledTask) (string, error) {
@@ -1291,20 +1722,63 @@ func (s *Scheduler) executeScriptTask(ctx context.Context, server *storage.Serve
 	return dockerCli.Exec(ctx, server.ContainerID, append(execCmd, config.Args...))
 }
 
+func (s *Scheduler) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// cronExprHasExplicitTimezone mirrors the shared cron parser: an expression
+// beginning with TZ= or CRON_TZ= carries its own location.
+func cronExprHasExplicitTimezone(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
+}
+
 // CalculateNextRun calculates the next run time for a task based on its schedule
 func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, error) {
-	now := time.Now()
+	now := s.currentTime()
 
 	switch task.Schedule {
 	case storage.ScheduleTypeCron:
 		if task.CronExpr == "" {
 			return nil, fmt.Errorf("cron expression required")
 		}
+		// Timezone applies only to cron slots. An interval or one-shot task
+		// must keep its absolute deadline even if a stale zone is configured.
+		// An explicit TZ=/CRON_TZ= prefix belongs to the expression and must not
+		// be overwritten by the task row's timezone.
+		var location *time.Location
+		if zone := strings.TrimSpace(task.Timezone); zone != "" && !cronExprHasExplicitTimezone(task.CronExpr) {
+			location = time.UTC
+			if !strings.EqualFold(zone, "UTC") {
+				loaded, err := time.LoadLocation(zone)
+				if err != nil {
+					return nil, fmt.Errorf("invalid timezone %q: %w", task.Timezone, err)
+				}
+				location = loaded
+			}
+		}
 		schedule, err := s.cronParser.Parse(task.CronExpr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
 		}
+		// The shared parser builds a spec schedule in the host zone. Rebind its
+		// location so five-field slots are interpreted in the operator's zone.
+		if location != nil {
+			if spec, ok := schedule.(*cron.SpecSchedule); ok {
+				zoneSpec := *spec
+				zoneSpec.Location = location
+				schedule = &zoneSpec
+			}
+		}
 		next := schedule.Next(now)
+		if next.IsZero() {
+			// A parseable but impossible expression (for example 31 February)
+			// has no future occurrence. Storing the zero value would make the
+			// task look overdue forever, so treat it as a calculation failure.
+			return nil, fmt.Errorf("cron expression has no future occurrence")
+		}
 		return &next, nil
 
 	case storage.ScheduleTypeInterval:
@@ -1401,6 +1875,81 @@ func webhookEventName(t v1.TriggeredEventType) string {
 	}
 }
 
+// ValidateModUpdateConfigJSON rejects a malformed policy before it is stored,
+// so a misconfigured schedule fails at create/update time rather than hours
+// later when the schedule first fires.
+func ValidateModUpdateConfigJSON(raw string) error {
+	_, err := ParseModUpdateConfigJSON(raw)
+	return err
+}
+
+// ParseModUpdateConfigJSON returns the validated policy used to create a task.
+func ParseModUpdateConfigJSON(raw string) (storage.ModUpdateTaskConfig, error) {
+	var cfg storage.ModUpdateTaskConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return cfg, fmt.Errorf("invalid mod update policy: %w", err)
+	}
+	return cfg, ValidateModUpdateConfig(cfg)
+}
+
+// ValidateModUpdateConfig checks a decoded policy at the execution boundary.
+func ValidateModUpdateConfig(cfg storage.ModUpdateTaskConfig) error {
+	if cfg.MaxUpdatesPerRun < 0 || cfg.MaxUpdatesPerRun > maxAutomaticModUpdatesPerRun {
+		return fmt.Errorf("max_updates_per_run must be between 0 and %d", maxAutomaticModUpdatesPerRun)
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Window)) {
+	case "", "next_restart":
+	case "idle":
+		if cfg.IdleMinutes <= 0 || cfg.IdleMinutes > 10080 {
+			return errors.New("idle_minutes must be between 1 and 10080 for the idle window")
+		}
+	default:
+		return fmt.Errorf("unknown apply window %q", cfg.Window)
+	}
+	return nil
+}
+
+// executeModUpdateTask runs an opt-in mod update policy through the shared
+// planner. It never publishes bytes itself: the existing journaled batch apply
+// remains the only path that writes the live mods directory.
+func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, budget *modUpdateRunBudget) (string, error) {
+	var cfg storage.ModUpdateTaskConfig
+	if task.Config != "" {
+		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
+			return "", fmt.Errorf("invalid mod update policy: %w", err)
+		}
+	}
+	if !cfg.Enabled {
+		return "mod update policy is disabled; nothing staged", nil
+	}
+	if err := ValidateModUpdateConfig(cfg); err != nil {
+		return "", fmt.Errorf("invalid mod update policy: %w", err)
+	}
+	if cfg.SkipWhenRunning && server.Status == storage.StatusRunning {
+		return "server is running; mod update policy skipped by running-server policy", nil
+	}
+	if s.modUpdatePlanner == nil {
+		return "", errors.New("mod update planner is not installed")
+	}
+	limit := cfg.MaxUpdatesPerRun
+	if limit == 0 {
+		limit = DefaultModUpdatesPerRun
+	}
+	cfg.MaxUpdatesPerRun = limit - budget.staged
+	staged, refused, reasons, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
+	budget.staged += staged
+	budget.exhausted = budget.staged >= limit
+	output := fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", budget.staged, refused)
+	if len(reasons) > 0 {
+		shown := reasons
+		if len(shown) > 3 {
+			shown = shown[:3]
+		}
+		output += "; reasons: " + strings.Join(shown, " | ")
+	}
+	return output, err
+}
+
 // ModpackUpdateTaskConfig matches the configuration for periodic modpack updates
 type ModpackUpdateTaskConfig struct {
 	GitURL                   string `json:"git_url"`
@@ -1416,6 +1965,85 @@ type ModpackUpdateTaskConfig struct {
 	AutoRollbackOnFailure    bool   `json:"auto_rollback_on_failure"` // Automatically rollback snapshot if restart/update fails
 	BootGateTimeoutSecs      int    `json:"boot_gate_timeout_secs"`   // SLP boot verification after restart; 0 disables (MINE-145)
 	AuthToken                string `json:"auth_token"`
+}
+
+// modpackPendingCommitFile records a fetched commit whose stage or sync has
+// not completed. The clone cache is reset to FETCH_HEAD before the tree is
+// staged, so HEAD already names the fetched commit when a later run starts.
+// Without this marker that run would compare HEAD with FETCH_HEAD, report "no
+// updates", and lose an update a refused stage never published.
+//
+// The live marker is a sibling of the clone cache, never inside it: a staging
+// pass or legacy sync may read the whole cache as pack content.
+const modpackPendingCommitFile = ".carbon-panel_pending_update"
+
+// removeModpackPendingCommit is replaceable in tests to prove a clear failure
+// is retried without staging a duplicate modpack row.
+var removeModpackPendingCommit = os.Remove
+
+func modpackPendingCommitPath(cacheDir string) string {
+	return cacheDir + modpackPendingCommitFile
+}
+
+func legacyModpackPendingCommitPath(cacheDir string) string {
+	return filepath.Join(cacheDir, modpackPendingCommitFile)
+}
+
+func readModpackPendingCommit(cacheDir string) string {
+	for _, name := range []string{modpackPendingCommitPath(cacheDir), legacyModpackPendingCommitPath(cacheDir)} {
+		body, err := os.ReadFile(name)
+		if err == nil {
+			return strings.TrimSpace(string(body))
+		}
+	}
+	return ""
+}
+
+// writeModpackPendingCommit records the fetched commit before the cache is
+// reset or staged. A write failure must stop the update rather than let the
+// fetched commit become invisible on the next run. The path is outside the
+// clone cache, so it can also be written before an initial clone starts.
+func writeModpackPendingCommit(cacheDir, commit string) error {
+	if commit == "" {
+		return nil
+	}
+	return os.WriteFile(modpackPendingCommitPath(cacheDir), []byte(commit+"\n"), 0o644)
+}
+
+// clearModpackPendingCommit removes both the current marker and a marker left
+// inside the clone cache by an older version. A failure is returned, not
+// ignored, so the next run can retry clearing and staging idempotently.
+func clearModpackPendingCommit(cacheDir string) error {
+	var failed error
+	for _, name := range []string{modpackPendingCommitPath(cacheDir), legacyModpackPendingCommitPath(cacheDir)} {
+		if err := removeModpackPendingCommit(name); err != nil && !os.IsNotExist(err) {
+			failed = errors.Join(failed, err)
+		}
+	}
+	return failed
+}
+
+// modpackStagedInOpenBatch reports whether this exact fetched commit already
+// has a staged modpack row. It makes a failed marker clear safe to retry: the
+// next run finishes the clear instead of staging the same commit twice.
+func (s *Scheduler) modpackStagedInOpenBatch(ctx context.Context, serverID, label string) (bool, error) {
+	batch, err := s.store.OpenUpdateBatch(ctx, serverID)
+	if err != nil {
+		return false, err
+	}
+	if batch == nil {
+		return false, nil
+	}
+	rows, err := s.store.ListBatchContent(ctx, batch.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.Kind == storage.StagedKindModpack && row.FileName == label {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // executeModpackUpdateTask handles cloning or fetching updates from Git/source, syncing into the server directory, and restarting if updates are applied
@@ -1470,6 +2098,12 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); os.IsNotExist(err) {
 		// Initial clone
 		_ = os.MkdirAll(cacheDir, 0755)
+		// Record that a clone is pending before it starts. A crash after the
+		// clone but before its commit is read must still be retried instead of
+		// leaving HEAD at the fetched commit with no marker.
+		if err := writeModpackPendingCommit(cacheDir, "initial-clone"); err != nil {
+			return "", fmt.Errorf("record the pending initial modpack clone for retry: %w", err)
+		}
 		s.log.Info("ModpackTask %s: Performing initial clone from %s (branch: %s)", task.Name, cfg.GitURL, branch)
 		if out, err := cloneFn(ctx, gitURL, branch, cacheDir); err != nil {
 			return string(out), fmt.Errorf("initial git clone failed: %w: %s", err, string(out))
@@ -1480,12 +2114,16 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		}
 		hasUpdates = true
 		updateSummary = fmt.Sprintf("Initial modpack clone successful from %s on branch %s", cfg.GitURL, branch)
+		if err := writeModpackPendingCommit(cacheDir, remoteHash); err != nil {
+			return "", fmt.Errorf("record the fetched modpack commit for retry: %w", err)
+		}
 	} else {
 		// Fetch and check if updates are available
 		if out, err := fetchFn(ctx, cacheDir, branch); err != nil {
 			return string(out), fmt.Errorf("git fetch failed: %w: %s", err, string(out))
 		}
 
+		pendingHash := readModpackPendingCommit(cacheDir)
 		cmdHead := exec.CommandContext(ctx, "git", "-C", cacheDir, "rev-parse", "HEAD")
 		headOut, _ := cmdHead.Output()
 		currentHash = strings.TrimSpace(string(headOut))
@@ -1494,12 +2132,16 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		remoteOut, _ := cmdRemote.Output()
 		remoteHash = strings.TrimSpace(string(remoteOut))
 
-		if currentHash == remoteHash && currentHash != "" {
+		// A pending marker means an earlier run fetched an update but its stage
+		// or sync did not complete. Treat it as an update even though the
+		// earlier reset already moved HEAD to the fetched commit.
+		retryingFetched := pendingHash != ""
+		if currentHash == remoteHash && currentHash != "" && !retryingFetched {
 			return fmt.Sprintf("Modpack is up to date at commit %s (no updates)", currentHash[:min(8, len(currentHash))]), nil
 		}
 
 		// Inspect changed files between current commit and new FETCH_HEAD
-		if currentHash != "" && remoteHash != "" {
+		if currentHash != "" && remoteHash != "" && currentHash != remoteHash {
 			cmdDiff := exec.CommandContext(ctx, "git", "-C", cacheDir, "diff", "--name-only", currentHash, remoteHash)
 			if diffOut, err := cmdDiff.Output(); err == nil {
 				for _, f := range strings.Split(string(diffOut), "\n") {
@@ -1511,6 +2153,12 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			}
 		}
 
+		// Persist the fetched commit before resetting HEAD. If the stage below
+		// is refused, the next run must still see this commit as unpublished.
+		if err := writeModpackPendingCommit(cacheDir, remoteHash); err != nil {
+			return "", fmt.Errorf("record the fetched modpack commit for retry: %w", err)
+		}
+
 		// Pull latest changes
 		cmdReset := exec.CommandContext(ctx, "git", "-C", cacheDir, "reset", "--hard", "FETCH_HEAD")
 		if out, err := cmdReset.CombinedOutput(); err != nil {
@@ -1518,9 +2166,13 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 		}
 
 		hasUpdates = true
-		updateSummary = fmt.Sprintf("Updated modpack from commit %s to %s",
-			currentHash[:min(8, len(currentHash))],
-			remoteHash[:min(8, len(remoteHash))])
+		if retryingFetched && currentHash == remoteHash {
+			updateSummary = fmt.Sprintf("Retrying previously fetched modpack commit %s", remoteHash[:min(8, len(remoteHash))])
+		} else {
+			updateSummary = fmt.Sprintf("Updated modpack from commit %s to %s",
+				currentHash[:min(8, len(currentHash))],
+				remoteHash[:min(8, len(remoteHash))])
+		}
 	}
 
 	if hasUpdates {
@@ -1533,8 +2185,20 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			if remoteHash != "" {
 				label = "modpack " + remoteHash[:min(8, len(remoteHash))]
 			}
-			if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
-				return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
+			// A previous attempt may have staged this exact fetched commit but
+			// failed to clear its marker. Do not append a second modpack row for
+			// one commit; finish the clear and report the existing stage.
+			alreadyStaged, err := s.modpackStagedInOpenBatch(ctx, server.ID, label)
+			if err != nil {
+				return updateSummary, err
+			}
+			if !alreadyStaged {
+				if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
+					return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
+				}
+			}
+			if err := clearModpackPendingCommit(cacheDir); err != nil {
+				return updateSummary + "; staged into the open batch", fmt.Errorf("staged modpack but could not clear the pending update marker; retry to clear it: %w", err)
 			}
 			return updateSummary + "; staged into the open batch", nil
 		}
@@ -1585,6 +2249,9 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 				_ = s.snapshotEngine.Rollback(ctx, server, createdSnapshot.ID)
 			}
 			return out, syncErr
+		}
+		if err := clearModpackPendingCommit(cacheDir); err != nil {
+			return fmt.Sprintf("%s\nModpack synced successfully, but the pending update marker could not be cleared; retry to clear it: %v", updateSummary, err), err
 		}
 
 		// Check if maintenance window or immediate restart is triggered
@@ -1673,22 +2340,27 @@ func (s *Scheduler) syncModpackFiles(ctx context.Context, server *storage.Server
 	}
 	defer transition.Release()
 
+	write, err := datawrite.TryShared(server.ID)
+	if err != nil {
+		return "", fmt.Errorf("modpack sync refused while staged publication owns the data path: %w", err)
+	}
+	defer write.Release()
 	if s.log != nil {
 		s.log.Info("Syncing updated modpack files from %s to %s", srcDir, destRoot)
 	}
-	cmdRsync := exec.CommandContext(ctx, "rsync", "-avc",
-		"--exclude=.git",
-		"--exclude=.carbon-panel_modpack_git",
-		"--exclude=.carbon-panel_modpack_staged",
-		"--exclude=.carbon-panel_snapshots",
-		srcDir+"/", destRoot+"/")
+	excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots", modpackPendingCommitFile}
+	args := []string{"-avc"}
+	for _, exclude := range excludes {
+		args = append(args, "--exclude="+exclude)
+	}
+	args = append(args, srcDir+"/", destRoot+"/")
+	cmdRsync := exec.CommandContext(ctx, "rsync", args...)
 	if out, err := cmdRsync.CombinedOutput(); err != nil {
-		cmdCp := exec.CommandContext(ctx, "cp", "-rf", srcDir+"/.", destRoot+"/")
-		if cpOut, cpErr := cmdCp.CombinedOutput(); cpErr != nil {
-			excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots"}
-			if goErr := copyDirExcluding(srcDir, destRoot, excludes); goErr != nil {
-				return string(out) + "\n" + string(cpOut), fmt.Errorf("failed to copy modpack files: %w", goErr)
-			}
+		// rsync is not installed on every supported host. The Go fallback
+		// applies the same exclusions, including a legacy marker inside the
+		// clone cache, so controller state never becomes live pack content.
+		if goErr := copyDirExcluding(srcDir, destRoot, excludes); goErr != nil {
+			return string(out), fmt.Errorf("failed to copy modpack files: %w", goErr)
 		}
 	}
 	return "", nil

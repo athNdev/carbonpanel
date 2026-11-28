@@ -14,6 +14,8 @@ import type { GenFile, GenMessage, GenService } from '@bufbuild/protobuf/codegen
 import { fileDesc, messageDesc, serviceDesc } from '@bufbuild/protobuf/codegenv2';
 import type { Timestamp } from '@bufbuild/protobuf/wkt';
 import { file_google_protobuf_timestamp } from '@bufbuild/protobuf/wkt';
+import type { ConfigApplyWindow } from './config_pb';
+import { file_carbonpanel_v1_config } from './config_pb';
 import type { Message } from '@bufbuild/protobuf';
 
 /**
@@ -22,8 +24,8 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_mod: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChhjYXJib25wYW5lbC92MS9tb2QucHJvdG8SDmNhcmJvbnBhbmVsLnYxIuUCCgNNb2QSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSEwoLZGVzY3JpcHRpb24YBSABKAkSDwoHdmVyc2lvbhgGIAEoCRIOCgZtb2RfaWQYByABKAkSDgoGYXV0aG9yGAggASgJEg8KB3dlYnNpdGUYCSABKAkSEQoJZmlsZV9zaXplGAogASgDEi8KC3VwbG9hZGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAwgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIPCgdlbmFibGVkGA0gASgIEjoKDnVwZGF0ZV9wcmV2aWV3GA4gASgLMiIuY2FyYm9ucGFuZWwudjEuSW5zdGFsbGVkTW9kVXBkYXRlIpsCChJJbnN0YWxsZWRNb2RVcGRhdGUSDQoFc3RhdGUYASABKAkSDgoGcmVhc29uGAIgASgJEhgKEGluc3RhbGxlZF9zaGE1MTIYAyABKAkSEAoIcHJvdmlkZXIYBCABKAkSEgoKcHJvamVjdF9pZBgFIAEoCRIcChRpbnN0YWxsZWRfdmVyc2lvbl9pZBgGIAEoCRIZChFpbnN0YWxsZWRfdmVyc2lvbhgHIAEoCRIcChRjYW5kaWRhdGVfdmVyc2lvbl9pZBgIIAEoCRIZChFjYW5kaWRhdGVfdmVyc2lvbhgJIAEoCRIYChBjYW5kaWRhdGVfc2hhNTEyGAogASgJEhoKEmNhbmRpZGF0ZV9maWxlbmFtZRgLIAEoCSI7Cg9MaXN0TW9kc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhUKDWNoZWNrX3VwZGF0ZXMYAiABKAgiNQoQTGlzdE1vZHNSZXNwb25zZRIhCgRtb2RzGAEgAygLMhMuY2FyYm9ucGFuZWwudjEuTW9kIjIKDUdldE1vZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg4KBm1vZF9pZBgCIAEoCSIyCg5HZXRNb2RSZXNwb25zZRIgCgNtb2QYASABKAsyEy5jYXJib25wYW5lbC52MS5Nb2QiggEKGEltcG9ydFVwbG9hZGVkTW9kUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSGQoRdXBsb2FkX3Nlc3Npb25faWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEg0KBXN0YWdlGAUgASgIIl4KGUltcG9ydFVwbG9hZGVkTW9kUmVzcG9uc2USIAoDbW9kGAEgASgLMhMuY2FyYm9ucGFuZWwudjEuTW9kEg8KB21lc3NhZ2UYAiABKAkSDgoGc3RhZ2VkGAMgASgIIq0BChBVcGRhdGVNb2RSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIOCgZtb2RfaWQYAiABKAkSGQoMZGlzcGxheV9uYW1lGAMgASgJSACIAQESGAoLZGVzY3JpcHRpb24YBCABKAlIAYgBARIUCgdlbmFibGVkGAUgASgISAKIAQFCDwoNX2Rpc3BsYXlfbmFtZUIOCgxfZGVzY3JpcHRpb25CCgoIX2VuYWJsZWQiNQoRVXBkYXRlTW9kUmVzcG9uc2USIAoDbW9kGAEgASgLMhMuY2FyYm9ucGFuZWwudjEuTW9kIjUKEERlbGV0ZU1vZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg4KBm1vZF9pZBgCIAEoCSIkChFEZWxldGVNb2RSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJItgBChVGYWJyaWNPcHRpbWl6YXRpb25Nb2QSDgoGbW9kX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEQoJaW5zdGFsbGVkGAQgASgIEhIKCmNvbXBhdGlibGUYBSABKAgSGQoRaW5zdGFsbGVkX3ZlcnNpb24YBiABKAkSIQoZbGF0ZXN0X2NvbXBhdGlibGVfdmVyc2lvbhgHIAEoCRIRCglmaWxlX25hbWUYCCABKAkSFAoMZG93bmxvYWRfdXJsGAkgASgJIjYKIUdldEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkigAEKIkdldEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVzcG9uc2USEQoJaXNfZmFicmljGAEgASgIEhIKCm1jX3ZlcnNpb24YAiABKAkSMwoEbW9kcxgDIAMoCzIlLmNhcmJvbnBhbmVsLnYxLkZhYnJpY09wdGltaXphdGlvbk1vZCJLCiVJbnN0YWxsRmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdtb2RfaWRzGAIgAygJIooBCiZJbnN0YWxsRmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXNwb25zZRI9Cg5pbnN0YWxsZWRfbW9kcxgBIAMoCzIlLmNhcmJvbnBhbmVsLnYxLkZhYnJpY09wdGltaXphdGlvbk1vZBIQCgh3YXJuaW5ncxgCIAMoCRIPCgdtZXNzYWdlGAMgASgJMsoFCgpNb2RTZXJ2aWNlEk0KCExpc3RNb2RzEh8uY2FyYm9ucGFuZWwudjEuTGlzdE1vZHNSZXF1ZXN0GiAuY2FyYm9ucGFuZWwudjEuTGlzdE1vZHNSZXNwb25zZRJHCgZHZXRNb2QSHS5jYXJib25wYW5lbC52MS5HZXRNb2RSZXF1ZXN0Gh4uY2FyYm9ucGFuZWwudjEuR2V0TW9kUmVzcG9uc2USaAoRSW1wb3J0VXBsb2FkZWRNb2QSKC5jYXJib25wYW5lbC52MS5JbXBvcnRVcGxvYWRlZE1vZFJlcXVlc3QaKS5jYXJib25wYW5lbC52MS5JbXBvcnRVcGxvYWRlZE1vZFJlc3BvbnNlElAKCVVwZGF0ZU1vZBIgLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZU1vZFJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5VcGRhdGVNb2RSZXNwb25zZRJQCglEZWxldGVNb2QSIC5jYXJib25wYW5lbC52MS5EZWxldGVNb2RSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuRGVsZXRlTW9kUmVzcG9uc2USgwEKGkdldEZhYnJpY09wdGltaXphdGlvblN0YWNrEjEuY2FyYm9ucGFuZWwudjEuR2V0RmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXF1ZXN0GjIuY2FyYm9ucGFuZWwudjEuR2V0RmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXNwb25zZRKPAQoeSW5zdGFsbEZhYnJpY09wdGltaXphdGlvblN0YWNrEjUuY2FyYm9ucGFuZWwudjEuSW5zdGFsbEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVxdWVzdBo2LmNhcmJvbnBhbmVsLnYxLkluc3RhbGxGYWJyaWNPcHRpbWl6YXRpb25TdGFja1Jlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
-		[file_google_protobuf_timestamp]
+		'ChhjYXJib25wYW5lbC92MS9tb2QucHJvdG8SDmNhcmJvbnBhbmVsLnYxIuUCCgNNb2QSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSEwoLZGVzY3JpcHRpb24YBSABKAkSDwoHdmVyc2lvbhgGIAEoCRIOCgZtb2RfaWQYByABKAkSDgoGYXV0aG9yGAggASgJEg8KB3dlYnNpdGUYCSABKAkSEQoJZmlsZV9zaXplGAogASgDEi8KC3VwbG9hZGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAwgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIPCgdlbmFibGVkGA0gASgIEjoKDnVwZGF0ZV9wcmV2aWV3GA4gASgLMiIuY2FyYm9ucGFuZWwudjEuSW5zdGFsbGVkTW9kVXBkYXRlIpsCChJJbnN0YWxsZWRNb2RVcGRhdGUSDQoFc3RhdGUYASABKAkSDgoGcmVhc29uGAIgASgJEhgKEGluc3RhbGxlZF9zaGE1MTIYAyABKAkSEAoIcHJvdmlkZXIYBCABKAkSEgoKcHJvamVjdF9pZBgFIAEoCRIcChRpbnN0YWxsZWRfdmVyc2lvbl9pZBgGIAEoCRIZChFpbnN0YWxsZWRfdmVyc2lvbhgHIAEoCRIcChRjYW5kaWRhdGVfdmVyc2lvbl9pZBgIIAEoCRIZChFjYW5kaWRhdGVfdmVyc2lvbhgJIAEoCRIYChBjYW5kaWRhdGVfc2hhNTEyGAogASgJEhoKEmNhbmRpZGF0ZV9maWxlbmFtZRgLIAEoCSKlAQoSTW9kVXBkYXRlU2VsZWN0aW9uEg4KBm1vZF9pZBgBIAEoCRIRCglmaWxlX25hbWUYAiABKAkSGAoQaW5zdGFsbGVkX3NoYTUxMhgDIAEoCRIcChRjYW5kaWRhdGVfdmVyc2lvbl9pZBgEIAEoCRIYChBjYW5kaWRhdGVfc2hhNTEyGAUgASgJEhoKEmNhbmRpZGF0ZV9maWxlbmFtZRgGIAEoCSJoCg9TdGFnZWRNb2RVcGRhdGUSDgoGbW9kX2lkGAEgASgJEhEKCWZpbGVfbmFtZRgCIAEoCRIRCglzdGFnZWRfaWQYAyABKAkSDwoHb3V0Y29tZRgEIAEoCRIOCgZyZWFzb24YBSABKAkiOwoPTGlzdE1vZHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIVCg1jaGVja191cGRhdGVzGAIgASgIIjUKEExpc3RNb2RzUmVzcG9uc2USIQoEbW9kcxgBIAMoCzITLmNhcmJvbnBhbmVsLnYxLk1vZCIyCg1HZXRNb2RSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIOCgZtb2RfaWQYAiABKAkiMgoOR2V0TW9kUmVzcG9uc2USIAoDbW9kGAEgASgLMhMuY2FyYm9ucGFuZWwudjEuTW9kIoIBChhJbXBvcnRVcGxvYWRlZE1vZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhkKEXVwbG9hZF9zZXNzaW9uX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRINCgVzdGFnZRgFIAEoCCJeChlJbXBvcnRVcGxvYWRlZE1vZFJlc3BvbnNlEiAKA21vZBgBIAEoCzITLmNhcmJvbnBhbmVsLnYxLk1vZBIPCgdtZXNzYWdlGAIgASgJEg4KBnN0YWdlZBgDIAEoCCLhAgoQVXBkYXRlTW9kUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDgoGbW9kX2lkGAIgASgJEhkKDGRpc3BsYXlfbmFtZRgDIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAQgASgJSAGIAQESFAoHZW5hYmxlZBgFIAEoCEgCiAEBEj0KEXVwZGF0ZV9zZWxlY3Rpb25zGAYgAygLMiIuY2FyYm9ucGFuZWwudjEuTW9kVXBkYXRlU2VsZWN0aW9uEjgKDXVwZGF0ZV93aW5kb3cYByABKA4yIS5jYXJib25wYW5lbC52MS5Db25maWdBcHBseVdpbmRvdxIcChR1cGRhdGVfYXBwbHlfYXRfdW5peBgIIAEoAxIbChN1cGRhdGVfaWRsZV9taW51dGVzGAkgASgFQg8KDV9kaXNwbGF5X25hbWVCDgoMX2Rlc2NyaXB0aW9uQgoKCF9lbmFibGVkIocBChFVcGRhdGVNb2RSZXNwb25zZRIgCgNtb2QYASABKAsyEy5jYXJib25wYW5lbC52MS5Nb2QSNwoOc3RhZ2VkX3VwZGF0ZXMYAiADKAsyHy5jYXJib25wYW5lbC52MS5TdGFnZWRNb2RVcGRhdGUSFwoPdXBkYXRlX2JhdGNoX2lkGAMgASgJIjUKEERlbGV0ZU1vZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg4KBm1vZF9pZBgCIAEoCSIkChFEZWxldGVNb2RSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJItgBChVGYWJyaWNPcHRpbWl6YXRpb25Nb2QSDgoGbW9kX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEQoJaW5zdGFsbGVkGAQgASgIEhIKCmNvbXBhdGlibGUYBSABKAgSGQoRaW5zdGFsbGVkX3ZlcnNpb24YBiABKAkSIQoZbGF0ZXN0X2NvbXBhdGlibGVfdmVyc2lvbhgHIAEoCRIRCglmaWxlX25hbWUYCCABKAkSFAoMZG93bmxvYWRfdXJsGAkgASgJIjYKIUdldEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkigAEKIkdldEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVzcG9uc2USEQoJaXNfZmFicmljGAEgASgIEhIKCm1jX3ZlcnNpb24YAiABKAkSMwoEbW9kcxgDIAMoCzIlLmNhcmJvbnBhbmVsLnYxLkZhYnJpY09wdGltaXphdGlvbk1vZCJLCiVJbnN0YWxsRmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdtb2RfaWRzGAIgAygJIooBCiZJbnN0YWxsRmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXNwb25zZRI9Cg5pbnN0YWxsZWRfbW9kcxgBIAMoCzIlLmNhcmJvbnBhbmVsLnYxLkZhYnJpY09wdGltaXphdGlvbk1vZBIQCgh3YXJuaW5ncxgCIAMoCRIPCgdtZXNzYWdlGAMgASgJMsoFCgpNb2RTZXJ2aWNlEk0KCExpc3RNb2RzEh8uY2FyYm9ucGFuZWwudjEuTGlzdE1vZHNSZXF1ZXN0GiAuY2FyYm9ucGFuZWwudjEuTGlzdE1vZHNSZXNwb25zZRJHCgZHZXRNb2QSHS5jYXJib25wYW5lbC52MS5HZXRNb2RSZXF1ZXN0Gh4uY2FyYm9ucGFuZWwudjEuR2V0TW9kUmVzcG9uc2USaAoRSW1wb3J0VXBsb2FkZWRNb2QSKC5jYXJib25wYW5lbC52MS5JbXBvcnRVcGxvYWRlZE1vZFJlcXVlc3QaKS5jYXJib25wYW5lbC52MS5JbXBvcnRVcGxvYWRlZE1vZFJlc3BvbnNlElAKCVVwZGF0ZU1vZBIgLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZU1vZFJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5VcGRhdGVNb2RSZXNwb25zZRJQCglEZWxldGVNb2QSIC5jYXJib25wYW5lbC52MS5EZWxldGVNb2RSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuRGVsZXRlTW9kUmVzcG9uc2USgwEKGkdldEZhYnJpY09wdGltaXphdGlvblN0YWNrEjEuY2FyYm9ucGFuZWwudjEuR2V0RmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXF1ZXN0GjIuY2FyYm9ucGFuZWwudjEuR2V0RmFicmljT3B0aW1pemF0aW9uU3RhY2tSZXNwb25zZRKPAQoeSW5zdGFsbEZhYnJpY09wdGltaXphdGlvblN0YWNrEjUuY2FyYm9ucGFuZWwudjEuSW5zdGFsbEZhYnJpY09wdGltaXphdGlvblN0YWNrUmVxdWVzdBo2LmNhcmJvbnBhbmVsLnYxLkluc3RhbGxGYWJyaWNPcHRpbWl6YXRpb25TdGFja1Jlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		[file_google_protobuf_timestamp, file_carbonpanel_v1_config]
 	);
 
 /**
@@ -186,6 +188,96 @@ export const InstalledModUpdateSchema: GenMessage<InstalledModUpdate> =
 	messageDesc(file_carbonpanel_v1_mod, 1);
 
 /**
+ * One operator-reviewed replacement. The service re-verifies the installed
+ * fingerprint and the provider release before it stages any bytes.
+ *
+ * @generated from message carbonpanel.v1.ModUpdateSelection
+ */
+export type ModUpdateSelection = Message<'carbonpanel.v1.ModUpdateSelection'> & {
+	/**
+	 * @generated from field: string mod_id = 1;
+	 */
+	modId: string;
+
+	/**
+	 * @generated from field: string file_name = 2;
+	 */
+	fileName: string;
+
+	/**
+	 * @generated from field: string installed_sha512 = 3;
+	 */
+	installedSha512: string;
+
+	/**
+	 * @generated from field: string candidate_version_id = 4;
+	 */
+	candidateVersionId: string;
+
+	/**
+	 * @generated from field: string candidate_sha512 = 5;
+	 */
+	candidateSha512: string;
+
+	/**
+	 * @generated from field: string candidate_filename = 6;
+	 */
+	candidateFilename: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ModUpdateSelection.
+ * Use `create(ModUpdateSelectionSchema)` to create a new message.
+ */
+export const ModUpdateSelectionSchema: GenMessage<ModUpdateSelection> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_mod, 2);
+
+/**
+ * Per-selection outcome of a staging request.
+ *
+ * @generated from message carbonpanel.v1.StagedModUpdate
+ */
+export type StagedModUpdate = Message<'carbonpanel.v1.StagedModUpdate'> & {
+	/**
+	 * @generated from field: string mod_id = 1;
+	 */
+	modId: string;
+
+	/**
+	 * @generated from field: string file_name = 2;
+	 */
+	fileName: string;
+
+	/**
+	 * @generated from field: string staged_id = 3;
+	 */
+	stagedId: string;
+
+	/**
+	 * staged, already_staged, already_selected, retryable, transient_download,
+	 * refused_drift, refused_provider, refused_download, refused_checksum,
+	 * refused_stale_preview, refused_limit, error
+	 *
+	 * @generated from field: string outcome = 4;
+	 */
+	outcome: string;
+
+	/**
+	 * @generated from field: string reason = 5;
+	 */
+	reason: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.StagedModUpdate.
+ * Use `create(StagedModUpdateSchema)` to create a new message.
+ */
+export const StagedModUpdateSchema: GenMessage<StagedModUpdate> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_mod, 3);
+
+/**
  * Server mods request
  *
  * @generated from message carbonpanel.v1.ListModsRequest
@@ -210,7 +302,7 @@ export type ListModsRequest = Message<'carbonpanel.v1.ListModsRequest'> & {
  */
 export const ListModsRequestSchema: GenMessage<ListModsRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 2);
+	messageDesc(file_carbonpanel_v1_mod, 4);
 
 /**
  * All server mods
@@ -230,7 +322,7 @@ export type ListModsResponse = Message<'carbonpanel.v1.ListModsResponse'> & {
  */
 export const ListModsResponseSchema: GenMessage<ListModsResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 3);
+	messageDesc(file_carbonpanel_v1_mod, 5);
 
 /**
  * Mod lookup
@@ -255,7 +347,7 @@ export type GetModRequest = Message<'carbonpanel.v1.GetModRequest'> & {
  */
 export const GetModRequestSchema: GenMessage<GetModRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 4);
+	messageDesc(file_carbonpanel_v1_mod, 6);
 
 /**
  * Mod details
@@ -275,7 +367,7 @@ export type GetModResponse = Message<'carbonpanel.v1.GetModResponse'> & {
  */
 export const GetModResponseSchema: GenMessage<GetModResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 5);
+	messageDesc(file_carbonpanel_v1_mod, 7);
 
 /**
  * Import mod from chunked upload session
@@ -317,7 +409,7 @@ export type ImportUploadedModRequest = Message<'carbonpanel.v1.ImportUploadedMod
  */
 export const ImportUploadedModRequestSchema: GenMessage<ImportUploadedModRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 6);
+	messageDesc(file_carbonpanel_v1_mod, 8);
 
 /**
  * Import result
@@ -347,7 +439,7 @@ export type ImportUploadedModResponse = Message<'carbonpanel.v1.ImportUploadedMo
  */
 export const ImportUploadedModResponseSchema: GenMessage<ImportUploadedModResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 7);
+	messageDesc(file_carbonpanel_v1_mod, 9);
 
 /**
  * Mod fields to update
@@ -379,6 +471,29 @@ export type UpdateModRequest = Message<'carbonpanel.v1.UpdateModRequest'> & {
 	 * @generated from field: optional bool enabled = 5;
 	 */
 	enabled?: boolean | undefined;
+
+	/**
+	 * A reviewed provider update stages exact replacement bytes into the
+	 * server's open batch. This reuses this procedure's mods/update scope.
+	 *
+	 * @generated from field: repeated carbonpanel.v1.ModUpdateSelection update_selections = 6;
+	 */
+	updateSelections: ModUpdateSelection[];
+
+	/**
+	 * @generated from field: carbonpanel.v1.ConfigApplyWindow update_window = 7;
+	 */
+	updateWindow: ConfigApplyWindow;
+
+	/**
+	 * @generated from field: int64 update_apply_at_unix = 8;
+	 */
+	updateApplyAtUnix: bigint;
+
+	/**
+	 * @generated from field: int32 update_idle_minutes = 9;
+	 */
+	updateIdleMinutes: number;
 };
 
 /**
@@ -387,7 +502,7 @@ export type UpdateModRequest = Message<'carbonpanel.v1.UpdateModRequest'> & {
  */
 export const UpdateModRequestSchema: GenMessage<UpdateModRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 8);
+	messageDesc(file_carbonpanel_v1_mod, 10);
 
 /**
  * Updated mod
@@ -399,6 +514,16 @@ export type UpdateModResponse = Message<'carbonpanel.v1.UpdateModResponse'> & {
 	 * @generated from field: carbonpanel.v1.Mod mod = 1;
 	 */
 	mod?: Mod | undefined;
+
+	/**
+	 * @generated from field: repeated carbonpanel.v1.StagedModUpdate staged_updates = 2;
+	 */
+	stagedUpdates: StagedModUpdate[];
+
+	/**
+	 * @generated from field: string update_batch_id = 3;
+	 */
+	updateBatchId: string;
 };
 
 /**
@@ -407,7 +532,7 @@ export type UpdateModResponse = Message<'carbonpanel.v1.UpdateModResponse'> & {
  */
 export const UpdateModResponseSchema: GenMessage<UpdateModResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 9);
+	messageDesc(file_carbonpanel_v1_mod, 11);
 
 /**
  * Mod to delete
@@ -432,7 +557,7 @@ export type DeleteModRequest = Message<'carbonpanel.v1.DeleteModRequest'> & {
  */
 export const DeleteModRequestSchema: GenMessage<DeleteModRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 10);
+	messageDesc(file_carbonpanel_v1_mod, 12);
 
 /**
  * Deletion confirmation
@@ -452,7 +577,7 @@ export type DeleteModResponse = Message<'carbonpanel.v1.DeleteModResponse'> & {
  */
 export const DeleteModResponseSchema: GenMessage<DeleteModResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 11);
+	messageDesc(file_carbonpanel_v1_mod, 13);
 
 /**
  * Fabric optimization mod item
@@ -518,7 +643,7 @@ export type FabricOptimizationMod = Message<'carbonpanel.v1.FabricOptimizationMo
  */
 export const FabricOptimizationModSchema: GenMessage<FabricOptimizationMod> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 12);
+	messageDesc(file_carbonpanel_v1_mod, 14);
 
 /**
  * Get Fabric optimization stack request
@@ -539,7 +664,7 @@ export type GetFabricOptimizationStackRequest =
  */
 export const GetFabricOptimizationStackRequestSchema: GenMessage<GetFabricOptimizationStackRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 13);
+	messageDesc(file_carbonpanel_v1_mod, 15);
 
 /**
  * Get Fabric optimization stack response
@@ -570,7 +695,7 @@ export type GetFabricOptimizationStackResponse =
  */
 export const GetFabricOptimizationStackResponseSchema: GenMessage<GetFabricOptimizationStackResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 14);
+	messageDesc(file_carbonpanel_v1_mod, 16);
 
 /**
  * Install Fabric optimization stack request
@@ -598,7 +723,7 @@ export type InstallFabricOptimizationStackRequest =
  */
 export const InstallFabricOptimizationStackRequestSchema: GenMessage<InstallFabricOptimizationStackRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 15);
+	messageDesc(file_carbonpanel_v1_mod, 17);
 
 /**
  * Install Fabric optimization stack response
@@ -629,7 +754,7 @@ export type InstallFabricOptimizationStackResponse =
  */
 export const InstallFabricOptimizationStackResponseSchema: GenMessage<InstallFabricOptimizationStackResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_mod, 16);
+	messageDesc(file_carbonpanel_v1_mod, 18);
 
 /**
  * Server mod management

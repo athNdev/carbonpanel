@@ -520,12 +520,6 @@ func main() {
 	deepSleepMgr.Start(deepSleepCtx, 60*time.Second)
 	defer deepSleepMgr.Stop()
 
-	// Start the scheduler
-	if err := taskScheduler.Start(); err != nil {
-		log.Error("Failed to start task scheduler: %v", err)
-	}
-	defer taskScheduler.Stop()
-
 	backupCtx, backupCancel := context.WithCancel(context.Background())
 	defer backupCancel()
 	startPanelDBBackup(backupCtx, store, cfg, log)
@@ -548,23 +542,46 @@ func main() {
 	defer moduleManager.Stop()
 	taskScheduler.SetModuleRecreator(moduleManager.RecreateModule)
 
-	// Register event consumers on the event bus - EVENT CONSUMERS REGISTER HERE...
+	// Module lifecycle handling is subscribed before the RPC server is
+	// constructed, so an event emitted while its services are created is still
+	// observed. The scheduler is subscribed only after that server installs the
+	// shared mod-update planner below.
 	eventBus.Subscribe(moduleManager.HandleServerEvent)
-	eventBus.Subscribe(taskScheduler.HandleServerEvent)
 
-	// Start the metrics collector now that consumers are subscribed
+	// Initialize placement engine for multi-node support
+	placementEngine := docker.NewPlacementEngine(store)
+
+	// Construct the RPC server before the scheduler is exposed to event
+	// producers. NewServer installs the shared mod-update planner; subscribing
+	// the scheduler or starting the metrics collector first would let a
+	// persisted event-triggered policy run without a planner.
+	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
+	rpcServer.SetAdmissionCoordinator(admission)
+	rpcServer.SetHibernationManager(hibernationMgr)
+
+	// Register the remaining event consumer and start the metrics collector
+	// only after the planner is installed, so lifecycle events cannot reach a
+	// scheduler with no mod-update executor.
+	eventBus.Subscribe(taskScheduler.HandleServerEvent)
+	// Register the scheduler's stop before the metrics collector starts. Defers
+	// run LIFO, so metrics.Stop must be registered after this one to stop the
+	// metrics producer before the scheduler's WaitGroup drains.
+	defer func() {
+		if err := taskScheduler.Stop(); err != nil {
+			log.Error("Failed to stop task scheduler: %v", err)
+		}
+	}()
 	if err := metricsCollector.Start(); err != nil {
 		log.Error("Failed to start metrics collector: %v", err)
 	}
 	defer metricsCollector.Stop()
 
-	// Initialize placement engine for multi-node support
-	placementEngine := docker.NewPlacementEngine(store)
-
-	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
-	rpcServer.SetAdmissionCoordinator(admission)
-	rpcServer.SetHibernationManager(hibernationMgr)
+	// Start the scheduler after the planner is installed so its first due check
+	// sees the real planner and the interface is never swapped while the run
+	// loop is active.
+	if err := taskScheduler.Start(); err != nil {
+		log.Error("Failed to start task scheduler: %v", err)
+	}
 
 	// The auth manager persists the recovery key. Announce the secret only
 	// when this process generated it; later starts log the path alone so a

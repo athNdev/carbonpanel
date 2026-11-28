@@ -42,6 +42,7 @@
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
+- [Mod update scheduling and legacy rows](mod-update-scheduling.md) — Due mod updates claim their execution atomically; retained legacy cron config has no silent consumer.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.
@@ -55,6 +56,7 @@
 - [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
 - [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
+- [One data-write gate for panel writes and staged publication](data-write-gate.md) — Ordinary panel file mutations take a shared per-server lease; staged publication owns the same path exclusively from before its undo snapshot through rollback.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
@@ -63,9 +65,13 @@
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Release qualification uses the retained OCI archive](release-staging-artifact-contract.md) — The Compose upgrade matrix uses the original verified OCI digest from a trusted Stable staging run and supports older raw build contexts.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
+- [Resolve an unpersisted replacement identity through an explicit marker](publication-identity-unresolved.md) — A created replacement whose identity write fails is retried, then recorded as identity-unresolved; a retry may adopt that dispatch's canonical container and verify it, never the baseline or an unrelated discovery.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
+- [Reviewed mod update application](mod-update-apply.md) — Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
+- [Reviewed mod update client and scheduled policy](mod-update-client.md) — The Mods tab and policy editor bind requests to the captured server, use the scheduler's effective default budget, and fail closed on malformed policy.
+- [Reviewed mod update publication](mod-update-publication.md) — A staged reviewed mod row carries durable approval and publishes under the data-write lease and window checks.
 - [Runtime artifact format support](runtime-artifact-formats.md) — Publish only runtime bundles whose exact manifest has reviewed deployment evidence.
 - [Runtime artifact format support — Alternatives + Consequence](runtime-artifact-formats-alternatives.md) — Publishing converted VHDX/VMDK/VDI images from qemu-img output would claim
 - [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Candidate artifact kinds and the evidence required before publication.

@@ -28,7 +28,11 @@ type SleeperStore interface {
 // WakePreparer applies any configuration that requires container replacement
 // before the sleeping container is started. It may update server.ContainerID
 // after persisting the replacement identity.
-type WakePreparer func(ctx context.Context, server *db.Server) error
+type WakePreparer func(ctx context.Context, server *db.Server) (WakeCompletion, error)
+
+// WakeCompletion resolves staged changes under the data gate after the actual
+// wake succeeds or fails. It returns any additional recovery error.
+type WakeCompletion func(startAttempted bool, wakeErr error) error
 
 // SleepController defines container start/stop/status capabilities for deep sleep.
 type SleepController interface {
@@ -491,7 +495,7 @@ func refuseActiveOperation(ctx context.Context, store any, serverID string) erro
 // WakeServer boots a deeply asleep server. Concurrent callers wait for the
 // current lifecycle transition, then re-read state; a completed wake is
 // idempotent while an in-flight sleep is followed by a wake.
-func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) error {
+func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) (retErr error) {
 	if m.store == nil {
 		return fmt.Errorf("store is nil")
 	}
@@ -534,10 +538,19 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 		defer release()
 	}
 
+	startAttempted := false
 	if prepareWake != nil {
-		if err := prepareWake(ctx, srv); err != nil {
+		complete, err := prepareWake(ctx, srv)
+		if err != nil {
 			m.rollbackWake(ctx, serverID)
 			return fmt.Errorf("failed to prepare server %s for wake: %w", serverID, err)
+		}
+		if complete != nil {
+			defer func() {
+				if recoveryErr := complete(startAttempted, retErr); recoveryErr != nil {
+					retErr = errors.Join(retErr, recoveryErr)
+				}
+			}()
 		}
 	}
 	if srv.ContainerID == "" {
@@ -557,6 +570,7 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 	}
 
 	start := time.Now()
+	startAttempted = true
 	if err := ctrl.StartContainer(ctx, srv.ContainerID); err != nil {
 		m.rollbackWake(ctx, serverID)
 		return fmt.Errorf("container start failed for server %s: %w", serverID, err)
@@ -579,7 +593,7 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 		}
 		if time.Now().After(deadline) {
 			m.rollbackWake(ctx, serverID)
-			return fmt.Errorf("container for server %s did not reach running in time", serverID)
+			return fmt.Errorf("container for server %s did not reach running in time: %w", serverID, context.DeadlineExceeded)
 		}
 		select {
 		case <-ctx.Done():
@@ -592,8 +606,16 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 	srv.Status = db.StatusRunning
 	now := time.Now()
 	srv.LastStarted = &now
-	if err := m.store.UpdateServer(ctx, srv); err != nil {
-		persistErr := fmt.Errorf("failed to update server status to running: %w", err)
+	var saveErr error
+	if writer, ok := m.store.(interface {
+		UpdateServerFields(context.Context, string, map[string]any) error
+	}); ok {
+		saveErr = writer.UpdateServerFields(ctx, srv.ID, map[string]any{"status": srv.Status, "last_started": srv.LastStarted})
+	} else {
+		saveErr = m.store.UpdateServer(ctx, srv)
+	}
+	if saveErr != nil {
+		persistErr := fmt.Errorf("failed to update server status to running: %w", saveErr)
 		rollbackErr := m.rollbackWakePersistenceFailure(ctx, ctrl, serverID, srv.ContainerID)
 		return errors.Join(persistErr, rollbackErr)
 	}

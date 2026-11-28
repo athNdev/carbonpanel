@@ -9,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"gorm.io/gorm"
 )
@@ -52,16 +54,38 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
-	if req.Msg.GetItemId() == "" {
-		if err := s.discardWholeBatch(ctx, server); err != nil {
-			return nil, err
-		}
-		return connect.NewResponse(&v1.DiscardUpdateBatchResponse{}), nil
-	}
-	if err := s.discardBatchItem(ctx, server, req.Msg.GetItemId()); err != nil {
+	release, err := beginDataWrite(server.ID)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.closeBatchIfEmpty(ctx, server.ID); err != nil {
+	defer release()
+	// Mod-update staging holds the same per-server operation while it commits
+	// a window and staged rows. Sharing the ownership prevents a discard from
+	// closing the chosen batch halfway through a staging write.
+	err = operation.RunJournaled(ctx, s.store, s.log, server, "discard-update-batch", "", func() error {
+		if req.Msg.GetItemId() == "" {
+			return s.discardWholeBatch(ctx, server)
+		}
+		if err := s.discardBatchItem(ctx, server, req.Msg.GetItemId()); err != nil {
+			return err
+		}
+		if err := s.closeBatchIfEmpty(ctx, server.ID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		// Keep the typed refusal from the inner operation (for example a
+		// missing item or wrong server) instead of flattening it to Internal.
+		if _, ok := err.(*connect.Error); ok {
+			return nil, err
+		}
+		// A concurrent staging or publication owns the server journal. The
+		// discard did not run, so retrying after it finishes is valid.
+		if errors.Is(err, storage.ErrActiveOperation) || errors.Is(err, operation.ErrInProgress) {
+			return nil, connect.NewError(connect.CodeAborted,
+				fmt.Errorf("discard refused while another operation owns the server: %w", err))
+		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&v1.DiscardUpdateBatchResponse{}), nil
@@ -107,6 +131,19 @@ func (s *ConfigService) discardWholeBatch(ctx context.Context, server *storage.S
 	}
 	if batch == nil {
 		return nil
+	}
+	// Closing a batch that retains an acknowledged or unresolved publication
+	// would orphan its recovery tree and the applied rows that prove cleanup is
+	// owed. A lifecycle retry must resolve it first.
+	if batch.SealedAt != nil || batch.PublishedAt != nil {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("this update batch has a retained publication; retry the server start or restart before discarding it"))
+	}
+	applied, err := s.store.CountBatchContentByStatus(ctx, batch.ID, storage.StagedStatusApplied)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if applied > 0 {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("this update batch has published content awaiting finalization; retry the server start or restart before discarding it"))
 	}
 	content, err := s.store.ListBatchContent(ctx, batch.ID)
 	if err != nil {
@@ -170,6 +207,19 @@ func (s *ConfigService) closeBatchIfEmpty(ctx context.Context, serverID string) 
 		return err
 	}
 	if len(content) > 0 || len(configs) > 0 {
+		return nil
+	}
+	// Discarding the last staged row must not close a batch that still owns a
+	// retained publication or applied content recovery. Keep it open so the
+	// next lifecycle retry can finalize it without losing the undo tree.
+	if batch.SealedAt != nil || batch.PublishedAt != nil {
+		return nil
+	}
+	applied, err := s.store.CountBatchContentByStatus(ctx, batch.ID, storage.StagedStatusApplied)
+	if err != nil {
+		return err
+	}
+	if applied > 0 {
 		return nil
 	}
 	return s.store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchDiscarded)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -874,6 +875,17 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 	}
 
 	// Mode B: bake into the server's data directory on the node's mapped storage.
+	write, err := datawrite.TryShared(server.ID)
+	if errors.Is(err, datawrite.ErrExclusiveHeld) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer write.Release()
+
 	dataRoot, err := serverDataDirectory(r.Context(), h.store, server, true, h.storageResolver)
 	if err != nil {
 		if nodestorage.IsUnavailable(err) {

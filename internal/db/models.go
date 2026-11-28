@@ -599,6 +599,14 @@ type ServerUpdateBatch struct {
 	IdleMinutes int        `json:"idle_minutes,omitempty" gorm:"column:idle_minutes"`
 	IdleSince   *time.Time `json:"idle_since,omitempty" gorm:"column:idle_since"`
 	Status      string     `json:"status" gorm:"not null;index"`
+	// SealedAt marks a batch whose publication produced durable applied rows
+	// without a confirmed lifecycle outcome. Admission must not append new work
+	// to that batch; a retry resolves the retained snapshot first.
+	SealedAt *time.Time `json:"sealed_at,omitempty" gorm:"column:sealed_at"`
+	// PublishedAt records that a lifecycle positively accepted the batch's
+	// runtime publication. Any retry after this point owes only metadata and
+	// recovery cleanup, not another container mutation. It also seals admission.
+	PublishedAt *time.Time `json:"published_at,omitempty" gorm:"column:published_at"`
 	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
@@ -621,18 +629,45 @@ const (
 // StagedContentChange is one mod, datapack, or file edit waiting in a batch.
 // StagePath is empty for a delete, which records the live path to remove later.
 type StagedContentChange struct {
-	ID         string       `json:"id" gorm:"primaryKey"`
-	ServerID   string       `json:"server_id" gorm:"not null;index;column:server_id"`
-	BatchID    string       `json:"batch_id" gorm:"not null;index;column:batch_id"`
-	Kind       string       `json:"kind" gorm:"not null"`
-	Action     string       `json:"action" gorm:"not null"`
-	TargetPath string       `json:"target_path" gorm:"not null;column:target_path"`
-	StagePath  string       `json:"stage_path,omitempty" gorm:"column:stage_path"`
-	FileName   string       `json:"file_name" gorm:"column:file_name"`
-	Status     StagedStatus `json:"status" gorm:"not null;index"`
-	CreatedAt  time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	AppliedAt  *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
-	Server     *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
+	ID         string `json:"id" gorm:"primaryKey"`
+	ServerID   string `json:"server_id" gorm:"not null;index;column:server_id"`
+	BatchID    string `json:"batch_id" gorm:"not null;index;column:batch_id"`
+	Kind       string `json:"kind" gorm:"not null"`
+	Action     string `json:"action" gorm:"not null"`
+	TargetPath string `json:"target_path" gorm:"not null;column:target_path"`
+	StagePath  string `json:"stage_path,omitempty" gorm:"column:stage_path"`
+	FileName   string `json:"file_name" gorm:"column:file_name"`
+	// ExpectedLiveSha512 is the installed digest observed when a reviewed
+	// update was staged. Publish must recheck it so a later local edit cannot
+	// be silently overwritten by a delayed apply. Empty means no precondition.
+	ExpectedLiveSha512 string `json:"expected_live_sha512,omitempty" gorm:"column:expected_live_sha512"`
+	// ReviewedRuntimeLoader and ReviewedRuntimeVersion record the normalized
+	// effective Docker target the reviewed candidate was admitted against.
+	// Publication revalidates this durable target before any live-tree
+	// mutation so a later config or Docker override change cannot publish the
+	// jar onto a runtime it was never verified against. A reviewed row without
+	// them predates durable target admission and must be reviewed again.
+	ReviewedRuntimeLoader  string `json:"reviewed_runtime_loader,omitempty" gorm:"column:reviewed_runtime_loader"`
+	ReviewedRuntimeVersion string `json:"reviewed_runtime_version,omitempty" gorm:"column:reviewed_runtime_version"`
+	// ApprovedSha512 is the provider release digest the operator reviewed and
+	// the staged payload bytes were verified against at admission. Publication
+	// requires this durable value to match the payload and provider
+	// revalidation; a row without it predates durable approval and must be
+	// re-reviewed instead of deriving approval from a mutable sidecar.
+	ApprovedSha512 string `json:"approved_sha512,omitempty" gorm:"column:approved_sha512"`
+	// ApprovedProvider, ApprovedProjectID, ApprovedVersionID and
+	// ApprovedFilename are the durable provider release identity the operator
+	// approved at admission. Publication revalidates this identity, not the
+	// mutable sidecar, so a sidecar rewritten to a different release that
+	// happens to carry the same bytes cannot substitute its provider identity.
+	ApprovedProvider  string       `json:"approved_provider,omitempty" gorm:"column:approved_provider"`
+	ApprovedProjectID string       `json:"approved_project_id,omitempty" gorm:"column:approved_project_id"`
+	ApprovedVersionID string       `json:"approved_version_id,omitempty" gorm:"column:approved_version_id"`
+	ApprovedFilename  string       `json:"approved_filename,omitempty" gorm:"column:approved_filename"`
+	Status            StagedStatus `json:"status" gorm:"not null;index"`
+	CreatedAt         time.Time    `json:"created_at" gorm:"autoCreateTime"`
+	AppliedAt         *time.Time   `json:"applied_at,omitempty" gorm:"column:applied_at"`
+	Server            *Server      `json:"-" gorm:"foreignKey:ServerID;constraint:OnDelete:CASCADE"`
 }
 
 // TaskType defines the type of scheduled task
@@ -647,8 +682,20 @@ const (
 	TaskTypeScript        TaskType = "script"         // Run a custom script
 	TaskTypeWebhook       TaskType = "webhook"        // Send an HTTP webhook
 	TaskTypeModpackUpdate TaskType = "modpack_update" // Periodically fetch and update modpack from Git/source
+	TaskTypeModUpdate     TaskType = "mod_update"     // Opt-in automatic/scheduled mod updates using the shared planner
 	TaskTypeChunkyPregen  TaskType = "chunky_pregen"  // Automated background Chunky radius pre-generation task runner
 )
+
+// ModUpdateTaskConfig is the JSON payload of a mod_update ScheduledTask. It is
+// an opt-in policy: a task without Enabled never stages anything.
+type ModUpdateTaskConfig struct {
+	Enabled          bool     `json:"enabled"`
+	ExcludedProjects []string `json:"excluded_projects,omitempty"`
+	MaxUpdatesPerRun int      `json:"max_updates_per_run,omitempty"`
+	SkipWhenRunning  bool     `json:"skip_when_running,omitempty"`
+	Window           string   `json:"window,omitempty"`
+	IdleMinutes      int      `json:"idle_minutes,omitempty"`
+}
 
 // TaskStatus defines the status of a scheduled task
 type TaskStatus string

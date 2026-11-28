@@ -10,14 +10,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
+	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
@@ -36,6 +40,7 @@ func TestDisplayNameFromFilename(t *testing.T) {
 type fakeDatapackIndexer struct {
 	name      string
 	datapacks []indexers.Datapack
+	latest    *indexers.DatapackFile
 	total     int
 	err       error
 }
@@ -48,6 +53,9 @@ func (f *fakeDatapackIndexer) SearchDatapacks(_ context.Context, _, _ string, _,
 }
 
 func (f *fakeDatapackIndexer) GetDatapackLatestFile(context.Context, string, string) (*indexers.DatapackFile, error) {
+	if f.latest != nil {
+		return f.latest, nil
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -137,6 +145,82 @@ func uploadSession(t *testing.T, um *upload.Manager, filename string, data []byt
 	require.NoError(t, err)
 	require.True(t, done)
 	return sess.ID
+}
+
+func TestDatapackWritesShareDataGate(t *testing.T) {
+	ctx := context.Background()
+	s, um, server := newUploadTestService(t)
+	s.indexer = &fakeDatapackIndexer{latest: &indexers.DatapackFile{Filename: "install.zip"}}
+	data := zipArchiveBytes(t, map[string]string{
+		"pack.mcmeta":      `{"pack":{"pack_format":34}}`,
+		"data/minecraft/x": "",
+	})
+	session := uploadSession(t, um, "direct.zip", data)
+	stagedSession := uploadSession(t, um, "staged.zip", data)
+	dir := minecraft.GetDatapacksPath(server.DataPath, "")
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	existing := filepath.Join(dir, "existing.zip")
+	require.NoError(t, os.WriteFile(existing, data, 0644))
+
+	owned, err := datawrite.AcquireExclusive(ctx, server.ID)
+	require.NoError(t, err)
+	t.Cleanup(owned.Release)
+	_, err = s.InstallDatapack(ctx, connect.NewRequest(&v1.InstallDatapackRequest{ServerId: server.ID, DatapackId: "pack"}))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
+	_, err = s.UploadDatapack(ctx, connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: session}))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
+	_, err = s.DeleteDatapack(ctx, connect.NewRequest(&v1.DeleteDatapackRequest{ServerId: server.ID, FileName: "existing.zip"}))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
+	require.FileExists(t, existing)
+
+	stagedReq := connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: stagedSession, Stage: true})
+	_, err = s.UploadDatapack(ctx, stagedReq)
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), err)
+	for _, name := range []string{"direct.zip", "install.zip", "staged.zip"} {
+		require.NoFileExists(t, filepath.Join(dir, name))
+	}
+	owned.Release()
+
+	staged, err := s.UploadDatapack(ctx, stagedReq)
+	require.NoError(t, err, "publication refusal should leave the staged upload available for retry")
+	require.True(t, staged.Msg.GetStaged())
+	require.NoFileExists(t, filepath.Join(dir, "staged.zip"))
+	_, err = s.UploadDatapack(ctx, connect.NewRequest(&v1.UploadDatapackRequest{ServerId: server.ID, UploadSessionId: session}))
+	require.NoError(t, err, "publication refusal should leave the completed upload available for retry")
+	require.FileExists(t, filepath.Join(dir, "direct.zip"))
+	_, err = s.DeleteDatapack(ctx, connect.NewRequest(&v1.DeleteDatapackRequest{ServerId: server.ID, FileName: "existing.zip"}))
+	require.NoError(t, err)
+	require.NoFileExists(t, existing)
+}
+
+// A staged datapack upload refused by the archive-export admission must keep the
+// completed upload session. The operator retries after the export finishes and
+// the same session must stage without uploading the bytes again.
+func TestStagedDatapackUploadKeepsSessionOnArchiveExportRefusal(t *testing.T) {
+	ctx := context.Background()
+	s, um, server := newUploadTestService(t)
+	data := zipArchiveBytes(t, map[string]string{
+		"pack.mcmeta":      `{"pack":{"pack_format":34}}`,
+		"data/minecraft/x": "",
+	})
+	session := uploadSession(t, um, "staged-export.zip", data)
+	req := connect.NewRequest(&v1.UploadDatapackRequest{
+		ServerId:        server.ID,
+		UploadSessionId: session,
+		Stage:           true,
+	})
+
+	fence, err := module.TryBeginServerModuleArchive(server.ID)
+	require.NoError(t, err)
+	_, err = s.UploadDatapack(ctx, req)
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "%v", err)
+	require.Contains(t, err.Error(), "archive export is in progress")
+
+	fence.Release()
+	res, err := s.UploadDatapack(ctx, req)
+	require.NoError(t, err, "the export refusal must leave the upload session available for retry")
+	require.True(t, res.Msg.GetStaged())
+	require.NoFileExists(t, filepath.Join(minecraft.GetDatapacksPath(server.DataPath, ""), "staged-export.zip"))
 }
 
 func TestUploadDatapack(t *testing.T) {

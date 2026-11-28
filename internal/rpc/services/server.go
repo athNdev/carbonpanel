@@ -131,6 +131,17 @@ func beginServerLifecycleTransition(id string) (*docker.Transition, error) {
 	return transition, nil
 }
 
+// stagedPublicationError keeps reviewed-mod admission refusals as
+// FailedPrecondition with their re-review guidance instead of flattening them
+// into an internal lifecycle failure.
+func stagedPublicationError(prefix string, err error) *connect.Error {
+	if errors.Is(err, storage.ErrStagedModVersionChange) ||
+		errors.Is(err, storage.ErrStagedModRuntimeTargetChanged) {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", prefix, err))
+}
+
 func (s *ServerService) getDockerClient(nodeID string) *docker.Client {
 	cli, err := s.getDockerClientStrict(nodeID)
 	if err != nil {
@@ -1845,6 +1856,22 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}), nil
 }
 
+// preflightReviewedModRuntimeTarget refuses an UpdateServer that would move the
+// effective Docker runtime target while a reviewed mod candidate is staged. It
+// runs before the write phase so an already-invalid request does not reserve
+// ports, and CommitServerSettings re-runs the same check inside its writer
+// transaction so a candidate admitted after this read still refuses the pair.
+func (s *ServerService) preflightReviewedModRuntimeTarget(ctx context.Context, current *storage.Server, currentConfig *storage.ServerConfig, proposed *storage.Server, proposedConfig *storage.ServerConfig) error {
+	err := s.store.RefuseReviewedModRuntimeChange(ctx, current, currentConfig, proposed, proposedConfig)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, storage.ErrStagedModVersionChange) {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check the reviewed mod runtime target: %w", err))
+}
+
 // UpdateServer updates a server
 func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v1.UpdateServerRequest]) (*connect.Response[v1.UpdateServerResponse], error) {
 	transition, err := beginServerLifecycleTransition(req.Msg.Id)
@@ -1859,6 +1886,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+	currentConfig, err := s.store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		if !errors.Is(err, storage.ErrServerConfigNotFound) {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
+		}
+		currentConfig = nil
+	}
 
 	var modpack *storage.IndexedModpack
 	if msg.ModpackId != "" {
@@ -1868,12 +1902,21 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}
 
+	// Mutate a copy so the reviewed-mod runtime-target preflight can refuse
+	// before any server or config row changes. `server` stays the committed
+	// state the preflight compares against.
+	proposed := *server
+	var proposedConfig *storage.ServerConfig
+	if currentConfig != nil {
+		cfg := *currentConfig
+		proposedConfig = &cfg
+	}
 	// Check if container recreation is needed
 	needsRecreation := false
-	originalMemory := server.Memory
-	originalModLoader := server.ModLoader
-	originalMCVersion := server.MCVersion
-	originalDockerImage := server.DockerImage
+	originalMemory := proposed.Memory
+	originalModLoader := proposed.ModLoader
+	originalMCVersion := proposed.MCVersion
+	originalDockerImage := proposed.DockerImage
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
 		canonical, imageErr := docker.CanonicalServerImage(msg.DockerImage)
 		if imageErr != nil {
@@ -1888,17 +1931,18 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
-	// Update fields
+	// Update fields on the proposed copy. Nothing here may write.
+	memoryChanged := false
 	if msg.Name != "" {
-		server.Name = msg.Name
+		proposed.Name = msg.Name
 	}
 	if msg.Description != "" {
-		server.Description = msg.Description
+		proposed.Description = msg.Description
 	}
-	if msg.Port != nil && int(*msg.Port) != server.Port {
+	if msg.Port != nil && int(*msg.Port) != proposed.Port {
 		newPort := int(*msg.Port)
 
-		if server.ProxyHostname != "" {
+		if proposed.ProxyHostname != "" {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cannot change port for proxy-enabled servers"))
 		}
 
@@ -1911,7 +1955,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			s.log.Error("Failed to check port: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check port availability"))
 		}
-		if existing != nil && existing.ID != server.ID {
+		if existing != nil && existing.ID != proposed.ID {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port already in use"))
 		}
 
@@ -1919,92 +1963,92 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("port is already in use by the proxy server"))
 		}
 
-		if err := s.checkNodeHostPort(ctx, server.NodeID, newPort); err != nil {
+		if err := s.checkNodeHostPort(ctx, proposed.NodeID, newPort); err != nil {
 			return nil, err
 		}
 
-		server.Port = newPort
+		proposed.Port = newPort
 		needsRecreation = true
 	}
 	if msg.MaxPlayers > 0 {
-		server.MaxPlayers = int(msg.MaxPlayers)
+		proposed.MaxPlayers = int(msg.MaxPlayers)
 		needsRecreation = true
 	}
 	if msg.Memory > 0 && int(msg.Memory) != originalMemory {
 		if int(msg.Memory) > originalMemory {
 			s.capacityMu.Lock()
 			capacityLockHeld = true
-			if err := s.checkNodeMemoryCapacity(ctx, server.NodeID, int64(msg.Memory)-int64(originalMemory)); err != nil {
+			if err := s.checkNodeMemoryCapacity(ctx, proposed.NodeID, int64(msg.Memory)-int64(originalMemory)); err != nil {
 				return nil, err
 			}
 		}
-		server.Memory = int(msg.Memory)
+		proposed.Memory = int(msg.Memory)
 		needsRecreation = true
-		if err := s.store.UpdateServerConfigMemory(ctx, server.ID, int(msg.Memory)); err != nil {
-			s.log.Error("Failed to update server config memory: %v", err)
-		}
+		memoryChanged = true
 	}
 	if msg.ModLoader != "" {
 		newLoader := parseModLoaderString(msg.ModLoader)
 		if newLoader != originalModLoader {
-			server.ModLoader = newLoader
-			server.TPSCommand = minecraft.GetTPSCommand(server.ModLoader)
+			proposed.ModLoader = newLoader
+			proposed.TPSCommand = minecraft.GetTPSCommand(proposed.ModLoader)
 			needsRecreation = true
 		}
 	}
 	if msg.McVersion != "" && msg.McVersion != originalMCVersion {
-		server.MCVersion = msg.McVersion
+		proposed.MCVersion = msg.McVersion
 		needsRecreation = true
 	}
 	if msg.LoaderVersion != nil {
-		loaderVersion, err := validateLoaderVersion(server.ModLoader, *msg.LoaderVersion)
+		loaderVersion, err := validateLoaderVersion(proposed.ModLoader, *msg.LoaderVersion)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		if loaderVersion != server.LoaderVersion {
-			server.LoaderVersion = loaderVersion
+		if loaderVersion != proposed.LoaderVersion {
+			proposed.LoaderVersion = loaderVersion
 			// The loader build is baked into the container at creation, so a
 			// change only takes effect on the next recreate.
 			needsRecreation = true
 		}
 	}
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
-		server.DockerImage = msg.DockerImage
+		proposed.DockerImage = msg.DockerImage
 		needsRecreation = true
 	}
 	if msg.AutoStart != nil {
-		server.AutoStart = *msg.AutoStart
+		proposed.AutoStart = *msg.AutoStart
 	}
 	if msg.Detached != nil {
-		server.Detached = *msg.Detached
+		proposed.Detached = *msg.Detached
 	}
 	if msg.TpsCommand != nil {
-		server.TPSCommand = *msg.TpsCommand
+		proposed.TPSCommand = *msg.TpsCommand
 	}
 	if msg.AutoHibernate != nil {
-		server.AutoHibernate = *msg.AutoHibernate
+		proposed.AutoHibernate = *msg.AutoHibernate
 	}
 	if msg.IdleTimeoutMinutes != nil {
 		if int(*msg.IdleTimeoutMinutes) < 0 {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid idle timeout %d", *msg.IdleTimeoutMinutes))
 		}
-		server.IdleTimeoutMinutes = int(*msg.IdleTimeoutMinutes)
+		proposed.IdleTimeoutMinutes = int(*msg.IdleTimeoutMinutes)
 	}
 	if msg.AutoDeepSleep != nil {
-		server.AutoDeepSleep = *msg.AutoDeepSleep
+		proposed.AutoDeepSleep = *msg.AutoDeepSleep
 	}
 	if msg.DeepSleepTimeoutMinutes != nil {
 		if int(*msg.DeepSleepTimeoutMinutes) < 0 {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid deep sleep timeout %d", *msg.DeepSleepTimeoutMinutes))
 		}
-		server.DeepSleepTimeoutMinutes = int(*msg.DeepSleepTimeoutMinutes)
+		proposed.DeepSleepTimeoutMinutes = int(*msg.DeepSleepTimeoutMinutes)
 	}
 
 	var rollbackAdditional bool
+	var replaceAdditionalPorts bool
+	var additionalPorts []*v1.AdditionalPort
+	var previousAdditionalPorts []storage.HostPort
 	// Handle additional ports update
 	if len(msg.AdditionalPorts) > 0 {
 		// Validate additional ports
-		var additionalPorts []*v1.AdditionalPort
 		usedPorts := make(map[string]bool)
 
 		for _, protoPort := range msg.AdditionalPorts {
@@ -2032,7 +2076,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			usedPorts[portKey] = true
 
 			// The game port is TCP. A UDP publish of the same number is a different bind.
-			if protocol == "tcp" && int(protoPort.HostPort) == server.Port {
+			if protocol == "tcp" && int(protoPort.HostPort) == proposed.Port {
 				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("additional port %d conflicts with main server port", protoPort.HostPort))
 			}
 			if s.config.Proxy.Enabled && slices.Contains(s.config.Proxy.ListenPorts, int(protoPort.HostPort)) {
@@ -2048,24 +2092,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			})
 		}
 
-		if err := s.checkAdditionalHostPorts(ctx, server.NodeID, additionalPorts); err != nil {
+		if err := s.checkAdditionalHostPorts(ctx, proposed.NodeID, additionalPorts); err != nil {
 			return nil, err
 		}
-		proxied := server.ProxyHostname != ""
-		previousPorts := hostPorts(server.AdditionalPorts, proxied)
-		if err := s.store.ReplaceAdditionalPortLeases(ctx, server.NodeID, server.ID, hostPorts(additionalPorts, proxied)); err != nil {
-			if errors.Is(err, storage.ErrPortLeaseHeld) {
-				return nil, connect.NewError(connect.CodeInvalidArgument, err)
-			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reserve additional ports: %w", err))
-		}
-		rollbackAdditional = true
-		defer func() {
-			if rollbackAdditional {
-				_ = s.store.ReplaceAdditionalPortLeases(context.WithoutCancel(ctx), server.NodeID, server.ID, previousPorts)
-			}
-		}()
-		server.AdditionalPorts = additionalPorts
+		proxied := proposed.ProxyHostname != ""
+		previousAdditionalPorts = hostPorts(proposed.AdditionalPorts, proxied)
+		replaceAdditionalPorts = true
+		proposed.AdditionalPorts = additionalPorts
 		needsRecreation = true
 	}
 
@@ -2074,7 +2107,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 		if err := s.checkDockerPrivilegedOverrides(ctx, msg.DockerOverrides); err != nil {
 			return nil, err
 		}
-		if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, server.DataPath); err != nil {
+		if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, proposed.DataPath); err != nil {
 			return nil, err
 		}
 
@@ -2085,51 +2118,87 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			}
 		}
 
-		server.DockerOverrides = msg.DockerOverrides
+		proposed.DockerOverrides = msg.DockerOverrides
 		needsRecreation = true
 	}
 
 	// Handle modpack version update
+	saveModpackConfig := false
 	if modpack != nil {
-		serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
-		if err != nil {
-			s.log.Error("Failed to get server config: %v", err)
-			serverConfig = s.store.CreateDefaultServerConfig(server.ID)
+		if proposedConfig == nil {
+			proposedConfig = s.store.CreateDefaultServerConfig(proposed.ID)
 		}
 
 		modpackURL := modpack.WebsiteURL
 		// A re-attached pack replaces the previous display loader.
 		loader, version := s.resolveAttachedModpack(ctx, modpack, msg.ModpackVersionId)
-		server.ModpackLoader = loader
+		proposed.ModpackLoader = loader
 
 		switch modpack.Indexer {
 		case "fuego", "manual":
-			server.ModLoader = storage.ModLoaderAutoCurseForge
+			proposed.ModLoader = storage.ModLoaderAutoCurseForge
 			needsRecreation = true
 
 			if msg.ModpackVersionId != "" {
 				versionedURL := fmt.Sprintf("%s/files/%s", modpackURL, msg.ModpackVersionId)
-				serverConfig.CFPageURL = &versionedURL
+				proposedConfig.CFPageURL = &versionedURL
 			} else {
-				serverConfig.CFPageURL = &modpackURL
+				proposedConfig.CFPageURL = &modpackURL
 			}
 		case "modrinth":
-			server.ModLoader = storage.ModLoaderModrinth
+			proposed.ModLoader = storage.ModLoaderModrinth
 			needsRecreation = true
 
-			configureModrinthModpack(serverConfig, modpack.IndexerID, version)
+			configureModrinthModpack(proposedConfig, modpack.IndexerID, version)
 		}
-
-		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
-			s.log.Error("Failed to update server config with modpack settings: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to save modpack configuration: %w", err))
-		}
+		saveModpackConfig = true
 	}
 
-	// Save server updates first
-	if err := s.store.UpdateServer(ctx, server); err != nil {
-		s.log.Error("Failed to update server: %v", err)
+	// Refuse a runtime-target move before any server or config row changes. A
+	// refused request leaves the committed pair untouched, so later reads and
+	// lifecycle calls still see a consistent config.
+	if err := s.preflightReviewedModRuntimeTarget(ctx, server, currentConfig, &proposed, proposedConfig); err != nil {
+		return nil, err
+	}
+
+	// Commit phase: every write follows the preflight. The server row and the
+	// config row commit in one writer transaction that re-runs the reviewed-mod
+	// check, so an admission that commits after the preflight cannot be
+	// invalidated between the check and the pair. The candidate check uses the
+	// committed rows read under that same lock.
+	if replaceAdditionalPorts {
+		if err := s.store.ReplaceAdditionalPortLeases(ctx, proposed.NodeID, proposed.ID, hostPorts(additionalPorts, proposed.ProxyHostname != "")); err != nil {
+			if errors.Is(err, storage.ErrPortLeaseHeld) {
+				return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to reserve additional ports: %w", err))
+		}
+		rollbackAdditional = true
+		defer func() {
+			if rollbackAdditional {
+				_ = s.store.ReplaceAdditionalPortLeases(context.WithoutCancel(ctx), proposed.NodeID, proposed.ID, previousAdditionalPorts)
+			}
+		}()
+	}
+	server = &proposed
+	if err := s.store.CommitServerSettings(ctx, storage.ServerSettingsCommit{
+		ServerID:       proposed.ID,
+		Proposed:       server,
+		ProposedConfig: proposedConfig,
+		SaveConfig:     saveModpackConfig,
+	}); err != nil {
+		s.log.Error("Failed to update server settings: %v", err)
+		if errors.Is(err, storage.ErrStagedModVersionChange) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+	}
+	if memoryChanged {
+		// Runs after the commit so its read-modify-write preserves the
+		// modpack fields.
+		if err := s.store.UpdateServerConfigMemory(ctx, proposed.ID, proposed.Memory); err != nil {
+			s.log.Error("Failed to update server config memory: %v", err)
+		}
 	}
 	rollbackAdditional = false
 	if capacityLockHeld {
@@ -2446,13 +2515,50 @@ func unsafeDataRemoval(path string) bool {
 	return rest == ""
 }
 
+// errLifecycleRequestCompleted refuses a replay whose journaled callback was
+// suppressed: the runtime mutation already ran for this request ID and no
+// staged row may be published under it.
+var errLifecycleRequestCompleted = errors.New("this lifecycle request ID was already completed; retry the staged change with a new request ID")
+
+// refuseCompletedLifecycleRequest refuses a replay of a request whose journaled
+// step already completed. The journal key carries the step kind, so checking
+// only the kind the current state would select would let a replay of the same
+// request ID select another kind (unpause, create, recreate or in-place
+// restart) and mutate the runtime. This gate spans every kind and runs before
+// the first live write or dispatch.
+func (s *ServerService) refuseCompletedLifecycleRequest(ctx context.Context, serverID, requestID string) error {
+	completed, err := s.store.HasCompletedServerOperationForRequest(ctx, serverID, requestID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check the lifecycle request journal: %w", err))
+	}
+	if completed {
+		return connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
+	}
+	return nil
+}
+
+// A completed request ID may suppress the mutation callback. It cannot
+// acknowledge fresh staged changes that were published by this attempt. The
+// dispatch intent is written inside the journaled callback so a suppressed
+// request cannot leave a durable dispatch for bytes that were never sent to a
+// runtime.
+func (s *ServerService) runPublicationMutation(ctx context.Context, publication *staging.RestartPublication, server *storage.Server, kind, requestID string, mutate func() error) error {
+	ran := false
+	err := s.runJournaledMutation(ctx, server, kind, requestID, func() error {
+		if dispatchErr := publication.BeginDispatch(ctx); dispatchErr != nil {
+			return fmt.Errorf("failed to record staged publication dispatch: %w", dispatchErr)
+		}
+		ran = true
+		return mutate()
+	})
+	if err == nil && !ran && publication.HasChanges() {
+		return errLifecycleRequestCompleted
+	}
+	return err
+}
+
 // StartServer starts a server
 func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1.StartServerRequest]) (out *connect.Response[v1.StartServerResponse], retErr error) {
-	defer func() {
-		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
-		}
-	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
 	if reqErr != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, reqErr)
@@ -2470,11 +2576,14 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
 		return nil, err
 	}
+	if err := s.refuseCompletedLifecycleRequest(ctx, server.ID, requestID); err != nil {
+		return nil, err
+	}
 
 	dockerCli, err := s.getDockerClientStrict(server.NodeID)
 	if err != nil {
 		server.Status = storage.StatusError
-		_ = s.store.UpdateServer(ctx, server)
+		_ = s.store.UpdateServerStatus(ctx, server.ID, server.Status)
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q is unavailable: %w", server.NodeID, err))
 	}
 	release, err := s.acquireNodeAdmission(ctx, server)
@@ -2486,33 +2595,74 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		return nil, err
 	}
 
+	// If container doesn't exist (e.g. ContainerID lost/never persisted), try to recover an
+	// existing-but-untracked container before creating a duplicate (MINE-103).
+	if server.ContainerID == "" {
+		if resolved, resolveErr := dockerCli.ResolveContainer(ctx, server.ID); resolveErr == nil && resolved != nil {
+			s.log.Info("Recovered untracked container %s for server %s via label/name resolution", resolved.ID, server.ID)
+			server.ContainerID = resolved.ID
+			if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
+				s.log.Error("Failed to update server with resolved container ID: %v", err)
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
+			}
+		}
+	}
+
 	// Apply staged configs on restart/start (STAGED-CONFIG). Content waiting
 	// for a clock time or an idle window stays staged.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
+	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on start for server %s: %v", server.ID, fileErr)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
+		return nil, stagedPublicationError("failed to apply staged content", fileErr)
 	}
-	contentReady := undoFiles != nil
-	if undoFiles == nil {
-		undoFiles = func() {}
+	// Applied content whose publication an earlier lifecycle already accepted
+	// owes cleanup only. It must not trigger a new recreation; the normal start
+	// below still starts the existing container when the user asked for one.
+	contentReady := commit.NeedsRuntimePublication()
+	publication := staging.RestartPublication{
+		Commit: commit,
 	}
-	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
+	defer func() {
+		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
+			out = nil
+			retErr = connect.NewError(connect.CodeInternal, errors.Join(retErr, finishErr))
+		}
+	}()
+	appliedStaged, err := commit.ApplyConfigs(ctx, s.store)
+	publication.Configs = appliedStaged
 	if err != nil {
-		undoFiles()
 		s.log.Error("Failed to apply staged config changes on start for server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged config changes: %w", err))
 	}
-	n := len(appliedStaged)
-	if n > 0 {
+	appliedNow := commit.AppliedConfigsThisAttempt()
+	if n := len(appliedStaged); n > 0 {
 		s.log.Info("Applied %d staged config change(s) on start for server %s", n, server.ID)
 	}
 	pendingRecreate, err := scheduler.HasPendingRestartStagedConfigRecreate(ctx, s.store, server.ID, server.LastStarted)
 	if err != nil {
-		undoFiles()
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
 	}
-	needsStagedRecreate := n > 0 || pendingRecreate || contentReady
+	needsStagedRecreate := appliedNow > 0 || pendingRecreate || contentReady
+	if commit.NeedsIdentityVerification() {
+		// A dispatch intent is durable but unverified. Repair the tracked
+		// identity if needed, then accept only the exact replacement identity
+		// captured at creation. Any other canonical container is drift.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server); reconcileErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx), fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr)))
+		}
+		verified, verifyErr := commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to verify the recorded container replacement: %w", verifyErr))
+		}
+		if !verified {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, commit.ExpectedReplacementID())))
+		}
+		// The runtime is verified; this attempt owes cleanup, not another
+		// replacement. The operator's explicit start continues below.
+		publication.RuntimeAccepted = true
+		needsStagedRecreate = false
+	}
 	stagedContainerStarted := false
 
 	// If server was in deep sleep, release direct knock listener before starting
@@ -2524,13 +2674,14 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	// replacement. For staged replacement, keep it frozen until config loading
 	// succeeds and RecreateContainer owns the stop/remove transition.
 	if server.Status == storage.StatusPaused && server.ContainerID != "" && !needsStagedRecreate {
-		if err := s.runJournaledMutation(ctx, server, "start_unpause", requestID, func() error {
-			return dockerCli.UnpauseContainer(ctx, server.ContainerID)
+		if err := s.runPublicationMutation(ctx, &publication, server, "start_unpause", requestID, func() error {
+			publication.RuntimeAttempted = true
+			return resumePausedContainer(ctx, dockerCli, server.ContainerID)
 		}); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server: %w", err))
 		}
 		server.Status = storage.StatusRunning
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := s.store.UpdateServerStatus(ctx, server.ID, server.Status); err != nil {
 			resumeErr := fmt.Errorf("server resumed but status could not be saved: %w", err)
 			rollbackErr := s.rollbackPausedResume(ctx, dockerCli, server)
 			return nil, connect.NewError(connect.CodeInternal, errors.Join(resumeErr, rollbackErr))
@@ -2540,6 +2691,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		}
 		// Unpause lands on running inside this RPC, so it announces here.
 		// Create and StartServer announce from the reconciler when it records running.
+		publication.RuntimeAccepted = true
 		if s.bus != nil {
 			s.bus.Emit(ctx, events.Event{
 				Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START,
@@ -2554,52 +2706,56 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
 		}
+		if serverConfig == nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		result, recreateErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+		// The dispatch and the replacement share the journaled mutation: a
+		// completed request ID suppresses both, so fresh rows are never
+		// published under a runtime this request did not touch.
+		var result *docker.RecreateContainerResult
+		recreateRan := false
+		recreateErr := s.runPublicationMutation(ctx, &publication, server, "start_recreate", requestID, func() error {
+			publication.RuntimeAttempted = true
+			recreateRan = true
+			var err error
+			result, err = serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			return err
+		})
+		if recreateErr == nil && !recreateRan {
+			// The request ID already completed and nothing needed publishing:
+			// never recreate or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
+		}
 		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
-			}
-			undoFiles()
-			for _, rec := range appliedStaged {
-				if _, rbErr := s.store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil {
-					s.log.Error("Failed to auto-rollback staged config %s after start recreate error: %v", rec.ID, rbErr)
-				} else {
-					s.log.Warn("Auto-rolled back staged config %s due to start recreate failure", rec.ID)
+			if errors.As(recreateErr, &outcomeErr) {
+				if outcomeErr.Operation == nil {
+					publication.RuntimeIdentityUnresolved = true
 				}
+				// A typed preflight proves no container mutation began; set the
+				// flag before deciding whether to record an identity.
+				publication.RuntimePreflight = outcomeErr.Preflight
+			}
+		}
+		if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
+		if recreateErr != nil {
+			if publication.RuntimeIdentityUnresolved {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
 		if !result.WasRunning {
 			if err := serverruntime.Start(ctx, s.store, dockerCli, server); err != nil {
-				server.Status = storage.StatusError
-				_ = s.store.UpdateServer(ctx, server)
-				undoFiles()
-				for _, rec := range appliedStaged {
-					if _, rbErr := s.store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil {
-						s.log.Error("Failed to auto-rollback staged config %s after start error: %v", rec.ID, rbErr)
-					} else {
-						s.log.Warn("Auto-rolled back staged config %s due to start failure", rec.ID)
-					}
-				}
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start recreated server: %w", err))
 			}
 		}
+		publication.RuntimeAccepted = true
 		stagedContainerStarted = true
-	}
-
-	// If container doesn't exist (e.g. ContainerID lost/never persisted), try to recover an
-	// existing-but-untracked container before creating a duplicate (MINE-103).
-	if server.ContainerID == "" {
-		if resolved, resolveErr := dockerCli.ResolveContainer(ctx, server.ID); resolveErr == nil && resolved != nil {
-			s.log.Info("Recovered untracked container %s for server %s via label/name resolution", resolved.ID, server.ID)
-			server.ContainerID = resolved.ID
-			if err := s.store.UpdateServer(ctx, server); err != nil {
-				s.log.Error("Failed to update server with resolved container ID: %v", err)
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
-			}
-		}
 	}
 
 	// Still no container - create it
@@ -2610,11 +2766,32 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
+		if serverConfig == nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		containerID, err := dockerCli.CreateContainer(ctx, server, serverConfig)
-		if err != nil {
-			s.log.Error("Failed to create container: %v", err)
-			return nil, createContainerError(err)
+		// A completed request ID suppresses this journaled mutation before the
+		// dispatch and the create, so a replay cannot build a container for
+		// freshly applied rows.
+		var containerID string
+		createRan := false
+		if createErr := s.runPublicationMutation(ctx, &publication, server, "start_create", requestID, func() error {
+			publication.RuntimeAttempted = true
+			createRan = true
+			var err error
+			containerID, err = dockerCli.CreateContainer(ctx, server, serverConfig)
+			return err
+		}); createErr != nil {
+			s.log.Error("Failed to create container: %v", createErr)
+			return nil, createContainerError(createErr)
+		}
+		if !createRan {
+			// The request ID already completed and nothing needed publishing:
+			// never create or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
+		}
+		if recordErr := publication.RecordReplacement(ctx, containerID); recordErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 		}
 
 		server.ContainerID = containerID
@@ -2624,19 +2801,31 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			server.AppliedImageID = imageID
 			server.AppliedRepoDigest = repoDigest
 		}
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := s.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": containerID, "applied_image_id": server.AppliedImageID, "applied_repo_digest": server.AppliedRepoDigest}); err != nil {
+			// A recorded replacement identity is recovery evidence. Keep the
+			// created container: it may already contain the staged bytes and it
+			// is the only object that identity can verify on retry. The deferred
+			// resolution seals the batch. Without that evidence the container is
+			// untracked and is removed instead of becoming an orphan.
 			s.log.Error("Failed to update server with container ID: %v", err)
-			_ = dockerCli.RemoveContainer(ctx, containerID)
+			if !publication.Commit.NeedsIdentityVerification() {
+				_ = dockerCli.RemoveContainer(ctx, containerID)
+			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 		}
 	}
 
 	if !stagedContainerStarted {
-
-		// Start container
-		if err := s.runJournaledMutation(ctx, server, "start", requestID, func() error {
+		// Start container. The dispatch is written inside the journaled
+		// mutation, immediately before this live write, and only for a request
+		// that still runs.
+		if err := s.runPublicationMutation(ctx, &publication, server, "start", requestID, func() error {
+			publication.RuntimeAttempted = true
 			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
+			if publication.HasChanges() {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start staged server: %w", err))
+			}
 			s.log.Error("Failed to start container, attempting to recreate: %v", err)
 
 			// Get server config for container creation
@@ -2644,13 +2833,31 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			if err != nil {
 				s.log.Error("Failed to get server config: %v", err)
 				server.Status = storage.StatusError
-				_ = s.store.UpdateServer(ctx, server)
+				_ = s.store.UpdateServerStatus(ctx, server.ID, server.Status)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 			}
 
 			// Recreate container
+			if serverConfig == nil {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+			}
 			s.prepareServerConfig(ctx, server, serverConfig)
+			publication.RuntimeAttempted = true
 			result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			if err != nil {
+				var outcomeErr *serverruntime.RecreationError
+				if errors.As(err, &outcomeErr) {
+					if outcomeErr.Operation == nil {
+						publication.RuntimeIdentityUnresolved = true
+					}
+					publication.RuntimePreflight = outcomeErr.Preflight
+				}
+			}
+			if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+				if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+				}
+			}
 			if err != nil {
 				s.log.Error("Failed to recreate container: %v", err)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", err))
@@ -2662,13 +2869,14 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 				if startErr := serverruntime.Start(ctx, s.store, dockerCli, server); startErr != nil {
 					s.log.Error("Failed to start recreated container: %v", startErr)
 					server.Status = storage.StatusError
-					_ = s.store.UpdateServer(ctx, server)
+					_ = s.store.UpdateServerStatus(ctx, server.ID, server.Status)
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", startErr))
 				}
 			}
 
+			publication.RuntimeAccepted = true
 			// Update server with new container ID
-			if err := s.store.UpdateServer(ctx, server); err != nil {
+			if err := s.store.UpdateServerContainerID(ctx, server.ID, server.ContainerID); err != nil {
 				s.log.Error("Failed to update server after container recreation: %v", err)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server after container recreation"))
 			}
@@ -2676,12 +2884,13 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 	}
 
+	publication.RuntimeAccepted = true
 	// Update server status
 	now := time.Now()
 	server.Status = storage.StatusStarting
 	server.LastStarted = &now
 
-	if err := s.store.UpdateServer(ctx, server); err != nil {
+	if err := serverruntime.PersistStarted(ctx, s.store, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server started but status could not be saved: %w", err))
 	}
@@ -2708,6 +2917,28 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
 	}), nil
+}
+
+// resumePausedContainer is the idempotent unpause step for lifecycle requests.
+// Docker refuses an unpause when the container is not frozen. A completed
+// unpause whose status write was interrupted leaves the database PAUSED while
+// the container is already running, so a new request ID must observe the
+// running state and continue instead of failing the lifecycle. Only a live
+// observed state (running or unhealthy) is accepted; paused, stopped, error and
+// absent containers keep the original unpause error so a stopped runtime is
+// never mistaken for a successful resume.
+func resumePausedContainer(ctx context.Context, dockerCli *docker.Client, containerID string) error {
+	if err := dockerCli.UnpauseContainer(ctx, containerID); err != nil {
+		observed, observeErr := dockerCli.GetContainerStatus(ctx, containerID)
+		if observeErr != nil {
+			return errors.Join(err, fmt.Errorf("failed to verify the container state after the unpause was refused: %w", observeErr))
+		}
+		if observed == storage.StatusRunning || observed == storage.StatusUnhealthy {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // rollbackPausedResume keeps the persisted PAUSED intent aligned with Docker
@@ -2887,11 +3118,6 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 
 // RestartServer restarts a server
 func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[v1.RestartServerRequest]) (out *connect.Response[v1.RestartServerResponse], retErr error) {
-	defer func() {
-		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
-		}
-	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
 	if reqErr != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, reqErr)
@@ -2907,6 +3133,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
+	if err := s.refuseCompletedLifecycleRequest(ctx, server.ID, requestID); err != nil {
 		return nil, err
 	}
 
@@ -2925,36 +3154,53 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 
 	// Apply any staged config changes marked for restart. A future time or idle
 	// window is not published by this restart.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
+	commit, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on restart for server %s: %v", server.ID, fileErr)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
+		return nil, stagedPublicationError("failed to apply staged content", fileErr)
 	}
-	if undoFiles == nil {
-		undoFiles = func() {}
+	publication := staging.RestartPublication{
+		Commit: commit,
 	}
-	appliedStaged, err := scheduler.ApplyOnRestartStagedConfigRecords(ctx, s.store, server.ID)
+	defer func() {
+		if finishErr := publication.Resolve(ctx, s.store, retErr); finishErr != nil {
+			out = nil
+			retErr = connect.NewError(connect.CodeInternal, errors.Join(retErr, finishErr))
+		}
+	}()
+	appliedStaged, err := commit.ApplyConfigs(ctx, s.store)
+	publication.Configs = appliedStaged
 	if err != nil {
-		undoFiles()
 		s.log.Error("Failed to apply staged config changes on restart for server %s: %v", server.ID, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged config changes: %w", err))
 	}
-	stagedApplied := len(appliedStaged)
+	stagedApplied := commit.AppliedConfigsThisAttempt()
 	// If server is in deep sleep, release direct knock listener before starting
 	if server.Status == storage.StatusDeepSleep && s.proxy != nil {
 		s.proxy.StopDirectKnock(server.ID)
 	}
-	// If server is paused, unpause it first so Docker can restart it
-	if server.Status == storage.StatusPaused && server.ContainerID != "" {
-		if err := dockerCli.UnpauseContainer(ctx, server.ContainerID); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
-		}
-	}
-
 	pendingRecreate, err := scheduler.HasPendingRestartStagedConfigRecreate(ctx, s.store, server.ID, server.LastStarted)
 	if err != nil {
-		undoFiles()
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check staged config recovery: %w", err))
+	}
+	if commit.NeedsIdentityVerification() {
+		// A previous attempt recorded a dispatch but the canonical outcome was
+		// not verified. Repair the tracked ID if needed, then accept only the
+		// exact captured replacement identity; anything else is drift.
+		if _, reconcileErr := serverruntime.ReconcileContainerIdentity(ctx, s.store, dockerCli, server); reconcileErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx), fmt.Errorf("failed to reconcile server container identity: %w", reconcileErr)))
+		}
+		verified, verifyErr := commit.VerifyExpectedReplacement(ctx, server.ContainerID)
+		if verifyErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to verify the recorded container replacement: %w", verifyErr))
+		}
+		if !verified {
+			return nil, connect.NewError(connect.CodeInternal, errors.Join(commit.Retain(ctx),
+				fmt.Errorf("canonical container %q is not the recorded replacement %q; refusing to acknowledge the publication", server.ContainerID, commit.ExpectedReplacementID())))
+		}
+		publication.RuntimeAccepted = true
+		stagedApplied = 0
+		pendingRecreate = false
 	}
 
 	// If staged config changes were applied and container exists, recreate it with new config
@@ -2963,44 +3209,60 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
 		}
+		if serverConfig == nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
-		if err != nil {
+		// The dispatch and the replacement share the journaled mutation: a
+		// completed request ID suppresses both, so fresh config is never
+		// published under a runtime this request did not touch.
+		var result *docker.RecreateContainerResult
+		recreateRan := false
+		recreateErr := s.runPublicationMutation(ctx, &publication, server, "restart_recreate", requestID, func() error {
+			publication.RuntimeAttempted = true
+			recreateRan = true
+			var err error
+			result, err = serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			return err
+		})
+		if recreateErr == nil && !recreateRan {
+			// The request ID already completed and nothing needed publishing:
+			// never recreate or start a runtime for a replayed request.
+			return nil, connect.NewError(connect.CodeInternal, errLifecycleRequestCompleted)
+		}
+		if recreateErr != nil {
 			var outcomeErr *serverruntime.RecreationError
-			if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
-			}
-			undoFiles()
-			for _, rec := range appliedStaged {
-				if _, rbErr := s.store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil {
-					s.log.Error("Failed to auto-rollback staged config %s after restart recreate error: %v", rec.ID, rbErr)
-				} else {
-					s.log.Warn("Auto-rolled back staged config %s due to restart recreate failure", rec.ID)
+			if errors.As(recreateErr, &outcomeErr) {
+				if outcomeErr.Operation == nil {
+					publication.RuntimeIdentityUnresolved = true
 				}
+				publication.RuntimePreflight = outcomeErr.Preflight
 			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", err))
+		}
+		if result != nil && result.NewContainerID != "" && !publication.RuntimePreflight {
+			if recordErr := publication.RecordReplacement(ctx, result.NewContainerID); recordErr != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+			}
+		}
+		if recreateErr != nil {
+			if publication.RuntimeIdentityUnresolved {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
+			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
 		if !result.WasRunning {
-			if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
+			if err := s.runPublicationMutation(ctx, &publication, server, "restart_start", requestID, func() error {
+				publication.RuntimeAttempted = true
 				return serverruntime.Start(ctx, s.store, dockerCli, server)
 			}); err != nil {
-				server.Status = storage.StatusError
-				_ = s.store.UpdateServer(ctx, server)
-				undoFiles()
-				for _, rec := range appliedStaged {
-					if _, rbErr := s.store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil {
-						s.log.Error("Failed to auto-rollback staged config %s after restart start error: %v", rec.ID, rbErr)
-					} else {
-						s.log.Warn("Auto-rolled back staged config %s due to restart start failure", rec.ID)
-					}
-				}
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start recreated server: %w", err))
 			}
 		}
+		publication.RuntimeAccepted = true
 		now := time.Now()
 		server.Status = storage.StatusStarting
 		server.LastStarted = &now
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := serverruntime.PersistStarted(ctx, s.store, server); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server recreated but status could not be saved: %w", err))
 		}
 		if err := s.store.ClearEphemeralConfigFields(ctx, server.ID); err != nil {
@@ -3025,15 +3287,22 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}
 
 		// Create container
+		if serverConfig == nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+		}
 		s.prepareServerConfig(ctx, server, serverConfig)
 		var containerID string
-		if err := s.runJournaledMutation(ctx, server, "restart_create", requestID, func() error {
+		if err := s.runPublicationMutation(ctx, &publication, server, "restart_create", requestID, func() error {
+			publication.RuntimeAttempted = true
 			var createErr error
 			containerID, createErr = dockerCli.CreateContainer(ctx, server, serverConfig)
 			return createErr
 		}); err != nil {
 			s.log.Error("Failed to create container: %v", err)
 			return nil, createContainerError(err)
+		}
+		if recordErr := publication.RecordReplacement(ctx, containerID); recordErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
 		}
 
 		server.ContainerID = containerID
@@ -3043,27 +3312,36 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			server.AppliedImageID = imageID
 			server.AppliedRepoDigest = repoDigest
 		}
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := s.store.UpdateServerFields(ctx, server.ID, map[string]any{"container_id": containerID, "applied_image_id": server.AppliedImageID, "applied_repo_digest": server.AppliedRepoDigest}); err != nil {
+			// A recorded replacement identity is recovery evidence. Keep the
+			// created container: it may already contain the staged bytes and it
+			// is the only object that identity can verify on retry. The deferred
+			// resolution seals the batch. Without that evidence the container is
+			// untracked and is removed instead of becoming an orphan.
 			s.log.Error("Failed to update server with container ID: %v", err)
-			_ = dockerCli.RemoveContainer(ctx, containerID)
+			if !publication.Commit.NeedsIdentityVerification() {
+				_ = dockerCli.RemoveContainer(ctx, containerID)
+			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update server"))
 		}
 
 		// Now start the container. These kinds stay distinct from StartServer
 		// so a reused request id cannot replay a completed start as this restart.
-		if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
+		if err := s.runPublicationMutation(ctx, &publication, server, "restart_start", requestID, func() error {
+			publication.RuntimeAttempted = true
 			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
 			s.log.Error("Failed to start container: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", err))
 		}
 
+		publication.RuntimeAccepted = true
 		// Update server status
 		now := time.Now()
 		server.Status = storage.StatusStarting
 		server.LastStarted = &now
 
-		if err := s.store.UpdateServer(ctx, server); err != nil {
+		if err := serverruntime.PersistStarted(ctx, s.store, server); err != nil {
 			s.log.Error("Failed to update server status: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but status could not be saved: %w", err))
 		}
@@ -3094,24 +3372,88 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}), nil
 	}
 
-	// Restart container
-	if err := s.runJournaledMutation(ctx, server, "restart", requestID, func() error {
+	// If server is paused, unpause it first so Docker can restart it. The
+	// unpause is a journaled mutation: a completed request ID must not resume
+	// the container or record a dispatch for freshly staged rows.
+	if server.Status == storage.StatusPaused && server.ContainerID != "" {
+		if err := s.runPublicationMutation(ctx, &publication, server, "restart_unpause", requestID, func() error {
+			publication.RuntimeAttempted = true
+			publication.RuntimeInPlaceMayHaveMutated = true
+			return resumePausedContainer(ctx, dockerCli, server.ContainerID)
+		}); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to resume server before restarting: %w", err))
+		}
+		// Record RUNNING before the restart so an interruption after the
+		// unpause is recovered by a new request ID instead of being stranded
+		// as PAUSED over a running container. A failed write is an error, not
+		// a success claim; the retained publication can be retried.
+		server.Status = storage.StatusRunning
+		if err := s.store.UpdateServerStatus(ctx, server.ID, server.Status); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server resumed but status could not be saved before restarting: %w", err))
+		}
+		if s.proxy != nil && server.ProxyHostname != "" {
+			_ = s.proxy.UpdateServerRoute(server)
+		}
+	}
+
+	// Restart container. The request stays inside the publication mutation so
+	// a consumed request ID cannot silently skip freshly published changes.
+	if err := s.runPublicationMutation(ctx, &publication, server, "restart", requestID, func() error {
+		publication.RuntimeAttempted = true
 		return dockerCli.RestartContainer(ctx, server.ContainerID, 2*time.Second)
 	}); err != nil {
+		// Record what the in-place attempt actually proved. A typed preflight
+		// means Docker never stopped or started the container; every other
+		// failure may already have exposed the staged bytes and survives any
+		// later fallback preflight.
+		if publication.RuntimeAttempted {
+			if errors.Is(err, docker.ErrRecreatePreflight) {
+				publication.RuntimePreflight = true
+			} else {
+				publication.RuntimeInPlaceMayHaveMutated = true
+			}
+		}
+		if publication.HasChanges() && !publication.RuntimePreflight {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart staged server: %w", err))
+		}
 		s.log.Warn("Failed to restart container directly (%v), attempting recreation", err)
 		serverConfig, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 		if cfgErr == nil {
+			if serverConfig == nil {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("server configuration is empty"))
+			}
 			s.prepareServerConfig(ctx, server, serverConfig)
+			// The fallback is a separate runtime attempt. It starts without the
+			// in-place preflight's proof; only its own typed preflight may
+			// restore it.
+			publication.RuntimePreflight = false
+			publication.RuntimeAttempted = true
 			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			if recErr != nil {
+				var outcomeErr *serverruntime.RecreationError
+				if errors.As(recErr, &outcomeErr) {
+					if outcomeErr.Operation == nil {
+						publication.RuntimeIdentityUnresolved = true
+					} else {
+						publication.RuntimePreflight = outcomeErr.Preflight
+					}
+				}
+			}
+			if recResult != nil && recResult.NewContainerID != "" && !publication.RuntimePreflight {
+				if recordErr := publication.RecordReplacement(ctx, recResult.NewContainerID); recordErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record the replacement identity: %w", recordErr))
+				}
+			}
 			if recErr == nil && !recResult.WasRunning {
 				recErr = serverruntime.Start(ctx, s.store, dockerCli, server)
 			}
 			if recErr == nil {
+				publication.RuntimeAccepted = true
 				server.ContainerID = recResult.NewContainerID
 				now := time.Now()
 				server.Status = storage.StatusStarting
 				server.LastStarted = &now
-				if saveErr := s.store.UpdateServer(ctx, server); saveErr != nil {
+				if saveErr := serverruntime.PersistStarted(ctx, s.store, server); saveErr != nil {
 					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but status could not be saved: %w", saveErr))
 				}
 				if clearErr := s.store.ClearEphemeralConfigFields(ctx, server.ID); clearErr != nil {
@@ -3138,15 +3480,16 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}
 		s.log.Error("Failed to restart container: %v", err)
 		server.Status = storage.StatusError
-		_ = s.store.UpdateServer(ctx, server)
+		_ = s.store.UpdateServerStatus(ctx, server.ID, server.Status)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server: %w", err))
 	}
 
+	publication.RuntimeAccepted = true
 	// Update server status
 	now := time.Now()
 	server.Status = storage.StatusStarting
 	server.LastStarted = &now
-	if err := s.store.UpdateServer(ctx, server); err != nil {
+	if err := serverruntime.PersistStarted(ctx, s.store, server); err != nil {
 		s.log.Error("Failed to update server status: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but status could not be saved: %w", err))
 	}

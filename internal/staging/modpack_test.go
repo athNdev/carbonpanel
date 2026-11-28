@@ -169,6 +169,7 @@ func TestStageModpackPublishFailureRestoresTheTreeAndModule(t *testing.T) {
 	_ = batchID
 
 	err = Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		require.NoError(t, store.UpdateModuleContainerID(ctx, "map", "replacement"))
 		return os.ErrClosed
 	})
 	require.Error(t, err)
@@ -178,6 +179,7 @@ func TestStageModpackPublishFailureRestoresTheTreeAndModule(t *testing.T) {
 	live, err := store.GetModule(ctx, "map")
 	require.NoError(t, err)
 	require.Equal(t, "old", live.Config)
+	require.Equal(t, "replacement", live.ContainerID)
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, open)
@@ -200,4 +202,57 @@ func TestStageModpackRefusesASymlink(t *testing.T) {
 	open, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.Nil(t, open)
+}
+
+// TestStageModpackNeverPublishesThePendingMarker proves a marker left inside
+// the clone cache (old controller state) is not staged as pack content.
+func TestStageModpackNeverPublishesThePendingMarker(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "marker", Name: "marker", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	openBatch(t, store, server.ID, storage.UpdateWindowNextRestart, nil, 0)
+
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "keep.txt"), []byte("pack"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, modpackPendingCommitFile), []byte("deadbeef\n"), 0o644))
+
+	row, err := StageModpackTree(ctx, store, server, src, "modpack marker")
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(data, row.StagePath, modpackPendingCommitFile))
+	require.FileExists(t, filepath.Join(data, row.StagePath, "keep.txt"))
+	require.NoFileExists(t, filepath.Join(data, modpackPendingCommitFile))
+}
+
+// TestStageModpackNeverPublishesTheSiblingPendingMarker proves the live marker
+// the scheduler keeps beside (not inside) the clone cache cannot be staged as
+// pack content and cannot overwrite controller state at publication. The marker
+// basename is the cache directory name joined with the marker file name.
+func TestStageModpackNeverPublishesTheSiblingPendingMarker(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "sibling-marker", Name: "sibling-marker", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	when := time.Now().Add(-time.Minute).UTC()
+	openBatch(t, store, server.ID, storage.UpdateWindowAtTime, &when, 0)
+
+	liveMarker := filepath.Join(data, modpackPendingCommitSibling)
+	require.NoError(t, os.WriteFile(liveMarker, []byte("live\n"), 0o644))
+
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "keep.txt"), []byte("pack"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, modpackPendingCommitSibling), []byte("pack\n"), 0o644))
+
+	row, err := StageModpackTree(ctx, store, server, src, "modpack sibling marker")
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(data, row.StagePath, modpackPendingCommitSibling))
+	require.FileExists(t, filepath.Join(data, row.StagePath, "keep.txt"))
+
+	require.NoError(t, Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		return nil
+	}))
+	body, err := os.ReadFile(liveMarker)
+	require.NoError(t, err)
+	require.Equal(t, "live\n", string(body), "publication must never overwrite the live pending marker")
+	require.FileExists(t, filepath.Join(data, "keep.txt"))
 }

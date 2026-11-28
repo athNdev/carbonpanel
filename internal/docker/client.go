@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -636,7 +637,11 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 			if key == writableRootfsEnv || strings.EqualFold(key, skipNsswitchConfEnv) {
 				continue
 			}
-			config.Env = append(config.Env, fmt.Sprintf("%s=%s", key, value))
+			prefix := key + "="
+			config.Env = slices.DeleteFunc(config.Env, func(entry string) bool {
+				return entry == key || strings.HasPrefix(entry, prefix)
+			})
+			config.Env = append(config.Env, prefix+value)
 		}
 	}
 
@@ -1702,8 +1707,15 @@ func (c *Client) UnpauseContainer(ctx context.Context, containerID string) error
 
 // Stops and starts a container with an optional delay between operations
 func (c *Client) RestartContainer(ctx context.Context, containerID string, delay time.Duration) error {
-	if _, err := c.StopContainer(ctx, containerID); err != nil {
+	found, err := c.StopContainer(ctx, containerID)
+	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+	if !found {
+		// Nothing was stopped and no start was attempted: Docker has no such
+		// container, so the caller can safely fall back to recreation without
+		// treating the restart as a possibly accepted runtime mutation.
+		return fmt.Errorf("%w: container %s is absent before the restart", ErrRecreatePreflight, containerID)
 	}
 
 	if delay > 0 {
@@ -1719,6 +1731,16 @@ func (c *Client) RestartContainer(ctx context.Context, containerID string, delay
 	}
 
 	return nil
+}
+
+// ErrRecreatePreflight marks a recreation failure that happened before any
+// stop, rename, create or remove request was sent. The old container is
+// untouched (it may still be running), so a caller may safely compensate the
+// staged changes that were about to be published.
+var ErrRecreatePreflight = errors.New("container recreation preflight failed")
+
+func recreatePreflightError(op string, err error) error {
+	return fmt.Errorf("%w: %s: %w", ErrRecreatePreflight, op, err)
 }
 
 // Result of a container recreation operation
@@ -1772,11 +1794,11 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 	// Preflight the replacement before touching the known-good container:
 	// configuration and image failures leave the old container running.
 	if err := validateServerPorts(server); err != nil {
-		return result, err
+		return result, recreatePreflightError("validate ports", err)
 	}
 	imageID, repoDigest, err := c.ensureServerImage(ctx, server)
 	if err != nil {
-		return result, err
+		return result, recreatePreflightError("resolve image", err)
 	}
 
 	// rollback restores the retained old container's name and run state. It is
@@ -1791,8 +1813,9 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			if !errdefs.IsNotFound(inspectErr) {
 				// An unavailable or timed-out inspect is not evidence that the
 				// old container is absent. Keep its identity and do not send a
-				// destructive call based on an unknown observation.
-				return result, fmt.Errorf("failed to inspect old container before recreation: %w", inspectErr)
+				// destructive call based on an unknown observation. The inspect
+				// is read-only, so nothing was mutated and compensation is safe.
+				return result, recreatePreflightError("inspect old container", inspectErr)
 			}
 			c.log.Debug("Container %s is already absent during recreation: %v", oldContainerID, inspectErr)
 		} else {
@@ -1800,8 +1823,8 @@ func (c *Client) RecreateContainer(ctx context.Context, oldContainerID string, s
 			if status == models.StatusError {
 				// A successful response without a usable state is still an
 				// unknown observation. Preserve the known identity and require
-				// reconciliation.
-				return result, fmt.Errorf("failed to determine old container state before recreation: status is unknown")
+				// reconciliation. Nothing has been mutated yet.
+				return result, recreatePreflightError("inspect old container", errors.New("status is unknown"))
 			}
 			if status == models.StatusRunning || status == models.StatusUnhealthy || status == models.StatusPaused {
 				// A paused container cannot be retained reliably until

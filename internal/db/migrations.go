@@ -48,6 +48,7 @@ func allModels() []any {
 		&ServerSnapshot{},
 		&StagedConfigChange{},
 		&ServerUpdateBatch{},
+		&ServerUpdatePublication{},
 		&StagedContentChange{},
 		&BackendPortLease{},
 		&ServerOperation{},

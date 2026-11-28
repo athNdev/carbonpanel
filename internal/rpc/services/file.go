@@ -29,6 +29,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/module"
@@ -281,6 +282,40 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 	}), nil
 }
 
+// beginDataWrite admits one ordinary panel mutation against the server data
+// path. It shares the path with other panel writes, but a staged publication
+// owns it exclusively from before its undo snapshot through rollback, so a
+// write is refused instead of racing that snapshot. Reads do not take a lease.
+// It also keeps the module archive-export fence: while the fence is held a
+// stopped archive export cannot claim consistency.
+func beginDataWrite(serverID string) (func(), error) {
+	exportWrite, err := module.TryBeginServerDataWrite(serverID)
+	if err != nil {
+		if errors.Is(err, module.ErrModuleArchiveExport) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("a server archive export is in progress; retry after it finishes"))
+		}
+		return nil, connect.NewError(connect.CodeAborted, err)
+	}
+	write, err := datawrite.TryShared(serverID)
+	if err != nil {
+		exportWrite.Release()
+		if errors.Is(err, datawrite.ErrExclusiveHeld) {
+			return nil, connect.NewError(connect.CodeAborted,
+				errors.New("a staged update is being published; retry after it finishes"))
+		}
+		return nil, connect.NewError(connect.CodeAborted, err)
+	}
+	return func() {
+		write.Release()
+		exportWrite.Release()
+	}, nil
+}
+
+func (s *FileService) beginDataWrite(serverID string) (func(), error) {
+	return beginDataWrite(serverID)
+}
+
 // openMappedStorage resolves the owning node's data root and opens an accessor
 // there. The controller copy of server.DataPath is not consulted. A remote
 // node without reachable storage is refused before any path check. Write
@@ -410,20 +445,10 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 }
 
 // beginServerDataWrite admits a direct panel write to the server data path.
-// While it is held a stopped archive export cannot claim consistency; when an
-// export already owns the path the write is refused instead of racing it.
+// It keeps the module archive-export fence and the shared data-write lease in
+// one handle; use beginDataWrite directly for the same protection.
 func (s *FileService) beginServerDataWrite(serverID string) (func(), error) {
-	write, err := module.TryBeginServerDataWrite(serverID)
-	if err == nil {
-		return write.Release, nil
-	}
-	switch {
-	case errors.Is(err, module.ErrModuleArchiveExport):
-		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			errors.New("a server archive export is in progress; retry after it finishes"))
-	default:
-		return nil, connect.NewError(connect.CodeAborted, err)
-	}
+	return s.beginDataWrite(serverID)
 }
 
 // SaveUploadedFile saves a file from a completed chunked upload session
@@ -537,6 +562,13 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	write := !msg.GetStage()
+	if write {
+		releaseWrite, err := s.beginDataWrite(server.ID)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseWrite()
+	}
 	root, acc, err := s.openMappedStorage(ctx, server, write)
 	if err != nil {
 		return nil, storageError(err)
@@ -558,12 +590,6 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 			Staged:  true,
 		}), nil
 	}
-
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 
 	if err := acc.WriteFile(msg.Path, msg.Content); err != nil {
 		if nodestorage.IsSymlink(err) {
@@ -601,6 +627,15 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
+	// One shared lease covers every path in this request, staged or live.
+	// Releasing it per item would let a publication take exclusive ownership
+	// between items and split what the operator submitted as one bulk delete.
+	releaseWrite, err := s.beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+
 	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
 		return nil, storageError(err)
@@ -618,18 +653,12 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 
 	if msg.GetStage() {
 		for _, p := range paths {
-			if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil); err != nil {
+			if _, err := stageContentBytesHeld(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil, ""); err != nil {
 				return nil, stageContentError(err)
 			}
 		}
 		return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 	}
-
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseWrite()
 
 	for _, p := range paths {
 		info, err := acc.Stat(p)
@@ -674,7 +703,7 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -760,7 +789,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, storageError(err)
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -849,11 +878,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 // never calls dataRootFor or os.MkdirAll, so a transport-only node cannot
 // grow a controller-local tree (ADR 0005).
 func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *storage.Server, msg *v1.ExtractArchiveRequest) (*connect.Response[v1.ExtractArchiveResponse], error) {
-	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
-	if err != nil {
-		return nil, storageError(err)
-	}
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -863,6 +888,10 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 			releaseWrite()
 		}
 	}()
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
 	// The accessor is handed to a detached job: open it with the service-owned
 	// context so a client disconnect cannot kill the worker mid-extraction.
 	detachedCtx, release := s.beginDetached()
@@ -1018,9 +1047,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, storageError(err)
 	}
 
-	// Admission must be held before the destination tree is allocated or
-	// created. It moves to the detached download worker below.
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1194,9 +1221,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 // writes or extracts through nodestorage.ForNode. It never calls dataRootFor
 // or os.MkdirAll on the server tree (ADR 0005).
 func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.DownloadRemoteArchiveRequest, rawURL string) (*connect.Response[v1.DownloadRemoteArchiveResponse], error) {
-	// Hold the same server-data admission as the local path, before opening the
-	// accessor or creating the destination directory.
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1421,7 +1446,7 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1457,7 +1482,7 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1519,7 +1544,7 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	releaseWrite, err := s.beginServerDataWrite(server.ID)
+	releaseWrite, err := s.beginDataWrite(server.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1653,7 +1678,8 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 
 // createArchiveViaAccessor writes a zip through nodestorage.ForNode. It never
 // calls dataRootFor or os.MkdirAll, so a transport-only node cannot grow a
-// controller-local tree (ADR 0005).
+// controller-local tree (ADR 0005). The caller already holds the shared
+// data-write lease for this request.
 func (s *FileService) createArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.CreateArchiveRequest) (*connect.Response[v1.CreateArchiveResponse], error) {
 	acc, err := s.resolveAccessor(ctx, info, server)
 	if err != nil {

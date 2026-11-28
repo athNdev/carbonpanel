@@ -189,6 +189,11 @@ func TestStartServer_PausedContainerStaysFrozenWhenStagedConfigReadFails(t *test
 			unpauseCalls++
 			mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			// Identity reconciliation reads the canonical container before a
+			// retry acts on a prior applied row; the tracked ID is still live.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"paused","Names":["/carbon-panel-server-staged-config-read-failure"],"State":"paused"}]`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -211,7 +216,7 @@ func TestStartServer_PausedContainerStaysFrozenWhenStagedConfigReadFails(t *test
 
 	lastStarted := time.Now().Add(-time.Minute)
 	server := &storage.Server{
-		ID: "staged-config-read-failure", Name: "Staged Config Read Failure", NodeID: "test-node",
+		DataPath: t.TempDir(), ID: "staged-config-read-failure", Name: "Staged Config Read Failure", NodeID: "test-node",
 		Port: 25672, Memory: 2048, ContainerID: "paused", Status: storage.StatusPaused, LastStarted: &lastStarted,
 	}
 	if err := svc.store.CreateServer(context.Background(), server); err != nil {
@@ -227,13 +232,30 @@ func TestStartServer_PausedContainerStaysFrozenWhenStagedConfigReadFails(t *test
 	if _, err := svc.store.ApplyStagedConfigChange(context.Background(), staged.ID); err != nil {
 		t.Fatalf("apply staged change: %v", err)
 	}
+	file, err := stageContentBytes(context.Background(), svc.store, server, nil, storage.StagedKindFile, storage.StagedActionInstall, "candidate.txt", "candidate.txt", []byte("staged"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.store.DB().Exec("DROP TABLE server_configs").Error; err != nil {
 		t.Fatalf("inject staged config read failure: %v", err)
 	}
 
-	_, err = svc.StartServer(ctxWithRole("operator"), connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
-	if err == nil {
-		t.Fatal("StartServer() error = nil, want staged config read failure")
+	for _, start := range []bool{true, false} {
+		if start {
+			_, err = svc.StartServer(ctxWithRole("operator"), connect.NewRequest(&v1.StartServerRequest{Id: server.ID}))
+		} else {
+			_, err = svc.RestartServer(ctxWithRole("operator"), connect.NewRequest(&v1.RestartServerRequest{Id: server.ID}))
+		}
+		if err == nil || !strings.Contains(err.Error(), "failed to get server configuration") {
+			t.Fatalf("start=%v: expected staged configuration preflight failure, got %v", start, err)
+		}
+		restaged, readErr := svc.store.GetStagedContent(context.Background(), file.ID)
+		if readErr != nil || restaged.Status != storage.StagedStatusStaged {
+			t.Fatalf("start=%v: staged content after preflight failure: %+v, %v", start, restaged, readErr)
+		}
+		if _, err := os.Stat(filepath.Join(server.DataPath, "candidate.txt")); !os.IsNotExist(err) {
+			t.Fatalf("start=%v: published file survived preflight failure, stat error %v", start, err)
+		}
 	}
 	mu.Lock()
 	defer mu.Unlock()

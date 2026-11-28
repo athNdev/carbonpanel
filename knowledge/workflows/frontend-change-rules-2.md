@@ -50,10 +50,10 @@ sources:
   grid children get `min-w-0` (or `[&>*]:min-w-0` on the grid) so tracks cannot
   blow out; UUIDs and other unbreakable strings are shortened or `break-all`.
   Verify with the overflow audit pattern before calling a surface responsive.
-- A tab pane whose fixed header, toolbar and status line crowd a phone-height
-  panel may raise the tab strip's floor for that pane (`max-sm:min-h`) and let
-  the page scroll; the working list keeps its own bounded scroll region. The
-  mods tab does this so a full preview reason stays visible at 390 px.
+- A pane whose header, toolbar and status line crowd a phone-height panel may
+  raise the tab strip's floor (`max-sm:min-h`) and let the page scroll. The
+  mods tab does this at both sizes so a preview reason stays visible at 390 px;
+  its apply bar compacts and its policy editor opens in `CarbonModal`.
 - Give each `CarbonTabs` item a reciprocal panel ID. Use
   `CarbonInactiveTabPanels` for empty, hidden targets so lazy content mounts
   only when selected. Make the active panel the next keyboard Tab stop.

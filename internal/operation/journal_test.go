@@ -149,6 +149,26 @@ func TestRunJournaledInProgressDoesNotStartSecondMutation(t *testing.T) {
 	}
 }
 
+func TestRunJournaledMapsAnotherActiveOperationToInProgress(t *testing.T) {
+	store := openJournalStore(t)
+	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}
+	if _, _, err := store.BeginServerOperation(context.Background(), server.ID, server.NodeID, server.ContainerID,
+		"active-key", "backup", Digest("backup", server)); err != nil {
+		t.Fatalf("begin active operation: %v", err)
+	}
+	called := false
+	err := RunJournaled(context.Background(), store, logger.New(), server, "start", "req-after-active", func() error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrInProgress) {
+		t.Fatalf("RunJournaled with another active operation = %v, want ErrInProgress", err)
+	}
+	if called {
+		t.Fatal("mutation ran while another operation owned the server")
+	}
+}
+
 func TestRunJournaledEmptyRequestIDIsNotIdempotent(t *testing.T) {
 	store := openJournalStore(t)
 	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}

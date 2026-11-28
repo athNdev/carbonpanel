@@ -372,8 +372,36 @@ func (s *Store) UpdateServerConfig(ctx context.Context, config *ServerConfig) er
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
+// takeServerConfigWriterLock takes SQLite's writer lock before a guard's reads.
+// A deferred transaction that reads first and writes later can lose the
+// snapshot upgrade to a concurrent commit and fail with SQLITE_BUSY_SNAPSHOT
+// ("database is locked"), which busy_timeout does not retry. The UPDATE matches
+// the row being saved at most and changes nothing; a zero-row UPDATE still
+// starts the write transaction when the legacy server has no config row yet.
+func takeServerConfigWriterLock(tx *gorm.DB, serverID string) error {
+	return tx.Model(&ServerConfig{}).Where("server_id = ?", serverID).
+		UpdateColumn("server_id", gorm.Expr("server_id")).Error
+}
+
+// saveServerConfigTx runs the reviewed-mod guard and the save inside the
+// caller's transaction. The caller must already hold the writer lock.
+func saveServerConfigTx(tx *gorm.DB, config *ServerConfig) error {
+	if err := ensureDirectRuntimeSaveAllowed(tx, config); err != nil {
+		return err
+	}
+	return tx.Save(config).Error
+}
+
 func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) error {
-	return s.db.WithContext(ctx).Save(config).Error
+	if config == nil || config.ServerID == "" {
+		return s.db.WithContext(ctx).Save(config).Error
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := takeServerConfigWriterLock(tx, config.ServerID); err != nil {
+			return err
+		}
+		return saveServerConfigTx(tx, config)
+	})
 }
 
 // SaveSyncedServerConfig updates only the fields propagated by global sync.
@@ -454,6 +482,19 @@ func (s *Store) ClearEphemeralConfigFields(ctx context.Context, serverID string)
 	return s.SaveServerConfig(ctx, config)
 }
 
+// applyServerFieldsToConfig mirrors the system fields that a server row owns.
+// SyncServerConfigWithServer writes them, and the UpdateServer preflight applies
+// the same projection to the proposed config so the effective targets it
+// compares match what the sync will persist.
+func applyServerFieldsToConfig(config *ServerConfig, server *Server) {
+	stringPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	config.Type = stringPtr(NormalizeModLoaderForType(server.ModLoader))
+	config.Version = stringPtr(server.MCVersion)
+	config.ServerPort = intPtr(server.Port)
+	config.MaxPlayers = intPtr(server.MaxPlayers)
+}
+
 // SyncServerConfigWithServer updates system fields in ServerConfig based on Server settings
 func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) error {
 	// Get or create config
@@ -466,12 +507,7 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 		}
 	}
 
-	stringPtr := func(s string) *string { return &s }
-	intPtr := func(i int) *int { return &i }
-	config.Type = stringPtr(NormalizeModLoaderForType(server.ModLoader))
-	config.Version = stringPtr(server.MCVersion)
-	config.ServerPort = intPtr(server.Port)
-	config.MaxPlayers = intPtr(server.MaxPlayers)
+	applyServerFieldsToConfig(config, server)
 
 	return s.SaveServerConfig(ctx, config)
 }
@@ -1581,6 +1617,80 @@ func (s *Store) UpdateScheduledTask(ctx context.Context, task *ScheduledTask) er
 	return s.db.WithContext(ctx).Save(task).Error
 }
 
+// ErrModUpdateScheduleChanged indicates the scheduling state observed by a
+// writer was replaced by a schedule edit or status toggle.
+var ErrModUpdateScheduleChanged = errors.New("mod update schedule changed")
+
+func matchingTaskSchedule(tx *gorm.DB, task *ScheduledTask) *gorm.DB {
+	return tx.Where("task_type = ? AND status = ? AND schedule = ?", task.TaskType, task.Status, task.Schedule).
+		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
+		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt)
+}
+
+// UpdateModUpdatePolicy saves a task definition only while the observed
+// schedule, status and policy config hold. The config fence keeps a
+// policy-only edit submitted from a stale snapshot from overwriting a newer
+// definition. Policy-only changes preserve scheduler deadlines.
+func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *ScheduledTask, scheduleChanged bool) (bool, error) {
+	omit := []string{"ID", "Status", "CreatedAt", "LastRun"}
+	if !scheduleChanged {
+		omit = append(omit, "NextRun")
+	}
+	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(task), previous).
+		Where("COALESCE(config, '') = ?", previous.Config).
+		Select("*").Omit(omit...).Updates(task)
+	return result.RowsAffected != 0, result.Error
+}
+
+// AdvanceModUpdateSchedule refuses to advance a stale schedule, status,
+// policy revision, or deadline. A one-shot claim persists its terminal status
+// in the same guarded write. When the scheduled dispatcher supplies an
+// execution, it is inserted in the same transaction: either both are durable
+// or the slot stays due. SQL IS also matches a task whose observed deadline
+// was NULL.
+func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time, persistStatus TaskStatus, execution *TaskExecution) error {
+	updates := map[string]any{"next_run": nextRun, "last_run": lastRun}
+	if persistStatus != "" {
+		updates["status"] = persistStatus
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := matchingTaskSchedule(tx.Model(&ScheduledTask{}), task).
+			Where("COALESCE(config, '') = ?", task.Config).
+			Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrModUpdateScheduleChanged
+		}
+		if execution == nil {
+			return nil
+		}
+		// A failure here rolls the claim back, leaving the task due and the
+		// run unclaimed.
+		if err := tx.Create(execution).Error; err != nil {
+			return fmt.Errorf("record claimed task execution: %w", err)
+		}
+		return nil
+	})
+}
+
+// ToggleModUpdateSchedule updates scheduling fields without writing a stale
+// policy definition or execution record.
+func (s *Store) ToggleModUpdateSchedule(ctx context.Context, previous, task *ScheduledTask) (bool, error) {
+	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), previous).
+		Where("id = ?", task.ID).Updates(map[string]any{"status": task.Status, "next_run": task.NextRun})
+	return result.RowsAffected != 0, result.Error
+}
+
+// DisableInvalidModUpdateSchedule avoids disabling a replacement schedule
+// when calculation from the scheduler's earlier snapshot fails.
+func (s *Store) DisableInvalidModUpdateSchedule(ctx context.Context, task *ScheduledTask) error {
+	return matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
+		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).Update("status", TaskStatusDisabled).Error
+}
+
 func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete executions first
@@ -1644,6 +1754,44 @@ func (s *Store) ListServerTaskExecutions(ctx context.Context, serverID string, l
 
 func (s *Store) UpdateTaskExecution(ctx context.Context, execution *TaskExecution) error {
 	return s.db.WithContext(ctx).Save(execution).Error
+}
+
+// UpdateTaskExecutionOutput replaces only the output column. Chain-stop
+// bookkeeping must not rewrite a terminal status, error or end time that a
+// cancellation or another writer already recorded. It reports whether a row
+// was updated.
+func (s *Store) UpdateTaskExecutionOutput(ctx context.Context, id, output string) (bool, error) {
+	res := s.db.WithContext(ctx).Model(&TaskExecution{}).
+		Where("id = ?", id).
+		Update("output", output)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// UpdateTaskExecutionIfRunning applies an outcome only while the durable row is
+// still running. A cancellation or another writer that already reached a
+// terminal state keeps its outcome, so a late worker cannot overwrite it. It
+// reports whether the row was updated.
+func (s *Store) UpdateTaskExecutionIfRunning(ctx context.Context, execution *TaskExecution) (bool, error) {
+	if execution == nil {
+		return false, nil
+	}
+	res := s.db.WithContext(ctx).Model(&TaskExecution{}).
+		Where("id = ? AND status = ?", execution.ID, ExecutionStatusRunning).
+		Updates(map[string]any{
+			"status":    execution.Status,
+			"ended_at":  execution.EndedAt,
+			"duration":  execution.Duration,
+			"output":    execution.Output,
+			"error":     execution.Error,
+			"retry_num": execution.RetryNum,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 func (s *Store) DeleteTaskExecutions(ctx context.Context, taskID string) error {

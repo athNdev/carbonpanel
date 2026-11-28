@@ -234,7 +234,7 @@ func TestCommandTaskDoesNotRepeatAFailedSend(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil)
+	execution, err := s.executeTask(ctx, task, "manual", v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_UNSPECIFIED, nil, nil)
 	if err == nil {
 		t.Fatal("expected the command send to fail")
 	}

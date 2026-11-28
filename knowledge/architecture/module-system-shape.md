@@ -26,7 +26,10 @@ describe a server's desired configuration.
   reserve the gate before acknowledging an asynchronous worker. A delayed init
   command and its optional restart take the same gate. Cross-server dependency
   starts use non-waiting admission so crossed acyclic dependencies cannot
-  deadlock while each start holds its own server's gate.
+  deadlock while each start holds its own server's gate. A staged module edit
+  that reaches the shared data-write gate while publication owns the server
+  path is a retryable `Aborted` refusal with the same operator wording as a
+  direct file write.
 - Every module operation must use the Docker client resolved for the target
   server. Do not use the manager's client directly.
 - Surface indexer and delivery failures; do not turn a partial download into a

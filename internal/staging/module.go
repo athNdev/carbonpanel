@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/google/uuid"
@@ -44,6 +46,11 @@ func StageModuleChange(ctx context.Context, store *storage.Store, server *storag
 			return nil, err
 		}
 	}
+	write, err := datawrite.TryShared(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer write.Release()
 	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
@@ -103,13 +110,16 @@ func applyStagedModules(ctx context.Context, store *storage.Store, server *stora
 
 	type prior struct {
 		module *storage.Module
+		fields []string
 	}
 	applied := make([]prior, 0, len(moduleRows))
 	ids := make([]string, 0, len(moduleRows))
 	undo := func() error {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
 		var failed error
 		for i := len(applied) - 1; i >= 0; i-- {
-			if err := store.UpdateModule(ctx, applied[i].module); err != nil {
+			if err := store.DB().WithContext(recoveryCtx).Model(applied[i].module).Select(applied[i].fields).Updates(applied[i].module).Error; err != nil {
 				failed = errors.Join(failed, err)
 			}
 		}
@@ -118,32 +128,32 @@ func applyStagedModules(ctx context.Context, store *storage.Store, server *stora
 	for _, row := range moduleRows {
 		payload, err := readModulePayload(acc, row.StagePath)
 		if err != nil {
-			_ = undo()
-			return nil, nil, err
+			return nil, nil, errors.Join(err, undo())
 		}
 		module, err := store.GetModule(ctx, payload.ModuleID)
 		if err != nil {
-			_ = undo()
-			return nil, nil, err
+			return nil, nil, errors.Join(err, undo())
 		}
 		if module.ServerID != server.ID {
-			_ = undo()
-			return nil, nil, fmt.Errorf("staged module %s is not on this server", payload.ModuleID)
+			return nil, nil, errors.Join(fmt.Errorf("staged module %s is not on this server", payload.ModuleID), undo())
 		}
 		before := *module
 		if err := checkModuleBase(module, payload.Fields); err != nil {
-			_ = undo()
-			return nil, nil, err
+			return nil, nil, errors.Join(err, undo())
 		}
 		if err := assignModuleFields(module, payload.Fields); err != nil {
-			_ = undo()
-			return nil, nil, err
+			return nil, nil, errors.Join(err, undo())
 		}
-		if err := store.UpdateModule(ctx, module); err != nil {
-			_ = undo()
-			return nil, nil, err
+		// Only the validated staged fields belong to this change. A module
+		// recreation or reconciler can independently change its identity/status.
+		fields := make([]string, 0, len(payload.Fields))
+		for name := range payload.Fields {
+			fields = append(fields, name)
 		}
-		applied = append(applied, prior{module: &before})
+		if err := store.DB().WithContext(ctx).Model(module).Select(fields).Updates(module).Error; err != nil {
+			return nil, nil, errors.Join(err, undo())
+		}
+		applied = append(applied, prior{module: &before, fields: fields})
 		if payload.NeedsRecreate {
 			ids = append(ids, module.ID)
 		}

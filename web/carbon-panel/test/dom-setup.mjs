@@ -85,6 +85,18 @@ Element.prototype.animate = function animateForKeyframes(keyframes, options) {
 Bun.plugin({
 	name: 'svelte-client-test',
 	setup(build) {
+		build.onLoad({ filter: /\.svelte\.[jt]s$/ }, (args) => {
+			const raw = readFileSync(args.path, 'utf8');
+			const source = args.path.endsWith('.ts')
+				? new Bun.Transpiler({ loader: 'ts' }).transformSync(raw)
+				: raw;
+			const { js } = compileModule(source, {
+				filename: args.path,
+				generate: 'client',
+				dev: true
+			});
+			return { contents: js.code, loader: 'js' };
+		});
 		build.onLoad({ filter: /\.svelte$/ }, async (args) => {
 			const source = readFileSync(args.path, 'utf8');
 			const { js } = compile(source, {

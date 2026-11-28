@@ -8,11 +8,14 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -25,6 +28,10 @@ import (
 const stagedContentRoot = ".carbon-panel/staged"
 
 var errStagedPath = errors.New("invalid staged path")
+
+// errStagedModValidation marks a definitive refusal of the reviewed mod bytes
+// or identity. It is not a storage failure and must not be retried.
+var errStagedModValidation = errors.New("invalid staged mod")
 
 func safeStageTarget(rel string) (string, error) {
 	rel = strings.TrimSpace(strings.ReplaceAll(rel, "\\", "/"))
@@ -68,6 +75,24 @@ func serverAccessor(ctx context.Context, store *storage.Store, server *storage.S
 // .carbon-panel/staged. A delete records the live path and writes nothing.
 // The server's mods directory, datapacks directory, and world are not modified.
 func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
+	return stageContentBytesWithPrecondition(ctx, store, server, resolver, kind, action, targetRel, fileName, data, "")
+}
+
+// stageContentBytesWithPrecondition records the live digest observed at stage
+// time. The journaled publish rechecks it before copying replacement bytes.
+func stageContentBytesWithPrecondition(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
+	releaseWrite, err := beginDataWrite(server.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWrite()
+	return stageContentBytesHeld(ctx, store, server, resolver, kind, action, targetRel, fileName, data, expectedLiveSha512)
+}
+
+// stageContentBytesHeld records one staged row while the caller already owns
+// the shared data-write lease. Bulk operations use it so publication cannot
+// take exclusive ownership between items and split one request.
+func stageContentBytesHeld(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte, expectedLiveSha512 string) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -76,6 +101,7 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 	if err != nil {
 		return nil, err
 	}
+
 	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
@@ -91,18 +117,97 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 		}
 	}
 	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
-		ID:         id,
-		ServerID:   server.ID,
-		Kind:       kind,
-		Action:     action,
-		TargetPath: target,
-		StagePath:  stagePath,
-		FileName:   base,
+		ID:                 id,
+		ServerID:           server.ID,
+		Kind:               kind,
+		Action:             action,
+		TargetPath:         target,
+		StagePath:          stagePath,
+		FileName:           base,
+		ExpectedLiveSha512: expectedLiveSha512,
 	})
 	if err != nil {
 		if stagePath != "" {
 			_ = acc.RemoveAll(stagedContentRoot + "/" + id)
 		}
+		return nil, err
+	}
+	return row, nil
+}
+
+// approvedModRelease is the provider release the operator reviewed. Admission
+// records it only after the staged bytes match SHA512, so publication can rely
+// on the durable row instead of a mutable sidecar.
+type approvedModRelease struct {
+	SHA512    string
+	Provider  string
+	ProjectID string
+	VersionID string
+	Filename  string
+}
+
+// stageModContentToBatch writes candidate bytes and inserts the staged row
+// only while the reviewed batch is still open with the reviewed window. This
+// closes the window between choosing the batch and writing its payload.
+func stageModContentToBatch(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver,
+	batchID string, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int,
+	targetRel, fileName string, data []byte, expectedLiveSha512 string, approved approvedModRelease,
+	reviewedLoader storage.ModLoader, reviewedVersion string) (*storage.StagedContentChange, error) {
+	target, err := safeStageTarget(targetRel)
+	if err != nil {
+		return nil, err
+	}
+	base, err := stagedFileBase(fileName)
+	if err != nil {
+		return nil, err
+	}
+	// The row records the release identity and digest the operator approved
+	// only after the exact bytes written below have been verified against it.
+	// This is the durable approval publication later requires; it is not
+	// re-derived from a mutable sidecar.
+	if approved.SHA512 != "" {
+		sum := sha512.Sum512(data)
+		if !strings.EqualFold(hex.EncodeToString(sum[:]), approved.SHA512) {
+			return nil, fmt.Errorf("%w: candidate bytes do not match the approved SHA-512", errStagedModValidation)
+		}
+		approved.SHA512 = strings.ToLower(approved.SHA512)
+		approved.Provider = strings.ToLower(strings.TrimSpace(approved.Provider))
+		approved.ProjectID = strings.TrimSpace(approved.ProjectID)
+		approved.VersionID = strings.TrimSpace(approved.VersionID)
+		approved.Filename = strings.TrimSpace(approved.Filename)
+		if approved.Filename != "" && (strings.ContainsAny(approved.Filename, "/\\") || !strings.HasSuffix(strings.ToLower(approved.Filename), ".jar")) {
+			return nil, fmt.Errorf("%w: approved candidate filename is not a bare JAR name", errStagedModValidation)
+		}
+	}
+	acc, err := serverAccessor(ctx, store, server, resolver)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = acc.Close() }()
+	id := uuid.New().String()
+	stagePath := stagedContentRoot + "/" + id + "/" + base
+	if _, err := nodestorage.WriteFrom(ctx, acc, stagePath, bytes.NewReader(data), 64<<30); err != nil {
+		return nil, err
+	}
+	row := &storage.StagedContentChange{
+		ID:                     id,
+		ServerID:               server.ID,
+		Kind:                   storage.StagedKindMod,
+		Action:                 storage.StagedActionReplace,
+		TargetPath:             target,
+		StagePath:              stagePath,
+		FileName:               base,
+		ExpectedLiveSha512:     expectedLiveSha512,
+		ReviewedRuntimeLoader:  string(reviewedLoader),
+		ReviewedRuntimeVersion: reviewedVersion,
+		ApprovedSha512:         approved.SHA512,
+		ApprovedProvider:       approved.Provider,
+		ApprovedProjectID:      approved.ProjectID,
+		ApprovedVersionID:      approved.VersionID,
+		ApprovedFilename:       approved.Filename,
+	}
+	if err := store.AddStagedContentToBatch(ctx, row, batchID, window, applyAt, idleMinutes); err != nil {
+		_ = acc.RemoveAll(stagedContentRoot + "/" + id)
 		return nil, err
 	}
 	return row, nil
@@ -133,9 +238,19 @@ func discardStagedContent(ctx context.Context, store *storage.Store, server *sto
 }
 
 func stageContentError(err error) error {
+	switch connect.CodeOf(err) {
+	case connect.CodeAborted, connect.CodeFailedPrecondition:
+		// Admission refusals already carry an operator-facing retry reason
+		// (publication in progress, archive export in progress). Keep it.
+		return err
+	}
 	switch {
 	case nodestorage.IsUnavailable(err):
 		return connect.NewError(connect.CodeUnavailable, err)
+	case errors.Is(err, storage.ErrUpdateBatchConflict), errors.Is(err, storage.ErrDuplicateStagedTarget), errors.Is(err, storage.ErrModpackBatchConflict):
+		// Batch state is an admission precondition, matching reviewed-mod and
+		// config staging; keep the operator-facing conflict message intact.
+		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case nodestorage.IsEscape(err), errors.Is(err, errStagedPath):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	default:

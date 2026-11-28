@@ -7,9 +7,12 @@ package db
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -305,6 +308,252 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLegacyConfigRetargetsEmptyIdleBatchAndResetsIdleClock(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-empty-idle"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "first"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	since := time.Now().Add(-time.Hour)
+	require.NoError(t, store.SetBatchIdleSince(ctx, first.BatchID, &since))
+	_, err = store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.ErrorIs(t, err, ErrUpdateBatchConflict, "a pending timed row keeps its window")
+	require.NoError(t, store.DiscardStagedConfigChange(ctx, first.ID))
+	restarted, err := store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, restarted.BatchID)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, string(UpdateWindowNextRestart), batch.Window)
+	require.Nil(t, batch.IdleSince)
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "second"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	batch, err = store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Nil(t, batch.IdleSince)
+}
+
+func TestContentAfterApplyingCronUsesNextRestartBatch(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-content-after-cron"
+	store := newStagedTestStore(t, serverID)
+	cron, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "cron"}, StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	content, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete, TargetPath: "mods/a.jar",
+	})
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, cron.BatchID, content.BatchID)
+	require.Equal(t, string(UpdateWindowNextRestart), batch.Window)
+}
+
+func TestLegacyOnRestartBatchAdmitsCompatibleConfigAndReviewedContent(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-legacy-on-restart"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "soon"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Model(&ServerUpdateBatch{}).Where("id = ?", first.BatchID).
+		UpdateColumn("window", string(StagedApplyOnRestart)).Error)
+	before, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, "on_restart", before.Window)
+	second, err := store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, second.BatchID)
+	require.NoError(t, store.CheckReviewedContentWindow(ctx, serverID, UpdateWindowNextRestart, nil, 0))
+	prepared, err := store.PrepareReviewedContentBatch(ctx, serverID, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, prepared.ID)
+	require.Equal(t, string(UpdateWindowNextRestart), prepared.Window)
+	require.NoError(t, store.AddStagedContentToBatch(ctx, &StagedContentChange{
+		ID: uuid.NewString(), ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete,
+		TargetPath: "mods/a.jar",
+	}, prepared.ID, UpdateWindowNextRestart, nil, 0))
+}
+
+func TestStageConfigRetargetRollsBackOnInsertFailure(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-config-retarget"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "soon"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	rows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+
+	require.NoError(t, store.DB().Exec(`CREATE TRIGGER fail_second_config BEFORE INSERT ON staged_config_changes
+		BEGIN SELECT RAISE(ABORT, 'fixture rejected config insert'); END`).Error)
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"difficulty": "hard"}, UpdateWindowIdle, nil, 10)
+	require.ErrorContains(t, err, "fixture rejected config insert")
+	after, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, batch, after)
+	afterRows, err := store.ListBatchConfig(ctx, first.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, rows, afterRows)
+}
+
+func TestConfigRequiresMatchingIdleIntervalForReviewedContent(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-config-idle-review"
+	store := newStagedTestStore(t, serverID)
+	batch, err := store.PrepareReviewedContentBatch(ctx, serverID, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	content := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete,
+		TargetPath: "mods/a.jar",
+	}
+	require.NoError(t, store.AddStagedContentToBatch(ctx, content, batch.ID, UpdateWindowIdle, nil, 5))
+	_, err = store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 12)
+	require.ErrorIs(t, err, ErrUpdateBatchConflict)
+	config, err := store.StageServerConfigUpdate(ctx, serverID, map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 5)
+	require.NoError(t, err)
+	require.Equal(t, batch.ID, config.BatchID)
+	require.Equal(t, 5, config.IdleMinutes)
+	require.Equal(t, StagedApplyIdle, config.ApplyMode)
+}
+
+func TestConcurrentCronAdmissionCannotJoinTimedModBatch(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-cron-race")
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-cron-race", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	// Existing reviewed mod content in the open batch.
+	_, err = store.AddStagedContent(ctx, &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-cron-race", BatchID: batch.ID,
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/a.jar", StagePath: ".carbon-panel/staged/a/a.jar", FileName: "a.jar",
+		Status: StagedStatusStaged,
+	})
+	require.NoError(t, err)
+
+	const attempts = 6
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = store.StageConfigChange(ctx, "srv-cron-race",
+				map[string]any{"motd": "nightly"}, StagedApplyScheduled, "0 3 * * *")
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.ErrorIs(t, err, ErrUpdateBatchConflict, "every concurrent cron admission must be refused")
+	}
+	configs, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Empty(t, configs, "no cron row may be committed into the timed mod batch")
+}
+
+func TestSetOpenBatchWindowPreservesCronScheduledConfigRow(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-cron-preserve")
+	scheduled, err := store.StageConfigChange(ctx, "srv-cron-preserve",
+		map[string]any{"motd": "nightly"}, StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, "srv-cron-preserve")
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, batch.ID, scheduled.BatchID)
+
+	_, err = store.SetOpenBatchWindow(ctx, "srv-cron-preserve", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	rows, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyScheduled, rows[0].ApplyMode, "a cron row owns its own schedule")
+	assert.Equal(t, "0 3 * * *", rows[0].CronExpr)
+}
+
+func TestAddStagedContentToBatchRefusesChangedOrClosedBatch(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-conditional-insert")
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-conditional-insert", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	row := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-conditional-insert",
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/a.jar", StagePath: ".carbon-panel/staged/a/a.jar", FileName: "a.jar",
+	}
+	require.NoError(t, store.AddStagedContentToBatch(ctx, row, batch.ID, UpdateWindowNextRestart, nil, 0))
+
+	// A changed window must fail the conditional insert.
+	other := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-conditional-insert",
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/b.jar", StagePath: ".carbon-panel/staged/b/b.jar", FileName: "b.jar",
+	}
+	err = store.AddStagedContentToBatch(ctx, other, batch.ID, UpdateWindowIdle, nil, 5)
+	require.Error(t, err, "a batch whose window changed must refuse the row")
+
+	require.NoError(t, store.CloseUpdateBatch(ctx, batch.ID, UpdateBatchDiscarded))
+	err = store.AddStagedContentToBatch(ctx, other, batch.ID, UpdateWindowNextRestart, nil, 0)
+	require.Error(t, err, "a discarded batch must refuse the row")
+}
+
+func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-mod-window")
+	config, err := store.StageServerConfigUpdate(ctx, "srv-mod-window", map[string]any{"motd": "soon"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	content, err := store.AddStagedContent(ctx, &StagedContentChange{
+		ID:         uuid.NewString(),
+		ServerID:   "srv-mod-window",
+		Kind:       StagedKindMod,
+		Action:     StagedActionReplace,
+		TargetPath: "mods/mod.jar",
+		StagePath:  ".carbon-panel/staged/mod/mod.jar",
+		FileName:   "mod.jar",
+	})
+	require.NoError(t, err)
+	require.Equal(t, config.BatchID, content.BatchID)
+
+	when := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	require.Equal(t, config.BatchID, batch.ID)
+	require.Equal(t, string(UpdateWindowAtTime), batch.Window)
+	require.NotNil(t, batch.ApplyAt)
+	assert.True(t, batch.ApplyAt.Equal(when))
+
+	rows, err := store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyAtTime, rows[0].ApplyMode)
+	contentRows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, contentRows, 1)
+
+	// An idempotent submission must not rewrite a matching window.
+	again, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	require.Equal(t, batch.ID, again.ID)
+	require.Equal(t, string(UpdateWindowAtTime), again.Window)
+	rows, err = store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyAtTime, rows[0].ApplyMode)
+
+	// An intended transition updates the batch and its config rows together.
+	soon := when.Add(time.Hour)
+	changed, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &soon, 0)
+	require.NoError(t, err)
+	require.True(t, changed.ApplyAt.Equal(soon))
+	rows, err = store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].ApplyAt)
+	assert.True(t, rows[0].ApplyAt.Equal(soon))
+}
+
 func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 	for field, value := range map[string]string{"level": "other", "customServerProperties": "level-name=other"} {
 		t.Run(field, func(t *testing.T) {
@@ -358,6 +607,66 @@ func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 			release(op)
 			_, err = store.RollbackStagedConfigChange(ctx, change.ID)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func stringPtr(s string) *string { return &s }
+
+func TestStagedConfigRollbackRefusesPendingReviewedMod(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	server := &Server{ID: "srv-rollback-gate", Name: "rollback-gate", ModLoader: ModLoaderFabric, MCVersion: "1.21.1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	cfg.Type = stringPtr("FABRIC")
+	cfg.Version = stringPtr("1.21.1")
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	staged, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"version": "1.21.4"}, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	_, err = store.ApplyStagedConfigChange(ctx, staged.ID)
+	require.NoError(t, err)
+	_, err = store.AddStagedContent(ctx, &StagedContentChange{
+		ServerID:           server.ID,
+		Kind:               StagedKindMod,
+		Action:             StagedActionReplace,
+		TargetPath:         "mods/mod.jar",
+		StagePath:          ".carbon-panel/staged/reviewed/mod.jar",
+		FileName:           "mod.jar",
+		ExpectedLiveSha512: "deadbeef",
+		ApprovedSha512:     strings.Repeat("ab", 64),
+		ApprovedProvider:   "modrinth",
+		ApprovedProjectID:  "project",
+		ApprovedVersionID:  "release",
+		ApprovedFilename:   "mod.jar",
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "rollback", run: func() error {
+			_, rollbackErr := store.RollbackStagedConfigChange(ctx, staged.ID)
+			return rollbackErr
+		}},
+		{name: "revert", run: func() error {
+			_, revertErr := store.RevertStagedConfigApplyToStaged(ctx, staged.ID)
+			return revertErr
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, tc.run(), ErrStagedModVersionChange)
+			current, err := store.GetServerConfig(ctx, server.ID)
+			require.NoError(t, err)
+			require.NotNil(t, current.Version)
+			require.Equal(t, "1.21.4", *current.Version, "a refused runtime rollback must not change the live target")
+			stored, err := store.GetStagedConfigChange(ctx, staged.ID)
+			require.NoError(t, err)
+			require.Equal(t, StagedStatusApplied, stored.Status)
 		})
 	}
 }

@@ -78,6 +78,117 @@ func TestServerOperationJournalLifecycle(t *testing.T) {
 	}
 }
 
+func TestCompletedServerOperationForRequestSpansStepKinds(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	op, _, err := store.BeginServerOperation(ctx, "srv-replay", "node-1", "cont-1", "request-a:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationPrepared, ServerOperationExecuting, ""); err != nil {
+		t.Fatalf("advance to executing: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationExecuting, ServerOperationComplete, ""); err != nil {
+		t.Fatalf("advance to complete: %v", err)
+	}
+
+	// A replay may select another kind, so the request completes for every kind.
+	completed, err := store.HasCompletedServerOperationForRequest(ctx, "srv-replay", "request-a")
+	if err != nil {
+		t.Fatalf("HasCompletedServerOperationForRequest: %v", err)
+	}
+	if !completed {
+		t.Fatal("a completed start step must complete the request for another step kind")
+	}
+	for _, tc := range []struct{ serverID, requestID string }{
+		{"srv-replay", "request-b"},
+		{"srv-replay", "request-a2"},
+		{"srv-other", "request-a"},
+	} {
+		completed, err := store.HasCompletedServerOperationForRequest(ctx, tc.serverID, tc.requestID)
+		if err != nil {
+			t.Fatalf("HasCompletedServerOperationForRequest(%s, %s): %v", tc.serverID, tc.requestID, err)
+		}
+		if completed {
+			t.Fatalf("request %q for server %q must not be reported completed", tc.requestID, tc.serverID)
+		}
+	}
+
+	failed, _, err := store.BeginServerOperation(ctx, "srv-failed", "node-1", "cont-1", "request-c:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation(failed): %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, failed.ID, ServerOperationPrepared, ServerOperationFailed, "docker refused"); err != nil {
+		t.Fatalf("advance to failed: %v", err)
+	}
+	completed, err = store.HasCompletedServerOperationForRequest(ctx, "srv-failed", "request-c")
+	if err != nil {
+		t.Fatalf("HasCompletedServerOperationForRequest(failed): %v", err)
+	}
+	if completed {
+		t.Fatal("a failed step must not gate a retry as completed")
+	}
+}
+
+func TestCompletedServerOperationForRequestRejectsPrefixAndColonAliases(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	// Request ids are opaque and may contain ':'. A completed "req:extra"
+	// step must not report the shorter "req" as completed, which a prefix
+	// match would do because "req:extra:start" begins with "req:".
+	op, _, err := store.BeginServerOperation(ctx, "srv-colon", "node-1", "cont-1", "req:extra:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationPrepared, ServerOperationExecuting, ""); err != nil {
+		t.Fatalf("advance to executing: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, ServerOperationExecuting, ServerOperationComplete, ""); err != nil {
+		t.Fatalf("advance to complete: %v", err)
+	}
+
+	for _, tc := range []struct {
+		requestID string
+		completed bool
+	}{
+		{"req", false},
+		{"req:", false},
+		{"req:ext", false},
+		{"req:extra", true},
+	} {
+		completed, err := store.HasCompletedServerOperationForRequest(ctx, "srv-colon", tc.requestID)
+		if err != nil {
+			t.Fatalf("HasCompletedServerOperationForRequest(%q): %v", tc.requestID, err)
+		}
+		if completed != tc.completed {
+			t.Fatalf("request %q completed = %t, want %t", tc.requestID, completed, tc.completed)
+		}
+	}
+
+	// A shorter id that is a prefix of a longer completed id is still distinct.
+	long, _, err := store.BeginServerOperation(ctx, "srv-prefix", "node-1", "cont-1", "request-ab:start", "start", "digest")
+	if err != nil {
+		t.Fatalf("BeginServerOperation(prefix): %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, long.ID, ServerOperationPrepared, ServerOperationExecuting, ""); err != nil {
+		t.Fatalf("advance prefix to executing: %v", err)
+	}
+	if err := store.AdvanceServerOperation(ctx, long.ID, ServerOperationExecuting, ServerOperationComplete, ""); err != nil {
+		t.Fatalf("advance prefix to complete: %v", err)
+	}
+	completed, err := store.HasCompletedServerOperationForRequest(ctx, "srv-prefix", "request-a")
+	if err != nil {
+		t.Fatalf("HasCompletedServerOperationForRequest(prefix): %v", err)
+	}
+	if completed {
+		t.Fatal("a request id that is only a prefix of the completed id must not match")
+	}
+}
+
 func TestNoteActiveServerOperationKeepsTheLock(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

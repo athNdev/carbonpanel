@@ -137,6 +137,28 @@ func (s *Store) AdvanceServerOperation(ctx context.Context, id, from, to, detail
 	return nil
 }
 
+// HasCompletedServerOperationForRequest reports whether any journaled step for
+// this server already completed under requestID. A step key is
+// requestID + ":" + kind, so matching the reconstructed key covers every step
+// kind, including a kind introduced after the request completed. Reconstructing
+// the key per row keeps the request id whole: a prefix or colon match would
+// otherwise let one request report another as complete.
+func (s *Store) HasCompletedServerOperationForRequest(ctx context.Context, serverID, requestID string) (bool, error) {
+	requestID = strings.TrimSpace(requestID)
+	if serverID == "" || requestID == "" {
+		return false, nil
+	}
+	var count int64
+	err := s.db.WithContext(ctx).Model(&ServerOperation{}).
+		Where("server_id = ? AND phase = ? AND request_key = ? || ':' || kind",
+			serverID, ServerOperationComplete, requestID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // ListActiveServerOperations returns every operation that still owns a server lock.
 // Startup recovery observes the container state for each one before any retry is
 // allowed, instead of treating an interrupted mutation as if it never happened.
