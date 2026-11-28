@@ -139,19 +139,19 @@ func (s *Store) AdvanceServerOperation(ctx context.Context, id, from, to, detail
 
 // HasCompletedServerOperationForRequest reports whether any journaled step for
 // this server already completed under requestID. A step key is
-// requestID + ":" + kind, so the prefix match covers every step kind, including
-// a kind introduced after the request completed. Matching only the kind the
-// current runtime state would select would let a replay choose another step.
+// requestID + ":" + kind, so matching the reconstructed key covers every step
+// kind, including a kind introduced after the request completed. Reconstructing
+// the key per row keeps the request id whole: a prefix or colon match would
+// otherwise let one request report another as complete.
 func (s *Store) HasCompletedServerOperationForRequest(ctx context.Context, serverID, requestID string) (bool, error) {
 	requestID = strings.TrimSpace(requestID)
 	if serverID == "" || requestID == "" {
 		return false, nil
 	}
-	prefix := requestID + ":"
 	var count int64
 	err := s.db.WithContext(ctx).Model(&ServerOperation{}).
-		Where("server_id = ? AND phase = ? AND substr(request_key, 1, length(?)) = ?",
-			serverID, ServerOperationComplete, prefix, prefix).
+		Where("server_id = ? AND phase = ? AND request_key = ? || ':' || kind",
+			serverID, ServerOperationComplete, requestID).
 		Count(&count).Error
 	if err != nil {
 		return false, err
