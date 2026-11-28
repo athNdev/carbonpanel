@@ -12,7 +12,9 @@ import { readFileSync } from 'node:fs';
 // eslint-disable-next-line svelte/no-svelte-internal -- test-only use of the runtime proxy $state compiles to
 import { proxy } from 'svelte/internal/client';
 import { create } from '@bufbuild/protobuf';
+import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
 import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
+import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 import { dockerOverridesFingerprint, snapshotServerForm } from './server-settings-snapshot';
 
@@ -147,6 +149,65 @@ test('snapshotServerForm keeps production-shaped map keys through the reactive p
 	Object.defineProperty(snapshot.dockerOverrides!.environment, '__proto__', { value: 'changed' });
 	assert.equal(environment.MODE, 'source');
 	assert.equal(Object.getOwnPropertyDescriptor(environment, '__proto__')?.value, 'literal-proto');
+});
+
+test('snapshotServerForm normalizes a plain Docker Overrides JSON-editor object', () => {
+	// The Docker Overrides JSON editor assigns a plain `JSON.parse` object into
+	// the form, so the snapshot must normalize it instead of handing a foreign
+	// message to protobuf-es's clone.
+	const memoryLimit = 1024n;
+	const environment: { [key: string]: string } = { MODE: 'json' };
+	Object.defineProperty(environment, '$typeName', {
+		value: 'literal-type-name',
+		enumerable: true,
+		configurable: true,
+		writable: true
+	});
+	Object.defineProperty(environment, '__proto__', {
+		value: 'literal-proto',
+		enumerable: true,
+		configurable: true,
+		writable: true
+	});
+	const jsonOverrides = { environment, memoryLimit } as unknown as DockerOverrides;
+	const source = create(UpdateServerRequestSchema, { id: 'server-1', name: 'JSON editor' });
+	source.dockerOverrides = jsonOverrides;
+
+	// Cover both the plain form and the reactive proxy production hands over.
+	for (const form of [source, proxy(source)]) {
+		let snapshot: UpdateServerRequest | undefined;
+		assert.doesNotThrow(() => {
+			snapshot = snapshotServerForm(form);
+		});
+		assert.ok(snapshot);
+
+		assert.equal(snapshot.dockerOverrides?.memoryLimit, memoryLimit);
+		assert.equal(snapshot.dockerOverrides?.environment.MODE, 'json');
+		assert.equal(snapshot.$typeName, 'carbonpanel.v1.UpdateServerRequest');
+
+		// The snapshot must be a fresh message that does not alias the form.
+		assert.notEqual(snapshot, form);
+		assert.notEqual(snapshot.dockerOverrides, form.dockerOverrides);
+		assert.notEqual(snapshot.dockerOverrides?.environment, environment);
+
+		const snapshotEnvironment = snapshot.dockerOverrides!.environment;
+		assert.equal(
+			Object.getOwnPropertyDescriptor(snapshotEnvironment, '$typeName')?.value,
+			'literal-type-name'
+		);
+		assert.equal(
+			Object.getOwnPropertyDescriptor(snapshotEnvironment, '__proto__')?.value,
+			'literal-proto'
+		);
+
+		snapshot.dockerOverrides!.memoryLimit = 1n;
+		snapshotEnvironment.MODE = 'snapshot';
+		Object.defineProperty(snapshotEnvironment, '__proto__', { value: 'changed' });
+
+		assert.equal(source.dockerOverrides?.memoryLimit, memoryLimit);
+		assert.equal(environment.MODE, 'json');
+		assert.equal(Object.getOwnPropertyDescriptor(environment, '__proto__')?.value, 'literal-proto');
+	}
 });
 
 test('dockerOverridesFingerprint serializes plain JSON objects with own map keys', () => {

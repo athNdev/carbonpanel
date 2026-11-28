@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import { clone } from '@bufbuild/protobuf';
+import { clone, create } from '@bufbuild/protobuf';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 
@@ -13,9 +13,18 @@ import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
  * it came from, while int64 fields such as `dockerOverrides.memoryLimit` keep
  * their `bigint` values and user map keys such as `$typeName` or `__proto__`
  * survive intact.
+ *
+ * The Docker Overrides JSON editor assigns a plain `JSON.parse` object, so the
+ * form can hold a foreign shape that `clone` refuses. `create` normalizes
+ * nested plain objects such as `dockerOverrides`, but it fast-paths any object
+ * whose `$typeName` is a string and returns it unchanged. Dropping `$typeName`
+ * from a field copy therefore forces a plain init even when `source` is a
+ * message or reactive proxy.
  */
 export function snapshotServerForm(source: UpdateServerRequest): UpdateServerRequest {
-	return clone(UpdateServerRequestSchema, source);
+	const init = { ...source };
+	delete (init as { $typeName?: string }).$typeName;
+	return clone(UpdateServerRequestSchema, create(UpdateServerRequestSchema, init));
 }
 
 /**
