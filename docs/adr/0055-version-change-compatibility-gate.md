@@ -31,8 +31,10 @@ log scanning, as a broken server.
    broken. Forge-style ranges are not yet parsed and report unknown. This
    fail-open applies to a readable location: when the server's storage cannot
    be inspected at all (`nodestorage.ErrUnavailable` — no storage adapter for
-   the node, or an inaccessible controller storage root), the change is
-   refused with `FailedPrecondition` rather than skipping the gate.
+   the node, an inaccessible controller storage root, or storage reachable
+   only through the node's transport, whose node-side path the controller
+   cannot walk), the change is refused with `FailedPrecondition` rather than
+   skipping the gate.
 4. The gate is a pre-flight, not a wrapper: modpack-driven provisioning keeps
    its own path, and a failed recreation after a passed gate still uses the
    existing recovery flow.

@@ -43,9 +43,9 @@ compatibility with the target (fabric/quilt depends, plugin api-version,
 datapack pack format). When the request changes the loader too, the scan uses
 the destination loader without mutating the stored server. Incompatible files
 refuse the change with a per-file list; unknown or unparseable content fails
-open, except uninspectable storage (`nodestorage.ErrUnavailable`: no adapter or
-storage root) and unknown mod loaders, which probe the conventional
-`mods/`/`plugins/` roots and fail closed on jars there. ADR 0055 is the contract.
+open, except uninspectable storage (`nodestorage.ErrUnavailable`: no adapter,
+no controller-visible root, or transport-only storage) and unknown mod loaders,
+which probe the conventional roots and fail closed on jars there. ADR 0055.
 
 Fabric bare versions are exact requirements; Quilt bare versions are caret
 ranges, while an explicit Quilt `=` pin is exact. Quilt dependency entries are

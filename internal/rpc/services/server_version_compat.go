@@ -32,12 +32,30 @@ const maxListedIncompatible = 10
 // case before a failed recreation persists the new version row.
 //
 // A server whose storage the panel cannot inspect at all — the typed
-// nodestorage.ErrUnavailable case, where the node has no storage adapter or
-// its controller storage root is inaccessible — fails closed instead: there is
-// no way to prove the installed content is compatible, so the change is
-// refused rather than silently skipping the gate before a recreation.
+// nodestorage.ErrUnavailable case, where the node has no storage adapter, its
+// controller storage root is inaccessible, or its storage is reachable only
+// through the node's transport — fails closed instead: there is no way to prove
+// the installed content is compatible, and a node-side path this process
+// cannot walk would scan as empty and pass silently.
 func (s *ServerService) refuseVersionIncompatibleContent(ctx context.Context, server *storage.Server, targetVersion string) error {
-	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		if s.log != nil {
+			s.log.Warn("Skipping content compatibility check for server %s: %v", server.ID, err)
+		}
+		return nil
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		// dataRootFor would hand back the node-side path when a storage
+		// resolver is configured, but this process cannot inspect it. Use the
+		// same typed refusal as an unreachable controller mount so the gate
+		// fails closed.
+		err = fmt.Errorf("%w: server storage for node %q is only reachable through the node", nodestorage.ErrUnavailable, info.Name)
+	}
+	var root string
+	if err == nil {
+		root, err = nodestorage.MapDataPath(info, server.DataPath, s.storageResolver)
+	}
 	if err != nil {
 		if nodestorage.IsUnavailable(err) {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(

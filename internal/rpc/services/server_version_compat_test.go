@@ -18,6 +18,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/assert"
@@ -215,6 +216,66 @@ func TestUpdateServerRefusesVersionChangeWhenNodeStorageUninspectable(t *testing
 	updated, err := store.GetServer(ctx, server.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "1.21.1", updated.MCVersion)
+}
+
+// TestVersionCompatGateFailsClosedForTransportOnlyStorage covers the case the
+// typed dataRootFor error misses: with a storage resolver configured, a
+// transport-only node maps to a node-side path the controller cannot walk.
+// Scanning that path returns nothing, so without this check the gate would
+// fail open and let an unverified version change through.
+func TestVersionCompatGateFailsClosedForTransportOnlyStorage(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	nodeRoot := filepath.Join(t.TempDir(), "only-on-node")
+	require.NoError(t, store.CreateNode(ctx, &storage.Node{
+		ID: "remote-transport", Name: "remote-transport", Host: "tcp://10.0.0.9:2375",
+		Enabled: true, StorageRoot: nodeRoot,
+	}))
+
+	server := &storage.Server{
+		ID: "srv-compat-transport", Name: "Compat Transport", NodeID: "remote-transport",
+		Port: 25598, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderFabric, MCVersion: "1.21.1",
+		ContainerID: "tracked", Status: storage.StatusStopped,
+		DataPath: filepath.Join("srv", "servers", "srv-compat-transport"),
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)))
+
+	svc := newVersionCompatService(t, store, nil, logger.New())
+	svc.storageResolver = nodestorage.NewResolver(&recordingTransport{workerRoot: t.TempDir()})
+
+	err := svc.refuseVersionIncompatibleContent(ctx, server, "1.20.1")
+	require.Error(t, err, "transport-only storage must not pass the gate silently")
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "error = %v", err)
+	assert.Contains(t, err.Error(), "content compatibility cannot be inspected on this server's storage")
+}
+
+// TestVersionCompatGateFailsOpenOnUnparseableReadableContent pins the other
+// half of the contract: readable content whose archives or metadata cannot be
+// parsed is unknown, never a version-change blocker.
+func TestVersionCompatGateFailsOpenOnUnparseableReadableContent(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	dataPath := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dataPath, "mods"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataPath, "mods", "corrupt.jar"), []byte("garbage"), 0o644))
+
+	server := &storage.Server{
+		ID: "srv-compat-unreadable", Name: "Compat Unreadable", NodeID: "local",
+		Port: 25599, Memory: 1024, MaxPlayers: 20,
+		ModLoader: storage.ModLoaderFabric, MCVersion: "1.21.1",
+		DataPath: dataPath,
+	}
+	require.NoError(t, store.CreateServer(ctx, server))
+
+	svc := newVersionCompatService(t, store, nil, logger.New())
+	require.NoError(t, svc.refuseVersionIncompatibleContent(ctx, server, "1.20.1"),
+		"an unreadable archive in a readable location must fail open")
 }
 
 // TestVersionCompatGateFailsOpenOnNodeResolutionError keeps the documented
