@@ -183,6 +183,89 @@ describe('buildDependencyPlan', () => {
 		]);
 	});
 
+	test('two different pinned versions for one project conflict instead of installing twice', async () => {
+		const getVersions = lookup({
+			'pinned-api': [
+				{ ...version('Pinned A'), id: 'a-id' },
+				{ ...version('Pinned B'), id: 'b-id' }
+			]
+		});
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{
+					project_id: 'pinned-api',
+					version_id: 'a-id',
+					dependency_type: 'required',
+					title: 'Pinned API'
+				},
+				{
+					project_id: 'pinned-api',
+					version_id: 'b-id',
+					dependency_type: 'required',
+					title: 'Pinned API'
+				}
+			],
+			selection: { 'pinned-api': true },
+			getVersions
+		});
+
+		// Only the first resolved pin is installed; the conflicting request is
+		// surfaced, never installed as a second copy.
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Pinned A.jar']
+		);
+		const calls = (getVersions as DependencyLookup & { calls: string[] }).calls;
+		assert.deepEqual(calls, ['pinned-api'], 'the project must be looked up once');
+		assert.equal(plan.unresolved.length, 1);
+		assert.equal(plan.unresolved[0].projectId, 'pinned-api');
+		assert.match(plan.unresolved[0].reason, /conflicting pinned versions/i);
+		assert.match(plan.unresolved[0].reason, /a-id/);
+		assert.match(plan.unresolved[0].reason, /b-id/);
+	});
+
+	test('the same pin requested twice is deduped without a conflict', async () => {
+		const getVersions = lookup({
+			'pinned-api': [{ ...version('Pinned A'), id: 'a-id' }]
+		});
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{ project_id: 'pinned-api', version_id: 'a-id', dependency_type: 'required' },
+				{ project_id: 'pinned-api', version_id: 'a-id', dependency_type: 'required' }
+			],
+			selection: { 'pinned-api': true },
+			getVersions
+		});
+
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Pinned A.jar']
+		);
+		assert.equal(plan.unresolved.length, 0);
+		const calls = (getVersions as DependencyLookup & { calls: string[] }).calls;
+		assert.deepEqual(calls, ['pinned-api']);
+	});
+
+	test('an unpinned project requested twice is deduped without a conflict', async () => {
+		const getVersions = lookup({ 'latest-api': [version('Latest API')] });
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [dep('latest-api'), dep('latest-api')],
+			selection: { 'latest-api': true },
+			getVersions
+		});
+
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Latest API.jar']
+		);
+		assert.equal(plan.unresolved.length, 0);
+		const calls = (getVersions as DependencyLookup & { calls: string[] }).calls;
+		assert.deepEqual(calls, ['latest-api']);
+	});
+
 	test('a pinned dependency version is selected instead of the newest version', async () => {
 		const getVersions = lookup({
 			'pinned-api': [version('Newest API'), { ...version('Pinned API'), id: 'pinned-version-id' }]

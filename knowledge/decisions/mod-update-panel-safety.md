@@ -14,6 +14,10 @@ code_refs:
 
 - Dependency planning keeps requirements beyond the traversal depth visible as
   unresolved outcomes and honors a dependency's explicit `version_id` pin.
+  Dedupe tracks the requested pin per project: a second request for the same
+  project with a different pin becomes an `unresolved` conflict entry instead
+  of silently reusing or dropping a pin. Repeated unpinned requests stay a
+  normal dedupe.
 - The browser compares the server, Minecraft version, and loader context after
   dependency planning and before the install request. A changed context refuses
   the install instead of using a stale lookup.

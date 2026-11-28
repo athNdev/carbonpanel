@@ -113,6 +113,13 @@ export async function buildDependencyPlan(
 	const projectKey = (platform: string, id: string) =>
 		`${platform.toLowerCase()}:${id.toLowerCase()}`;
 
+	// Dedupe is by project, but two requests for the same project can pin
+	// different versions. Track the pin each project was planned with so a
+	// conflicting request is surfaced instead of silently reusing the first
+	// pin (or silently dropping the second one).
+	const plannedPins = new Map<string, string | undefined>();
+	const pinLabel = (pin: string | undefined) => (pin ? `version ${pin}` : 'no pinned version');
+
 	async function visit(
 		deps: PlanDependency[],
 		platform: string,
@@ -142,12 +149,23 @@ export async function buildDependencyPlan(
 		for (const dep of wanted) {
 			const depId = dep.project_id as string;
 			const key = projectKey(platform, depId);
-			if (visited.has(key)) continue;
+			if (visited.has(key)) {
+				const plannedPin = plannedPins.get(key);
+				if (plannedPin !== dep.version_id) {
+					unresolved.push({
+						projectId: depId,
+						title: dep.title || depId,
+						reason: `Conflicting pinned versions requested for this project: already planned ${pinLabel(plannedPin)}, also requested ${pinLabel(dep.version_id)}`
+					});
+				}
+				continue;
+			}
 			if (request.isKnownProject?.(depId)) {
 				visited.add(key);
 				continue;
 			}
 			visited.add(key);
+			plannedPins.set(key, dep.version_id);
 			const label = dep.title || depId;
 			try {
 				const response = await request.getVersions({
