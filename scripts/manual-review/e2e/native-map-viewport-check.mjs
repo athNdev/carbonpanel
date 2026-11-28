@@ -192,10 +192,11 @@ async function runPackagedWorldView(browser) {
     const completedSave = page.waitForResponse((response) =>
       savingTile && response.url().endsWith(savingTile) && response.status() === 200
     );
-    // The standalone /worlds routes were removed (commit 8b523182d). The map
-    // now opens as the server page's expand dialog and ?map=<world key> is
-    // its deep link; the world-only grant still renders the map while the
-    // World tab behind it stays denied for worlds/read.
+    // Both the /worlds inventory and the server page's map dialog exist at
+    // this head. This packaged pass enters through the dialog's ?map=<world
+    // key> deep link; the /worlds row and card open paths are covered below.
+    // The world-only grant still renders the map while the World tab behind
+    // it stays denied for worlds/read.
     await page.goto(origin + "servers/" + native.serverId + "?tab=world&map=" + key + "&dimension=nether");
     await completedSave;
     assert.ok(savingTileRetried, "a tile interrupted by a save retries under the same map session");
@@ -218,9 +219,11 @@ async function runPackagedWorldView(browser) {
     assert.equal(await page.getByRole("button", { name: "Show player markers", exact: true }).count(), 0);
     assert.doesNotMatch(await page.locator("body").innerText(), /Private position|Player position|Region boundary|Nether location/);
     await page.screenshot({path: path.join(evidence, "packaged-world-view-native.png")});
-    // The share-link feature was removed together with the /worlds routes.
-    // The dialog's ?map=<world key> URL still carries the x/z camera query,
-    // so the deep link remains the way to restore a camera position.
+    // The "Copy map link" action is no longer rendered at this head (removed
+    // with the map dialog refactor and recorded in src/lib/changelog.md), so
+    // main's copy assertion cannot be restored. The dialog's ?map=<world key>
+    // URL still carries the x/z camera query, so the deep link remains the
+    // way to restore a camera position.
     await page.goto(origin + "servers/" + native.serverId + "?map=" + key + "&x=-128&z=92");
     await page.getByTestId("native-map-coordinates").getByText("X: -128 · Z: 92").waitFor();
     await page.locator('[role=application] img').first().waitFor();
@@ -252,8 +255,23 @@ async function runPackagedWorldView(browser) {
       0,
     );
     results.push("the native dimension switch serves nether tiles in the same session, keeps the camera, and keeps markers Overworld-scoped");
-    // The /worlds inventory index was removed with the standalone routes
-    // (commit 8b523182d); its row/card open-path checks retired with the page.
+    // /worlds still exists at this head; keep main's row/card open-path
+    // checks alongside the dialog and dimension-switch checks above.
+    for (const width of [360, 1440]) {
+      await page.setViewportSize({width, height: 900});
+      await page.goto(origin + "worlds?server=" + native.serverId);
+      const link = page.getByRole("link", {name:/Open map for Fixture native world/});
+      const row = link.locator("xpath=ancestor::*[self::tr or self::li][1]");
+      const bounds = await row.boundingBox();
+      assert.ok(bounds);
+      await page.mouse.click(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2);
+      await page.waitForURL(url => url.pathname.startsWith("/worlds/" + native.serverId + "/"));
+      await page.goBack();
+      await link.focus();
+      await link.press("Enter");
+      await page.waitForURL(url => url.pathname.startsWith("/worlds/" + native.serverId + "/"));
+    }
+    results.push("both desktop rows and mobile cards open through their far edge and keyboard link");
     libraryReader = true;
     await page.goto(origin + "library");
     const running = page.getByRole("region", {name:"Running server worlds"});

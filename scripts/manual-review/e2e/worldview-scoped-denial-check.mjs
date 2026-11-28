@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Real-browser checks for the World View dialog on the server detail page —
- * the successor of the removed /worlds routes (commit 8b523182d): the server
- * World tab's "Open map" action opens it, and ?map=<world key> deep-links it.
- * The actual SvelteKit app uses local Connect fixtures so the journey can
- * check navigation, recovery, and setup alongside the scoped permissions. It
- * proves that action-scoped write denials do NOT revoke an otherwise readable
+ * Real-browser checks for the World View inventory routes and the map dialog
+ * on the server detail page. Both surfaces exist at this head: /worlds lists
+ * maps, and the server World tab's "Open map" action opens the same map in a
+ * dialog that ?map=<world key> deep-links. The actual SvelteKit app uses
+ * local Connect fixtures so the journey can check navigation, recovery, and
+ * setup alongside the scoped permissions. It proves that action-scoped write
+ * denials do NOT revoke an otherwise readable
  * world view. The read scope stays valid; only a specific write RPC is refused
  * at the network boundary, which is the real regression case. No live server,
  * world, renderer or daemon is used and the sandbox frame is a harmless
@@ -51,6 +52,8 @@ let holdSession;
 let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
+const survivalMapLink = { name: "Open map for Fixture Overworld on Fixture Survival Server", exact: true };
+const creativeMapLink = { name: "Set up map for Fixture Creative on Fixture Creative Server", exact: true };
 const target = {
   serverId: "srv-1",
   worldRef,
@@ -267,9 +270,9 @@ try {
   // KIND_SERVER_LOCAL = 2 (worldview_pb.ts).
   const packed = [2, "srv-1", "survival", "", ""];
   const key = "w1." + Buffer.from(JSON.stringify(packed)).toString("base64url");
-  // The /worlds routes were removed (commit 8b523182d). The same dialog now
-  // lives on the server detail page, opened by the World tab's "Open map"
-  // action and deep-linkable via ?map=<world key>.
+  // The map dialog on the server detail page is deep-linkable via
+  // ?map=<world key>; the /worlds inventory routes are still present and are
+  // exercised by the world-inventory passes below.
   const url = `${base}/servers/srv-1?map=${key}&dimension=overworld`;
 
   // Warm route dependencies; Vite's initial optimization reloads the page.
@@ -417,12 +420,72 @@ try {
   results.push("world_view/read denial still produces the explicit no-access state");
 
   readDenied = false;
-  // The /worlds inventory index was removed with the standalone routes
-  // (commit 8b523182d). Its presentation, filter and keyboard checks retired
-  // with that page, and the dialog's own failed/retry and last-known states
-  // are covered by the unavailable-status and last-known-session passes
-  // below. The two scoped-permission checks keep running against the map's
-  // new home: the server World tab and its expand dialog.
+  // /worlds still exists at this head, so its inventory presentation, server
+  // scoping and failed/retry states stay covered alongside the dialog passes
+  // that follow.
+  await dumpOnFailure("world-inventory", async () => {
+    for (const [width, theme] of [[360, "dark"], [768, "light"], [1440, "dark"]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((mode) => {
+        localStorage.setItem("carbon-theme", mode);
+      }, theme);
+      await page.goto(base + "/worlds");
+      const content = page.getByTestId("showcase-worlds-content");
+      const mapLink = content.getByRole("link", survivalMapLink);
+      await mapLink.waitFor();
+      await mapLink.getByText(/Fixture Survival Server · overworld/).waitFor();
+      const setupLink = content.getByRole("link", creativeMapLink);
+      await setupLink.getByText("SETUP NEEDED", { exact: true }).waitFor();
+      assert.doesNotMatch(await setupLink.innerText(), /Checked |Rendered /);
+      assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
+      const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
+      assert.equal(overflow, false, "World View fits at width " + width);
+      await mapLink.focus();
+      assert.equal(await mapLink.evaluate((element) => element === document.activeElement), true);
+      await page.screenshot({
+        path: path.join(evidence, "inventory-" + width + "-" + theme + ".png"),
+        animations: "disabled",
+      });
+      await page.keyboard.press("Enter");
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+    }
+    await page.goto(base + "/worlds?server=srv-1");
+    await page.getByRole("link", survivalMapLink).waitFor();
+    assert.equal(await page.getByRole("link", creativeMapLink).count(), 0);
+    await page.getByRole("link", { name: "All servers" }).click();
+    await page.getByRole("link", creativeMapLink).waitFor();
+  });
+  results.push("inventory presents names, setup and unknown freshness at 360, 768 and 1440, supports keyboard navigation and preserves server scoping");
+
+  await dumpOnFailure("concrete-server-scope", async () => {
+    scopedPermission = true;
+    const globalBaseline = fleetCalls;
+    const scopedBaseline = scopedCalls;
+    const scopedUrl = base + "/worlds?server=srv-1";
+    await page.goto(scopedUrl);
+    await page.getByRole("link", survivalMapLink).waitFor();
+    assert.equal(await page.getByRole("link", { name: "All servers" }).count(), 0);
+    assert.equal(fleetCalls, globalBaseline, "concrete server access must not call the fleet RPC");
+    assert.ok(scopedCalls > scopedBaseline);
+
+    statusMode = "error";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "World inventory refresh failed" }).waitFor();
+    assert.equal(await page.getByRole("link", survivalMapLink).count(), 1);
+    await page.reload();
+    await page.getByRole("heading", { name: "Could not load worlds" }).waitFor();
+
+    statusMode = "ready";
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await page.getByRole("link", survivalMapLink).click();
+    await page.getByRole("region", { name: /World map/i }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Server maps", exact: true }).getAttribute("href"), "/worlds?server=srv-1");
+    scopedPermission = false;
+  });
+  results.push("server-scoped reader uses the concrete read RPC and gets separate fresh, stale, failed and navigation states");
+
+  // The dialog passes keep the map's other home covered: the server World tab
+  // and its expand dialog.
   await dumpOnFailure("world-tab-read-scope", async () => {
     // Without the world_view/read grant the World tab offers no map action
     // and the dialog deep link renders the lock empty-state without firing
@@ -535,7 +598,7 @@ try {
       await oldStatusStarted;
       const otherKey = "w1." + Buffer.from(JSON.stringify([2, "srv-2", "creative", "", ""])).toString("base64url");
       // Client-side navigation between two server pages, each carrying its
-      // own map deep link, replaces the removed /worlds cross-world hop.
+      // own map dialog deep link, exercises the dialog's cross-server hop.
       await page.evaluate((href) => {
         const link = document.createElement("a");
         link.href = href;

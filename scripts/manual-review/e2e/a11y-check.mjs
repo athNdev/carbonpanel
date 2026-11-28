@@ -840,6 +840,18 @@ const PACKAGED_ROUTES = [
 		]
 	},
 	{
+		path: '/worlds',
+		h1: 'World View',
+		controls: [
+			['heading', 'World View'],
+			['textbox', 'Search maps'],
+			['combobox', 'Server'],
+			['combobox', 'Map status'],
+			['button', 'Refresh'],
+			['link', 'Open map for Alpha Overworld on Alpha Server']
+		]
+	},
+	{
 		path: '/servers',
 		h1: 'Servers',
 		controls: [
