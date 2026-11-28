@@ -60,6 +60,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// Kept as text so the port field is not rewritten while the operator is typing.
 	let newListenerPort = $state('25565');
 	let portError = $state('');
+	let editListenerNameError = $state('');
 	let activeRoutes = $state<ProxyRoute[]>([]);
 
 	onMount(() => {
@@ -188,16 +189,23 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function updateListener(listener: ProxyListener) {
+		const name = listener.name.trim();
+		if (!name) {
+			editListenerNameError = 'Listener name is required';
+			return;
+		}
+		editListenerNameError = '';
+
 		try {
 			await rpcClient.proxy.updateProxyListener({
 				id: listener.id,
-				name: listener.name,
+				name,
 				description: listener.description,
 				enabled: listener.enabled,
 				isDefault: listener.isDefault
 			});
 
-			toast.success(`Listener "${listener.name}" updated`);
+			toast.success(`Listener "${name}" updated`);
 			editingListener = null;
 			await loadListeners();
 		} catch (_e) {
@@ -380,6 +388,8 @@ one at https://mozilla.org/MPL/2.0/.
 												<CarbonTextInput
 													label="Name"
 													bind:value={editingListener.name}
+													oninput={() => (editListenerNameError = '')}
+													error={editListenerNameError}
 													placeholder="Listener name"
 													class="[&_input]:bg-background"
 												/>
@@ -428,7 +438,10 @@ one at https://mozilla.org/MPL/2.0/.
 													<CarbonButton
 														kind="secondary"
 														size="sm"
-														onclick={() => (editingListener = null)}
+														onclick={() => {
+															editingListener = null;
+															editListenerNameError = '';
+														}}
 													>
 														Cancel
 													</CarbonButton>
@@ -502,7 +515,10 @@ one at https://mozilla.org/MPL/2.0/.
 												<button
 													type="button"
 													class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-													onclick={() => (editingListener = { ...listener })}
+													onclick={() => {
+														editingListener = { ...listener };
+														editListenerNameError = '';
+													}}
 													aria-label="Edit listener"
 												>
 													<Edit class="h-4 w-4" />
