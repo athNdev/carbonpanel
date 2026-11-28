@@ -69,8 +69,9 @@ export function wasRpcErrorToasted(error: unknown): boolean {
 
 const recentErrorToasts = new Set<string>();
 
-// Login auth interception
-const authInterceptor: Interceptor = (next) => async (req) => {
+// Login auth interception. Exported for the interceptor contract test; the
+// transport below is its only production caller.
+export const authInterceptor: Interceptor = (next) => async (req) => {
 	// Auth headers
 	const sessionRevision = authStore.getSessionRevision();
 	const authHeaders = authStore.getHeaders();
