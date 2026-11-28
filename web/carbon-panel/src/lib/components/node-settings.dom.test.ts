@@ -46,7 +46,7 @@ const scanResult = new Promise<unknown>((resolve) => {
 	resolveScan = resolve;
 });
 const scanCandidates = [
-	{ host: 'tcp://10.0.0.5:2376', port: 2376, reachable: true, latencyMs: 5n, source: 'scan' }
+	{ host: 'tcp://10.0.0.5:2376', port: 2376, reachable: true, latencyMs: 12n, source: 'tcp-scan' }
 ];
 
 // Keep the real RPC singleton and replace only the methods this test drives,
@@ -124,6 +124,11 @@ test('closing the auto-detect results dialog returns focus to the trigger', asyn
 			),
 			'the detected-daemons dialog opens after the scan'
 		);
+		assert.equal(
+			document.querySelector('[data-detected-meta]')?.textContent?.trim(),
+			'responded in 12 ms · tcp-scan',
+			'the latency, separator and source render with spaces'
+		);
 
 		buttonByText(document.body, 'Skip for now').click();
 		await flush();
@@ -159,6 +164,32 @@ test('closing the edit dialog returns focus to the edit trigger', async () => {
 			document.activeElement,
 			trigger,
 			'focus must return to the Edit trigger after close'
+		);
+	} finally {
+		ui.unmount();
+	}
+});
+
+test('a successful update returns focus to the refreshed node edit control', async () => {
+	const ui = mountUi();
+	try {
+		await flush();
+		const trigger = ui.target.querySelector<HTMLButtonElement>('[data-node-edit="node-1"]');
+		assert.ok(trigger, 'the node exposes an edit control');
+		trigger.focus();
+		trigger.click();
+		await flush();
+
+		buttonByText(document.body, 'Save Changes').click();
+		await flush(250);
+
+		const refreshed = ui.target.querySelector<HTMLButtonElement>('[data-node-edit="node-1"]');
+		assert.ok(refreshed, 'the refreshed list still has the node edit control');
+		assert.notEqual(refreshed, trigger, 'the refreshed list replaces the old tile');
+		assert.equal(
+			document.activeElement,
+			refreshed,
+			'focus must land on the same node after the list reloads'
 		);
 	} finally {
 		ui.unmount();
