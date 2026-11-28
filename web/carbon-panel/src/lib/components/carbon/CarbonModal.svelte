@@ -23,6 +23,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import { cubicOut, cubicIn } from 'svelte/easing';
 	import { X } from '@lucide/svelte';
@@ -42,6 +43,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		bare?: boolean;
 		/** Fill the viewport edge to edge, above the app header and sidebar. */
 		fullscreen?: boolean;
+		/**
+		 * Element that regains focus on close. Use when the trigger is disabled or
+		 * replaced between the opening click and the dialog mounting; otherwise the
+		 * element focused at open is restored.
+		 */
+		restoreFocusTo?: HTMLElement | null;
 		onprimary?: () => void;
 		onsecondary?: () => void;
 		onclose?: () => void;
@@ -60,6 +67,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		hasFooter = true,
 		bare = false,
 		fullscreen = false,
+		restoreFocusTo = null,
 		onprimary,
 		onsecondary,
 		onclose,
@@ -182,7 +190,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		if (open) {
 			if (typeof document !== 'undefined') {
-				previousActiveElement = document.activeElement as HTMLElement | null;
+				previousActiveElement =
+					untrack(() => restoreFocusTo) ?? (document.activeElement as HTMLElement | null);
 				// Focus the modal or its first actionable element on open
 				const focusTimer = setTimeout(() => {
 					if (!modalElement || !isTopDialog() || modalElement.contains(document.activeElement))

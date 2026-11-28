@@ -6,7 +6,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { NodeStatus, type Node } from '$lib/proto/carbonpanel/v1/node_pb';
 	import { parseCapacity } from '$lib/utils/node-capacity';
@@ -58,11 +58,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let showDetectedDialog = $state(false);
 	let detectedDaemons = $state<DetectedDaemon[]>([]);
 	let addingDaemonHost = $state<string | null>(null);
+	// The Auto-detect trigger disables itself while scanning, which moves focus to
+	// the document body before the dialog opens. Keep the clicked control so the
+	// dialog can return focus to it on close.
+	let detectedDialogTrigger = $state<HTMLElement | null>(null);
 
 	// Dialog state
 	let showAddDialog = $state(false);
 	let showEditDialog = $state(false);
 	let isSaving = $state(false);
+	// The refreshed node list replaces the edit trigger. Keep the edited node's
+	// id so a successful save can move focus to the equivalent new control.
+	let editTriggerNodeId = $state<string | null>(null);
+	let settingsRoot = $state<HTMLDivElement | null>(null);
 
 	let newNode = $state({
 		name: '',
@@ -153,7 +161,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return host.trim().toLowerCase().replace(/\/+$/, '');
 	}
 
-	async function handleAutoDetect() {
+	async function handleAutoDetect(event?: MouseEvent) {
+		if (event?.currentTarget instanceof HTMLElement) {
+			detectedDialogTrigger = event.currentTarget;
+		}
 		scanning = true;
 		try {
 			const data = await rpcClient.node.scanNodes({}, silentCallOptions);
@@ -342,7 +353,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	function focusEditedNodeTrigger(nodeId: string) {
+		const editButtons = settingsRoot?.querySelectorAll<HTMLElement>('[data-node-edit]') ?? [];
+		for (const button of editButtons) {
+			if (button.dataset.nodeEdit === nodeId) {
+				button.focus();
+				return;
+			}
+		}
+		// The node may have been renamed out of the list or otherwise removed.
+		// Fall back to a stable action rather than leaving focus on <body>.
+		settingsRoot?.querySelector<HTMLElement>('[data-node-add]')?.focus();
+	}
+
 	function openEditNode(node: Node) {
+		editTriggerNodeId = node.id;
 		// TLS secrets are redacted on read. Never copy whatever the response
 		// carries into editable state: an empty value means "unchanged", and a
 		// non-empty placeholder is not real credential material either.
@@ -396,10 +421,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			return;
 		}
 
+		const updatedNodeId = editTriggerNodeId ?? editingNode.id;
 		isSaving = true;
 		try {
 			await rpcClient.node.updateNode({
-				id: editingNode.id,
+				id: updatedNodeId,
 				name: editingNode.name.trim(),
 				host: editingNode.host.trim(),
 				advertisedIp: editingNode.advertisedIp.trim(),
@@ -413,6 +439,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			showEditDialog = false;
 			editingNode = null;
 			await loadNodes();
+			// The list was rebuilt, so the trigger that existed at open is gone.
+			// Wait for the refreshed tiles, then return focus to the same node.
+			await tick();
+			focusEditedNodeTrigger(updatedNodeId);
 		} catch (error: unknown) {
 			toast.error(
 				`Failed to update node: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -523,7 +553,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="space-y-4">
+<div bind:this={settingsRoot} class="space-y-4">
 	<!-- Header panel: section title, node actions, and cluster summary -->
 	<CarbonTile class="overflow-hidden rounded-none !border-border !bg-card !p-0">
 		<div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
@@ -565,6 +595,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					kind="primary"
 					size="md"
 					class="justify-center gap-2"
+					data-node-add
 					onclick={() => (showAddDialog = true)}
 				>
 					<Plus class="h-4 w-4" />
@@ -853,6 +884,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<CarbonButton
 								kind="ghost"
 								iconOnly
+								data-node-edit={node.id}
 								onclick={() => openEditNode(node)}
 								title="Edit node"
 								aria-label="Edit {node.name}"
@@ -886,6 +918,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	description="Auto-detect found reachable Docker daemons on this host's network. Register the ones you want the placement engine to use — you can adjust names, IPs, and limits later."
 	size="xl"
 	hasFooter={false}
+	restoreFocusTo={detectedDialogTrigger}
 >
 	<div class="max-h-[50vh] space-y-3 overflow-y-auto">
 		{#each detectedDaemons as d (d.host)}
@@ -897,9 +930,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<span class="truncate font-mono text-xs text-foreground" title={d.host}>{d.host}</span
 							>
 						</div>
-						<p class="mt-0.5 text-xs text-muted-foreground">
-							{#if d.latencyMs > 0}responded in {d.latencyMs}ms ·
-							{/if}{d.source}
+						<p class="mt-0.5 text-xs text-muted-foreground" data-detected-meta>
+							{#if d.latencyMs > 0}responded in {d.latencyMs} ms · {d.source}{:else}{d.source}{/if}
 						</p>
 					</div>
 					<CarbonButton

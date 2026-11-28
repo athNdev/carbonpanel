@@ -48,9 +48,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		indicatorWidth = button.offsetWidth;
 		// Keep a selected tab visible after programmatic selection or resize,
 		// without scrolling any ancestor or moving the page vertically.
-		if (button.offsetLeft < container.scrollLeft) container.scrollLeft = button.offsetLeft;
-		else if (button.offsetLeft + button.offsetWidth > container.scrollLeft + container.clientWidth)
-			container.scrollLeft = button.offsetLeft + button.offsetWidth - container.clientWidth;
+		// offsetLeft is relative to the offset parent, not necessarily this scroll
+		// container, so compare the tab's viewport rect with the container's
+		// client area instead. A stale offset parent or transform used to leave a
+		// deep-linked tab clipped at narrow widths.
+		const containerRect = container.getBoundingClientRect();
+		const buttonRect = button.getBoundingClientRect();
+		const containerLeft = containerRect.left + container.clientLeft;
+		const left = buttonRect.left - containerLeft;
+		const right = buttonRect.right - containerLeft;
+		if (left < 0) container.scrollLeft += left;
+		else if (right > container.clientWidth) container.scrollLeft += right - container.clientWidth;
 	}
 
 	$effect(() => {
@@ -65,15 +73,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		// ancestor. Measuring only on window resize left the indicator parked
 		// under the previously selected tab after any of those. The observer
 		// coalesces to one measurement per frame so the animation stays smooth.
+		//
+		// Tab widths also change without the container resizing: a late webfont
+		// swap widens every label after the first measure. Observe the tabs too,
+		// and re-measure once fonts finish loading, so a deep-linked tab does not
+		// stay clipped until the operator clicks or resizes something.
 		if (!container) return;
+		const tabCount = tabs.length;
 		let frame = 0;
+		let cancelled = false;
 		const schedule = () => {
+			if (cancelled) return;
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(measure);
 		};
 		const observer = new ResizeObserver(schedule);
 		observer.observe(container);
+		const buttons = container.querySelectorAll<HTMLElement>('[data-tab]');
+		for (let i = 0; i < tabCount && i < buttons.length; i++) observer.observe(buttons[i]);
+		const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+		fonts?.ready.then(schedule).catch(() => {});
 		return () => {
+			cancelled = true;
 			cancelAnimationFrame(frame);
 			observer.disconnect();
 		};

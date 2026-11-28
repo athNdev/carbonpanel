@@ -81,7 +81,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let canEdit = $derived($canUpdateSettings);
 
 	let parsedSessionHours = $derived.by(() => {
-		const text = sessionTimeoutText.trim();
+		// The number input binds a number (or null/undefined when cleared), so
+		// stringify before trimming; trimming a raw number throws.
+		const text = String(sessionTimeoutText ?? '').trim();
 		if (text === '') return null;
 		const hours = Number(text);
 		return Number.isFinite(hours) ? hours : null;

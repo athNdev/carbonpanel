@@ -60,6 +60,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// Kept as text so the port field is not rewritten while the operator is typing.
 	let newListenerPort = $state('25565');
 	let portError = $state('');
+	let editListenerNameError = $state('');
 	let activeRoutes = $state<ProxyRoute[]>([]);
 
 	onMount(() => {
@@ -203,6 +204,20 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch (_e) {
 			toast.error('Failed to update listener');
 		}
+	}
+
+	function saveEditedListener() {
+		if (!editingListener) return;
+		// Validate only the edit form. Row actions such as "Set as default" use
+		// updateListener directly and must keep persisting the stored name.
+		const name = editingListener.name.trim();
+		if (!name) {
+			editListenerNameError = 'Listener name is required';
+			return;
+		}
+		editListenerNameError = '';
+		editingListener.name = name;
+		void updateListener(editingListener);
 	}
 
 	let pendingDelete = $state<ProxyListenerWithCount | null>(null);
@@ -380,6 +395,8 @@ one at https://mozilla.org/MPL/2.0/.
 												<CarbonTextInput
 													label="Name"
 													bind:value={editingListener.name}
+													oninput={() => (editListenerNameError = '')}
+													error={editListenerNameError}
 													placeholder="Listener name"
 													class="[&_input]:bg-background"
 												/>
@@ -428,17 +445,14 @@ one at https://mozilla.org/MPL/2.0/.
 													<CarbonButton
 														kind="secondary"
 														size="sm"
-														onclick={() => (editingListener = null)}
+														onclick={() => {
+															editingListener = null;
+															editListenerNameError = '';
+														}}
 													>
 														Cancel
 													</CarbonButton>
-													<CarbonButton
-														kind="primary"
-														size="sm"
-														onclick={() => {
-															if (editingListener) updateListener(editingListener);
-														}}
-													>
+													<CarbonButton kind="primary" size="sm" onclick={saveEditedListener}>
 														Save
 													</CarbonButton>
 												</div>
@@ -502,7 +516,10 @@ one at https://mozilla.org/MPL/2.0/.
 												<button
 													type="button"
 													class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-													onclick={() => (editingListener = { ...listener })}
+													onclick={() => {
+														editingListener = { ...listener };
+														editListenerNameError = '';
+													}}
 													aria-label="Edit listener"
 												>
 													<Edit class="h-4 w-4" />
