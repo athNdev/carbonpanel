@@ -21,6 +21,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
+	"github.com/athNdev/carbon-panel/internal/worldlib"
 )
 
 const testSave = 1_779_000_000
@@ -33,6 +34,12 @@ type savedChunk struct {
 }
 
 func chunkData(x, z, version int32, status string) []byte {
+	return chunkDataWithSurface(x, z, version, -4, status, func(i int) uint64 {
+		return uint64(1 + (i%16)*7 + (i/16)*13)
+	})
+}
+
+func chunkDataWithSurface(x, z, version, minSection int32, status string, height func(int) uint64) []byte {
 	var b bytes.Buffer
 	write := func(v any) { _ = binary.Write(&b, binary.BigEndian, v) }
 	str := func(s string) {
@@ -47,7 +54,7 @@ func chunkData(x, z, version int32, status string) []byte {
 	for _, field := range []struct {
 		name  string
 		value int32
-	}{{"DataVersion", version}, {"xPos", x}, {"yPos", -4}, {"zPos", z}} {
+	}{{"DataVersion", version}, {"xPos", x}, {"yPos", minSection}, {"zPos", z}} {
 		tag(3, field.name)
 		write(field.value)
 	}
@@ -57,10 +64,7 @@ func chunkData(x, z, version int32, status string) []byte {
 	tag(12, "WORLD_SURFACE")
 	var packed [37]uint64
 	for i := range 256 {
-		// The stored height is one above the highest block relative to -64.
-		// Distinct horizontal and vertical gradients establish orientation.
-		height := uint64(1 + (i%16)*7 + (i/16)*13)
-		packed[i/7] |= height << ((i % 7) * 9)
+		packed[i/7] |= height(i) << ((i % 7) * 9)
 	}
 	write(int32(len(packed)))
 	for _, value := range packed {
@@ -169,6 +173,101 @@ func TestRenderOverworldTileFromConfinedRegion(t *testing.T) {
 	after, err := os.ReadFile(file)
 	if err != nil || !bytes.Equal(original, after) {
 		t.Fatalf("region changed after render: %v", err)
+	}
+}
+
+func TestRenderVanillaEndTileUsesConfinedDimensionAndExactProfile(t *testing.T) {
+	const level = "fixture_world"
+	const regionName = "r.-1.-1.mca"
+	overworld := regionData(t, savedChunk{31, 31, chunkData(-1, -1, 4554, "full"), 2, testSave})
+	overworldPath, store := regionStore(t, regionName, overworld)
+	ctx := context.Background()
+	coord := TileCoord{X: -1, Z: -1}
+
+	tile, err := RenderOverworldTile(ctx, store, level, coord)
+	if err != nil || tile.RenderedChunks != 1 {
+		t.Fatalf("control Overworld rendered=%d: %v", tile.RenderedChunks, err)
+	}
+	if _, err = RenderVanillaEndTile(ctx, store, level, coord); !errors.Is(err, ErrTerrainMissing) {
+		t.Fatalf("missing End must not use the Overworld region: %v", err)
+	}
+
+	chunk := chunkDataWithSurface(-1, -1, 4554, 0, "minecraft:full", func(i int) uint64 {
+		switch i {
+		case 0:
+			return 0
+		case 1:
+			return 1
+		default:
+			return 256
+		}
+	})
+	surface, err := worldlib.ParseJavaEndChunkSurface(chunk)
+	if err != nil || surface.Heights[0] != -1 || surface.Heights[1] != 0 || surface.Heights[2] != 255 {
+		t.Fatalf("End surface starts %v, error %v", surface.Heights[:3], err)
+	}
+	if _, err = worldlib.ParseJavaChunkSurface(chunk); !errors.Is(err, worldlib.ErrJavaChunkUnsupported) {
+		t.Fatalf("the Overworld profile accepted an End chunk: %v", err)
+	}
+
+	endDirectory := filepath.Join(filepath.Dir(filepath.Dir(overworldPath)), "DIM1", "region")
+	if err := os.MkdirAll(endDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	endPath := filepath.Join(endDirectory, regionName)
+	end := regionData(t, savedChunk{31, 31, chunk, 2, testSave})
+	if err := os.WriteFile(endPath, end, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tile, err = RenderVanillaEndTile(ctx, store, level, coord)
+	if err != nil || tile.RenderedChunks != 1 || tile.MissingChunks != 63 {
+		t.Fatalf("End rendered=%d missing=%d: %v", tile.RenderedChunks, tile.MissingChunks, err)
+	}
+	if want := time.Unix(testSave, 0).UTC(); !tile.NewestSavedAt.Equal(want) {
+		t.Fatalf("End save time = %s, want %s", tile.NewestSavedAt, want)
+	}
+	img, err := png.Decode(bytes.NewReader(tile.PNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pixel := range []struct {
+		x, z  int
+		alpha uint32
+	}{{111, 112, 0}, {112, 112, 0}, {113, 112, 0xffff}, {114, 112, 0xffff}} {
+		_, _, _, alpha := img.At(pixel.x, pixel.z).RGBA()
+		if alpha != pixel.alpha {
+			t.Fatalf("End pixel (%d, %d) alpha = %d, want %d", pixel.x, pixel.z, alpha, pixel.alpha)
+		}
+	}
+	for _, save := range []struct {
+		path string
+		want []byte
+	}{{overworldPath, overworld}, {endPath, end}} {
+		got, err := os.ReadFile(save.path)
+		if err != nil || !bytes.Equal(got, save.want) {
+			t.Fatalf("terrain read altered source %s: %v", save.path, err)
+		}
+	}
+}
+
+func TestJavaEndSurfaceRefusesUnqualifiedFormats(t *testing.T) {
+	for _, tt := range []struct {
+		name                string
+		version, minSection int32
+		height              uint64
+		want                error
+	}{
+		{"older End", 4553, 0, 64, worldlib.ErrJavaChunkUnsupported},
+		{"newer End", 4555, 0, 64, worldlib.ErrJavaChunkUnsupported},
+		{"Overworld section floor", 4554, -4, 64, worldlib.ErrJavaChunkUnsupported},
+		{"above End maximum", 4554, 0, 257, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := chunkDataWithSurface(0, 0, tt.version, tt.minSection, "full", func(int) uint64 { return tt.height })
+			if _, err := worldlib.ParseJavaEndChunkSurface(raw); err == nil || (tt.want != nil && !errors.Is(err, tt.want)) {
+				t.Fatalf("End metadata outside the profile was accepted: %v", err)
+			}
+		})
 	}
 }
 
@@ -377,6 +476,42 @@ func TestRenderOverworldTileBoundsAggregateWork(t *testing.T) {
 	if !errors.Is(err, ErrTileBudget) || len(tile.PNG) > 0 {
 		t.Fatalf("expected aggregate limit, got %v with %d bytes", err, len(tile.PNG))
 	}
+}
+
+// TestRenderVanillaEndTileGameSave optionally qualifies the saved End of a
+// disposable save generated by the real game. It never writes to the save.
+func TestRenderVanillaEndTileGameSave(t *testing.T) {
+	root, level := os.Getenv("CARBON_TERRAIN_END_FIXTURE_ROOT"), os.Getenv("CARBON_TERRAIN_END_FIXTURE_LEVEL")
+	if root == "" || level == "" {
+		t.Skip("real End qualification requires CARBON_TERRAIN_END_FIXTURE_ROOT and CARBON_TERRAIN_END_FIXTURE_LEVEL")
+	}
+	store, err := nodestorage.NewLocal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	chunks, timestamps := 0, 0
+	for z := -1; z <= 1; z++ {
+		for x := -1; x <= 1; x++ {
+			tile, err := RenderVanillaEndTile(t.Context(), store, level, TileCoord{X: x, Z: z})
+			if errors.Is(err, ErrTerrainMissing) {
+				continue
+			}
+			if err != nil {
+				t.Fatalf("End tile (%d, %d): %v", x, z, err)
+			}
+			if tile.UnreadableChunks != 0 || tile.UnsupportedChunks != 0 {
+				t.Fatalf("End tile (%d, %d) unreadable=%d unsupported=%d", x, z, tile.UnreadableChunks, tile.UnsupportedChunks)
+			}
+			chunks += tile.RenderedChunks
+			timestamps += tile.TimestampedChunks
+		}
+	}
+	if chunks == 0 || timestamps != chunks {
+		t.Fatalf("real End save yielded %d chunks with %d timestamps", chunks, timestamps)
+	}
+	t.Logf("qualified %d saved End chunks with %d timestamps", chunks, timestamps)
 }
 
 // TestRenderOverworldTileGameSave optionally qualifies a disposable save

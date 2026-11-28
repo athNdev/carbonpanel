@@ -135,6 +135,19 @@ func (r *Resolver) Resolve(ctx context.Context, nodeID, serverID string) (Render
 	return r.resolveDiscovered(ctx, nodeID, serverID)
 }
 
+// allowsNativeFallback preserves explicit endpoint precedence, even when the
+// configured endpoint cannot currently be reached.
+func (r *Resolver) allowsNativeFallback(nodeID, serverID string, resolveErr error) bool {
+	if !errors.Is(resolveErr, ErrRendererUnavailable) {
+		return false
+	}
+	if r == nil {
+		return true
+	}
+	_, configured := r.cfg.endpointFor(nodeID, serverID)
+	return !configured
+}
+
 // resolveDiscovered locates an installed renderer through the PRIVATE backend
 // transport. It is node-local and fail-closed: no port probing, no host-port
 // dependency, no cross-server fallback and no controller-local fallback.

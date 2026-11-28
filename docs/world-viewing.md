@@ -23,9 +23,11 @@ Map sessions renew automatically. During a temporary connection failure the
 page keeps an authorized map available until its session expires, then retries.
 
 The native saved-terrain map shows saved markers, waypoints and points of
-interest from the world’s Overworld. Select a pin for its coordinates. Open
-**Map markers** to center the map on a point or toggle pin visibility. Live
-player positions and regions are outside the native map’s coverage.
+interest for the selected map dimension. Select a pin for its coordinates.
+Open **Map markers** to center the map on a point or toggle pin visibility.
+Qualified local Vanilla Java saves offer **The End** in **Map dimension**.
+**Copy map link** includes the selected dimension when sharing End coordinates.
+Live player positions and regions are outside the native map’s coverage.
 
 ## 1. Renderer lifecycle
 
@@ -205,14 +207,16 @@ need it.
 ## 3. Capability matrix
 
 Capabilities come from the adapter and gate visible controls. Unsupported means
-unsupported — no lookalike control is substituted.
+unsupported — no lookalike control is substituted. The built-in viewport
+additionally uses its authorized manifest to decide which saved dimensions it
+can open.
 
 | Capability | Built-in terrain | BlueMap | squaremap | Dynmap | Static |
 | --- | --- | --- | --- | --- | --- |
-| `map.2d` | saved Java Overworld | yes | yes | yes | static tiles only |
+| `map.2d` | saved Java terrain | yes | yes | yes | static tiles only |
 | `map.3d` | no | yes | no | no | no |
-| `dimensions` | Overworld only | yes | not verified | not verified | no |
-| `markers` | saved Overworld points | yes | not verified | not verified | no |
+| `dimensions` | Overworld and qualified local Vanilla Java End | yes | not verified | not verified | no |
+| `markers` | saved points in the selected dimension | yes | not verified | not verified | no |
 | `players` | no | only with explicit bridge feed | no | no | no (offline) |
 | `time_weather` | no | no | no | no | no |
 | `telemetry` | no | no | no | no | no |

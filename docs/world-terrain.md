@@ -19,8 +19,16 @@ Earlier stages
 and chunks without a readable surface stay blank. The file is selected
 from the owning world's `region/` directory. It does not follow external
 `.mcc` chunk payloads. Gzip, zlib, and uncompressed records are supported.
-LZ4, older and newer formats, nonstandard world heights, Nether, End, and
-Bedrock are outside this renderer's format scope.
+The End uses a separate profile for controller-local Vanilla Java 1.21.9 saves
+(DataVersion 4554) with the built-in generator and End biome source, the
+vanilla datapack, and a saved `DIM1/region/` directory. The map keeps the
+Overworld as the default.
+For a qualified save, choose **The End** under **Map dimension**. The End
+uses the same material and elevation palette and starts at X 0, Z 0. If End
+storage is unavailable, the map can still show the Overworld from the current
+save. Missing terrain is transparent. LZ4, unsupported versions, nonstandard
+world heights, Nether, custom End generators, and Bedrock are outside the
+supported profiles.
 
 Each request reads one 128 × 128 block tile at one pixel per block. X increases
 right and Z increases down. It reads at most 64 selected chunks from a single
@@ -37,11 +45,12 @@ The World View workspace can open a built-in map for a supported Java save on
 the controller's local Docker node. Explicit renderer configuration takes
 precedence. The panel switches to a discovered BlueMap installation when it
 can serve this world's map, and uses the built-in map while that installation
-is stopped or waiting for its first render when a readable save is available. A native
-map reads only saved Overworld data. **Map span** sets the longer edge of the
+is stopped or waiting for its first render when a readable save is available.
+A native map reads a qualified saved Overworld or End dimension. **Map span**
+sets the longer edge of the
 viewport from 32 to 1,024 blocks. **Auto** opens at 256 blocks and expands to
 512 when every tile in the initial view has complete coverage. The span sets how
-much fits on screen. Pan or use **Jump** to reach any valid Overworld coordinate.
+much fits on screen. Pan or use **Jump** to reach any valid coordinate.
 The map loads the visible area with up to two concurrent requests and rechecks
 visible gaps every 30 seconds. Explore a new area in Minecraft to generate terrain.
 New chunks can appear after Minecraft saves, and **Refresh terrain** checks
@@ -55,7 +64,7 @@ the largest continuous patch when it covers most of the sample. Otherwise it
 trims empty outer margins and leaves unsaved gaps transparent.
 Check the tile's saved time and coverage
 when terrain is still being generated or saved. Use **Copy map link** to
-share the current coordinates with someone who can read the same world.
+share the current coordinates and dimension with someone who can read the same world.
 Ordinary save churn retries the affected tile in place. In a large server
 list, Carbon Panel may check the save format when you open the world. An
 unsupported save reports the format limit before opening the map.
@@ -64,10 +73,11 @@ The panel authorizes its native manifest and PNG requests through the existing
 short-lived World View key and the operator's server-specific read permission.
 The server's canonical level, current node generation, World Library revision
 and last restore operation scope each key. Restoring a backup invalidates open
-map keys even when the level folder name stays the same. The native renderer accepts only Overworld coordinate
-tile requests, and permits two concurrent renders in the controller. A busy
-request can be retried. The server supplies only a rendered tile, not a raw
-region file. Viewing uses no runtime module, game assets or external services.
+map keys even when the level folder name stays the same. The manifest lists
+the dimensions allowed for the save. The controller permits two concurrent
+renders. A busy request can be retried. The server supplies rendered tiles and
+keeps raw region files on the owning server. Viewing uses no runtime module,
+game assets or external services.
 
 ## Qualification
 
@@ -79,6 +89,13 @@ and `CARBON_TERRAIN_FIXTURE_LEVEL` to its level directory, then use
 Optional `CARBON_TERRAIN_FIXTURE_PNG` must name a new artifact outside the
 save. The fixture renders nine tiles around the origin and records the saved
 chunk count and color diversity. It does not require a running server.
+
+Set `CARBON_TERRAIN_END_FIXTURE_ROOT` and `CARBON_TERRAIN_END_FIXTURE_LEVEL`
+for a disposable game-generated 1.21.9 End save. Use
+`go test ./internal/worldterrain -run TestRenderVanillaEndTileGameSave -v`
+to qualify its saved chunks and
+`go test ./internal/rpc -run TestNativeWorldViewEndThroughScopedProxy -v`
+to qualify the authenticated route.
 
 - [Mojang's Java 1.18 release notes](https://feedback.minecraft.net/hc/en-us/articles/4415128577293-Minecraft-Java-Edition-1-18)
 - [PrismarineJS Anvil format implementation](https://github.com/PrismarineJS/prismarine-provider-anvil)

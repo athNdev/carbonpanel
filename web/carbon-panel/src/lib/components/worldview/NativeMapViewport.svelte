@@ -24,15 +24,19 @@
 		CHUNKS_PER_TILE,
 		clampBlock,
 		loadNativeManifest,
+		loadNativeTile,
 		MAP_SPANS,
 		NATIVE_FAILURE_MESSAGE,
+		nativeDimensionLabel,
 		parseNativeCoordinate,
+		resolveNativeDimension,
 		TILE_BLOCKS,
 		tileKey,
 		visibleNativeTiles,
 		type ManifestResult,
 		type MapPoint,
 		type MapSize,
+		type NativeDimension,
 		type NativeMapFailure,
 		type TileResult
 	} from '$lib/features/worldview/native-map';
@@ -50,6 +54,9 @@
 		preservePositionOnRenewal = false,
 		onReopen,
 		location = null,
+		requestedDimension,
+		onDimensionChange,
+		onActiveDimensionChange,
 		mapLink,
 		markers = [],
 		markersUnavailable = false
@@ -59,7 +66,11 @@
 		preservePositionOnRenewal?: boolean;
 		onReopen?: () => void;
 		location?: MapPoint | null;
-		mapLink?: (point: MapPoint) => string;
+		/** Deep-link intent; the manifest decides whether the session serves it. */
+		requestedDimension?: NativeDimension;
+		onDimensionChange?: (dimension: NativeDimension) => void;
+		onActiveDimensionChange?: (dimension: NativeDimension | null) => void;
+		mapLink?: (point: MapPoint, dimension: NativeDimension) => string;
 		markers?: readonly NativeMapMarker[];
 		markersUnavailable?: boolean;
 	} = $props();
@@ -90,27 +101,57 @@
 	let copyNote = $state('');
 	let revision = $state(0);
 	let source = $state.raw<{ path: string; revision: number; result: ManifestResult } | undefined>();
-	let tiles = $state.raw<ReadonlyMap<string, TileResult>>(new Map());
+	let tileState = $state.raw<{
+		path: string;
+		revision: number;
+		dimension: NativeDimension;
+		results: ReadonlyMap<string, TileResult>;
+	}>();
 	let loader = $state.raw<ReturnType<typeof createNativeTileLoader> | undefined>();
 	let dragging = $state(false);
 	let showMarkers = $state(true);
 	let selectedMarkerId = $state('');
 	let viewport = $state<HTMLDivElement>();
 	let markerTrigger: HTMLButtonElement | undefined;
-	let selectedMarker = $derived(markers.find((marker) => marker.id === selectedMarkerId));
+	let details = $state<HTMLDivElement>();
+	// The manifest is the source of truth for served dimensions. A requested
+	// deep link is kept locally until a later manifest confirms it.
+	let localDimension = $state<NativeDimension>('overworld');
+	let lastRequestedDimension: NativeDimension | undefined;
+	let previousDimension = '';
+	// The last dimension a settled manifest actually served. A renewal that
+	// drops it must not keep the old dimension's camera over new terrain.
+	let settledDimension: NativeDimension | '' = '';
+	// A deep link is consumed once per dimension and coordinate pair. Clearing
+	// the link releases it so the same URL positions the map again later.
+	let appliedLinkKey: string | null = null;
 	let positionedPath: string | undefined;
+	let positionedDimension: NativeDimension | undefined;
 	let drag: { pointer: number; x: number; y: number; center: MapPoint } | undefined;
+	const emptyTiles = new Map<string, TileResult>();
 
 	let result = $derived(
 		source?.path === proxyPath && source.revision === revision ? source.result : undefined
 	);
-	let spawn = $derived(result?.status === 'ready' ? result.manifest.spawn : null);
+	let manifest = $derived(result?.status === 'ready' ? result.manifest : undefined);
+	let dimensions = $derived<NativeDimension[]>(manifest?.dimensions ?? ['overworld']);
+	let activeDimension = $derived(resolveNativeDimension(localDimension, dimensions));
+	let spawn = $derived(activeDimension === 'overworld' ? (manifest?.spawn ?? null) : null);
+	let dimensionMarkers = $derived(markers.filter((marker) => marker.dimension === activeDimension));
+	let selectedMarker = $derived(dimensionMarkers.find((marker) => marker.id === selectedMarkerId));
+	let tiles = $derived(
+		tileState?.path === proxyPath &&
+			tileState.revision === revision &&
+			tileState.dimension === activeDimension
+			? tileState.results
+			: emptyTiles
+	);
 	let scale = $derived(blockScale(size, zoom));
 	let visible = $derived(visibleNativeTiles(center, size, scale));
 	let block = $derived({ x: Math.floor(center.x), z: Math.floor(center.z) });
 	let visiblePins = $derived(
 		showMarkers
-			? markers
+			? dimensionMarkers
 					.map((marker) => ({ marker, ...projectNativeMapPoint(marker, center, size, scale) }))
 					.filter(
 						({ left, top }) =>
@@ -122,36 +163,135 @@
 			: []
 	);
 
+	// Follow an external deep-link change (history, editor link, parent state).
+	// A local selection is left alone until the request value itself changes,
+	// so a parent that is still catching up cannot flick the map back.
+	$effect(() => {
+		if (requestedDimension === undefined || requestedDimension === lastRequestedDimension) return;
+		lastRequestedDimension = requestedDimension;
+		localDimension = requestedDimension;
+	});
+
 	$effect(() => {
 		const path = proxyPath;
 		const generation = revision;
 		const abort = new AbortController();
-		let tileLoader: typeof loader;
 		source = undefined;
-		loader = undefined;
-		tiles = new Map();
+		tileState = undefined;
 		copyNote = '';
 		drag = undefined;
 		dragging = false;
 		void loadNativeManifest(path, abort.signal)
 			.catch((): ManifestResult => ({ status: 'unavailable' }))
-			.then((manifest) => {
+			.then((next) => {
 				if (abort.signal.aborted) return;
-				source = { path, revision: generation, result: manifest };
-				if (manifest.status !== 'ready') return;
-				if (!positionedPath || (!preservePositionOnRenewal && positionedPath !== path)) {
-					positionedPath = path;
-					center = location ?? manifest.manifest.spawn ?? { x: 0, z: 0 };
-					zoom = initialZoom;
-					spanChoice = 'auto';
-				}
-				tileLoader = createNativeTileLoader(path, (results) => (tiles = results));
-				loader = tileLoader;
+				// Compare against the last settled manifest before publishing the
+				// new one. `manifest` is unset while a refresh is pending, so this
+				// never treats that transient fallback as a lost dimension.
+				const dimensionLost =
+					next.status === 'ready' &&
+					settledDimension !== '' &&
+					!next.manifest.dimensions.includes(settledDimension);
+				source = { path, revision: generation, result: next };
+				if (next.status !== 'ready' || !dimensionLost) return;
+				// The session still answers but no longer serves the dimension it
+				// served before. Its coordinates address terrain this manifest does
+				// not have, so fall back to the served Overworld origin.
+				center = next.manifest.spawn ?? { x: 0, z: 0 };
+				appliedLinkKey = null;
+				zoom = initialZoom;
+				spanChoice = 'auto';
 			});
-		return () => {
-			abort.abort();
-			tileLoader?.dispose();
-		};
+		return () => abort.abort();
+	});
+
+	// Tell the parent which manifest-backed dimension is actually visible, so
+	// its scoped ListMapOverlays request follows the terrain and not a stale
+	// URL value. A loading or failed manifest reports no active dimension.
+	$effect(() => {
+		onActiveDimensionChange?.(manifest ? activeDimension : null);
+	});
+
+	// Track the dimension of a settled manifest only. During a pending refresh
+	// the derived fallback is Overworld, and observing it would reset a still
+	// valid End camera before the replacement manifest arrives.
+	$effect(() => {
+		if (!manifest) return;
+		settledDimension = resolveNativeDimension(localDimension, manifest.dimensions);
+	});
+
+	// A dimension switch or an overlay refresh can remove the selected point
+	// before the detail panel is re-rendered. Capture focus first so a keyboard
+	// user lands on the map instead of the document body.
+	$effect.pre(() => {
+		const dimension = activeDimension;
+		const selectionGone = selectedMarkerId !== '' && !selectedMarker;
+		if ((previousDimension !== '' && dimension !== previousDimension) || selectionGone) {
+			const active = document.activeElement;
+			// Focus can already have fallen to <body> when the browser removed
+			// the focused pin; a control the user moved to (for example the
+			// dimension select) is never stolen.
+			const restoreFocus = Boolean(
+				details && active && details.contains(active)
+					? true
+					: markerTrigger && (active === markerTrigger || active === document.body)
+			);
+			selectedMarkerId = '';
+			markerTrigger = undefined;
+			if (restoreFocus) queueMicrotask(() => viewport?.focus());
+		}
+		previousDimension = dimension;
+	});
+
+	$effect(() => {
+		if (!manifest) return;
+		const nextLocation =
+			requestedDimension === undefined || requestedDimension === activeDimension ? location : null;
+		const path = proxyPath;
+		if (
+			!positionedPath ||
+			(!preservePositionOnRenewal && positionedPath !== path) ||
+			positionedDimension !== activeDimension
+		) {
+			// A deep link carries coordinates for the dimension it names. When
+			// the manifest falls back, those coordinates would point at the
+			// wrong terrain, so use the served dimension's spawn instead.
+			const position = nextLocation ?? spawn ?? { x: 0, z: 0 };
+			moveTo(position.x, position.z);
+			appliedLinkKey = nextLocation ? linkKey(activeDimension, nextLocation) : null;
+			zoom = initialZoom;
+			spanChoice = 'auto';
+			selectedMarkerId = '';
+			markerTrigger = undefined;
+		} else if (nextLocation) {
+			const key = linkKey(activeDimension, nextLocation);
+			if (appliedLinkKey !== key) {
+				moveTo(nextLocation.x, nextLocation.z);
+				appliedLinkKey = key;
+			}
+		} else {
+			// A cleared link releases its coordinates: reopening the same URL
+			// must be able to position the map again after the user pans.
+			appliedLinkKey = null;
+		}
+		positionedPath = path;
+		positionedDimension = activeDimension;
+	});
+
+	// The tile loader is keyed on the session path and the active dimension;
+	// switching dimensions keeps the camera and reloads terrain.
+	$effect(() => {
+		if (!manifest) return;
+		const path = proxyPath;
+		const dimension = activeDimension;
+		const generation = revision;
+		const tileLoader = createNativeTileLoader(
+			path,
+			(results) => (tileState = { path, revision: generation, dimension, results }),
+			(root, tile, signal) => loadNativeTile(root, tile, signal, dimension)
+		);
+		loader = tileLoader;
+		return () => tileLoader.dispose();
 	});
 
 	$effect(() => {
@@ -169,10 +309,6 @@
 			})
 		)
 			zoom = initialZoom - 1;
-	});
-
-	$effect(() => {
-		if (location) moveTo(location.x, location.z);
 	});
 
 	let summary = $derived.by(() => {
@@ -209,6 +345,15 @@
 		};
 	});
 
+	/**
+	 * A consumed deep link is identified by the dimension it names as well as
+	 * its coordinates: the same X/Z in another dimension addresses different
+	 * terrain and is a new link, not a repeat of the previous one.
+	 */
+	function linkKey(dimension: NativeDimension, point: MapPoint): string {
+		return dimension + ':' + point.x + ':' + point.z;
+	}
+
 	function moveTo(x: number, z: number) {
 		center = { x: clampBlock(x), z: clampBlock(z) };
 		copyNote = '';
@@ -222,6 +367,26 @@
 	function setMapSpan(value: string) {
 		spanChoice = value;
 		zoom = value === 'auto' ? initialZoom : MAP_SPANS.findIndex((span) => String(span) === value);
+	}
+
+	function chooseDimension(event: Event) {
+		const next = (event.currentTarget as HTMLSelectElement).value;
+		if (next !== 'overworld' && next !== 'end') return;
+		if (next === localDimension || !dimensions.includes(next)) return;
+		localDimension = next;
+		onDimensionChange?.(next);
+	}
+
+	function unavailableDimensionMessage(): string {
+		if (!requestedDimension || requestedDimension === activeDimension) return '';
+		const active = nativeDimensionLabel(activeDimension);
+		const activeWithArticle = active.startsWith('The ')
+			? 'the ' + active.slice(4)
+			: 'the ' + active;
+		return (
+			`${nativeDimensionLabel(requestedDimension)} is unavailable for this save. ` +
+			`Showing ${activeWithArticle}.`
+		);
 	}
 
 	function jumpToCoordinates(event: SubmitEvent) {
@@ -246,7 +411,7 @@
 	async function copyMapLink() {
 		if (!mapLink) return;
 		try {
-			await navigator.clipboard.writeText(mapLink(block));
+			await navigator.clipboard.writeText(mapLink(block, activeDimension));
 			copyNote = 'Map link copied.';
 		} catch {
 			copyNote = 'Could not copy the map link.';
@@ -331,8 +496,10 @@
 	}
 
 	function closeMarkerDetails() {
+		const trigger = markerTrigger?.isConnected ? markerTrigger : viewport;
 		selectedMarkerId = '';
-		(markerTrigger?.isConnected ? markerTrigger : viewport)?.focus();
+		markerTrigger = undefined;
+		trigger?.focus();
 	}
 
 	function markerName(marker: NativeMapMarker): string {
@@ -353,10 +520,19 @@
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
 		<div class="min-w-0">
 			<h2 id={id + '-title'} class="text-sm font-semibold text-foreground">{title}</h2>
-			<p class="mt-1 text-xs text-muted-foreground">Overworld</p>
+			<p class="mt-1 text-xs text-muted-foreground">
+				{nativeDimensionLabel(activeDimension)} · Saved terrain
+			</p>
 		</div>
 		{#if result?.status === 'ready'}
 			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap items-end gap-1">
+				{#if dimensions.length > 1}
+					<CarbonSelect label="Map dimension" value={activeDimension} onchange={chooseDimension}>
+						{#each dimensions as option (option)}
+							<option value={option}>{nativeDimensionLabel(option)}</option>
+						{/each}
+					</CarbonSelect>
+				{/if}
 				<CarbonSelect
 					label="Map span"
 					value={spanChoice}
@@ -369,26 +545,28 @@
 						<option value={String(span)}>{span.toLocaleString()} blocks</option>
 					{/each}
 				</CarbonSelect>
-				<CarbonButton
-					kind="secondary"
-					size="md"
-					iconOnly
-					aria-label="Zoom out"
-					disabled={zoom === 0}
-					onclick={() => changeZoom(-1)}
-				>
-					<Minus class="h-4 w-4" aria-hidden="true" />
-				</CarbonButton>
-				<CarbonButton
-					kind="secondary"
-					size="md"
-					iconOnly
-					aria-label="Zoom in"
-					disabled={zoom === maximumZoom}
-					onclick={() => changeZoom(1)}
-				>
-					<Plus class="h-4 w-4" aria-hidden="true" />
-				</CarbonButton>
+				<div class="inline-flex shrink-0 items-center gap-1">
+					<CarbonButton
+						kind="secondary"
+						size="md"
+						iconOnly
+						aria-label="Zoom out"
+						disabled={zoom === 0}
+						onclick={() => changeZoom(-1)}
+					>
+						<Minus class="h-4 w-4" aria-hidden="true" />
+					</CarbonButton>
+					<CarbonButton
+						kind="secondary"
+						size="md"
+						iconOnly
+						aria-label="Zoom in"
+						disabled={zoom === maximumZoom}
+						onclick={() => changeZoom(1)}
+					>
+						<Plus class="h-4 w-4" aria-hidden="true" />
+					</CarbonButton>
+				</div>
 				{#if spawn}
 					<CarbonButton
 						kind="tertiary"
@@ -424,6 +602,12 @@
 			</form>
 		{/if}
 	</header>
+
+	{#if result?.status === 'ready' && unavailableDimensionMessage()}
+		<p role="status" class="border-b border-border px-4 py-3 text-sm text-foreground">
+			{unavailableDimensionMessage()}
+		</p>
+	{/if}
 
 	{#if !result}
 		<WorldMapLoading label="Loading saved terrain…" />
@@ -496,6 +680,7 @@
 		</div>
 		{#if selectedMarker && showMarkers}
 			<div
+				bind:this={details}
 				class="flex flex-wrap items-start justify-between gap-2 border-t border-border bg-background px-4 py-3"
 			>
 				<div role="status" class="flex min-w-0 items-start gap-2">
@@ -581,14 +766,14 @@
 		</div>
 		{#if markersUnavailable}
 			<p role="status" class="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-				{markers.length
+				{dimensionMarkers.length
 					? 'Could not refresh map markers. Showing the last known markers.'
 					: 'Map markers are unavailable.'}
 			</p>
 		{/if}
-		{#if markers.length}
+		{#if dimensionMarkers.length}
 			<CarbonAccordion>
-				<CarbonAccordionItem title={'Map markers (' + markers.length + ')'}>
+				<CarbonAccordionItem title={'Map markers (' + dimensionMarkers.length + ')'}>
 					<label class="mb-3 flex items-center gap-2 text-xs text-foreground">
 						<input
 							type="checkbox"
@@ -601,7 +786,7 @@
 						class="max-h-56 divide-y divide-border overflow-auto"
 						aria-label="Map marker locations"
 					>
-						{#each markers as marker (marker.id)}
+						{#each dimensionMarkers as marker (marker.id)}
 							<li>
 								<button
 									type="button"

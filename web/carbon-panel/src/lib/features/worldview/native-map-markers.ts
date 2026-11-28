@@ -1,20 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 import type { MapOverlay } from '$lib/proto/carbonpanel/v1/worldview_pb';
-import { MAX_BLOCK, MIN_BLOCK, type MapPoint, type MapSize } from './native-map';
+import {
+	MAX_BLOCK,
+	MIN_BLOCK,
+	type MapPoint,
+	type MapSize,
+	type NativeDimension
+} from './native-map';
 import { overlayKindLabel } from './overlays';
 
 export type NativeMarkerKind = 'marker' | 'waypoint' | 'poi';
-export type NativeMapMarker = MapPoint & { id: string; kind: NativeMarkerKind; label: string };
+export type NativeMapMarker = MapPoint & {
+	id: string;
+	kind: NativeMarkerKind;
+	label: string;
+	dimension: NativeDimension;
+};
 
 function supported(kind: string): kind is NativeMarkerKind {
 	return kind === 'marker' || kind === 'waypoint' || kind === 'poi';
 }
 
-/** Project only panel-owned point overlays supported by the saved Overworld map. */
-export function nativeMapMarkers(overlays: readonly MapOverlay[]): NativeMapMarker[] {
+export function nativeMapMarkers(
+	overlays: readonly MapOverlay[],
+	activeDimension: NativeDimension = 'overworld'
+): NativeMapMarker[] {
 	const markers = new Map<string, NativeMapMarker>();
 	for (const { id, kind, label, x, z, dimension, sensitive } of overlays) {
-		if (!id || markers.has(id) || sensitive || dimension !== 'overworld' || !supported(kind))
+		if (!id || markers.has(id) || sensitive || dimension !== activeDimension || !supported(kind))
 			continue;
 		if (
 			![x, z].every(
@@ -23,7 +36,7 @@ export function nativeMapMarkers(overlays: readonly MapOverlay[]): NativeMapMark
 			)
 		)
 			continue;
-		markers.set(id, { id, kind, label: label || overlayKindLabel(kind), x, z });
+		markers.set(id, { id, kind, label: label || overlayKindLabel(kind), x, z, dimension });
 	}
 	return Array.from(markers.values());
 }

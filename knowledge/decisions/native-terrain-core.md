@@ -21,12 +21,19 @@ owning server's confined read accessor. The core takes an authorized caller's
 canonical level directory. It exposes no route and supplies no authorization.
 The caller owns the finite worker pool, cache, and delivery policy.
 
+The Vanilla End reader uses a fixed DIM1/region profile with standard End
+heights and Java 1.21.9 chunks. It shares the confined reader and publishes
+no browser capability. OSS-440 tracks qualification of the packaged map.
+
 # Alternatives
 
 A game-side plugin or external renderer would require an installation on each
 server. A textured block renderer would also need broader format coverage and
 a game asset source. Reading surface blocks directly from Anvil lets the map
-distinguish common materials using an original palette.
+distinguish common materials using an original palette. A qualified
+controller-local Vanilla Java 1.21.9 save can also render its saved
+`DIM1/region` End through the same bounded reader; custom End generators stay
+outside the profile.
 
 # Consequences
 

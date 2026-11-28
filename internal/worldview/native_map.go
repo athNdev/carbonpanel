@@ -69,9 +69,10 @@ type nativeSpawn struct {
 }
 
 type nativeManifest struct {
-	TileBlocks int          `json:"tileBlocks"`
-	Dimension  string       `json:"dimension"`
-	Spawn      *nativeSpawn `json:"spawn"`
+	TileBlocks int               `json:"tileBlocks"`
+	Dimension  string            `json:"dimension"`
+	Spawn      *nativeSpawn      `json:"spawn"`
+	Dimensions []nativeDimension `json:"dimensions,omitempty"`
 }
 
 func (m *NativeMap) tryWork() bool {
@@ -134,7 +135,11 @@ func readNativeLevel(ctx context.Context, acc nodestorage.Accessor, level string
 		return nil, errNativeSourceAbsent
 	}
 	defer func() { _ = f.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(f, nativeLevelLimit+1))
+	return decodeNativeLevel(ctx, f)
+}
+
+func decodeNativeLevel(ctx context.Context, reader io.Reader) (map[string]any, error) {
+	raw, err := io.ReadAll(io.LimitReader(reader, nativeLevelLimit+1))
 	if err != nil || len(raw) > nativeLevelLimit {
 		return nil, errNativeSourceAbsent
 	}
@@ -169,7 +174,7 @@ func makeNativeManifest(facts map[string]any) nativeManifest {
 
 // serveAsset runs only after the existing map session and server ACL checks.
 // The server's current binding, node generation and restore ID must match the lease.
-func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *storage.Server, issued nativeScope, asset string) {
+func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *storage.Server, issued nativeScope, asset string, renderer *Resolver) {
 	tileAsset, isTile := parseNativeTileAsset(asset)
 	if !isTile && asset != nativeManifestPath {
 		http.NotFound(w, r)
@@ -190,6 +195,16 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 	}
 	defer func() { <-m.slots }()
 
+	if tileAsset.dimension == nativeEnd {
+		tile, err := m.renderEndTile(ctx, server, scope, renderer, tileAsset)
+		if err != nil {
+			writeNativeAssetError(w, err)
+			return
+		}
+		writeNativeTile(w, r, tile)
+		return
+	}
+
 	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
 	if err != nil {
 		http.Error(w, "saved terrain is unavailable", http.StatusServiceUnavailable)
@@ -204,8 +219,15 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 
 	if asset == nativeManifestPath {
 		manifest := makeNativeManifest(facts)
-		if !m.currentScopeMatches(ctx, scope) {
-			http.Error(w, "world changed; reopen the map", http.StatusConflict)
+		if scope.loader == storage.ModLoaderVanilla && qualifiesNativeEnd(facts) {
+			manifest.Dimensions, err = m.endDimensions(ctx, server, scope, renderer)
+			if err != nil {
+				writeNativeAssetError(w, err)
+				return
+			}
+		}
+		if m.currentNativeServer(ctx, scope) == nil {
+			writeNativeAssetError(w, errNativeWorldMismatch)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -221,10 +243,14 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		writeNativeAssetError(w, err)
 		return
 	}
-	if !m.currentScopeMatches(ctx, scope) {
-		http.Error(w, "world changed; reopen the map", http.StatusConflict)
+	if m.currentNativeServer(ctx, scope) == nil {
+		writeNativeAssetError(w, errNativeWorldMismatch)
 		return
 	}
+	writeNativeTile(w, r, tile)
+}
+
+func writeNativeTile(w http.ResponseWriter, r *http.Request, tile worldterrain.Tile) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.Itoa(len(tile.PNG)))
@@ -241,6 +267,8 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 func writeNativeAssetError(w http.ResponseWriter, err error) {
 	status, message := http.StatusServiceUnavailable, "saved terrain is temporarily unavailable"
 	switch {
+	case errors.Is(err, errNativeWorldMismatch):
+		status, message = http.StatusConflict, "world changed or is temporarily unavailable; reopen the map"
 	case errors.Is(err, worldterrain.ErrTerrainMissing), errors.Is(err, worldterrain.ErrTileCoordinate):
 		status, message = http.StatusNotFound, "no saved terrain at these coordinates"
 	case errors.Is(err, worldterrain.ErrTerrainUnsupported):
@@ -252,11 +280,14 @@ func writeNativeAssetError(w http.ResponseWriter, err error) {
 	http.Error(w, message, status)
 }
 
-func (m *NativeMap) currentScopeMatches(ctx context.Context, scope nativeScope) bool {
+func (m *NativeMap) currentNativeServer(ctx context.Context, scope nativeScope) *storage.Server {
 	server, err := m.store.GetServer(ctx, scope.serverID)
 	if err != nil {
-		return false
+		return nil
 	}
 	current, err := resolveNativeScope(ctx, m.store, server, nil)
-	return err == nil && current == scope
+	if err != nil || current != scope || ctx.Err() != nil {
+		return nil
+	}
+	return server
 }

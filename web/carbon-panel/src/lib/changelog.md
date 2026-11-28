@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- World View opens saved terrain and markers in The End for qualified local Vanilla Java 1.21.9 saves. Shared map links reopen the selected dimension.
+
 ## [2.1.0] - 2026-11-21
 
 ### Added

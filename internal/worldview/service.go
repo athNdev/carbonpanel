@@ -544,10 +544,7 @@ func nativeTransientError(err error) error {
 }
 
 func (s *Service) nativeScopeFor(ctx context.Context, server *storage.Server, ref *v1.WorldRef, resolveErr error, budget *nativeInventoryBudget) (nativeScope, error) {
-	if s.deps.Native == nil || !errors.Is(resolveErr, ErrRendererUnavailable) {
-		return nativeScope{}, ErrRendererUnavailable
-	}
-	if _, exists := s.resolver().cfg.endpointFor(canonicalNodeID(server.NodeID), server.ID); exists {
+	if s.deps.Native == nil || !s.resolver().allowsNativeFallback(canonicalNodeID(server.NodeID), server.ID, resolveErr) {
 		return nativeScope{}, ErrRendererUnavailable
 	}
 	return s.deps.Native.inspect(ctx, server, ref, budget)

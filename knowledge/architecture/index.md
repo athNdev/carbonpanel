@@ -14,6 +14,7 @@
 - [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
 - [Map viewing — Read next](world-viewing-read-next.md) — Fail-closed authorization
 - [Map viewing — Rule](world-viewing-rule.md) — WorldViewService observes worlds; it does not own them. A WorldRef
+- [Map viewing — Rule (part 2)](world-viewing-rule-2.md) — Managed BlueMap install and private discovery share one node eligibility
 - [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
 - [MCP tool gateway — Read next](mcp-server-read-next.md) — Fail-closed authorization
 - [MCP tool gateway — Rule](mcp-server-rule.md) — cmd/carbonpanel-mcp speaks MCP over stdio. It calls the controller only

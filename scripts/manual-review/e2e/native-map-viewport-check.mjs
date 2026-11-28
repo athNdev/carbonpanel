@@ -107,6 +107,8 @@ async function runPackagedWorldView(browser) {
       renderer: { type: "RENDERER_TYPE_BLUEMAP", capabilities: ["map.2d"] },
     };
     let selectedRenderer = native;
+    let qualifyEnd = false;
+    const tileDimensions = new Set();
     let libraryReader = false;
     let serverListFailure;
     const runningServer = {id: native.serverId, name: native.name, status: "SERVER_STATUS_RUNNING", modLoader: "MOD_LOADER_VANILLA"};
@@ -121,6 +123,8 @@ async function runPackagedWorldView(browser) {
       { ...overworldMarker, id: "player", kind: "player", label: "Player position" },
       { ...overworldMarker, id: "region", kind: "region", label: "Region boundary" },
       { ...overworldMarker, id: "nether", kind: "poi", dimension: "nether", label: "Nether location" },
+      { ...overworldMarker, id: "island", kind: "poi", dimension: "end", label: "End island", x: 3, z: 7 },
+      { ...overworldMarker, id: "secret-end", kind: "marker", dimension: "end", label: "Private End position", sensitive: true },
     ];
     context = await browser.newContext({
       viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce",
@@ -140,7 +144,7 @@ async function runPackagedWorldView(browser) {
       if (method === "ListMapOverlays") {
         const request = route.request().postDataJSON();
         markerReads.push(request);
-        await route.fulfill({ json: { overlays: request.dimension === "overworld" ? overlays : [overlays.at(-1)] } });
+        await route.fulfill({ json: { overlays } });
         return;
       }
       const responses = {
@@ -169,12 +173,20 @@ async function runPackagedWorldView(browser) {
     );
     await page.route("**" + session + "**", async (route) => {
       if (route.request().url().endsWith("/native/manifest.json")) {
-        await route.fulfill({json: {tileBlocks: 128, dimension: "overworld", spawn: {x: 12, z: -34}}});
+        await route.fulfill({
+          json: {
+            tileBlocks: 128,
+            dimension: "overworld",
+            spawn: {x: 12, z: -34},
+            ...(qualifyEnd ? { dimensions: ["overworld", "end"] } : {}),
+          },
+        });
         return;
       }
-      const match = route.request().url().match(/\/native\/overworld\/(-?\d+)\/(-?\d+)\.png$/);
+      const match = route.request().url().match(/\/native\/(overworld|end)\/(-?\d+)\/(-?\d+)\.png$/);
       assert.ok(match, "packaged map requests exactly one scoped tile");
       tileRequests += 1;
+      tileDimensions.add(match[1]);
       if (!savingTile) {
         savingTile = match[0];
         await route.fulfill({ status: 503, headers: { "Retry-After": "1" } });
@@ -182,7 +194,7 @@ async function runPackagedWorldView(browser) {
       }
       if (match[0] === savingTile) savingTileRetried = true;
       await route.fulfill({
-        body: fixtureTile(Number(match[1]), Number(match[2])),
+        body: fixtureTile(Number(match[2]), Number(match[3])),
         contentType: "image/png",
         headers: { "X-CarbonPanel-Rendered-Chunks": "64", "X-CarbonPanel-Tile-Saved-At": "2026-11-12T12:32:00Z" },
       });
@@ -191,7 +203,8 @@ async function runPackagedWorldView(browser) {
     const completedSave = page.waitForResponse((response) =>
       savingTile && response.url().endsWith(savingTile) && response.status() === 200
     );
-    await page.goto(origin + "worlds/" + native.serverId + "/" + key + "?dimension=nether");
+    const worldUrl = origin + "worlds/" + native.serverId + "/" + key;
+    await page.goto(worldUrl + "?dimension=end&x=245&z=-560");
     await completedSave;
     assert.ok(savingTileRetried, "a tile interrupted by a save retries under the same map session");
     await page.getByRole("heading", { name: "World terrain" }).waitFor();
@@ -202,6 +215,12 @@ async function runPackagedWorldView(browser) {
     assert.equal(await tile.evaluate((img) => img.naturalWidth), 128);
     assert.equal(await surface.locator("iframe").count(), 0);
     assert.ok(tileRequests > 0);
+    assert.equal(await page.getByLabel("Map dimension").count(), 0);
+    await surface.getByText("The End is unavailable for this save. Showing the Overworld.").waitFor();
+    await page.getByTestId("native-map-coordinates").getByText("X: 12 · Z: -34").waitFor();
+    assert.deepEqual([...tileDimensions], ["overworld"]);
+    assert.ok(markerReads.every(({ dimension }) => dimension === "overworld"));
+    results.push("a legacy manifest rejects an End link without using its coordinates or requesting End assets");
     const gate = surface.getByRole("button", { name: "Waypoint: Village gate", exact: true });
     await gate.click();
     await surface.getByRole("heading", { name: "Village gate", exact: true }).waitFor();
@@ -232,6 +251,98 @@ async function runPackagedWorldView(browser) {
     assert.equal(await surface.locator("iframe").count(), 0);
     results.push("status polling reissues sessions when the rendering mode changes in either direction");
     results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
+    qualifyEnd = true;
+    await page.setViewportSize({ width: 360, height: 850 });
+    await page.goto(worldUrl);
+    const select = page.getByLabel("Map dimension");
+    await select.waitFor();
+    assert.equal(await select.inputValue(), "overworld");
+    await select.focus();
+    await select.press("End");
+    const endPin = surface.getByRole("button", { name: "Point of interest: End island", exact: true });
+    await endPin.waitFor();
+    const endTile = surface.locator('[role=application] img').first();
+    await endTile.evaluate((img) => img.decode());
+    assert.equal(await endTile.evaluate((img) => img.naturalWidth), 128);
+    assert.equal(await select.inputValue(), "end");
+    assert.equal(await select.evaluate((element) => document.activeElement === element), true);
+    assert.ok(await page.evaluate(() =>
+      document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    ), "the qualified dimension selector fits the narrow viewport");
+    assert.equal(await gate.count(), 0);
+    assert.equal(await surface.getByRole("button", { name: "World spawn" }).count(), 0);
+    assert.doesNotMatch(await surface.innerText(), /Private End position/);
+    assert.ok(tileDimensions.has("end"));
+    assert.ok(markerReads.some((request) =>
+      request.serverId === native.serverId && request.worldRef?.levelName === worldRef.levelName && request.dimension === "end"
+    ));
+    // The zoom pair is one inline group, so narrow layouts never split
+    // Zoom out from Zoom in or push either control past the viewport.
+    const zoomOut = page.getByRole("button", { name: "Zoom out", exact: true });
+    const zoomIn = page.getByRole("button", { name: "Zoom in", exact: true });
+    const mapSpan = page.getByRole("combobox", { name: "Map span", exact: true });
+    const outBox = await zoomOut.boundingBox();
+    const inBox = await zoomIn.boundingBox();
+    assert.ok(outBox && inBox, "both zoom controls render at 360");
+    assert.ok(Math.abs(outBox.y - inBox.y) < 1, "Zoom out and Zoom in share a row at 360");
+    assert.ok(
+      Math.abs(outBox.y + outBox.height - (inBox.y + inBox.height)) < 1,
+      "the zoom pair shares one baseline at 360",
+    );
+    assert.ok(
+      inBox.x >= outBox.x + outBox.width - 1,
+      "Zoom out and Zoom in stay adjacent at 360",
+    );
+    assert.ok(
+      outBox.x >= 0 && inBox.x + inBox.width <= 360,
+      "the zoom pair fits the narrow viewport",
+    );
+    await mapSpan.focus();
+    await mapSpan.press("Tab");
+    assert.equal(
+      await zoomOut.evaluate((element) => element === document.activeElement),
+      true,
+      "Tab reaches Zoom out in order",
+    );
+    assert.equal(
+      await zoomOut.evaluate((element) => element.matches(":focus-visible")),
+      true,
+      "Zoom out shows the keyboard focus ring",
+    );
+    await zoomOut.press("Tab");
+    assert.equal(
+      await zoomIn.evaluate((element) => element === document.activeElement),
+      true,
+      "Zoom in follows Zoom out in keyboard order",
+    );
+    await page.evaluate(() => document.activeElement?.blur());
+    await endPin.click();
+    await surface.getByRole("heading", { name: "End island", exact: true }).waitFor();
+    await surface.getByRole("button", { name: "Copy map link", exact: true }).click();
+    const endCopy = new URL(await page.evaluate(() => window.__copiedMapLink));
+    assert.equal(endCopy.pathname, copy.pathname);
+    assert.deepEqual(Object.fromEntries(endCopy.searchParams), { x: "0", z: "0", dimension: "end" });
+    await page.screenshot({path: path.join(evidence, "packaged-world-view-end-mobile.png")});
+    endCopy.searchParams.set("x", "140");
+    endCopy.searchParams.set("z", "-150");
+    await page.goto(endCopy.href);
+    await page.getByTestId("native-map-coordinates").getByText("X: 140 · Z: -150").waitFor();
+    await select.selectOption("overworld");
+    await page.getByTestId("native-map-coordinates").getByText("X: 12 · Z: -34").waitFor();
+    await gate.waitFor();
+    assert.equal(await endPin.count(), 0);
+    // A selector change replaces the current entry and drops the shared link's
+    // coordinates. Back therefore restores the previous End URL at its spawn,
+    // never the Overworld coordinates under an End dimension.
+    await page.goBack();
+    await page.getByTestId("native-map-coordinates").getByText("X: 0 · Z: 0").waitFor();
+    assert.equal(await select.inputValue(), "end");
+    // Reopening the same End link after a cleared selection is a new camera
+    // request, not a consumed repeat.
+    await page.goto(endCopy.href);
+    await page.getByTestId("native-map-coordinates").getByText("X: 140 · Z: -150").waitFor();
+    results.push("a qualified manifest switches terrain and scoped markers on mobile, restores End map links, clears stale coordinates, and keeps one focused adjacent zoom pair that fits 360");
+
     for (const width of [360, 1440]) {
       await page.setViewportSize({width, height: 900});
       await page.goto(origin + "worlds?server=" + native.serverId);

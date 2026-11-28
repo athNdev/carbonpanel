@@ -12,17 +12,29 @@ import (
 
 const nativeManifestPath = "native/manifest.json"
 
+type nativeDimension string
+
+const (
+	nativeOverworld nativeDimension = "overworld"
+	nativeEnd       nativeDimension = "end"
+)
+
 type nativeTileAsset struct {
-	x, z int
+	dimension nativeDimension
+	x, z      int
 }
 
 // Native paths allow one protocol-specific manifest and only canonical decimal
 // tile coordinates. Tile coordinates are converted to storage paths by the
 // renderer after resolving the session's current world on the controller.
 func parseNativeTileAsset(asset string) (nativeTileAsset, bool) {
-	const prefix = "native/overworld/"
-	path, ok := strings.CutPrefix(asset, prefix)
+	path, ok := strings.CutPrefix(asset, "native/")
 	if !ok {
+		return nativeTileAsset{}, false
+	}
+	name, path, ok := strings.Cut(path, "/")
+	dimension := nativeDimension(name)
+	if !ok || (dimension != nativeOverworld && dimension != nativeEnd) {
 		return nativeTileAsset{}, false
 	}
 	path, ok = strings.CutSuffix(path, ".png")
@@ -38,5 +50,5 @@ func parseNativeTileAsset(asset string) (nativeTileAsset, bool) {
 	if xErr != nil || zErr != nil || strconv.FormatInt(x, 10) != xText || strconv.FormatInt(z, 10) != zText {
 		return nativeTileAsset{}, false
 	}
-	return nativeTileAsset{x: int(x), z: int(z)}, true
+	return nativeTileAsset{dimension: dimension, x: int(x), z: int(z)}, true
 }

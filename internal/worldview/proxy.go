@@ -171,7 +171,7 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "native map is unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		h.deps.Native.serveAsset(w, r, server, sess.native, asset)
+		h.deps.Native.serveAsset(w, r, server, sess.native, asset, h.deps.Resolver)
 		return
 	}
 	renderer, err := h.deps.Resolver.Resolve(r.Context(), server.NodeID, sess.ServerID)

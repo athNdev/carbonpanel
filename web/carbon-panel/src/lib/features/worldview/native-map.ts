@@ -21,9 +21,12 @@ export interface MapSize {
 	height: number;
 }
 
+export type NativeDimension = 'overworld' | 'end';
+
 export interface NativeManifest {
 	tileBlocks: typeof TILE_BLOCKS;
 	dimension: 'overworld';
+	dimensions: NativeDimension[];
 	spawn: MapPoint | null;
 }
 
@@ -47,6 +50,28 @@ export const NATIVE_FAILURE_MESSAGE: Record<NativeMapFailure, string> = {
 	unavailable: 'Carbon Panel could not read the map. Retry in a moment.',
 	access: 'The map session is no longer authorized. Refresh the World View page.'
 };
+
+/** Human labels for the vanilla dimensions the native map can serve. */
+const NATIVE_DIMENSION_LABELS: Record<NativeDimension, string> = {
+	overworld: 'Overworld',
+	end: 'The End'
+};
+
+export function nativeDimensionLabel(dimension: NativeDimension): string {
+	return NATIVE_DIMENSION_LABELS[dimension] ?? dimension;
+}
+
+/**
+ * A native map serves only the dimensions its manifest lists. An unavailable
+ * or unknown deep link falls back to the Overworld instead of requesting an
+ * asset path the session does not offer.
+ */
+export function resolveNativeDimension(
+	requested: string | null | undefined,
+	dimensions: readonly string[]
+): NativeDimension {
+	return requested === 'end' && dimensions.includes('end') ? 'end' : 'overworld';
+}
 
 export function nativeSessionRoot(path: string): string | null {
 	return isSameOriginProxyPath(path) && /^\/api\/v1\/worldview\/map\/[A-Za-z0-9_-]+\/$/.test(path)
@@ -153,16 +178,22 @@ export async function loadNativeManifest(
 	const response = await request(root + 'native/manifest.json', signal);
 	if (!response.ok) return { status: failure(response) };
 	if (mediaType(response) !== 'application/json') return { status: 'unavailable' };
-	const manifest: Partial<NativeManifest> | null = await response.json();
+	const manifest: (Partial<Omit<NativeManifest, 'dimensions'>> & { dimensions?: unknown }) | null =
+		await response.json();
 	if (
 		manifest?.tileBlocks !== TILE_BLOCKS ||
 		manifest.dimension !== 'overworld' ||
 		(manifest.spawn !== null && !isPoint(manifest.spawn))
 	)
 		return { status: 'unavailable' };
+	const options = manifest.dimensions;
+	const dimensions: NativeDimension[] = ['overworld'];
+	if (Array.isArray(options) && options.includes('overworld') && options.includes('end')) {
+		dimensions.push('end');
+	}
 	return {
 		status: 'ready',
-		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', spawn: manifest.spawn }
+		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', dimensions, spawn: manifest.spawn }
 	};
 }
 
@@ -179,18 +210,20 @@ function toImageSource(image: Blob): Promise<string> {
 export async function loadNativeTile(
 	path: string,
 	tile: MapPoint,
-	signal: AbortSignal
+	signal: AbortSignal,
+	dimension: NativeDimension = 'overworld'
 ): Promise<TileResult> {
 	const root = nativeSessionRoot(path);
 	if (
 		!root ||
+		(dimension !== 'overworld' && dimension !== 'end') ||
 		![tile.x, tile.z].every(
 			(index) => Number.isInteger(index) && index >= MIN_TILE && index <= MAX_TILE
 		)
 	) {
 		return { status: 'unavailable' };
 	}
-	const url = root + 'native/overworld/' + tile.x + '/' + tile.z + '.png';
+	const url = root + 'native/' + dimension + '/' + tile.x + '/' + tile.z + '.png';
 	let response = await request(url, signal);
 	if ((response.status === 503 || response.status === 429) && failure(response) === 'busy') {
 		// Minecraft may rewrite the region header during a read. Give that save

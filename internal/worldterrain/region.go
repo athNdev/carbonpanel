@@ -43,7 +43,7 @@ func readAt(r io.ReaderAt, buf []byte, offset int64) error {
 
 // readSurface reads the selected sector range only. The first region sector
 // contains the 1024 packed locations and the second their Unix timestamps.
-func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget) (worldlib.JavaChunkSurface, error) {
+func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget, decode func([]byte) (worldlib.JavaChunkSurface, error)) (worldlib.JavaChunkSurface, error) {
 	var result worldlib.JavaChunkSurface
 	location := binary.BigEndian.Uint32(entry)
 	first, count := int64(location>>8), int(location&0xff)
@@ -80,7 +80,7 @@ func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readB
 	if err != nil {
 		return result, err
 	}
-	return worldlib.ParseJavaChunkSurface(raw)
+	return decode(raw)
 }
 
 func unpackChunk(ctx context.Context, compression byte, packed []byte, budget *readBudget) ([]byte, error) {
