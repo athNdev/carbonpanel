@@ -45,11 +45,15 @@ const authConfig = {
 	oidcEnabled: true
 };
 
+const updateRequests: Array<{ sessionTimeout?: number }> = [];
 mock.module('$lib/api/rpc-client', () => ({
 	rpcClient: {
 		auth: {
 			getAuthConfig: async () => authConfig,
-			updateAuthSettings: async () => ({ config: authConfig })
+			updateAuthSettings: async (req: { sessionTimeout?: number }) => {
+				updateRequests.push(req);
+				return { config: authConfig };
+			}
 		}
 	},
 	silentCallOptions: {}
@@ -110,6 +114,50 @@ test('clearing the session timeout shows validation instead of throwing', async 
 		);
 		assert.ok(save, 'the save button must stay rendered');
 		assert.equal(save.disabled, true, 'an invalid timeout must keep saving disabled');
+	} finally {
+		window.removeEventListener('error', onError);
+		ui.unmount();
+	}
+});
+
+test('typing a session timeout parses as hours instead of throwing', async () => {
+	errorToasts.length = 0;
+	updateRequests.length = 0;
+	const pageErrors: unknown[] = [];
+	const onError = (event: ErrorEvent) => pageErrors.push(event.error ?? event.message);
+	window.addEventListener('error', onError);
+	const ui = mountUi();
+	try {
+		await flush();
+		const input = ui.target.querySelector<HTMLInputElement>('#session-timeout-hours');
+		assert.ok(input, 'the editable session timeout field must render for settings editors');
+		assert.equal(input.value, '24', 'the timeout loads as whole hours');
+
+		input.value = '12';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await flush();
+
+		assert.deepEqual(pageErrors, [], 'typing a number must not throw a page error');
+		assert.equal(input.value, '12', 'the typed timeout must stay on screen');
+		assert.equal(
+			ui.target.querySelector('#session-timeout-hours-desc'),
+			null,
+			'a valid timeout must clear the validation message'
+		);
+		const save = Array.from(ui.target.querySelectorAll('button')).find((button) =>
+			button.textContent?.includes('Save Changes')
+		);
+		assert.ok(save, 'the save button must stay rendered');
+		assert.equal(save.disabled, false, 'a changed, valid timeout must allow saving');
+
+		save.click();
+		await flush();
+		assert.equal(updateRequests.length, 1, 'saving must send one update');
+		assert.equal(
+			updateRequests[0].sessionTimeout,
+			12 * 3600,
+			'the typed 12 hours must parse to 43200 seconds'
+		);
 	} finally {
 		window.removeEventListener('error', onError);
 		ui.unmount();
