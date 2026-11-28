@@ -29,10 +29,12 @@ import (
 
 type nativeScopeFixture struct {
 	*fakeStore
-	node      *storage.Node
-	binding   *storage.WorldBinding
-	busy      bool
-	restoreID string
+	node               *storage.Node
+	binding            *storage.WorldBinding
+	busy               bool
+	restoreID          string
+	worldBindingReads  int
+	onWorldBindingRead func(read int)
 }
 
 func (f *nativeScopeFixture) GetNode(context.Context, string) (*storage.Node, error) {
@@ -43,6 +45,10 @@ func (f *nativeScopeFixture) GetNode(context.Context, string) (*storage.Node, er
 }
 
 func (f *nativeScopeFixture) GetWorldBinding(context.Context, string, string) (*storage.WorldBinding, error) {
+	f.worldBindingReads++
+	if f.onWorldBindingRead != nil {
+		f.onWorldBindingRead(f.worldBindingReads)
+	}
 	if f.binding == nil {
 		return nil, gorm.ErrRecordNotFound
 	}

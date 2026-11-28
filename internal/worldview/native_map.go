@@ -233,6 +233,10 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 	// its current image and re-asks on the next TTL.
 	if validator := r.Header.Get("If-None-Match"); validator != "" {
 		if current := regionFreshness(acc, tileAsset.dimension.RegionPath(scope.level, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})); current != "" && current == validator {
+			if !m.currentScopeMatches(ctx, scope) {
+				http.Error(w, "world changed; reopen the map", http.StatusConflict)
+				return
+			}
 			w.Header().Set(regionModifiedHeader, current)
 			w.WriteHeader(http.StatusNotModified)
 			return

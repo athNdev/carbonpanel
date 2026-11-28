@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +206,27 @@ func TestNativeAssetServesDimensionsAndFreshnessFixture(t *testing.T) {
 	// A dimension whose region folder does not exist stays a missing tile.
 	if end := serve("native/end/0/0.png", nil); end.Code != http.StatusNotFound {
 		t.Fatalf("end tile without DIM1: %d %s", end.Code, end.Body)
+	}
+
+	// A matching validator must not answer 304 when the world scope changes
+	// after the tile was issued: the scope check has to run on every response
+	// path, not only after a render. Mutate the level during this request's
+	// first scope resolution, after its config read, so the issued scope still
+	// matches while the re-check sees the replacement world.
+	readsBefore := f.worldBindingReads
+	f.onWorldBindingRead = func(read int) {
+		if read == readsBefore+1 {
+			f.setLevelName(serverID, "replacement-world")
+		}
+	}
+	changed := serve("native/overworld/0/0.png", func(request *http.Request) {
+		request.Header.Set("If-None-Match", validator)
+	})
+	f.onWorldBindingRead = nil
+	if changed.Code != http.StatusConflict {
+		t.Fatalf("matching validator after a scope change must not answer 304: %d %s", changed.Code, changed.Body)
+	}
+	if !strings.Contains(changed.Body.String(), "world changed; reopen the map") {
+		t.Fatalf("scope-change refusal = %q", changed.Body)
 	}
 }

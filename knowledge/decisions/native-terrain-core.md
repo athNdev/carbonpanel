@@ -52,9 +52,9 @@ sections and the bedrock roof at y=127); the Overworld and End keep 24 and 16
 full-height sections. LZ4 region chunks (compression byte 4, the lz4-java block
 stream) decode within the same budgets; `.mcc` external chunks stay unsupported. Tiles
 carry an opaque region-file freshness validator (size + mtime); the transport
-answers conditional revalidation with 304 before spending render budget, and
-the client's live toggle paces rechecks without changing the shared worker
-budget or invalidating the tile cache. The Nether's WORLD_SURFACE is its full
+re-checks the scoped world before answering conditional revalidation with 304,
+so a world change is refused before render budget. The client's live toggle
+paces rechecks without changing the shared worker budget or the tile cache. The Nether's WORLD_SURFACE is its full
 bedrock roof, so the surface scan descends to the first terrain block under
 the roof; columns that hold only roof bedrock and air stay transparent.
 Bukkit sibling worlds and modded dimension folders are out of scope.
