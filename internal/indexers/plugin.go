@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -135,10 +136,13 @@ func PluginIndexersFor(name, apiKey string, cfg *config.Config) ([]PluginIndexer
 }
 
 // SupportsGameVersion reports whether a platform's game-version list admits
-// the requested Minecraft version. Matching is segment-aware: a listing of
-// "1.21" covers "1.21.1" and vice versa, but "1.21.1" never matches
-// "1.21.10". An empty game version is treated as unfiltered; with an empty
-// platform the union of every platform's list is consulted.
+// the requested Minecraft version. A listed "LATEST" covers every requested
+// version, and a listed range such as "1.8-1.21.10" covers every version
+// ordered inclusively between its endpoints. Otherwise matching is
+// segment-aware: a listing of "1.21" covers "1.21.1" and vice versa, but
+// "1.21.1" never matches "1.21.10". An empty game version is treated as
+// unfiltered; with an empty platform the union of every platform's list is
+// consulted.
 func SupportsGameVersion(platforms map[string][]string, platform, gameVersion string) bool {
 	if strings.TrimSpace(gameVersion) == "" {
 		return true
@@ -156,12 +160,26 @@ func SupportsGameVersion(platforms map[string][]string, platform, gameVersion st
 	return false
 }
 
-// gameVersionSegmentMatch compares two Minecraft version strings by their
-// dot-separated segments: equal versions match, and so does a strict segment
+// gameVersionSegmentMatch compares one listed value against a requested
+// Minecraft version. "LATEST" and numeric ranges are coverage markers; every
+// other listing is compared by its dot-separated segments.
+func gameVersionSegmentMatch(listed, requested string) bool {
+	listed = strings.TrimSpace(listed)
+	requested = strings.TrimSpace(requested)
+	if strings.EqualFold(listed, "LATEST") {
+		return true
+	}
+	if low, high, ok := gameVersionRange(listed); ok {
+		return versionCompare(requested, low) >= 0 && versionCompare(requested, high) <= 0
+	}
+	return gameVersionPrefixMatch(listed, requested)
+}
+
+// gameVersionPrefixMatch matches equal versions and a strict dot-segment
 // prefix in either direction.
-func gameVersionSegmentMatch(a, b string) bool {
-	as := strings.Split(strings.TrimSpace(a), ".")
-	bs := strings.Split(strings.TrimSpace(b), ".")
+func gameVersionPrefixMatch(a, b string) bool {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
 	if len(as) > len(bs) {
 		as, bs = bs, as
 	}
@@ -171,6 +189,72 @@ func gameVersionSegmentMatch(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// gameVersionRange recognizes "a-b" listings whose endpoints are numeric
+// release versions. A loader's pre-release suffix (for example
+// "1.20.1-pre1") is not a range.
+func gameVersionRange(listed string) (low, high string, ok bool) {
+	if strings.Count(listed, "-") != 1 {
+		return "", "", false
+	}
+	low, high, _ = strings.Cut(listed, "-")
+	low, high = strings.TrimSpace(low), strings.TrimSpace(high)
+	if !isNumericVersion(low) || !isNumericVersion(high) {
+		return "", "", false
+	}
+	return low, high, true
+}
+
+func isNumericVersion(version string) bool {
+	if version == "" {
+		return false
+	}
+	for _, segment := range strings.Split(version, ".") {
+		if segment == "" {
+			return false
+		}
+		for _, char := range segment {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// versionCompare orders numeric release versions segment by segment. A
+// shorter version sorts before the same prefix with more segments, so
+// "1.21" is below "1.21.1" and both are below "1.21.10".
+func versionCompare(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		if i >= len(as) {
+			return -1
+		}
+		if i >= len(bs) {
+			return 1
+		}
+		aNum, aErr := strconv.Atoi(as[i])
+		bNum, bErr := strconv.Atoi(bs[i])
+		if aErr == nil && bErr == nil {
+			if aNum != bNum {
+				if aNum < bNum {
+					return -1
+				}
+				return 1
+			}
+			continue
+		}
+		if as[i] != bs[i] {
+			if as[i] < bs[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // MergeLabeledResults merges search pages from multiple providers into one

@@ -31,7 +31,8 @@ sources:
   provider's artifact.
 - Hangar has no server-side game-version filter: compatibility filters
   client-side from `platformDependencies`, segment-aware (1.21 matches 1.21.1,
-  not 1.21.10).
+  not 1.21.10). A listed `LATEST` or an inclusive numeric range such as
+  `1.8-1.21.10` covers the versions it names.
 - Plugin jars are classified by `plugin.yml` / `paper-plugin.yml`
   (`minecraft.InspectModSide` → `SidePlugin`), checked before fabric/quilt
   descriptors.
