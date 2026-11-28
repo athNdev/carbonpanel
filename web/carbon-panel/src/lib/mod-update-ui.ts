@@ -176,8 +176,9 @@ export const DEFAULT_POLICY_STATE: PolicyFormState = {
 	idleMinutes: 15
 };
 
-// The persisted config is the opt-in authority; task status is only a fallback
-// for a legacy task without the new config shape.
+// The persisted config is the opt-in authority. Malformed data fails closed
+// (enabled:false); a missing legacy config stays an unset policy. Task status
+// is not used as an enablement fallback.
 export function policyFromPersistedTask(
 	task: { config?: string; status?: number; cronExpr?: string; timezone?: string } | null,
 	_enabledStatus: number
