@@ -49,7 +49,7 @@ the live pending marker kept beside the cache (the cache directory name joined
 with the marker file name). A pack therefore cannot publish over the scheduler's
 pending-update state.
 
-Client-only mod jars and archives that are not datapacks are rejected before any staged byte is kept. A completed upload session refused with `Aborted` or `FailedPrecondition` stays retryable; other staging failures clean it up.
+Client-only mod jars and archives that are not datapacks are rejected before any staged byte is kept. A completed upload session for a staged datapack refused with `Aborted` or `FailedPrecondition` stays retryable; other datapack staging failures clean it up.
 
 Publication, recovery, retry and modpack semantics are in
 [Staged server updates — Publication](staged-updates-publication.md).
