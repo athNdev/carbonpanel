@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -78,6 +79,12 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 		// missing item or wrong server) instead of flattening it to Internal.
 		if _, ok := err.(*connect.Error); ok {
 			return nil, err
+		}
+		// A concurrent staging or publication owns the server journal. The
+		// discard did not run, so retrying after it finishes is valid.
+		if errors.Is(err, storage.ErrActiveOperation) || errors.Is(err, operation.ErrInProgress) {
+			return nil, connect.NewError(connect.CodeAborted,
+				fmt.Errorf("discard refused while another operation owns the server: %w", err))
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -61,6 +62,20 @@ func TestUpdateBatchListsAndDiscardsWithoutTouchingLiveFiles(t *testing.T) {
 	after, err := svc.GetUpdateBatch(ctx, connect.NewRequest(&v1.GetUpdateBatchRequest{ServerId: server.ID}))
 	require.NoError(t, err)
 	require.False(t, after.Msg.GetOpen())
+}
+
+func TestDiscardUpdateBatchReportsJournalContentionAsAborted(t *testing.T) {
+	ctx := context.Background()
+	svc, store := setupConfigTestService(t)
+	server := &storage.Server{ID: "discard-contended", Name: "discard-contended", DataPath: t.TempDir(), Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	_, _, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID,
+		"staging-holder", "update-mod", operation.Digest("update-mod", server))
+	require.NoError(t, err)
+
+	_, err = svc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
+	require.Equal(t, connect.CodeAborted, connect.CodeOf(err), "%v", err)
+	require.Contains(t, err.Error(), "another operation owns the server")
 }
 
 func TestDiscardUpdateBatchRefusesRetainedPublication(t *testing.T) {

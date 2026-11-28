@@ -22,7 +22,8 @@ rollback reconciliation and publication; the remaining cron row and trigger
 stay intact. No production cron consumer applies those rows: they are pending
 manual apply/discard actions or an explicit operator conversion, and must not
 be silently re-enabled. Discard shares the lock, keeps typed Connect refusals
-and names its operation.
+and names its operation. A discard refused because staging or publication
+already owns the server journal is retryable `Aborted`, not an internal error.
 
 # Consequences
 
