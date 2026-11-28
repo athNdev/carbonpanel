@@ -59,6 +59,10 @@ valid unset policy, not a reason to re-enable it.
   inventory instead of a planner failure.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
   bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
+- The Mods tab binds one staging request to the captured server id and request
+  generation. A response that lands after navigation, or after a newer request,
+  writes no status or selection and starts no refresh for the newly selected
+  server.
 - Journaled admission recomputes and persists the normalized runtime target; a
   moved target or direct non-staged runtime save is refused while a candidate is
   staged. An open-batch file is `already_staged` before download and spends no

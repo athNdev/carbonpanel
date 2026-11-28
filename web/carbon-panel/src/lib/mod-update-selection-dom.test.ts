@@ -20,6 +20,7 @@ mock.module('$app/state', () => ({ page: {} }));
 mock.module('$app/env', () => ({ browser: false, dev: false }));
 
 const { mount, unmount, tick, flushSync } = await import('svelte');
+const { fromStore, writable } = await import('svelte/store');
 const { rpcClient } = await import('./api/rpc-client');
 const originalTaskClient = { ...rpcClient.task };
 const originalModClient = { ...rpcClient.mod };
@@ -33,10 +34,12 @@ Object.assign(rpcClient.task, {
 });
 
 type ListModsRequest = { serverId: string; checkUpdates: boolean };
+type UpdateModResponse = { stagedUpdates: { outcome: string }[] };
 let listMods = async (_request: ListModsRequest) => ({ mods: [] as Mod[] });
+let updateMod = async (_request: unknown): Promise<UpdateModResponse> => ({ stagedUpdates: [] });
 Object.assign(rpcClient.mod, {
 	listMods: (request: ListModsRequest) => listMods(request),
-	updateMod: async () => ({})
+	updateMod: (request: unknown) => updateMod(request)
 });
 after(() => {
 	Object.assign(rpcClient.task, originalTaskClient);
@@ -73,6 +76,41 @@ function renderMods() {
 	const instance = mount(ServerMods, { target, props: { server, active: true } });
 	return {
 		target,
+		async destroy() {
+			await unmount(instance);
+			target.remove();
+		}
+	};
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
+function renderSwitchableMods(initialServerId: string) {
+	const select = (id: string) => create(ServerSchema, { id, modLoader: ModLoader.FABRIC });
+	const selection = writable(select(initialServerId));
+	const selected = fromStore(selection);
+	const target = document.createElement('div');
+	document.body.appendChild(target);
+	const instance = mount(ServerMods, {
+		target,
+		props: {
+			get server() {
+				return selected.current;
+			},
+			active: true
+		}
+	});
+	return {
+		target,
+		navigate(id: string) {
+			selection.set(select(id));
+		},
 		async destroy() {
 			await unmount(instance);
 			target.remove();
@@ -200,6 +238,50 @@ test('a plain reload keeps the selection notice', async () => {
 		flushSync(() => toggle.click());
 		await settle();
 		assert.match(noticeRegion(ui.target).textContent ?? '', /^Selection cleared for mod\.jar:/);
+	} finally {
+		await ui.destroy();
+	}
+});
+
+test('a late stage response cannot mutate the newly selected server', async () => {
+	const ui = renderSwitchableMods('srv-a');
+	const calls: ListModsRequest[] = [];
+	const gate = deferred<UpdateModResponse>();
+	try {
+		listMods = async (request) => {
+			calls.push(request);
+			return { mods: request.serverId === 'srv-a' ? [installed('available', '2.0.0')] : [] };
+		};
+		updateMod = () => gate.promise;
+		await settle();
+		selectFirstUpdate(ui.target);
+
+		const stage = Array.from(ui.target.querySelectorAll<HTMLButtonElement>('button')).find(
+			(button) => button.textContent?.trim().startsWith('Stage ')
+		);
+		assert.ok(stage, 'the stage action is missing');
+		flushSync(() => stage.click());
+		await settle();
+
+		ui.navigate('srv-b');
+		await settle();
+		calls.length = 0;
+		assert.equal(checkSummary(ui.target).textContent, '');
+
+		gate.resolve({ stagedUpdates: [{ outcome: 'staged' }] });
+		await settle();
+		await settle();
+
+		assert.equal(
+			checkSummary(ui.target).textContent,
+			'',
+			'the old response must not write the new server status'
+		);
+		assert.equal(
+			calls.some((call) => call.serverId === 'srv-b' && call.checkUpdates),
+			false,
+			'the old response must not start a refresh for the new server'
+		);
 	} finally {
 		await ui.destroy();
 	}

@@ -304,6 +304,7 @@ one at https://mozilla.org/MPL/2.0/.
 			previewsSupplied = false;
 			loading = true;
 			uploading = false;
+			stagingUpdates = false;
 			hasLoaded = false;
 			// Invalidate outstanding policy work even if navigation returns to
 			// the same server before an earlier response arrives.
@@ -463,15 +464,20 @@ one at https://mozilla.org/MPL/2.0/.
 			return;
 		}
 
+		const serverId = server.id;
+		const request = ++requestNumber;
+		const isCurrent = () => request === requestNumber && server.id === serverId;
+
 		try {
 			stagingUpdates = true;
 			const response = await rpcClient.mod.updateMod({
-				serverId: server.id,
+				serverId,
 				updateSelections: selections,
 				updateWindow: applyWindowEnum(),
 				updateApplyAtUnix: BigInt(applyAtUnix),
 				updateIdleMinutes: updateWindow === 'idle' ? idleMinutes : 0
 			});
+			if (!isCurrent()) return;
 			const staged = response.stagedUpdates.filter((row) => row.outcome === 'staged').length;
 			const refused = response.stagedUpdates.length - staged;
 			updateStatus = `Staged ${staged} update(s) for the pending batch${refused ? `; ${refused} refused and left untouched` : ''}.`;
@@ -480,14 +486,19 @@ one at https://mozilla.org/MPL/2.0/.
 			selectedUpdateFingerprints = {};
 			if (staged > 0) {
 				toast.success(`${staged} mod update(s) staged`);
+				// The refresh starts a newer request generation. End this
+				// stage's ownership before waiting so its finally does not
+				// reopen the button over the refresh.
+				stagingUpdates = false;
 				await loadMods(true);
 			} else {
 				toastStageOutcome('No update was staged. Recheck the installed files and try again.');
 			}
 		} catch (error) {
-			if (!wasRpcErrorToasted(error)) toastStageOutcome('Failed to stage mod updates');
+			if (isCurrent() && !wasRpcErrorToasted(error))
+				toastStageOutcome('Failed to stage mod updates');
 		} finally {
-			stagingUpdates = false;
+			if (isCurrent()) stagingUpdates = false;
 		}
 	}
 
