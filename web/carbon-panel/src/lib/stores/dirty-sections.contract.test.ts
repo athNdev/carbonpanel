@@ -209,10 +209,19 @@ test('settings dirty state uses a captured baseline, not the live server store',
 });
 
 test('configuration keeps edits typed during an in-flight save', () => {
-	assert.match(
-		configuration,
-		/const inFlightValues = new SvelteMap\(currentValues\);/,
-		'the in-flight form is captured before the request'
+	const rpcAt = configuration.indexOf('await rpcClient.config.updateServerConfig(');
+	const captureAt = configuration.indexOf(
+		'const inFlightValues = new SvelteMap(currentValues);',
+		rpcAt
+	);
+	const processAt = configuration.indexOf('processConfig(response.categories);', rpcAt);
+	assert.ok(
+		rpcAt > -1 && captureAt > rpcAt,
+		'the in-flight form is captured after the request resolves'
+	);
+	assert.ok(
+		processAt > captureAt,
+		'the capture runs before the response refresh overwrites the form'
 	);
 	assert.match(
 		configuration,

@@ -21,6 +21,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { Save, RefreshCw, Loader2, Link, Send, ChevronRight, Wand2 } from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { dirtySections } from '$lib/stores/dirty-sections.svelte';
+	import { rebaselineConfigAfterSave } from '$lib/components/server-configuration-save';
 	import { CarbonButton, CarbonSearch, CarbonSelect, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -321,51 +322,16 @@ one at https://mozilla.org/MPL/2.0/.
 		inFlightValues: ReadonlyMap<string, string | null>,
 		inFlightEnabled: ReadonlySet<string>
 	): void {
-		const baselineValues = new SvelteMap(originalValues);
-		const baselineEnabled = new SvelteSet(originalEnabled);
-		const editedValues = new SvelteMap(currentValues);
-		const editedEnabled = new SvelteSet(currentEnabled);
-
-		for (const [key, value] of Object.entries(sent)) {
-			const sentValue = value === '' ? null : value;
-			const sentOn = value !== '';
-			baselineValues.set(key, sentValue);
-			if (sentOn) baselineEnabled.add(key);
-			else baselineEnabled.delete(key);
-
-			const editedValue = inFlightValues.get(key) ?? null;
-			const editedOn = inFlightEnabled.has(key);
-			if (editedValue === sentValue && editedOn === sentOn) {
-				// The entry still matches what was sent: it is clean now.
-				editedValues.set(key, sentValue);
-				if (sentOn) editedEnabled.add(key);
-				else editedEnabled.delete(key);
-			} else {
-				// Edited while the save ran: keep it as a dirty edit.
-				editedValues.set(key, editedValue);
-				if (editedOn) editedEnabled.add(key);
-				else editedEnabled.delete(key);
-			}
-		}
-
-		// Entries outside the sent batch: an edit typed mid-flight for a key
-		// that was not dirty when the save started must also survive.
-		for (const [key, value] of inFlightValues) {
-			if (key in sent) continue;
-			if (
-				value !== (baselineValues.get(key) ?? null) ||
-				inFlightEnabled.has(key) !== baselineEnabled.has(key)
-			) {
-				editedValues.set(key, value ?? null);
-				if (inFlightEnabled.has(key)) editedEnabled.add(key);
-				else editedEnabled.delete(key);
-			}
-		}
-
-		originalValues = baselineValues;
-		originalEnabled = baselineEnabled;
-		currentValues = editedValues;
-		currentEnabled = editedEnabled;
+		const next = rebaselineConfigAfterSave(
+			{ originalValues, originalEnabled, currentValues, currentEnabled },
+			sent,
+			inFlightValues,
+			inFlightEnabled
+		);
+		originalValues = new SvelteMap(next.originalValues);
+		originalEnabled = new SvelteSet(next.originalEnabled);
+		currentValues = new SvelteMap(next.currentValues);
+		currentEnabled = new SvelteSet(next.currentEnabled);
 	}
 
 	/**
@@ -402,10 +368,6 @@ one at https://mozilla.org/MPL/2.0/.
 		if (onSave) {
 			await onSave(updates);
 		} else if (server) {
-			// Capture the form as the user sees it while the request is in
-			// flight; the response refresh must not drop concurrent edits.
-			const inFlightValues = new SvelteMap(currentValues);
-			const inFlightEnabled = new SvelteSet(currentEnabled);
 			const sent = { ...updates };
 			const response = await rpcClient.config.updateServerConfig({
 				serverId: server.id,
@@ -418,6 +380,11 @@ one at https://mozilla.org/MPL/2.0/.
 						: 0n,
 				idleMinutes: stageUpdate && applyWindow === 'idle' ? idleMinutes : 0
 			});
+			// Capture the form as the user sees it only after the request
+			// resolves: anything typed while it was in flight is still live
+			// here, and the response refresh must not drop it.
+			const inFlightValues = new SvelteMap(currentValues);
+			const inFlightEnabled = new SvelteSet(currentEnabled);
 			processConfig(response.categories);
 			rebaselineAfterSave(sent, inFlightValues, inFlightEnabled);
 			await loadBatch();
