@@ -502,6 +502,39 @@ test('an empty log listing renders the empty state without a loading spinner', a
 	}
 });
 
+test('a superseded same-server listing cannot repaint the console with older lines', async () => {
+	jest.useFakeTimers();
+	const pending: ReturnType<typeof deferred<{ logs: unknown[] }>>[] = [];
+	stubServerClient({
+		getServerLogs: () => {
+			const request = deferred<{ logs: unknown[] }>();
+			pending.push(request);
+			return request.promise;
+		}
+	});
+	const ui = mountUi(true);
+	const logText = () => ui.target.querySelector('[role="log"]')?.textContent ?? '';
+	try {
+		await settle();
+		assert.equal(pending.length, 1, 'mount starts the first listing');
+
+		jest.advanceTimersByTime(5000);
+		await settle();
+		assert.equal(pending.length, 2, 'fallback polling starts a newer listing');
+
+		pending[1].resolve({ logs: [create(LogEntrySchema, { message: 'newer line' })] });
+		await settle();
+		assert.match(logText(), /newer line/);
+
+		pending[0].resolve({ logs: [create(LogEntrySchema, { message: 'older line' })] });
+		await settle();
+		assert.match(logText(), /newer line/);
+		assert.doesNotMatch(logText(), /older line/, 'a superseded listing must not paint again');
+	} finally {
+		ui.unmount();
+	}
+});
+
 test('unmounting clears the fallback polling interval and stops log fetches', async () => {
 	jest.useFakeTimers();
 	let calls = 0;
