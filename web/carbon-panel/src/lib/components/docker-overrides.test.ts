@@ -9,7 +9,11 @@ import { readFileSync } from 'node:fs';
 import { create } from '@bufbuild/protobuf';
 import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-import { normalizeDockerOverrides, formatDockerOverrides } from './docker-overrides';
+import {
+	normalizeDockerOverrides,
+	formatDockerOverrides,
+	DockerOverridesValidationError
+} from './docker-overrides';
 import { dockerOverridesFingerprint, snapshotServerForm } from './server-settings-snapshot';
 
 function formWith(overrides: unknown) {
@@ -102,6 +106,50 @@ test('an explicit empty override stays undefined', () => {
 	assert.equal(normalizeDockerOverrides(null), undefined);
 });
 
+test('semantically invalid overrides are rejected with the offending field named', () => {
+	const cases: Array<[string, RegExp]> = [
+		['{"memoryLimit":1.5}', /Docker overrides field "memoryLimit" must be an integer/],
+		['{"memoryLimit":"abc"}', /Docker overrides field "memoryLimit" must be an integer/],
+		[
+			'{"memoryLimit":"9223372036854775808"}',
+			/Docker overrides field "memoryLimit" must be within the int64 range/
+		],
+		['{"cpuLimit":"2.5"}', /Docker overrides field "cpuLimit" must be a finite number/],
+		['{"environment":{"A":5}}', /Docker overrides field "environment\.A" must be a string/],
+		['{"environment":["A"]}', /Docker overrides field "environment" must be an object of strings/],
+		['{"labels":null}', /Docker overrides field "labels" must be an object of strings/],
+		['{"volumes":{}}', /Docker overrides field "volumes" must be an array/],
+		['{"volumes":[5]}', /Docker overrides field "volumes" entries must be objects/],
+		['{"capAdd":"NET_ADMIN"}', /Docker overrides field "capAdd" must be an array/],
+		['{"privileged":"true"}', /Docker overrides field "privileged" must be a boolean/],
+		['{"networkMode":5}', /Docker overrides field "networkMode" must be a string/],
+		['{"cpu_limt":2}', /unknown Docker overrides field "cpu_limt"/],
+		['"abc"', /Docker overrides must be a JSON object/]
+	];
+
+	for (const [json, pattern] of cases) {
+		assert.throws(
+			() => normalizeDockerOverrides(JSON.parse(json)),
+			(error: unknown) => {
+				assert.ok(
+					error instanceof DockerOverridesValidationError,
+					`${json} must raise a validation error`
+				);
+				assert.match(error.message, pattern);
+				return true;
+			},
+			json
+		);
+	}
+});
+
+test('a decimal int64 string is still coerced to bigint after validation', () => {
+	const overrides = normalizeDockerOverrides(JSON.parse('{"memoryLimit":"1024","cpuLimit":2.5}'));
+
+	assert.equal(overrides?.memoryLimit, 1024n);
+	assert.equal(overrides?.cpuLimit, 2.5);
+});
+
 test('the JSON editor formatter round-trips int64 fields of a message', () => {
 	const overrides = normalizeDockerOverrides(JSON.parse('{"memoryLimit":1024}'));
 	assert.ok(overrides);
@@ -124,4 +172,20 @@ test('the Docker Overrides editor normalizes at its JSON boundary', () => {
 	);
 
 	assert.match(component, /overrides = normalizeDockerOverrides\(parsed\);/);
+});
+
+test('the JSON editor announces validation failures and marks the textarea invalid', () => {
+	const component = readFileSync(
+		new URL('./docker-overrides-editor.svelte', import.meta.url),
+		'utf8'
+	);
+
+	assert.match(component, /DockerOverridesValidationError/);
+	assert.match(component, /id="docker-overrides-json-error"/);
+	assert.match(component, /role="alert"/);
+	assert.match(component, /aria-invalid=\{jsonError \? 'true' : undefined\}/);
+	assert.match(
+		component,
+		/aria-describedby=\{jsonError \? 'docker-overrides-json-error' : undefined\}/
+	);
 });
