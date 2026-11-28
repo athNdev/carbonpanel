@@ -55,7 +55,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
 	import {
-		snapshotDockerOverrides,
+		dockerOverridesFingerprint,
 		snapshotServerForm
 	} from '$lib/components/server-settings-snapshot';
 
@@ -150,8 +150,8 @@ one at https://mozilla.org/MPL/2.0/.
 			form.autoDeepSleep !== baseline.autoDeepSleep ||
 			form.deepSleepTimeoutMinutes !== baseline.deepSleepTimeoutMinutes ||
 			safeToString(form.additionalPorts) !== safeToString(baseline.additionalPorts) ||
-			safeToString(snapshotDockerOverrides(form.dockerOverrides)) !==
-				safeToString(snapshotDockerOverrides(baseline.dockerOverrides))
+			dockerOverridesFingerprint(form.dockerOverrides) !==
+				dockerOverridesFingerprint(baseline.dockerOverrides)
 		);
 	}
 

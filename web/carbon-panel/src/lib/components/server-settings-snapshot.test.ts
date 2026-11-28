@@ -9,11 +9,12 @@ import { readFileSync } from 'node:fs';
 // Svelte's runtime proxy is the seam a `$state` component value exposes, but
 // its types are not part of the package's public type surface.
 // @ts-expect-error -- no declaration file for svelte/internal/client
+// eslint-disable-next-line svelte/no-svelte-internal -- test-only use of the runtime proxy $state compiles to
 import { proxy } from 'svelte/internal/client';
 import { create } from '@bufbuild/protobuf';
 import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-import { snapshotDockerOverrides, snapshotServerForm } from './server-settings-snapshot';
+import { dockerOverridesFingerprint, snapshotServerForm } from './server-settings-snapshot';
 
 test('snapshotServerForm clones a form whose Docker overrides contain int64 bigints', () => {
 	const memoryLimit = 9_007_199_254_740_993n;
@@ -148,55 +149,58 @@ test('snapshotServerForm keeps production-shaped map keys through the reactive p
 	assert.equal(Object.getOwnPropertyDescriptor(environment, '__proto__')?.value, 'literal-proto');
 });
 
-test('snapshotDockerOverrides preserves production-shaped map keys and is independent', () => {
-	// The dirty check compares snapshots of both overrides. Snapshotting with
-	// `$state.snapshot` would drop the own `__proto__` entry, so an edit to
-	// only that legal environment/label key would never mark the form dirty.
-	const environment: { [key: string]: string } = { MODE: 'source' };
-	const labels: { [key: string]: string } = { 'com.example.role': 'server' };
-	for (const map of [environment, labels]) {
-		Object.defineProperty(map, '$typeName', {
-			value: 'literal-type-name',
-			enumerable: true,
-			configurable: true,
-			writable: true
-		});
-		Object.defineProperty(map, '__proto__', {
-			value: 'literal-proto',
+test('dockerOverridesFingerprint serializes plain JSON objects with own map keys', () => {
+	// The Docker Overrides JSON editor assigns a plain `JSON.parse` object.
+	// An own `__proto__` map key is a legal environment/label name and must
+	// survive the fingerprint rather than disappearing behind the prototype.
+	const source: Record<string, unknown> = {};
+	for (const [key, value] of [
+		['$typeName', 'literal-type-name'],
+		['__proto__', 'literal-proto']
+	]) {
+		Object.defineProperty(source, key, {
+			value,
 			enumerable: true,
 			configurable: true,
 			writable: true
 		});
 	}
-	const source = create(DockerOverridesSchema, { environment, labels });
 
-	const snapshot = snapshotDockerOverrides(source);
-	assert.ok(snapshot);
-	assert.notEqual(snapshot, source);
+	const fingerprint = dockerOverridesFingerprint(source);
 
-	for (const [name, map] of [
-		['environment', snapshot.environment],
-		['labels', snapshot.labels]
-	] as const) {
-		assert.equal(
-			Object.getOwnPropertyDescriptor(map, '$typeName')?.value,
-			'literal-type-name',
-			`${name} must keep its own $typeName entry`
-		);
-		assert.equal(
-			Object.getOwnPropertyDescriptor(map, '__proto__')?.value,
-			'literal-proto',
-			`${name} must keep its own __proto__ entry`
-		);
-	}
+	assert.ok(fingerprint);
+	assert.match(fingerprint, /"\$typeName":"literal-type-name"/);
+	assert.match(fingerprint, /"__proto__":"literal-proto"/);
+});
 
-	// The snapshot must not alias the source it was taken from.
-	Object.defineProperty(snapshot.environment, '__proto__', { value: 'changed' });
-	snapshot.labels['com.example.role'] = 'changed';
-	assert.equal(Object.getOwnPropertyDescriptor(environment, '__proto__')?.value, 'literal-proto');
-	assert.equal(labels['com.example.role'], 'server');
+test('dockerOverridesFingerprint serializes protobuf messages with bigint fields', () => {
+	const memoryLimit = 9_007_199_254_740_993n;
+	const source = create(DockerOverridesSchema, { memoryLimit });
 
-	assert.equal(snapshotDockerOverrides(undefined), undefined);
+	let fingerprint: string | undefined;
+	assert.doesNotThrow(() => {
+		fingerprint = dockerOverridesFingerprint(source);
+	});
+
+	assert.ok(fingerprint);
+	assert.match(fingerprint, new RegExp(`"memoryLimit":"${memoryLimit}"`));
+});
+
+test('dockerOverridesFingerprint changes with a nested override value', () => {
+	const source = create(DockerOverridesSchema, { environment: { MODE: 'source' } });
+	const before = dockerOverridesFingerprint(source);
+
+	source.environment.MODE = 'changed';
+	const after = dockerOverridesFingerprint(source);
+
+	assert.ok(before);
+	assert.ok(after);
+	assert.notEqual(after, before);
+});
+
+test('dockerOverridesFingerprint treats missing overrides as absent', () => {
+	assert.equal(dockerOverridesFingerprint(undefined), undefined);
+	assert.equal(dockerOverridesFingerprint(null), undefined);
 });
 
 test('the settings form hands the reactive source straight to the snapshot helpers', () => {
@@ -208,9 +212,9 @@ test('the settings form hands the reactive source straight to the snapshot helpe
 	assert.doesNotMatch(component, /snapshotServerForm\(\$state\.snapshot\(/);
 	assert.match(component, /return snapshotServerForm\(source\);/);
 
-	// The dirty comparison must use the Docker overrides snapshot too, or the
-	// same key-loss class hides an edit from Save.
+	// The dirty comparison must fingerprint the Docker overrides directly too,
+	// or the same key-loss class hides an edit from Save.
 	assert.doesNotMatch(component, /\$state\.snapshot\([^)]*dockerOverrides/);
-	assert.match(component, /snapshotDockerOverrides\(form\.dockerOverrides\)/);
-	assert.match(component, /snapshotDockerOverrides\(baseline\.dockerOverrides\)/);
+	assert.match(component, /dockerOverridesFingerprint\(form\.dockerOverrides\)/);
+	assert.match(component, /dockerOverridesFingerprint\(baseline\.dockerOverrides\)/);
 });

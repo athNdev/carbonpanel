@@ -31,10 +31,11 @@ const maxListedIncompatible = 10
 // metadata never block a version change — the gate exists to catch the common
 // case before a failed recreation persists the new version row.
 //
-// A server whose storage the panel cannot inspect at all (a transport-only
-// node with no storage adapter) fails closed instead: there is no way to
-// prove the installed content is compatible, so the change is refused rather
-// than silently skipping the gate before a recreation.
+// A server whose storage the panel cannot inspect at all — the typed
+// nodestorage.ErrUnavailable case, where the node has no storage adapter or
+// its controller storage root is inaccessible — fails closed instead: there is
+// no way to prove the installed content is compatible, so the change is
+// refused rather than silently skipping the gate before a recreation.
 func (s *ServerService) refuseVersionIncompatibleContent(ctx context.Context, server *storage.Server, targetVersion string) error {
 	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {

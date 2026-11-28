@@ -4,8 +4,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import { clone } from '@bufbuild/protobuf';
-import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
-import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 
@@ -21,17 +19,23 @@ export function snapshotServerForm(source: UpdateServerRequest): UpdateServerReq
 }
 
 /**
- * Independent deep snapshot of Docker overrides for the dirty comparison.
+ * Shape-agnostic fingerprint of Docker overrides for the dirty comparison.
  *
- * The comparison cannot use `$state.snapshot`: that helper deep-clones plain
- * objects with `copy[key] = ...`, which silently drops an own `__proto__` map
- * key (a legal Docker environment/label name) into the prototype setter.
- * protobuf-es's clone reads the reactive proxy directly and keeps those keys.
- * `undefined` stays `undefined`; an absent field must compare equal.
+ * The Docker Overrides JSON editor assigns a plain `JSON.parse` object, while
+ * the form otherwise holds protobuf-es messages, so this must not assume a
+ * message. `JSON.stringify` also preserves an own `__proto__` map key (a legal
+ * Docker environment/label name), which `$state.snapshot`'s `copy[key] = ...`
+ * clone would silently drop into the prototype setter. `undefined` and other
+ * falsy values compare equal; a value that cannot be serialized also yields
+ * `undefined` instead of throwing inside the dirty check.
  */
-export function snapshotDockerOverrides(
-	source: DockerOverrides | undefined
-): DockerOverrides | undefined {
-	if (source === undefined) return undefined;
-	return clone(DockerOverridesSchema, source);
+export function dockerOverridesFingerprint(source: unknown): string | undefined {
+	if (!source) return undefined;
+	try {
+		return JSON.stringify(source, (_, value) =>
+			typeof value === 'bigint' ? value.toString() : value
+		);
+	} catch {
+		return undefined;
+	}
 }

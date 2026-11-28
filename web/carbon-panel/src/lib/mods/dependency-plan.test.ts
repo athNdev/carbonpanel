@@ -225,6 +225,86 @@ describe('buildDependencyPlan', () => {
 		assert.match(plan.unresolved[0].reason, /b-id/);
 	});
 
+	test('a repeated conflicting pin produces a single conflict entry', async () => {
+		const getVersions = lookup({
+			'pinned-api': [
+				{ ...version('Pinned A'), id: 'a-id' },
+				{ ...version('Pinned B'), id: 'b-id' }
+			]
+		});
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{ project_id: 'pinned-api', version_id: 'a-id', dependency_type: 'required' },
+				{ project_id: 'pinned-api', version_id: 'b-id', dependency_type: 'required' },
+				{ project_id: 'pinned-api', version_id: 'b-id', dependency_type: 'required' },
+				{ project_id: 'pinned-api', version_id: 'b-id', dependency_type: 'required' }
+			],
+			selection: { 'pinned-api': true },
+			getVersions
+		});
+
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Pinned A.jar']
+		);
+		assert.equal(plan.unresolved.length, 1, 'the same project+pin conflict is reported once');
+		assert.match(plan.unresolved[0].reason, /b-id/);
+	});
+
+	test('production-shaped empty version_id is unpinned and dedupes without conflict', async () => {
+		const getVersions = lookup({ 'latest-api': [version('Latest API')] });
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{ project_id: 'latest-api', version_id: '', dependency_type: 'required' },
+				{ project_id: 'latest-api', version_id: '   ', dependency_type: 'required' }
+			],
+			selection: { 'latest-api': true },
+			getVersions
+		});
+
+		assert.deepEqual(
+			plan.items.map((item) => item.file_name),
+			['Latest API.jar']
+		);
+		assert.equal(plan.unresolved.length, 0, 'empty and whitespace pins are both unpinned');
+		const calls = (getVersions as DependencyLookup & { calls: string[] }).calls;
+		assert.deepEqual(calls, ['latest-api']);
+	});
+
+	test('a known project pin seeds the plan so a later conflict is surfaced', async () => {
+		const getVersions = lookup({});
+		const plan = await buildDependencyPlan({
+			...base,
+			deps: [
+				{
+					project_id: 'root-mod',
+					version_id: 'root-a',
+					dependency_type: 'required',
+					title: 'Root Mod'
+				},
+				{
+					project_id: 'root-mod',
+					version_id: 'root-b',
+					dependency_type: 'required',
+					title: 'Root Mod'
+				}
+			],
+			selection: { 'root-mod': true },
+			isKnownProject: (projectId) => projectId === 'root-mod',
+			getVersions
+		});
+
+		const calls = (getVersions as DependencyLookup & { calls: string[] }).calls;
+		assert.deepEqual(calls, [], 'the known project is still never looked up');
+		assert.equal(plan.items.length, 0);
+		assert.equal(plan.unresolved.length, 1);
+		assert.equal(plan.unresolved[0].projectId, 'root-mod');
+		assert.match(plan.unresolved[0].reason, /root-a/);
+		assert.match(plan.unresolved[0].reason, /root-b/);
+	});
+
 	test('the same pin requested twice is deduped without a conflict', async () => {
 		const getVersions = lookup({
 			'pinned-api': [{ ...version('Pinned A'), id: 'a-id' }]

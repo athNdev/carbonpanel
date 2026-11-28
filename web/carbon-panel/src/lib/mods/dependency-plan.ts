@@ -99,6 +99,13 @@ export const MAX_DEPENDENCY_DEPTH = 3;
 
 const dependencyType = (dep: PlanDependency) => (dep.dependency_type || '').toLowerCase();
 
+// Production protos send an empty string for "no pin"; a whitespace-only value
+// is the same intent and must not participate in pin conflict detection.
+const normalizePin = (pin: string | undefined): string | undefined => {
+	const trimmed = pin?.trim();
+	return trimmed ? trimmed : undefined;
+};
+
 export async function buildDependencyPlan(
 	request: DependencyPlanRequest
 ): Promise<DependencyPlanResult> {
@@ -118,6 +125,7 @@ export async function buildDependencyPlan(
 	// conflicting request is surfaced instead of silently reusing the first
 	// pin (or silently dropping the second one).
 	const plannedPins = new Map<string, string | undefined>();
+	const reportedConflicts = new Set<string>();
 	const pinLabel = (pin: string | undefined) => (pin ? `version ${pin}` : 'no pinned version');
 
 	async function visit(
@@ -149,23 +157,33 @@ export async function buildDependencyPlan(
 		for (const dep of wanted) {
 			const depId = dep.project_id as string;
 			const key = projectKey(platform, depId);
+			const pin = normalizePin(dep.version_id);
 			if (visited.has(key)) {
 				const plannedPin = plannedPins.get(key);
-				if (plannedPin !== dep.version_id) {
-					unresolved.push({
-						projectId: depId,
-						title: dep.title || depId,
-						reason: `Conflicting pinned versions requested for this project: already planned ${pinLabel(plannedPin)}, also requested ${pinLabel(dep.version_id)}`
-					});
+				if (plannedPin !== pin) {
+					// A repeated conflicting request must not add a row per
+					// duplicate occurrence.
+					const conflictKey = `${key}\u0000${plannedPin ?? ''}\u0000${pin ?? ''}`;
+					if (!reportedConflicts.has(conflictKey)) {
+						reportedConflicts.add(conflictKey);
+						unresolved.push({
+							projectId: depId,
+							title: dep.title || depId,
+							reason: `Conflicting pinned versions requested for this project: already planned ${pinLabel(plannedPin)}, also requested ${pinLabel(pin)}`
+						});
+					}
 				}
 				continue;
 			}
 			if (request.isKnownProject?.(depId)) {
+				// Known projects are not resolved again, but their pin still
+				// owns this project so a later conflicting request is surfaced.
 				visited.add(key);
+				plannedPins.set(key, pin);
 				continue;
 			}
 			visited.add(key);
-			plannedPins.set(key, dep.version_id);
+			plannedPins.set(key, pin);
 			const label = dep.title || depId;
 			try {
 				const response = await request.getVersions({
@@ -179,14 +197,12 @@ export async function buildDependencyPlan(
 					unresolved.push({ projectId: depId, title: label, reason: 'No compatible version' });
 					continue;
 				}
-				const version = dep.version_id
-					? versions.find((candidate) => candidate.id === dep.version_id)
-					: versions[0];
+				const version = pin ? versions.find((candidate) => candidate.id === pin) : versions[0];
 				if (!version) {
 					unresolved.push({
 						projectId: depId,
 						title: label,
-						reason: `Pinned version ${dep.version_id} is not compatible`
+						reason: `Pinned version ${pin} is not compatible`
 					});
 					continue;
 				}
