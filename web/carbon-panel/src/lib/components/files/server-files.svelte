@@ -115,6 +115,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let hasLoaded = false;
 	let previousServerId: string;
+	// A listing can resolve after the user switched servers. Only the newest
+	// request for the still-selected server may touch the tree or the loading
+	// flag, so a slow response cannot overwrite another server's view.
+	let requestNumber = 0;
 
 	// --- Derived ---
 	let flatFiles = $derived.by(() => {
@@ -181,6 +185,8 @@ one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
+			// Invalidate anything in flight for the previous server.
+			requestNumber += 1;
 			stopExtractionPoll();
 			extracting = false;
 			files = [];
@@ -206,18 +212,23 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// --- Data loading ---
 	async function loadFiles() {
+		const serverId = server.id;
+		const request = ++requestNumber;
+		const isCurrent = () => request === requestNumber && server.id === serverId;
 		try {
 			loading = true;
 			const response = await rpcClient.file.listFiles({
-				serverId: server.id,
+				serverId,
 				path: '',
 				tree: true
 			});
+			if (!isCurrent()) return;
 			files = response.files;
 		} catch {
-			toast.error('Failed to load files');
+			// An obsolete request must not toast or clear the current view.
+			if (isCurrent()) toast.error('Failed to load files');
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 
