@@ -454,23 +454,27 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Local non-reactive lookup, discarded after mapping outcomes.
 				const installedFiles = new Set(response.installed);
 				// The server reports installed files by the base name of the trimmed
-				// request name (`filepath.Base(strings.TrimSpace(...))`), so the
-				// selected version's name may be padded or path-bearing and still
-				// match. The raw name stays in the failure message.
-				const trimmedRootFileName = options.rootFileName.trim();
-				const rootBasename = trimmedRootFileName.split(/[\\/]/).pop() || trimmedRootFileName;
-				const rootInstalled = installedFiles.has(rootBasename);
+				// request name (`filepath.Base(strings.TrimSpace(...))`), so an item
+				// or the selected version's name may be padded or path-bearing and
+				// still match. The raw name stays in the failure message.
+				const installedName = (fileName: string): string => {
+					const trimmed = fileName.trim();
+					return trimmed.split(/[\\/]/).pop() || trimmed;
+				};
+				const isInstalled = (fileName: string): boolean =>
+					installedFiles.has(installedName(fileName));
+				const rootInstalled = isInstalled(options.rootFileName);
 				const succeeded = response.success && rootInstalled;
 				// The server names each failed item inside its error strings
 				// ("skipped <name>: …"); attribute per item when possible and
 				// keep the blanket errors[0] only for a single failed item.
-				const failedItems = options.items.filter((item) => !installedFiles.has(item.file_name));
+				const failedItems = options.items.filter((item) => !isInstalled(item.file_name));
 				const detailFor = (item: InstallItem): string =>
 					response.errors.find((message) => message.includes(item.name)) ??
 					(failedItems.length === 1 ? response.errors[0] : undefined) ??
 					'Not installed';
 				installOutcomes = options.items.map((item) =>
-					installedFiles.has(item.file_name)
+					isInstalled(item.file_name)
 						? { key: item.file_name, label: item.name, tone: 'green' as const }
 						: {
 								key: item.file_name,

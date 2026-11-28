@@ -301,7 +301,7 @@ describe('mods browser store — install region', () => {
 		await store.submitSearch();
 
 		const response = await store.installServerItems({
-			items: [{ name: 'Root', file_name: 'root.jar', download_url: 'u1' }],
+			items: [{ name: 'Root', file_name: '  mods/root.jar  ', download_url: 'u1' }],
 			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 0 },
 			rootFileName: '  mods/root.jar  '
 		});
@@ -309,6 +309,11 @@ describe('mods browser store — install region', () => {
 		assert.equal(response.success, true, 'the trimmed basename must match the server list');
 		assert.equal(store.sessionCount, 1);
 		assert.equal(store.sessionInstalled[0].key, 'modrinth:root');
+		assert.deepEqual(
+			store.installOutcomes.map((row) => [row.label, row.tone]),
+			[['Root', 'green']],
+			'the padded/path-bearing root row must use the same basename match'
+		);
 	});
 
 	test('the root mod is recorded when only a dependency failed', async () => {

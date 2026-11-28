@@ -4,8 +4,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import { ScalarType, create } from '@bufbuild/protobuf';
+import type { DescField } from '@bufbuild/protobuf';
 import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
-import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
+import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 
 /** Scalar types the form holds as `bigint`. JSON can only carry them as numbers. */
 const INT64_SCALARS: ReadonlySet<ScalarType> = new Set([
@@ -22,6 +23,10 @@ const DECIMAL_INTEGER = /^-?\d+$/;
 
 const FIELDS_BY_NAME = new Map(
 	DockerOverridesSchema.fields.map((field) => [field.localName, field] as const)
+);
+
+const VOLUME_FIELDS_BY_NAME = new Map(
+	VolumeMountSchema.fields.map((field) => [field.localName, field] as const)
 );
 
 /**
@@ -42,24 +47,85 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return prototype === Object.prototype || prototype === null;
 }
 
-function invalidInteger(name: string): never {
-	throw new DockerOverridesValidationError(`Docker overrides field "${name}" must be an integer`);
+function invalidInteger(label: string): never {
+	throw new DockerOverridesValidationError(`Docker overrides field "${label}" must be an integer`);
 }
 
-function assertInt64(name: string, value: unknown): void {
+function assertInt64(label: string, value: unknown): void {
 	let parsed: bigint;
-	if (typeof value === 'number' && Number.isInteger(value)) {
+	if (typeof value === 'number') {
+		if (!Number.isInteger(value)) invalidInteger(label);
+		if (!Number.isSafeInteger(value)) {
+			throw new DockerOverridesValidationError(
+				`Docker overrides field "${label}" is not exactly representable as a number; use a decimal string for values beyond 2^53 - 1`
+			);
+		}
 		parsed = BigInt(value);
 	} else if (typeof value === 'string' && DECIMAL_INTEGER.test(value)) {
 		parsed = BigInt(value);
 	} else {
-		invalidInteger(name);
+		invalidInteger(label);
 	}
 	if (parsed < INT64_MIN || parsed > INT64_MAX) {
 		throw new DockerOverridesValidationError(
-			`Docker overrides field "${name}" must be within the int64 range`
+			`Docker overrides field "${label}" must be within the int64 range`
 		);
 	}
+}
+
+function assertScalar(label: string, scalar: ScalarType, value: unknown): void {
+	if (INT64_SCALARS.has(scalar)) {
+		assertInt64(label, value);
+	} else if (scalar === ScalarType.DOUBLE || scalar === ScalarType.FLOAT) {
+		if (typeof value !== 'number' || !Number.isFinite(value)) {
+			throw new DockerOverridesValidationError(
+				`Docker overrides field "${label}" must be a finite number`
+			);
+		}
+	} else if (scalar === ScalarType.BOOL) {
+		if (typeof value !== 'boolean') {
+			throw new DockerOverridesValidationError(
+				`Docker overrides field "${label}" must be a boolean`
+			);
+		}
+	} else if (typeof value !== 'string') {
+		throw new DockerOverridesValidationError(`Docker overrides field "${label}" must be a string`);
+	}
+}
+
+/**
+ * Validate one repeated `VolumeMount`. Only the generated fields are accepted:
+ * `__proto__` and `$typeName` are legal map keys elsewhere, but not volume
+ * fields. The message bookkeeping keys are tolerated on the entry itself and
+ * stripped before `create` so the nested entry cannot be fast-pathed as an
+ * already-built message.
+ */
+function assertVolumeMountEntry(name: string, index: number, entry: unknown): void {
+	if (!isPlainObject(entry)) {
+		throw new DockerOverridesValidationError(
+			`Docker overrides field "${name}" entries must be objects`
+		);
+	}
+	for (const key of Object.keys(entry)) {
+		if (key === '$typeName' || key === '$unknown') continue;
+		if (!VOLUME_FIELDS_BY_NAME.has(key)) {
+			throw new DockerOverridesValidationError(
+				`unknown Docker overrides field "${name}[${index}].${key}"`
+			);
+		}
+	}
+	for (const [key, field] of VOLUME_FIELDS_BY_NAME) {
+		if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+		assertFieldValue(field, entry[key], `${name}[${index}].${key}`);
+	}
+}
+
+function stripMessageBookkeeping(entry: Record<string, unknown>): Record<string, unknown> {
+	if (!('$typeName' in entry) && !('$unknown' in entry)) return entry;
+	const copy = { ...entry };
+	delete copy.$typeName;
+	delete copy.$unknown;
+	return copy;
 }
 
 /**
@@ -68,45 +134,23 @@ function assertInt64(name: string, value: unknown): void {
  * disappears into a default message, which would wipe every existing override
  * when the typo-only document is applied.
  */
-function assertFieldValue(
-	field: (typeof DockerOverridesSchema.fields)[number],
-	value: unknown
-): void {
-	const name = field.localName;
+function assertFieldValue(field: DescField, value: unknown, label = field.localName): void {
 	// JSON null means "unset" for scalar fields, matching `create`.
 	if (value === null && field.fieldKind !== 'map' && field.fieldKind !== 'list') return;
 	switch (field.fieldKind) {
 		case 'scalar':
-			if (INT64_SCALARS.has(field.scalar)) {
-				assertInt64(name, value);
-			} else if (field.scalar === ScalarType.DOUBLE || field.scalar === ScalarType.FLOAT) {
-				if (typeof value !== 'number' || !Number.isFinite(value)) {
-					throw new DockerOverridesValidationError(
-						`Docker overrides field "${name}" must be a finite number`
-					);
-				}
-			} else if (field.scalar === ScalarType.BOOL) {
-				if (typeof value !== 'boolean') {
-					throw new DockerOverridesValidationError(
-						`Docker overrides field "${name}" must be a boolean`
-					);
-				}
-			} else if (typeof value !== 'string') {
-				throw new DockerOverridesValidationError(
-					`Docker overrides field "${name}" must be a string`
-				);
-			}
+			assertScalar(label, field.scalar, value);
 			return;
 		case 'map':
 			if (!isPlainObject(value)) {
 				throw new DockerOverridesValidationError(
-					`Docker overrides field "${name}" must be an object of strings`
+					`Docker overrides field "${label}" must be an object of strings`
 				);
 			}
 			for (const [key, entry] of Object.entries(value)) {
 				if (typeof entry !== 'string') {
 					throw new DockerOverridesValidationError(
-						`Docker overrides field "${name}.${key}" must be a string`
+						`Docker overrides field "${label}.${key}" must be a string`
 					);
 				}
 			}
@@ -114,18 +158,24 @@ function assertFieldValue(
 		case 'list':
 			if (!Array.isArray(value)) {
 				throw new DockerOverridesValidationError(
-					`Docker overrides field "${name}" must be an array`
+					`Docker overrides field "${label}" must be an array`
 				);
 			}
-			if (field.listKind === 'message') {
-				for (const entry of value) {
-					if (!isPlainObject(entry)) {
+			value.forEach((entry, index) => {
+				if (field.listKind === 'message') {
+					if (field.message === VolumeMountSchema) {
+						assertVolumeMountEntry(label, index, entry);
+					} else if (!isPlainObject(entry)) {
 						throw new DockerOverridesValidationError(
-							`Docker overrides field "${name}" entries must be objects`
+							`Docker overrides field "${label}" entries must be objects`
 						);
 					}
+				} else if (field.listKind === 'scalar') {
+					// List elements have no "unset" spelling: every element must
+					// already have the field's scalar type.
+					assertScalar(`${label}[${index}]`, field.scalar, entry);
 				}
-			}
+			});
 			return;
 		default:
 			return;
@@ -172,6 +222,11 @@ export function normalizeDockerOverrides(value: unknown): DockerOverrides | unde
 	for (const [key, fieldValue] of Object.entries(init)) {
 		const field = FIELDS_BY_NAME.get(key);
 		if (field) assertFieldValue(field, fieldValue);
+	}
+	if (Array.isArray(init.volumes)) {
+		init.volumes = init.volumes.map((entry) =>
+			isPlainObject(entry) ? stripMessageBookkeeping(entry) : entry
+		);
 	}
 	const overrides = create(DockerOverridesSchema, init);
 	const target = overrides as unknown as Record<string, unknown>;

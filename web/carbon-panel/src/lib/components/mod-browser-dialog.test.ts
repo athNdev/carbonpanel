@@ -40,8 +40,10 @@ test('install names the selected root file so a dependency-only response is not 
 		'the dialog must tell the store which installed file is the selected mod'
 	);
 	assert.ok(
-		store.includes('installedFiles.has(rootBasename)'),
-		'the store must require the root file (by installed basename) in the installed list'
+		store.includes('const rootInstalled = isInstalled(options.rootFileName);') &&
+			store.includes('const installedName = (fileName: string): string =>') &&
+			store.includes('isInstalled(item.file_name)'),
+		'the store must compare the root and every item by installed basename'
 	);
 });
 

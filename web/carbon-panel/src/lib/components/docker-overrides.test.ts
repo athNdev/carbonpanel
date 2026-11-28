@@ -120,7 +120,27 @@ test('semantically invalid overrides are rejected with the offending field named
 		['{"labels":null}', /Docker overrides field "labels" must be an object of strings/],
 		['{"volumes":{}}', /Docker overrides field "volumes" must be an array/],
 		['{"volumes":[5]}', /Docker overrides field "volumes" entries must be objects/],
+		[
+			'{"volumes":[{"source":5}]}',
+			/Docker overrides field "volumes\[0\]\.source" must be a string/
+		],
+		[
+			'{"volumes":[{"readOnly":"yes"}]}',
+			/Docker overrides field "volumes\[0\]\.readOnly" must be a boolean/
+		],
+		[
+			'{"volumes":[{"source":"/a","bogus":true}]}',
+			/unknown Docker overrides field "volumes\[0\]\.bogus"/
+		],
+		['{"volumes":[{"__proto__":{}}]}', /unknown Docker overrides field "volumes\[0\]\.__proto__"/],
+		['{"capAdd":[5]}', /Docker overrides field "capAdd\[0\]" must be a string/],
+		['{"capAdd":[null]}', /Docker overrides field "capAdd\[0\]" must be a string/],
 		['{"capAdd":"NET_ADMIN"}', /Docker overrides field "capAdd" must be an array/],
+		['{"dns":["1.1.1.1",{}]}', /Docker overrides field "dns\[1\]" must be a string/],
+		[
+			'{"memoryLimit":9007199254740993}',
+			/Docker overrides field "memoryLimit" is not exactly representable as a number; use a decimal string/
+		],
 		['{"privileged":"true"}', /Docker overrides field "privileged" must be a boolean/],
 		['{"networkMode":5}', /Docker overrides field "networkMode" must be a string/],
 		['{"cpu_limt":2}', /unknown Docker overrides field "cpu_limt"/],
@@ -141,6 +161,40 @@ test('semantically invalid overrides are rejected with the offending field named
 			json
 		);
 	}
+});
+
+test('a valid volume mount entry normalizes and snapshots', () => {
+	const parsed = JSON.parse(
+		'{"volumes":[{"source":"/host/data","target":"/data","type":"bind","readOnly":true,"createDir":false}]}'
+	);
+
+	const overrides = normalizeDockerOverrides(parsed);
+	assert.ok(overrides);
+	assert.equal(overrides.volumes.length, 1);
+	const [volume] = overrides.volumes;
+	assert.equal(volume.source, '/host/data');
+	assert.equal(volume.target, '/data');
+	assert.equal(volume.type, 'bind');
+	assert.equal(volume.readOnly, true);
+	assert.equal(volume.createDir, false);
+
+	const form = formWith(overrides);
+	assert.doesNotThrow(() => snapshotServerForm(form));
+	const baseline = snapshotServerForm(form);
+	assert.equal(
+		dockerOverridesFingerprint(form.dockerOverrides),
+		dockerOverridesFingerprint(baseline.dockerOverrides)
+	);
+});
+
+test('int64 decimal strings stay exact at both range ends', () => {
+	const max = normalizeDockerOverrides(JSON.parse('{"memoryLimit":"9223372036854775807"}'));
+	const min = normalizeDockerOverrides(JSON.parse('{"memoryLimit":"-9223372036854775808"}'));
+
+	assert.equal(max?.memoryLimit, 9223372036854775807n);
+	assert.equal(min?.memoryLimit, -9223372036854775808n);
+	assert.doesNotThrow(() => snapshotServerForm(formWith(max)));
+	assert.doesNotThrow(() => snapshotServerForm(formWith(min)));
 });
 
 test('a decimal int64 string is still coerced to bigint after validation', () => {
