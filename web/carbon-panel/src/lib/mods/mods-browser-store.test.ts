@@ -272,8 +272,11 @@ describe('mods browser store — install region', () => {
 		});
 
 		assert.equal(response.success, false, 'only the dependency was installed');
-		assert.match(response.message, /root\.jar/);
-		assert.match(response.message, /dependencies/);
+		assert.equal(
+			response.message,
+			'The selected mod file root.jar was not installed.',
+			'the message must not claim dependencies were the only installed items'
+		);
 		assert.equal(store.sessionCount, 0, 'the root mod must not be recorded as installed');
 		assert.deepEqual(
 			store.installOutcomes.map((row) => [row.label, row.tone]),
@@ -283,6 +286,29 @@ describe('mods browser store — install region', () => {
 			],
 			'per-item outcome rows stay visible'
 		);
+	});
+
+	test('a padded or path-bearing root file name matches the installed basename', async () => {
+		const store = makeStore({
+			install: async () => ({
+				success: true,
+				installed: ['root.jar'],
+				errors: [],
+				message: 'Installed'
+			})
+		});
+		store.setTarget(serverTarget);
+		await store.submitSearch();
+
+		const response = await store.installServerItems({
+			items: [{ name: 'Root', file_name: 'root.jar', download_url: 'u1' }],
+			root: { platform: 'modrinth', id: 'root', title: 'Root', version: '1', depCount: 0 },
+			rootFileName: '  mods/root.jar  '
+		});
+
+		assert.equal(response.success, true, 'the trimmed basename must match the server list');
+		assert.equal(store.sessionCount, 1);
+		assert.equal(store.sessionInstalled[0].key, 'modrinth:root');
 	});
 
 	test('the root mod is recorded when only a dependency failed', async () => {

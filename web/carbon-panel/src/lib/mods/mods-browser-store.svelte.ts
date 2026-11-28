@@ -453,7 +453,13 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 				}
 				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Local non-reactive lookup, discarded after mapping outcomes.
 				const installedFiles = new Set(response.installed);
-				const rootInstalled = installedFiles.has(options.rootFileName);
+				// The server reports installed files by the base name of the trimmed
+				// request name (`filepath.Base(strings.TrimSpace(...))`), so the
+				// selected version's name may be padded or path-bearing and still
+				// match. The raw name stays in the failure message.
+				const trimmedRootFileName = options.rootFileName.trim();
+				const rootBasename = trimmedRootFileName.split(/[\\/]/).pop() || trimmedRootFileName;
+				const rootInstalled = installedFiles.has(rootBasename);
 				const succeeded = response.success && rootInstalled;
 				// The server names each failed item inside its error strings
 				// ("skipped <name>: …"); attribute per item when possible and
@@ -491,7 +497,7 @@ export function createModsBrowserStore(ports: ModsBrowserPorts) {
 					success: succeeded,
 					message:
 						response.success && !rootInstalled
-							? `The selected mod file ${options.rootFileName} was not installed; the server installed only its dependencies.`
+							? `The selected mod file ${options.rootFileName} was not installed.`
 							: response.message,
 					errors: response.errors
 				};
