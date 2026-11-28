@@ -19,6 +19,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/alias"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/datawrite"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/module"
@@ -991,6 +992,10 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		if _, err := staging.StageModuleChange(ctx, s.store, server, module.ID, "module "+module.Name, needsRecreate, fields, s.storageResolver); err != nil {
 			if nodestorage.IsUnavailable(err) {
 				return nil, connect.NewError(connect.CodeUnavailable, err)
+			}
+			if errors.Is(err, datawrite.ErrExclusiveHeld) {
+				return nil, connect.NewError(connect.CodeAborted,
+					errors.New("a staged update is being published; retry after it finishes"))
 			}
 			if errors.Is(err, storage.ErrDuplicateStagedTarget) || errors.Is(err, storage.ErrUpdateBatchConflict) || errors.Is(err, storage.ErrModpackBatchConflict) {
 				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
