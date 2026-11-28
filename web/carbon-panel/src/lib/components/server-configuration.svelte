@@ -197,10 +197,15 @@ one at https://mozilla.org/MPL/2.0/.
 		return () => window.removeEventListener('hashchange', checkUrlHash);
 	});
 
+	// A save starts a fresh batch read. An older read that resolves later must
+	// not replace the window the operator just stored.
+	let batchRead = 0;
 	async function loadBatch() {
 		if (!server) return;
+		const generation = ++batchRead;
 		try {
 			const batch = await rpcClient.config.getUpdateBatch({ serverId: server.id });
+			if (generation !== batchRead) return;
 			batchOpen = batch.open;
 			batchItems = batch.items ?? [];
 			if (batch.window === ConfigApplyWindow.AT_TIME) applyWindow = 'time';
@@ -213,6 +218,7 @@ one at https://mozilla.org/MPL/2.0/.
 				applyAtLocal = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T${pad(when.getHours())}:${pad(when.getMinutes())}`;
 			}
 		} catch (error) {
+			if (generation !== batchRead) return;
 			console.error(error);
 		}
 	}

@@ -71,6 +71,7 @@
 - [Runtime artifact format support — Decision](runtime-artifact-formats-decision.md) — Candidate artifact kinds and the evidence required before publication.
 - [Runtime artifact format support — Decision (part 2)](runtime-artifact-formats-decision-2.md) — A filename suffix or byte count is never a deployable-artifact claim.
 - [Scoped local dev-nightly updater](dev-nightly-local-updater.md) — Digest identity, scope and rollback rules for the local WSL Compose updater.
+- [Server configuration batch-read fencing](server-configuration-batch-read-fencing.md) — The Configuration screen applies only the newest staging-window read, so a pre-save response cannot replace the window an operator just stored.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Shared lazy editor runtime](editor-runtime.md) — Both Monaco views share a cached lazy bootstrap while owning their editor models and pending-load lifetime.
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.
