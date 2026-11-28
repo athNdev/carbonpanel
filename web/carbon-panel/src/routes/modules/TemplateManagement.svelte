@@ -18,7 +18,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm
 	} from '$lib/components/carbon';
 	import DynamicIcon from '$lib/components/ui/DynamicIcon.svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { ModuleTemplate } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { ModuleTemplateType } from '$lib/proto/carbonpanel/v1/module_pb';
@@ -44,8 +44,8 @@ one at https://mozilla.org/MPL/2.0/.
 			if (!silent) loading = true;
 			const response = await rpcClient.module.listModuleTemplates({});
 			templates = response.templates;
-		} catch {
-			if (!silent) toast.error('Failed to load module templates');
+		} catch (error) {
+			if (!silent && !wasRpcErrorToasted(error)) toast.error('Failed to load module templates');
 		} finally {
 			if (!silent) loading = false;
 		}
@@ -67,9 +67,11 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Template "${template.name}" deleted`);
 			await loadTemplates(true);
 		} catch (error) {
-			toast.error(
-				`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			if (!wasRpcErrorToasted(error)) {
+				toast.error(
+					`Failed to delete template: ${error instanceof Error ? error.message : 'Unknown error'}`
+				);
+			}
 		} finally {
 			pendingDelete = null;
 		}
