@@ -44,7 +44,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function handleInspect() {
 		error = null;
 		if (!rawInput.trim()) {
-			error = 'Please paste manifest JSON or upload a manifest file.';
+			error = 'Paste manifest JSON or upload a manifest file.';
 			return;
 		}
 		try {
@@ -73,7 +73,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!inspection) return;
 		const exportText = exportServerManifest(inspection);
 		navigator.clipboard.writeText(exportText);
-		toast.success('Server-ready manifest copied to clipboard!');
+		toast.success('Server-ready manifest copied to clipboard');
 	}
 
 	function downloadServerManifest() {
@@ -120,7 +120,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <CarbonModal
 	bind:open
-	title="CurseForge and Modrinth Manifest Inspector"
+	title="Inspect modpack manifest"
 	description="Inspect modpack manifests, detect client-only vs server-side mods, and export server-clean manifests."
 	size="4xl"
 	hasFooter={false}
@@ -143,7 +143,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<textarea
 				bind:value={rawInput}
 				rows={10}
-				placeholder="Paste manifest.json or modrinth.index.json contents here..."
+				placeholder="Paste manifest.json or modrinth.index.json contents here…"
 				class="w-full rounded-none border-b border-border bg-muted p-3 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 			></textarea>
 
@@ -233,7 +233,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div class="w-48">
-					<CarbonSearch placeholder="Search mods..." bind:value={searchQuery} size="sm" />
+					<CarbonSearch placeholder="Search mods…" bind:value={searchQuery} size="sm" />
 				</div>
 			</div>
 

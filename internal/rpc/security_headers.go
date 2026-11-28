@@ -18,10 +18,15 @@ import (
 // 'unsafe-inline'. Everything else is locked to same-origin: no plugins,
 // no framing by foreign origins, no cross-origin form posts. connect-src
 // covers the console WebSocket on the same origin (ws:/wss:).
+//
+// img-src carries blob: because player skins are fetched through the
+// same-origin RPC and rendered from an object URL the page itself created.
+// Without it the browser refuses the image and every avatar renders as a
+// broken image instead of the skin. data: covers inline placeholder images.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: https:; " +
+	"img-src 'self' data: blob: https:; " +
 	"font-src 'self' data:; " +
 	"connect-src 'self' ws: wss:; " +
 	"frame-ancestors 'self'; " +

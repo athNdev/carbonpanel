@@ -289,7 +289,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		const file = files[0];
 		if (!file.name.endsWith('.zip')) {
-			toast.error('Please select a valid modpack ZIP file');
+			toast.error('Select a modpack ZIP file');
 			return;
 		}
 
@@ -315,7 +315,7 @@ one at https://mozilla.org/MPL/2.0/.
 				description: ''
 			});
 
-			toast.success(`Modpack "${result.modpack?.name}" imported successfully`);
+			toast.success(`Modpack "${result.modpack?.name}" imported`);
 			await Promise.all([searchModpacks(), loadUploadedPacks()]);
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message === 'Upload cancelled') {
@@ -345,7 +345,7 @@ one at https://mozilla.org/MPL/2.0/.
 	async function handleRemoteImport() {
 		const trimmedUrl = remoteUrl.trim();
 		if (!trimmedUrl) {
-			toast.error('Please enter a valid modpack URL');
+			toast.error('Enter a modpack URL');
 			return;
 		}
 
@@ -360,7 +360,7 @@ one at https://mozilla.org/MPL/2.0/.
 				authToken: remoteAuthToken.trim()
 			});
 
-			toast.success(res.message || 'Modpack imported successfully');
+			toast.success(res.message || 'Modpack imported');
 			showImportModal = false;
 			remoteUrl = '';
 			remoteName = '';
@@ -383,13 +383,11 @@ one at https://mozilla.org/MPL/2.0/.
 			const res = await rpcClient.node.listNodes({});
 			const active = (res.nodes || []).filter((n) => n.enabled && n.status === NodeStatus.ONLINE);
 			if (active.length === 0) {
-				toast.error(
-					'No active Docker nodes available — add and enable a node in Settings → Docker Nodes before creating a server.'
-				);
+				toast.error('No active Docker nodes. Register one in Settings → Docker Nodes first.');
 				return;
 			}
 		} catch (error) {
-			toast.error('Could not verify available nodes. Please try again.');
+			toast.error('Could not verify available nodes. Try again.');
 			console.error(error);
 			return;
 		}
@@ -410,7 +408,7 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!modpack) return;
 		try {
 			await rpcClient.modpack.deleteModpack({ id: modpack.id });
-			toast.success(`Modpack "${modpack.name}" deleted successfully`);
+			toast.success(`Modpack "${modpack.name}" deleted`);
 
 			uploadedPacks = uploadedPacks.filter((m) => m.id !== modpack.id);
 			favorites = favorites.filter((m) => m.id !== modpack.id);
@@ -466,7 +464,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#snippet actions()}
 			<CarbonButton kind="primary" size="md" onclick={() => (showImportModal = true)}>
 				<Upload class="mr-1.5 h-4 w-4" />
-				Import Modpack
+				Import modpack
 			</CarbonButton>
 
 			<CarbonButton
@@ -486,7 +484,7 @@ one at https://mozilla.org/MPL/2.0/.
 				onclick={() => (showManifestInspector = true)}
 			>
 				<FileSearch class="mr-1.5 h-4 w-4" />
-				Inspect Manifest
+				Inspect manifest
 			</CarbonButton>
 		{/snippet}
 	</CarbonPageHeader>
@@ -520,7 +518,7 @@ one at https://mozilla.org/MPL/2.0/.
 					href={resolve('/settings?tab=api-keys')}
 				>
 					<Settings class="mr-1 h-3.5 w-3.5" />
-					Custom API Key
+					Custom API key
 				</CarbonButton>
 			</div>
 		{/if}
@@ -531,7 +529,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="grid grid-cols-1 gap-2 md:grid-cols-12">
 					<div class="md:col-span-4">
 						<CarbonSearch
-							placeholder="Search modpacks by name or description..."
+							placeholder="Search modpacks by name or description…"
 							bind:value={searchParams.query}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') searchModpacks();
@@ -598,7 +596,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="flex items-center gap-2">
 						<CarbonButton kind="tertiary" size="sm" onclick={syncModpacks} disabled={syncing}>
 							<RefreshCw class={`mr-1.5 h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
-							Sync {indexerName}
+							Sync from {indexerName}
 						</CarbonButton>
 					</div>
 
@@ -619,7 +617,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if uploading && uploadProgress}
 			<div class="space-y-2 border border-border bg-card p-4">
 				<div class="flex items-center justify-between text-xs">
-					<span class="font-medium text-foreground">Importing modpack archive...</span>
+					<span class="font-medium text-foreground">Importing modpack archive…</span>
 					<div class="flex items-center gap-3 font-mono text-muted-foreground">
 						<span>{uploadProgress.percentComplete.toFixed(0)}%</span>
 						<span
@@ -757,7 +755,7 @@ one at https://mozilla.org/MPL/2.0/.
 										size="sm"
 										onclick={() => handleUseInServer(modpack)}
 									>
-										Use in Server
+										Create server
 									</CarbonButton>
 								</span>
 							</div>
@@ -775,9 +773,9 @@ one at https://mozilla.org/MPL/2.0/.
 					{#if showFavorites}
 						No favorite modpacks found
 					{:else if loading}
-						Loading modpack catalog...
+						Loading modpack catalog…
 					{:else if syncing}
-						Syncing modpacks from indexers...
+						Syncing modpacks from indexers…
 					{:else if searchParams.query}
 						No modpacks matching "{searchParams.query}"
 					{:else}
@@ -786,10 +784,9 @@ one at https://mozilla.org/MPL/2.0/.
 				</p>
 				<p class="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
 					{#if showFavorites}
-						Click the heart icon on any package to add it to your pinned favorites.
+						Use the heart icon to pin a modpack to favorites.
 					{:else if !loading && !syncing}
-						Click "Sync" to index popular modpacks, or use "Import Modpack" to add a ZIP archive or
-						a direct URL.
+						Sync indexes the Modrinth/CurseForge catalogs. Import adds a ZIP or URL.
 					{/if}
 				</p>
 				{#if !showFavorites && !loading && !syncing && (searchParams.query || searchParams.gameVersion || searchParams.modLoader)}
@@ -804,7 +801,7 @@ one at https://mozilla.org/MPL/2.0/.
 							searchModpacks();
 						}}
 					>
-						Clear search & filters
+						Clear search and filters
 					</CarbonButton>
 				{/if}
 			</div>
@@ -846,8 +843,8 @@ one at https://mozilla.org/MPL/2.0/.
 	<!-- Import Modpack: one entry point, two methods -->
 	<CarbonModal
 		bind:open={showImportModal}
-		title="Import Modpack"
-		description="Add a modpack package to your library from a ZIP archive or a direct URL"
+		title="Import modpack"
+		description="Add a modpack from a ZIP archive or direct URL"
 		hasFooter={false}
 		size="3xl"
 	>
@@ -880,7 +877,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 					<CarbonButton kind="primary" size="md" onclick={chooseZipFile} disabled={uploading}>
 						<Upload class="mr-2 h-4 w-4" />
-						{uploading ? 'Importing...' : 'Choose ZIP File'}
+						{uploading ? 'Importing…' : 'Choose ZIP file'}
 					</CarbonButton>
 				</section>
 			{:else}
@@ -904,7 +901,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<CarbonTextInput
-						label="Modpack Archive URL *"
+						label="Modpack archive URL *"
 						placeholder="https://github.com/owner/repo/releases/download/v1.0/modpack.zip"
 						bind:value={remoteUrl}
 						disabled={importingRemote}
@@ -913,13 +910,13 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 						<CarbonTextInput
-							label="Pack Name (Optional)"
+							label="Pack name (optional)"
 							placeholder="Auto-detected if blank"
 							bind:value={remoteName}
 							disabled={importingRemote}
 						/>
 						<CarbonTextInput
-							label="Minecraft Version"
+							label="Minecraft version"
 							placeholder="e.g. 1.20.1 (or auto-detect)"
 							bind:value={remoteMcVersion}
 							disabled={importingRemote}
@@ -942,7 +939,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 						<CarbonTextInput
 							type="password"
-							label="Auth Token (Optional)"
+							label="Auth token (optional)"
 							placeholder="Bearer token or GitHub PAT"
 							bind:value={remoteAuthToken}
 							disabled={importingRemote}
@@ -950,7 +947,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<CarbonTextInput
-						label="Description (Optional)"
+						label="Description (optional)"
 						placeholder="Brief description or release summary"
 						bind:value={remoteDescription}
 						disabled={importingRemote}
@@ -973,10 +970,10 @@ one at https://mozilla.org/MPL/2.0/.
 						>
 							{#if importingRemote}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Downloading & Importing...
+								Downloading and importing…
 							{:else}
 								<Download class="mr-2 h-4 w-4" />
-								Import Modpack
+								Import modpack
 							{/if}
 						</CarbonButton>
 					</div>
@@ -1008,7 +1005,7 @@ one at https://mozilla.org/MPL/2.0/.
 		bind:open={confirmOpen}
 		title="Delete modpack?"
 		message="This action cannot be undone."
-		confirmLabel="Delete Modpack"
+		confirmLabel="Delete modpack"
 		danger
 		onconfirm={confirmDeleteModpack}
 		onclose={() => (pendingDelete = null)}

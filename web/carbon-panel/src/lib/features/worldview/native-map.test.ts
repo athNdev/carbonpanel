@@ -4,12 +4,16 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import {
 	blockScale,
+	CHUNKS_PER_TILE,
 	loadNativeManifest,
 	loadNativeTile,
+	nativeDimensionLabel,
 	nativeSessionRoot,
 	parseNativeCoordinate,
+	savedAgeLabel,
 	tileKey,
 	visibleNativeTiles,
+	type NativeTileRequest,
 	type TileResult
 } from './native-map';
 import { createNativeTileLoader } from './native-map-loader';
@@ -80,6 +84,7 @@ test('tile queue deduplicates visible tiles, fences stale results, and holds two
 	let result = new Map<string, TileResult>();
 	const loader = createNativeTileLoader(
 		session,
+		'overworld',
 		(next) => (result = new Map(next)),
 		(_root, tile, signal) =>
 			new Promise((finish) => requests.push({ key: tileKey(tile), signal, finish }))
@@ -120,6 +125,7 @@ test('explicit retry refetches a busy visible tile without retaining its old out
 	let result: TileResult | undefined;
 	const loader = createNativeTileLoader(
 		session,
+		'overworld',
 		(next) => (result = next.get('0:0')),
 		async () => statuses.shift() ?? { status: 'unavailable' }
 	);
@@ -131,6 +137,192 @@ test('explicit retry refetches a busy visible tile without retaining its old out
 		assert.equal(result, undefined);
 		await setImmediate();
 		assert.deepEqual(result, { status: 'empty' });
+	} finally {
+		loader.dispose();
+	}
+});
+
+function withFetch(body: unknown, run: () => Promise<void>): Promise<void> {
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () =>
+		new Response(JSON.stringify(body), {
+			status: 200,
+			headers: { 'content-type': 'application/json' }
+		})) as typeof fetch;
+	return run().finally(() => {
+		globalThis.fetch = original;
+	});
+}
+
+test('the manifest dimension list is sanitized and always offers the overworld', async () => {
+	await withFetch(
+		{
+			tileBlocks: 128,
+			dimension: 'overworld',
+			spawn: null,
+			dimensions: ['overworld', 'nether', 'end']
+		},
+		async () => {
+			const result = await loadNativeManifest(session, new AbortController().signal);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld',
+				'nether',
+				'end'
+			]);
+		}
+	);
+	await withFetch(
+		{
+			tileBlocks: 128,
+			dimension: 'overworld',
+			spawn: null,
+			dimensions: ['../escape', 'nether', 'overworld', 'nether', '']
+		},
+		async () => {
+			const result = await loadNativeManifest(session, new AbortController().signal);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld',
+				'nether'
+			]);
+		}
+	);
+	await withFetch({ tileBlocks: 128, dimension: 'overworld', spawn: null }, async () => {
+		const result = await loadNativeManifest(session, new AbortController().signal);
+		assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+			'overworld'
+		]);
+	});
+	await withFetch(
+		{ tileBlocks: 128, dimension: 'overworld', spawn: null, dimensions: 'overworld' },
+		async () => {
+			const result = await loadNativeManifest(session, new AbortController().signal);
+			assert.deepEqual(result.status === 'ready' ? result.manifest.dimensions : result.status, [
+				'overworld'
+			]);
+		}
+	);
+});
+
+test('saved-age labels stay honest for unknown or future timestamps', () => {
+	const now = Date.parse('2026-11-23T12:00:00Z');
+	assert.equal(savedAgeLabel(null, now), null);
+	assert.equal(savedAgeLabel('not-a-time', now), null);
+	assert.equal(savedAgeLabel('2026-11-23T11:59:40Z', now), 'just now');
+	assert.equal(savedAgeLabel('2026-11-23T11:59:00Z', now), '1 minute ago');
+	assert.equal(savedAgeLabel('2026-11-23T11:00:00Z', now), '1 hour ago');
+	assert.equal(savedAgeLabel('2026-11-20T12:00:00Z', now), '3 days ago');
+	assert.equal(nativeDimensionLabel('overworld'), 'Overworld');
+	assert.equal(nativeDimensionLabel('nether'), 'The Nether');
+	assert.equal(nativeDimensionLabel('custom_dim'), 'custom_dim');
+});
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test('live mode revalidates complete tiles with the region validator and keeps a 304 image', async () => {
+	const saved: TileResult = {
+		status: 'saved',
+		src: 'data:image/png;base64,',
+		chunks: CHUNKS_PER_TILE,
+		provisionalChunks: 0,
+		savedAt: '2026-11-23T00:00:00Z',
+		regionModified: '"123-456"'
+	};
+	let result: TileResult | undefined;
+	const requests: {
+		request: NativeTileRequest | undefined;
+		finish: (result: TileResult) => void;
+	}[] = [];
+	const loader = createNativeTileLoader(
+		session,
+		'overworld',
+		(next) => (result = next.get('0:0')),
+		(_root, _tile, _signal, request) => new Promise((finish) => requests.push({ request, finish })),
+		{ live: false, liveRecheckDelayMs: 5 }
+	);
+	try {
+		loader.setVisible([{ x: 0, z: 0 }]);
+		await setImmediate();
+		requests[0].finish(saved);
+		await setImmediate();
+		assert.equal(result, saved);
+
+		// Live off (the classic map): a complete tile is never rechecked.
+		await flush();
+		assert.equal(requests.length, 1);
+
+		// Live on: the revalidation echoes the region validator. A 304 keeps
+		// the cached image without publishing a replacement.
+		loader.setLive(true);
+		await flush();
+		assert.equal(requests.length, 2);
+		assert.deepEqual(requests[1].request, { dimension: 'overworld', ifNoneMatch: '"123-456"' });
+		requests[1].finish({ status: 'unchanged' });
+		await setImmediate();
+		assert.equal(result, saved);
+		const afterUnchanged = requests.length;
+
+		// Turning live off again stops the revalidation cadence.
+		loader.setLive(false);
+		await flush();
+		assert.equal(requests.length, afterUnchanged);
+
+		// A live toggle only changes the cadence: the cached tile and its
+		// validator survive, so the next revalidation stays conditional
+		// instead of refetching the tile unconditionally.
+		assert.equal(result, saved);
+		loader.setLive(true);
+		await flush();
+		assert.equal(requests.length, afterUnchanged + 1);
+		assert.deepEqual(requests[afterUnchanged].request, {
+			dimension: 'overworld',
+			ifNoneMatch: '"123-456"'
+		});
+	} finally {
+		loader.dispose();
+	}
+});
+
+test('a changed region re-renders and the tile dimension flows into the request', async () => {
+	let result: TileResult | undefined;
+	const requests: {
+		request: NativeTileRequest | undefined;
+		finish: (result: TileResult) => void;
+	}[] = [];
+	const loader = createNativeTileLoader(
+		session,
+		'nether',
+		(next) => (result = next.get('-3:4')),
+		(_root, _tile, _signal, request) => new Promise((finish) => requests.push({ request, finish })),
+		{ live: false, liveRecheckDelayMs: 5 }
+	);
+	try {
+		loader.setVisible([{ x: -3, z: 4 }]);
+		await setImmediate();
+		assert.deepEqual(requests[0].request, { dimension: 'nether' });
+		requests[0].finish({
+			status: 'saved',
+			src: 'data:image/png;base64,',
+			chunks: CHUNKS_PER_TILE,
+			provisionalChunks: 0,
+			savedAt: null,
+			regionModified: '"a-1"'
+		});
+		await setImmediate();
+		loader.setLive(true);
+		await flush();
+		assert.equal(requests.length, 2);
+		assert.deepEqual(requests[1].request, { dimension: 'nether', ifNoneMatch: '"a-1"' });
+		requests[1].finish({
+			status: 'saved',
+			src: 'data:image/png;base64,2',
+			chunks: CHUNKS_PER_TILE,
+			provisionalChunks: 0,
+			savedAt: null,
+			regionModified: '"a-2"'
+		});
+		await setImmediate();
+		assert.equal(result?.status, 'saved');
+		assert.equal(result !== undefined && result.regionModified, '"a-2"');
 	} finally {
 		loader.dispose();
 	}

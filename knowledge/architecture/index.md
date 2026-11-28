@@ -8,11 +8,12 @@
 - [Host-native private daemon mode — Rule](host-native-runtime-rule.md) — internal/noderuntime/native is the HOST-NATIVE LINUX PRIVATE DAEMON mode for
 - [Host-native private daemon mode — Rule (part 2)](host-native-runtime-rule-2.md) — issue-certificate-first atomic consume, controller-derived TLS topology
 - [Host-native private daemon mode — Why + How to check + Read next](host-native-runtime-why.md) — Parallel deployment modes share one enrollment/control contract. Keeping host
+- [Lifecycle queueing and version gate](lifecycle-queueing.md) — Rapid start/stop queueing, the interactive stop window, transition-end convergence and the version-change compatibility gate.
 - [Managed node outbound agent](managed-node-agent.md) — The managed agent binds enrollment and recurring health reports to an explicitly selected controller and private Docker daemon.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
-- [Map viewing — Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
-- [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
-- [Map viewing — Read next](world-viewing-read-next.md) — Fail-closed authorization
+- [Map viewing â€” Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
+- [Map viewing â€” Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
+- [Map viewing â€” Read next](world-viewing-read-next.md) — Fail-closed authorization
 - [Map viewing — Rule](world-viewing-rule.md) — WorldViewService observes worlds; it does not own them. A WorldRef
 - [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
 - [MCP tool gateway — Read next](mcp-server-read-next.md) — Fail-closed authorization
@@ -40,9 +41,11 @@
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Operation journal — Shape + Rules + Read next](operation-journal-shape.md) — Every create, start, stop, restart, delete and migrate is written to
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
+- [Player identity and provenance](player-identity.md) — How identities are registered versus observed, and where skins resolve.
 - [Player lookup profile](player-management-lookup-profile.md) — Read-only exact account resolution, bounded skin portraits and authorized session observations.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
 - [Player management - Identity, provenance and capabilities](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
+- [Player management - Snapshot resolution](player-management-snapshot-resolution.md) — Player snapshots live in the server's active level folder under the dashed UUID file name.
 - [Player management — Authorization and audit](player-management-authorization-and-audit.md) — All PlayerService procedures are mapped to players:* permissions and
 - [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 - [Portable node installer — How to check + Read next](node-installer-how-to-check.md) — go test ./internal/nodeinstall/... and

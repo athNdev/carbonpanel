@@ -146,6 +146,11 @@ func (s *Store) ListActiveServerOperations(ctx context.Context) ([]ServerOperati
 	return ops, err
 }
 
+// ErrServerOperationActive indicates the server is still owned by an active
+// lifecycle operation. Journal read failures return a different error so callers
+// can distinguish "owned" from "unknown".
+var ErrServerOperationActive = errors.New("server operation requires completion or recovery")
+
 func (s *Store) AssertNoServerOperation(ctx context.Context, serverID string) error {
 	var op ServerOperation
 	err := s.db.WithContext(ctx).Where("active_server = ?", serverID).First(&op).Error
@@ -155,7 +160,7 @@ func (s *Store) AssertNoServerOperation(ctx context.Context, serverID string) er
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("server operation %s (%s, phase %s) requires completion or recovery", op.ID, op.Kind, op.Phase)
+	return fmt.Errorf("server operation %s (%s, phase %s): %w", op.ID, op.Kind, op.Phase, ErrServerOperationActive)
 }
 
 // WorldViewOperationState takes one journal snapshot for a map scope. Any

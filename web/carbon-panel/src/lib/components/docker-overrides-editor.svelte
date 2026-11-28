@@ -19,6 +19,11 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { DockerOverrides, VolumeMount } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { DockerOverridesSchema, VolumeMountSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { create } from '@bufbuild/protobuf';
+	import {
+		DockerOverridesValidationError,
+		normalizeDockerOverrides,
+		formatDockerOverrides
+	} from '$lib/components/docker-overrides';
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 
@@ -67,7 +72,7 @@ one at https://mozilla.org/MPL/2.0/.
 	// Initialize JSON text when switching modes
 	$effect(() => {
 		if (jsonMode) {
-			jsonText = JSON.stringify(overrides || {}, null, 2);
+			jsonText = formatDockerOverrides(overrides);
 		}
 	});
 
@@ -76,12 +81,17 @@ one at https://mozilla.org/MPL/2.0/.
 			// Parse JSON and update overrides
 			try {
 				const parsed = jsonText.trim() ? JSON.parse(jsonText) : {};
-				overrides = Object.keys(parsed).length > 0 ? parsed : undefined;
+				// The editor owns the plain-object boundary: the form must hold
+				// a real message so save/clone and the dirty fingerprint agree.
+				overrides = normalizeDockerOverrides(parsed);
 				jsonError = '';
 				jsonMode = false;
 				onchange?.(overrides);
 			} catch (e) {
-				jsonError = `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
+				jsonError =
+					e instanceof DockerOverridesValidationError
+						? e.message
+						: `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`;
 			}
 		} else {
 			jsonMode = true;
@@ -349,10 +359,16 @@ one at https://mozilla.org/MPL/2.0/.
 							oninput={(e) => updateJsonText(e.currentTarget.value)}
 							{disabled}
 							placeholder={'{}'}
+							aria-invalid={jsonError ? 'true' : undefined}
+							aria-describedby={jsonError ? 'docker-overrides-json-error' : undefined}
 							class="min-h-50 font-mono text-xs {jsonError ? 'border-destructive' : ''}"
 						/>
 						{#if jsonError}
-							<div class="flex items-center gap-2 text-xs text-destructive">
+							<div
+								id="docker-overrides-json-error"
+								role="alert"
+								class="flex items-center gap-2 text-xs text-destructive"
+							>
 								<AlertCircle class="h-3 w-3" />
 								{jsonError}
 							</div>

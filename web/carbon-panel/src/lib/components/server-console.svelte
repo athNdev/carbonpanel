@@ -484,7 +484,7 @@ one at https://mozilla.org/MPL/2.0/.
 				{#if searchQuery.trim() !== '' && logEntries.length > 0}
 					No lines match this filter.
 				{:else if server.status === ServerStatus.CREATING}
-					Server container is being initialized and configured...
+					Server container is being initialized and configured…
 				{:else if [ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status)}
 					No logs available. Try refreshing or waiting for container output.
 				{:else}
@@ -622,7 +622,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#snippet toolbar()}
 			<div class="flex items-center gap-2 px-4 py-2">
 				<div class="flex-1">
-					<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
+					<CarbonSearch bind:value={searchQuery} placeholder="Filter logs…" size="sm" />
 				</div>
 				{#if searchQuery.trim() !== ''}
 					<span class="font-mono text-xs whitespace-nowrap text-muted-foreground">
@@ -661,11 +661,11 @@ one at https://mozilla.org/MPL/2.0/.
 					<input
 						type="text"
 						placeholder={server.status === ServerStatus.CREATING
-							? 'Server is creating...'
+							? 'Server is creating…'
 							: server.status === ServerStatus.STARTING
-								? 'Server is starting...'
+								? 'Server is starting…'
 								: server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY
-									? 'Enter Minecraft server command (↑↓ recalls history)...'
+									? 'Enter Minecraft server command (↑↓ recalls history)…'
 									: 'Server must be active to execute commands'}
 						bind:value={command}
 						disabled={server.status !== ServerStatus.RUNNING &&

@@ -11,6 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import '../app.css';
 	import CarbonShell from '$lib/components/carbon/CarbonShell.svelte';
+	import CarbonSpinner from '$lib/components/carbon/CarbonSpinner.svelte';
 	import { displayPreferences } from '$lib/display-preferences.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -150,8 +151,24 @@ one at https://mozilla.org/MPL/2.0/.
 	{#if page.url.pathname === '/login'}
 		{@render children?.()}
 	{:else if loading}
-		<div class="flex min-h-screen items-center justify-center bg-background" role="status">
-			<div class="h-10 w-10 animate-spin border-4 border-primary border-t-transparent"></div>
+		<!--
+			Boot screen mirrors CarbonShell's chrome so the swap cannot jump: a
+			48px (h-12) placeholder bar with the same bottom border stands in for
+			the fixed header, and the spinner centers in the remaining column.
+			role="status" + sr-only text keep exactly one live announcement; the
+			spinner itself is presentational.
+		-->
+		<div class="flex min-h-dvh flex-col bg-background" role="status">
+			<div class="h-12 shrink-0 border-b border-border" aria-hidden="true"></div>
+			<div class="flex flex-1 items-center justify-center">
+				<span class="text-primary" aria-hidden="true">
+					<CarbonSpinner
+						size="lg"
+						label="Loading Carbon Panel"
+						description="Loading Carbon Panel..."
+					/>
+				</span>
+			</div>
 			<span class="sr-only">Loading Carbon Panel…</span>
 		</div>
 	{:else}

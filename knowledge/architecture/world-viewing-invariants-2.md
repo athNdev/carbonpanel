@@ -1,10 +1,10 @@
----
+﻿---
 type: Architecture
-title: "Map viewing — Invariants (part 2)"
+title: "Map viewing â€” Invariants (part 2)"
 description: "(no host allocation/publication), read-only /app/world bind of the canonical"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, web/carbon-panel/src/routes/worlds]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md

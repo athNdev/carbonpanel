@@ -44,6 +44,11 @@ import (
 // in-flight execution of the same task (MINE-146, surfaced as 409).
 var ErrTaskAlreadyRunning = errors.New("task is already running")
 
+// errInvalidTaskSchedule distinguishes an invalid schedule definition from a
+// transient failure while persisting a valid schedule. Only the former may
+// disable a task.
+var errInvalidTaskSchedule = errors.New("invalid task schedule")
+
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
@@ -386,8 +391,22 @@ func (s *Scheduler) checkAndRunDueTasks() {
 			continue
 		}
 
-		// Update next run time immediately to prevent re-querying from DB if check runs again before task finishes
-		s.updateNextRun(task)
+		// Advance the schedule before dispatch. An invalid schedule definition
+		// may disable the task, but a transient persistence failure must leave
+		// it enabled and due for a later retry.
+		if err := s.updateNextRun(task); err != nil {
+			switch {
+			case errors.Is(err, errInvalidTaskSchedule):
+				s.log.Error("Task %s: invalid schedule, refusing dispatch: %v", task.Name, err)
+				if dbErr := s.disableInvalidSchedule(ctx, task); dbErr != nil {
+					s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
+				}
+			default:
+				s.log.Error("Task %s: cannot persist schedule, leaving it due: %v", task.Name, err)
+			}
+			s.releaseTask(task.ID)
+			continue
+		}
 
 		// Execute task asynchronously
 		s.wg.Add(1)
@@ -556,7 +575,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 		// Update next run time if not already updated at dispatch
 		if trigger != "scheduled" {
-			s.updateNextRun(task)
+			if err := s.updateNextRun(task); err != nil {
+				s.log.Error("Task %s: failed to advance schedule after skip: %v", task.Name, err)
+			}
 		}
 		return execution, nil
 	}
@@ -671,7 +692,9 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 
 	// Update next run time if not already updated at dispatch
 	if trigger != "scheduled" {
-		s.updateNextRun(task)
+		if err := s.updateNextRun(task); err != nil {
+			s.log.Error("Task %s: failed to advance schedule after execution: %v", task.Name, err)
+		}
 	}
 
 	return execution, execErr
@@ -787,36 +810,44 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	return fmt.Errorf("execution not found or already finished")
 }
 
-// updateNextRun calculates and updates the next run time for a task
-func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
+// updateNextRun calculates and updates the next run time for a task. It uses
+// CalculateNextRun so dispatch and explicit recalculation honor the same
+// per-task timezone and cannot drift apart.
+func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
-	var nextRun *time.Time
-
-	switch task.Schedule {
-	case storage.ScheduleTypeCron:
-		if task.CronExpr != "" {
-			schedule, err := s.cronParser.Parse(task.CronExpr)
-			if err == nil {
-				next := schedule.Next(now)
-				nextRun = &next
-			}
-		}
-	case storage.ScheduleTypeInterval:
-		if task.IntervalSecs > 0 {
-			next := now.Add(time.Duration(task.IntervalSecs) * time.Second)
-			nextRun = &next
-		}
-	case storage.ScheduleTypeOnce:
-		// Once tasks don't repeat, disable after execution
-		task.Status = storage.TaskStatusDisabled
-		nextRun = nil
-	case storage.ScheduleTypeEvent:
-		// Event-triggered tasks have no time-based next run.
-		nextRun = nil
+	advance := func(nextRun *time.Time) error {
+		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
 	}
+	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
+		if err := advance(nil); err != nil {
+			return fmt.Errorf("clear next run: %w", err)
+		}
+		if task.Schedule == storage.ScheduleTypeOnce {
+			task.Status = storage.TaskStatusDisabled
+		}
+		return nil
+	}
+	nextRun, err := s.CalculateNextRun(task)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errInvalidTaskSchedule, err)
+	}
+	if err := advance(nextRun); err != nil {
+		return fmt.Errorf("store next run: %w", err)
+	}
+	return nil
+}
 
-	s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+// disableInvalidSchedule disables only the exact schedule state that failed
+// calculation. If an operator corrected the task in the meantime, the guarded
+// update matches no row and leaves the corrected schedule enabled.
+func (s *Scheduler) disableInvalidSchedule(ctx context.Context, task *storage.ScheduledTask) error {
+	return s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+		Where("id = ? AND task_type = ? AND status = ? AND schedule = ?", task.ID, task.TaskType, task.Status, task.Schedule).
+		Where("COALESCE(cron_expr, '') = ? AND COALESCE(timezone, '') = ?", task.CronExpr, task.Timezone).
+		Where("COALESCE(interval_secs, 0) = ? AND run_at IS ?", task.IntervalSecs, task.RunAt).
+		Where("next_run IS ?", task.NextRun).
+		Update("status", storage.TaskStatusDisabled).Error
 }
 
 // Task type executors
@@ -1300,9 +1331,36 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 		if task.CronExpr == "" {
 			return nil, fmt.Errorf("cron expression required")
 		}
+		// Timezone applies only to cron slots. An interval or one-shot task
+		// must keep its absolute deadline even if a stale zone is configured.
+		// An explicit TZ=/CRON_TZ= prefix is part of the expression and takes
+		// precedence over the task-level timezone.
+		explicitTimezone := hasExplicitCronTimezone(task.CronExpr)
+		var location *time.Location
+		if !explicitTimezone {
+			if zone := strings.TrimSpace(task.Timezone); zone != "" {
+				location = time.UTC
+				if !strings.EqualFold(zone, "UTC") {
+					loaded, err := time.LoadLocation(zone)
+					if err != nil {
+						return nil, fmt.Errorf("unknown timezone %q: %w; use an IANA zone name and ensure the runtime image includes tzdata", task.Timezone, err)
+					}
+					location = loaded
+				}
+			}
+		}
 		schedule, err := s.cronParser.Parse(task.CronExpr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
+		}
+		// The shared parser builds a spec schedule in the host zone. Rebind its
+		// location so five-field slots are interpreted in the operator's zone.
+		if location != nil {
+			if spec, ok := schedule.(*cron.SpecSchedule); ok {
+				zoneSpec := *spec
+				zoneSpec.Location = location
+				schedule = &zoneSpec
+			}
 		}
 		next := schedule.Next(now)
 		return &next, nil
@@ -1330,6 +1388,10 @@ func (s *Scheduler) CalculateNextRun(task *storage.ScheduledTask) (*time.Time, e
 	default:
 		return nil, fmt.Errorf("unknown schedule type: %s", task.Schedule)
 	}
+}
+
+func hasExplicitCronTimezone(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
 }
 
 // ValidateCronExpr validates a cron expression

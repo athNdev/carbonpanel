@@ -25,6 +25,8 @@ export interface NativeManifest {
 	tileBlocks: typeof TILE_BLOCKS;
 	dimension: 'overworld';
 	spawn: MapPoint | null;
+	/** Saved vanilla dimensions this world offers tiles for, overworld first. */
+	dimensions: string[];
 }
 
 export type NativeMapFailure = 'busy' | 'changed' | 'unsupported' | 'unavailable' | 'access';
@@ -37,8 +39,20 @@ export type TileResult =
 			chunks: number | null;
 			provisionalChunks: number;
 			savedAt: string | null;
+			/**
+			 * Opaque region freshness validator (region size + mtime). Live
+			 * revalidation echoes it back in If-None-Match; a 304 keeps the
+			 * cached image without re-rendering.
+			 */
+			regionModified: string | null;
 	  }
-	| { status: 'empty' | NativeMapFailure };
+	| { status: 'empty' | 'unchanged' | NativeMapFailure };
+
+/** The dimension whose terrain a tile fetch addresses. */
+export interface NativeTileRequest {
+	dimension?: string;
+	ifNoneMatch?: string | null;
+}
 
 export const NATIVE_FAILURE_MESSAGE: Record<NativeMapFailure, string> = {
 	busy: 'Map rendering is busy. Retry in a moment.',
@@ -47,6 +61,44 @@ export const NATIVE_FAILURE_MESSAGE: Record<NativeMapFailure, string> = {
 	unavailable: 'Carbon Panel could not read the map. Retry in a moment.',
 	access: 'The map session is no longer authorized. Refresh the World View page.'
 };
+
+/** Human labels for the vanilla dimensions the native map can serve. */
+const NATIVE_DIMENSION_LABELS: Record<string, string> = {
+	overworld: 'Overworld',
+	nether: 'The Nether',
+	end: 'The End'
+};
+
+export function nativeDimensionLabel(dimension: string): string {
+	return NATIVE_DIMENSION_LABELS[dimension] ?? dimension;
+}
+
+/**
+ * A tile-path dimension segment must stay a plain identifier: it is
+ * interpolated into the proxy URL and validated again server-side.
+ */
+function isDimensionId(value: unknown): value is string {
+	return typeof value === 'string' && /^[a-z0-9_-]{1,32}$/.test(value);
+}
+
+/**
+ * Relative age of the newest chunk save in a view, refreshed by the caller
+ * as its clock ticks. Unknown timestamps report null rather than a
+ * plausible-looking zero.
+ */
+export function savedAgeLabel(savedAt: string | null, nowMs: number = Date.now()): string | null {
+	if (!savedAt) return null;
+	const saved = Date.parse(savedAt);
+	if (!Number.isFinite(saved)) return null;
+	const seconds = Math.max(0, Math.floor((nowMs - saved) / 1000));
+	if (seconds < 60) return 'just now';
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+	const days = Math.floor(hours / 24);
+	return `${days} day${days === 1 ? '' : 's'} ago`;
+}
 
 export function nativeSessionRoot(path: string): string | null {
 	return isSameOriginProxyPath(path) && /^\/api\/v1\/worldview\/map\/[A-Za-z0-9_-]+\/$/.test(path)
@@ -118,13 +170,14 @@ function failure(response: Response): NativeMapFailure {
 	}
 }
 
-function request(path: string, signal: AbortSignal): Promise<Response> {
+function request(path: string, signal: AbortSignal, headers?: HeadersInit): Promise<Response> {
 	return fetch(path, {
 		signal,
 		mode: 'same-origin',
 		credentials: 'same-origin',
 		redirect: 'error',
-		cache: 'no-store'
+		cache: 'no-store',
+		...(headers ? { headers } : {})
 	});
 }
 
@@ -160,9 +213,19 @@ export async function loadNativeManifest(
 		(manifest.spawn !== null && !isPoint(manifest.spawn))
 	)
 		return { status: 'unavailable' };
+	// The dimension list is additive and optional for older panels. A world
+	// always offers the overworld (kept first); every listed dimension stays
+	// a plain identifier that the proxy validates again per tile request.
+	const listed = Array.isArray(manifest.dimensions) ? manifest.dimensions : ['overworld'];
+	const dimensions: string[] = ['overworld'];
+	for (const dimension of listed) {
+		if (dimension === 'overworld') continue;
+		if (!isDimensionId(dimension) || dimensions.includes(dimension)) continue;
+		dimensions.push(dimension);
+	}
 	return {
 		status: 'ready',
-		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', spawn: manifest.spawn }
+		manifest: { tileBlocks: TILE_BLOCKS, dimension: 'overworld', spawn: manifest.spawn, dimensions }
 	};
 }
 
@@ -179,20 +242,39 @@ function toImageSource(image: Blob): Promise<string> {
 export async function loadNativeTile(
 	path: string,
 	tile: MapPoint,
-	signal: AbortSignal
+	signal: AbortSignal,
+	tileRequest: NativeTileRequest = {}
 ): Promise<TileResult> {
 	const root = nativeSessionRoot(path);
+	const dimension = tileRequest.dimension ?? 'overworld';
 	if (
 		!root ||
+		!isDimensionId(dimension) ||
 		![tile.x, tile.z].every(
 			(index) => Number.isInteger(index) && index >= MIN_TILE && index <= MAX_TILE
 		)
 	) {
 		return { status: 'unavailable' };
 	}
-	const url = root + 'native/overworld/' + tile.x + '/' + tile.z + '.png';
-	let response = await request(url, signal);
-	if ((response.status === 503 || response.status === 429) && failure(response) === 'busy') {
+	const url = root + 'native/' + dimension + '/' + tile.x + '/' + tile.z + '.png';
+	const conditional = tileRequest.ifNoneMatch || null;
+	const fetchTile = async (): Promise<Response | TileResult> => {
+		const response = await request(
+			url,
+			signal,
+			conditional ? { 'If-None-Match': conditional } : undefined
+		);
+		// A live client revalidates a fully rendered tile by echoing the
+		// region freshness validator; 304 keeps the cached image.
+		if (conditional && response.status === 304) return { status: 'unchanged' };
+		return response;
+	};
+	let response = await fetchTile();
+	if (
+		response instanceof Response &&
+		(response.status === 503 || response.status === 429) &&
+		failure(response) === 'busy'
+	) {
 		// Minecraft may rewrite the region header during a read. Give that save
 		// one second to finish without changing the session or losing the camera.
 		signal.throwIfAborted();
@@ -207,8 +289,9 @@ export async function loadNativeTile(
 			}
 			signal.addEventListener('abort', abort, { once: true });
 		});
-		response = await request(url, signal);
+		response = await fetchTile();
 	}
+	if (!(response instanceof Response)) return response;
 	if (response.status === 404) return { status: 'empty' };
 	if (!response.ok) return { status: failure(response) };
 	if (mediaType(response) !== 'image/png') return { status: 'unavailable' };
@@ -227,7 +310,15 @@ export async function loadNativeTile(
 		timestamp && /^\d{4}-\d{2}-\d{2}T/.test(timestamp) && Number.isFinite(Date.parse(timestamp))
 			? timestamp
 			: null;
+	const regionModified = response.headers.get('X-CarbonPanel-Region-Modified');
 	const image = await response.blob();
 	if (!image.size || image.size > 256 * 1024) return { status: 'unavailable' };
-	return { status: 'saved', src: await toImageSource(image), chunks, provisionalChunks, savedAt };
+	return {
+		status: 'saved',
+		src: await toImageSource(image),
+		chunks,
+		provisionalChunks,
+		savedAt,
+		regionModified: regionModified !== null && regionModified !== '' ? regionModified : null
+	};
 }

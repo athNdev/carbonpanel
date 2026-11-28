@@ -23,6 +23,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		size?: 'sm' | 'md' | 'lg';
 		/** Offer an explicit operator-driven cache refresh. */
 		refreshable?: boolean;
+		/**
+		 * When false the server reported no resolvable skin for this identity,
+		 * so no request is sent at all: the silhouette is shown without
+		 * caching a placeholder as if the player had no skin.
+		 */
+		skinAvailable?: boolean;
+		/** Also render the full 64x64 skin texture next to the face. */
+		showFullSkin?: boolean;
 	}
 
 	let {
@@ -31,7 +39,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		skinRef = '',
 		serverId = '',
 		size = 'sm',
-		refreshable = false
+		refreshable = false,
+		skinAvailable = true,
+		showFullSkin = false
 	}: Props = $props();
 
 	const sizeClass = {
@@ -40,10 +50,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		lg: 'h-16 w-16'
 	};
 
+	// The 64x64 texture is shown at four times the face's edge so individual
+	// skin pixels stay crisp instead of being smoothed away.
+	const fullSizeClass = {
+		sm: 'h-24 w-24',
+		md: 'h-36 w-36',
+		lg: 'h-64 w-64'
+	};
+
 	let url = $state<string | null>(null);
+	let fullUrl = $state<string | null>(null);
 	let loading = $state(false);
 	let failed = $state(false);
 	let currentUrl: string | null = null;
+	let currentFullUrl: string | null = null;
 	let generation = 0;
 	let refreshing = $state(false);
 
@@ -52,6 +72,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			URL.revokeObjectURL(currentUrl);
 			currentUrl = null;
 		}
+		if (currentFullUrl) {
+			URL.revokeObjectURL(currentFullUrl);
+			currentFullUrl = null;
+		}
+	}
+
+	function toObjectURL(data: Uint8Array, contentType: string | undefined): string {
+		// Copying into a fresh ArrayBuffer-backed view satisfies Blob's part
+		// type even when the RPC bytes use a wider buffer type.
+		const bytes = new Uint8Array(data);
+		const blob = new Blob([bytes], { type: contentType?.trim() || 'image/png' });
+		return URL.createObjectURL(blob);
 	}
 
 	async function loadFace(key: string, ref: string, scope: string, mine: number) {
@@ -71,12 +103,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (mine !== generation) return;
 			const asset = response.asset;
 			if (asset && asset.data.length > 0) {
-				const bytes = new Uint8Array(asset.data);
-				const blob = new Blob([bytes], {
-					type: asset.contentType?.trim() || 'image/png'
-				});
-				const next = URL.createObjectURL(blob);
-				revoke();
+				const next = toObjectURL(new Uint8Array(asset.data), asset.contentType);
+				if (currentUrl) URL.revokeObjectURL(currentUrl);
 				currentUrl = next;
 				url = next;
 			} else {
@@ -89,6 +117,32 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	// The full texture is supplementary: a failure leaves the face intact and
+	// never marks the avatar failed.
+	async function loadFullSkin(key: string, ref: string, scope: string, mine: number) {
+		if (!key || !ref) return;
+		try {
+			const response = await rpcClient.player.getPlayerSkin(
+				create(GetPlayerSkinRequestSchema, {
+					identityKey: key,
+					skinRef: ref,
+					kind: 'skin',
+					serverId: scope
+				})
+			);
+			if (mine !== generation) return;
+			const asset = response.asset;
+			if (asset && asset.data.length > 0) {
+				const next = toObjectURL(new Uint8Array(asset.data), asset.contentType);
+				if (currentFullUrl) URL.revokeObjectURL(currentFullUrl);
+				currentFullUrl = next;
+				fullUrl = next;
+			}
+		} catch {
+			// Supplementary asset: absence is rendered as no full-skin image.
+		}
+	}
+
 	// The skin is fetched only through the same-origin RPC. The rendered src is
 	// an object URL for bytes returned by that RPC — never a third-party URL.
 	$effect(() => {
@@ -98,9 +152,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const mine = ++generation;
 		revoke();
 		url = null;
+		fullUrl = null;
 		failed = false;
 		loading = false;
-		if (key && ref) void loadFace(key, ref, scope, mine);
+		if (key && ref && skinAvailable) {
+			loading = true;
+			void loadFace(key, ref, scope, mine);
+			if (showFullSkin) void loadFullSkin(key, ref, scope, mine);
+		} else if (key && ref) {
+			// The server reported no resolvable skin: show unavailable instead
+			// of sending a request that can only come back as a placeholder.
+			failed = true;
+		}
 		return () => {
 			generation++;
 			revoke();
@@ -116,13 +179,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			);
 			const asset = response.asset;
 			if (asset && asset.data.length > 0) {
-				const bytes = new Uint8Array(asset.data);
-				const blob = new Blob([bytes], {
-					type: asset.contentType?.trim() || 'image/png'
-				});
-				const next = URL.createObjectURL(blob);
+				const next = toObjectURL(new Uint8Array(asset.data), asset.contentType);
 				const mine = generation;
-				revoke();
+				if (currentUrl) URL.revokeObjectURL(currentUrl);
 				currentUrl = next;
 				url = next;
 				failed = false;
@@ -158,6 +217,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<span class="sr-only">{name} skin unavailable</span>
 		{/if}
 	</div>
+	{#if showFullSkin && fullUrl}
+		<img
+			src={fullUrl}
+			alt="{name} full skin texture"
+			class="{fullSizeClass[size]} shrink-0 border border-border bg-muted"
+			style="image-rendering: pixelated"
+		/>
+	{/if}
 	{#if refreshable && identityKey && serverId}
 		<CarbonButton
 			kind="tertiary"

@@ -112,7 +112,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// loop whenever normal roster rows carried a serverId.
 	const options = $derived(projectServerOptions(rosterState.players, serverOptions, serverId));
 
-	const visible = $derived(filterAndSortPlayers(rosterState.players, filter));
+	const visible = $derived(
+		neverObservedLast(filterAndSortPlayers(rosterState.players, filter), filter)
+	);
 	const hasFilters = $derived(
 		filter.serverId !== serverId ||
 			!!filter.query ||
@@ -122,6 +124,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function keyOf(player: PlayerSummary): string {
 		return player.ref?.identityKey || `${player.serverId}:${player.ref?.name || 'unknown'}`;
+	}
+
+	/**
+	 * A player who was never observed in game carries the least information, so
+	 * they sort after every observed player in both directions of the "Last
+	 * seen" sort (NULLS LAST). The shared projection sorts by the lastSeen
+	 * scalar, which cannot express "no observation"; the input order from
+	 * filterAndSortPlayers is stable and preserved inside each partition.
+	 */
+	function neverObservedLast(players: PlayerSummary[], current: RosterFilter): PlayerSummary[] {
+		if (current.sortBy !== 'lastSeen') return players;
+		const observed = players.filter((player) => !!player.lastSeen);
+		const neverObserved = players.filter((player) => !player.lastSeen);
+		return [...observed, ...neverObserved];
 	}
 
 	function selectedTargets(): PlayerActionTarget[] {
@@ -474,6 +490,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									name={player.ref?.name || key}
 									skinRef={player.skinRef}
 									serverId={player.serverId}
+									skinAvailable={player.skinAvailable}
 								/>
 								<div class="min-w-0">
 									<button
@@ -554,7 +571,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 						</td>
 						<td class="px-3 py-2 font-mono text-xs text-muted-foreground">
-							{formatTimestamp(player.lastSeen, 'unavailable')}
+							{#if player.lastSeen}
+								{formatTimestamp(player.lastSeen, 'unavailable')}
+							{:else}
+								Never observed
+							{/if}
 						</td>
 						<td class="px-3 py-2">
 							<div class="flex flex-wrap gap-1">
@@ -562,24 +583,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									serverId={player.serverId}
 									targets={[{ identityKey: key, name: player.ref?.name || key }]}
 									action="kick"
+									unavailableReason={player.serverId ? '' : 'Select a server for this player first'}
 									onDone={refresh}
 								/>
 								<PlayerActions
 									serverId={player.serverId}
 									targets={[{ identityKey: key, name: player.ref?.name || key }]}
 									action="ban"
+									unavailableReason={player.serverId ? '' : 'Select a server for this player first'}
 									onDone={refresh}
 								/>
 								<PlayerActions
 									serverId={player.serverId}
 									targets={[{ identityKey: key, name: player.ref?.name || key }]}
 									action={player.operator ? 'deop' : 'op'}
+									unavailableReason={player.serverId ? '' : 'Select a server for this player first'}
 									onDone={refresh}
 								/>
 								<PlayerActions
 									serverId={player.serverId}
 									targets={[{ identityKey: key, name: player.ref?.name || key }]}
 									action={player.whitelisted ? 'whitelist_remove' : 'whitelist_add'}
+									unavailableReason={player.serverId ? '' : 'Select a server for this player first'}
 									onDone={refresh}
 								/>
 							</div>

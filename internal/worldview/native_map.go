@@ -29,6 +29,12 @@ const (
 	nativeLevelLimit           = 1 << 20
 	nativeInventoryProbeLimit  = 12
 	nativeInventoryProbeWindow = 250 * time.Millisecond
+	// regionModifiedHeader carries the region file's opaque freshness
+	// validator (size + modification time). The proxy strips standard
+	// validators from renderer responses but this custom header passes
+	// through the panel-owned native path, and live clients echo it back in
+	// If-None-Match to skip re-rendering unchanged tiles.
+	regionModifiedHeader = "X-CarbonPanel-Region-Modified"
 )
 
 var (
@@ -72,6 +78,10 @@ type nativeManifest struct {
 	TileBlocks int          `json:"tileBlocks"`
 	Dimension  string       `json:"dimension"`
 	Spawn      *nativeSpawn `json:"spawn"`
+	// Dimensions lists the saved vanilla dimensions this world offers tiles
+	// for. It is additive JSON: clients that predate dimension support read
+	// the overworld prefix exactly as before.
+	Dimensions []string `json:"dimensions,omitempty"`
 }
 
 func (m *NativeMap) tryWork() bool {
@@ -204,6 +214,7 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 
 	if asset == nativeManifestPath {
 		manifest := makeNativeManifest(facts)
+		manifest.Dimensions = availableDimensions(acc, scope.level)
 		if !m.currentScopeMatches(ctx, scope) {
 			http.Error(w, "world changed; reopen the map", http.StatusConflict)
 			return
@@ -216,7 +227,22 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		return
 	}
 
-	tile, err := worldterrain.RenderOverworldTile(ctx, acc, scope.level, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})
+	// A live client revalidates a fully rendered tile by echoing the region
+	// file's freshness validator. When the region was not rewritten since the
+	// render, answer 304 before spending any render budget: the client keeps
+	// its current image and re-asks on the next TTL.
+	if validator := r.Header.Get("If-None-Match"); validator != "" {
+		if current := regionFreshness(acc, tileAsset.dimension.RegionPath(scope.level, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})); current != "" && current == validator {
+			if !m.currentScopeMatches(ctx, scope) {
+				http.Error(w, "world changed; reopen the map", http.StatusConflict)
+				return
+			}
+			w.Header().Set(regionModifiedHeader, current)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	tile, err := worldterrain.RenderDimensionTile(ctx, acc, scope.level, tileAsset.dimension, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})
 	if err != nil {
 		writeNativeAssetError(w, err)
 		return
@@ -230,12 +256,47 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 	w.Header().Set("Content-Length", strconv.Itoa(len(tile.PNG)))
 	w.Header().Set("X-CarbonPanel-Rendered-Chunks", strconv.Itoa(tile.RenderedChunks))
 	w.Header().Set("X-CarbonPanel-Provisional-Chunks", strconv.Itoa(tile.ProvisionalChunks))
+	if tile.RegionModified != "" {
+		w.Header().Set(regionModifiedHeader, tile.RegionModified)
+	}
 	if !tile.NewestSavedAt.IsZero() {
 		w.Header().Set("X-CarbonPanel-Tile-Saved-At", tile.NewestSavedAt.UTC().Format(time.RFC3339))
 	}
 	if r.Method == http.MethodGet {
 		_, _ = w.Write(tile.PNG)
 	}
+}
+
+// regionFreshness returns the region file's freshness validator, or "" when
+// the storage cannot report one.
+func regionFreshness(acc nodestorage.Accessor, regionPath string) string {
+	info, err := acc.Stat(regionPath)
+	if err != nil {
+		return ""
+	}
+	return worldterrain.RegionFreshnessValidator(info)
+}
+
+// availableDimensions reports the vanilla dimension folders that hold a
+// region directory in the active level. The overworld is always listed
+// (readNativeLevel already validated it); the Nether and End appear only
+// when their saves exist. Bukkit-style sibling worlds and modded dimension
+// folders are not listed: their layout is loader-specific and out of scope.
+func availableDimensions(acc nodestorage.Accessor, level string) []string {
+	dimensions := make([]string, 0, 3)
+	for _, id := range worldterrain.Dimensions() {
+		dimension, ok := worldterrain.DimensionByID(id)
+		if !ok {
+			continue
+		}
+		if id != worldterrain.Overworld.ID {
+			if info, err := acc.Stat(path.Join(level, dimension.Folder)); err != nil || !info.IsDir() {
+				continue
+			}
+		}
+		dimensions = append(dimensions, id)
+	}
+	return dimensions
 }
 
 func writeNativeAssetError(w http.ResponseWriter, err error) {

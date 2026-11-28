@@ -13,6 +13,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Search, Loader2, AlertTriangle, Package } from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { createRequestSequence } from '$lib/utils/request-sequence';
 
 	export interface DatapackSearchResult {
 		id: string;
@@ -45,9 +46,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let searched = $state(false);
 	let error = $state('');
 
+	// E21: the same stale-response race as the mods catalog searches — a slow
+	// earlier response must never overwrite newer results.
+	const searchSequence = createRequestSequence();
+
 	export async function search() {
 		searching = true;
 		error = '';
+		const seq = searchSequence.next();
 		try {
 			const res = await rpcClient.datapack.searchDatapacks({
 				query,
@@ -55,6 +61,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				limit: 20,
 				offset: 0
 			});
+			if (!searchSequence.isCurrent(seq)) return;
 			results = (res.datapacks ?? []).map((d) => ({
 				id: d.id,
 				indexer: d.indexer,
@@ -68,14 +75,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			}));
 			searched = true;
 		} catch (e) {
+			if (!searchSequence.isCurrent(seq)) return;
 			error = e instanceof Error ? e.message : 'Datapack search failed';
 		} finally {
-			searching = false;
+			if (searchSequence.isCurrent(seq)) searching = false;
 		}
 	}
 
 	function onkeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter') search();
+		if (event.key === 'Enter') {
+			// Stop implicit <form> submission: this input can sit inside the
+			// create-server wizard form, and Enter must only trigger a search.
+			event.preventDefault();
+			search();
+		}
 	}
 </script>
 

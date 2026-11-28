@@ -42,9 +42,11 @@
 - [MCP staged-download byte transport](mcp-download-byte-transport.md) — Download sessions reach the MCP gateway as bounded controller frames over typed RPCs, not through a gateway REST client or gateway filesystem.
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
+- [Mod browser dependency planning guards](mod-update-panel-safety.md) — Dependency plans and browser context checks preserve the operator's install intent and refuse stale targets.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.
+- [Mods browser target context](mods-browser-target-context.md) — Opening the mods browser uses the same loader, Minecraft version and compatible-side context as later searches; providers without sides omit the side filter.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module form conversions — Choice](module-form-codecs-choice.md) — Environment keys, metadata keys and volume paths trim whitespace; blank keys
 - [Module form conversions — Choice (part 2)](module-form-codecs-choice-2.md) — Malformed persisted JSON is now reported explicitly rather than silently
@@ -53,9 +55,10 @@
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
 - [Native map assets use scoped World View sessions](native-worldview-transport.md) — Native terrain uses the existing authenticated World View session with a server-validated world binding.
-- [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld tiles from saved heightmaps and block palettes.
+- [Native terrain reads saved Java surfaces](native-terrain-core.md) — A module-free reader renders bounded Java Overworld, Nether and End tiles from saved heightmaps and block palettes.
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
+- [Plugin indexer seam](plugin-indexers.md) — Hangar and Modrinth plugin discovery behind a PluginIndexer registry, gated by one loader-capability predicate.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.

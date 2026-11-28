@@ -77,6 +77,12 @@ const (
 	// ServerServiceStopServerProcedure is the fully-qualified name of the ServerService's StopServer
 	// RPC.
 	ServerServiceStopServerProcedure = "/carbonpanel.v1.ServerService/StopServer"
+	// ServerServicePauseServerProcedure is the fully-qualified name of the ServerService's PauseServer
+	// RPC.
+	ServerServicePauseServerProcedure = "/carbonpanel.v1.ServerService/PauseServer"
+	// ServerServiceDeepSleepServerProcedure is the fully-qualified name of the ServerService's
+	// DeepSleepServer RPC.
+	ServerServiceDeepSleepServerProcedure = "/carbonpanel.v1.ServerService/DeepSleepServer"
 	// ServerServiceRestartServerProcedure is the fully-qualified name of the ServerService's
 	// RestartServer RPC.
 	ServerServiceRestartServerProcedure = "/carbonpanel.v1.ServerService/RestartServer"
@@ -123,6 +129,10 @@ type ServerServiceClient interface {
 	StartServer(context.Context, *connect.Request[v1.StartServerRequest]) (*connect.Response[v1.StartServerResponse], error)
 	// Stop server container
 	StopServer(context.Context, *connect.Request[v1.StopServerRequest]) (*connect.Response[v1.StopServerResponse], error)
+	// Pause server container with cgroup freezer
+	PauseServer(context.Context, *connect.Request[v1.PauseServerRequest]) (*connect.Response[v1.PauseServerResponse], error)
+	// Stop server container into deep sleep
+	DeepSleepServer(context.Context, *connect.Request[v1.DeepSleepServerRequest]) (*connect.Response[v1.DeepSleepServerResponse], error)
 	// Stop and start container
 	RestartServer(context.Context, *connect.Request[v1.RestartServerRequest]) (*connect.Response[v1.RestartServerResponse], error)
 	// Destroy and recreate container from scratch
@@ -220,6 +230,18 @@ func NewServerServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(serverServiceMethods.ByName("StopServer")),
 			connect.WithClientOptions(opts...),
 		),
+		pauseServer: connect.NewClient[v1.PauseServerRequest, v1.PauseServerResponse](
+			httpClient,
+			baseURL+ServerServicePauseServerProcedure,
+			connect.WithSchema(serverServiceMethods.ByName("PauseServer")),
+			connect.WithClientOptions(opts...),
+		),
+		deepSleepServer: connect.NewClient[v1.DeepSleepServerRequest, v1.DeepSleepServerResponse](
+			httpClient,
+			baseURL+ServerServiceDeepSleepServerProcedure,
+			connect.WithSchema(serverServiceMethods.ByName("DeepSleepServer")),
+			connect.WithClientOptions(opts...),
+		),
 		restartServer: connect.NewClient[v1.RestartServerRequest, v1.RestartServerResponse](
 			httpClient,
 			baseURL+ServerServiceRestartServerProcedure,
@@ -273,6 +295,8 @@ type serverServiceClient struct {
 	deleteServer         *connect.Client[v1.DeleteServerRequest, v1.DeleteServerResponse]
 	startServer          *connect.Client[v1.StartServerRequest, v1.StartServerResponse]
 	stopServer           *connect.Client[v1.StopServerRequest, v1.StopServerResponse]
+	pauseServer          *connect.Client[v1.PauseServerRequest, v1.PauseServerResponse]
+	deepSleepServer      *connect.Client[v1.DeepSleepServerRequest, v1.DeepSleepServerResponse]
 	restartServer        *connect.Client[v1.RestartServerRequest, v1.RestartServerResponse]
 	recreateServer       *connect.Client[v1.RecreateServerRequest, v1.RecreateServerResponse]
 	sendCommand          *connect.Client[v1.SendCommandRequest, v1.SendCommandResponse]
@@ -341,6 +365,16 @@ func (c *serverServiceClient) StopServer(ctx context.Context, req *connect.Reque
 	return c.stopServer.CallUnary(ctx, req)
 }
 
+// PauseServer calls carbonpanel.v1.ServerService.PauseServer.
+func (c *serverServiceClient) PauseServer(ctx context.Context, req *connect.Request[v1.PauseServerRequest]) (*connect.Response[v1.PauseServerResponse], error) {
+	return c.pauseServer.CallUnary(ctx, req)
+}
+
+// DeepSleepServer calls carbonpanel.v1.ServerService.DeepSleepServer.
+func (c *serverServiceClient) DeepSleepServer(ctx context.Context, req *connect.Request[v1.DeepSleepServerRequest]) (*connect.Response[v1.DeepSleepServerResponse], error) {
+	return c.deepSleepServer.CallUnary(ctx, req)
+}
+
 // RestartServer calls carbonpanel.v1.ServerService.RestartServer.
 func (c *serverServiceClient) RestartServer(ctx context.Context, req *connect.Request[v1.RestartServerRequest]) (*connect.Response[v1.RestartServerResponse], error) {
 	return c.restartServer.CallUnary(ctx, req)
@@ -397,6 +431,10 @@ type ServerServiceHandler interface {
 	StartServer(context.Context, *connect.Request[v1.StartServerRequest]) (*connect.Response[v1.StartServerResponse], error)
 	// Stop server container
 	StopServer(context.Context, *connect.Request[v1.StopServerRequest]) (*connect.Response[v1.StopServerResponse], error)
+	// Pause server container with cgroup freezer
+	PauseServer(context.Context, *connect.Request[v1.PauseServerRequest]) (*connect.Response[v1.PauseServerResponse], error)
+	// Stop server container into deep sleep
+	DeepSleepServer(context.Context, *connect.Request[v1.DeepSleepServerRequest]) (*connect.Response[v1.DeepSleepServerResponse], error)
 	// Stop and start container
 	RestartServer(context.Context, *connect.Request[v1.RestartServerRequest]) (*connect.Response[v1.RestartServerResponse], error)
 	// Destroy and recreate container from scratch
@@ -490,6 +528,18 @@ func NewServerServiceHandler(svc ServerServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(serverServiceMethods.ByName("StopServer")),
 		connect.WithHandlerOptions(opts...),
 	)
+	serverServicePauseServerHandler := connect.NewUnaryHandler(
+		ServerServicePauseServerProcedure,
+		svc.PauseServer,
+		connect.WithSchema(serverServiceMethods.ByName("PauseServer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	serverServiceDeepSleepServerHandler := connect.NewUnaryHandler(
+		ServerServiceDeepSleepServerProcedure,
+		svc.DeepSleepServer,
+		connect.WithSchema(serverServiceMethods.ByName("DeepSleepServer")),
+		connect.WithHandlerOptions(opts...),
+	)
 	serverServiceRestartServerHandler := connect.NewUnaryHandler(
 		ServerServiceRestartServerProcedure,
 		svc.RestartServer,
@@ -552,6 +602,10 @@ func NewServerServiceHandler(svc ServerServiceHandler, opts ...connect.HandlerOp
 			serverServiceStartServerHandler.ServeHTTP(w, r)
 		case ServerServiceStopServerProcedure:
 			serverServiceStopServerHandler.ServeHTTP(w, r)
+		case ServerServicePauseServerProcedure:
+			serverServicePauseServerHandler.ServeHTTP(w, r)
+		case ServerServiceDeepSleepServerProcedure:
+			serverServiceDeepSleepServerHandler.ServeHTTP(w, r)
 		case ServerServiceRestartServerProcedure:
 			serverServiceRestartServerHandler.ServeHTTP(w, r)
 		case ServerServiceRecreateServerProcedure:
@@ -619,6 +673,14 @@ func (UnimplementedServerServiceHandler) StartServer(context.Context, *connect.R
 
 func (UnimplementedServerServiceHandler) StopServer(context.Context, *connect.Request[v1.StopServerRequest]) (*connect.Response[v1.StopServerResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.StopServer is not implemented"))
+}
+
+func (UnimplementedServerServiceHandler) PauseServer(context.Context, *connect.Request[v1.PauseServerRequest]) (*connect.Response[v1.PauseServerResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.PauseServer is not implemented"))
+}
+
+func (UnimplementedServerServiceHandler) DeepSleepServer(context.Context, *connect.Request[v1.DeepSleepServerRequest]) (*connect.Response[v1.DeepSleepServerResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ServerService.DeepSleepServer is not implemented"))
 }
 
 func (UnimplementedServerServiceHandler) RestartServer(context.Context, *connect.Request[v1.RestartServerRequest]) (*connect.Response[v1.RestartServerResponse], error) {

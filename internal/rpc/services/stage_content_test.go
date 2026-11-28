@@ -150,6 +150,41 @@ func TestStageContentLeavesLiveTreeUntouched(t *testing.T) {
 	}
 }
 
+func TestImportUploadedModAlwaysStagesForSafePath(t *testing.T) {
+	// A12: compatibility-sensitive mod uploads without declared loader/version
+	// context follow the documented safe path. Stage false/omitted must not
+	// live-install; the upload is staged.
+	for _, tc := range []struct {
+		name  string
+		stage bool
+	}{
+		{name: "stage false", stage: false},
+		{name: "stage true", stage: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, server, um := newContentStageFixture(t, "mod-safe-"+tc.name[:1], storage.StatusRunning)
+			jar := zipArchiveBytes(t, map[string]string{
+				"fabric.mod.json": `{"environment":"server"}`,
+			})
+			session := uploadSession(t, um, "servermod.jar", jar)
+			modSvc := NewModService(store, nil, um, logger.New())
+			res, err := modSvc.ImportUploadedMod(ctx, connect.NewRequest(&v1.ImportUploadedModRequest{
+				ServerId:        server.ID,
+				UploadSessionId: session,
+				Stage:           tc.stage,
+			}))
+			require.NoError(t, err)
+			require.True(t, res.Msg.GetStaged(), "mod upload must follow safe staged path")
+			require.Equal(t, "Mod staged. The server was not changed.", res.Msg.GetMessage())
+			mods, err := filepath.Glob(filepath.Join(server.DataPath, "mods", "*"))
+			require.NoError(t, err)
+			require.Empty(t, mods, "safe path must not write live mods directory")
+			require.Len(t, stagedFiles(t, server.DataPath), 1)
+		})
+	}
+}
+
 func TestStageContentRejectsBadPayloadsBeforeKeepingBytes(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "stage-reject", storage.StatusRunning)

@@ -1,0 +1,39 @@
+---
+type: Decision
+title: Mod browser dependency planning guards
+description: Dependency plans and browser context checks preserve the operator's install intent and refuse stale targets.
+status: stable
+owners: [oss-runtime]
+code_refs:
+  - web/carbon-panel/src/lib/mods/dependency-plan.ts
+  - web/carbon-panel/src/lib/components/mod-browser-dialog.svelte
+---
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+
+# Choice
+
+- Dependency planning keeps requirements beyond the traversal depth visible as
+  unresolved outcomes and honors a dependency's explicit `version_id` pin.
+  Dedupe tracks the requested pin per project: a second request for the same
+  project with a different pin becomes an `unresolved` conflict entry instead
+  of silently reusing or dropping a pin. Repeated unpinned requests stay a
+  normal dedupe.
+- Every unresolved entry becomes its own outcome row, keyed by project and
+  conflict identity. Two different conflicting pin sets for one project must
+  never share a row key; `unresolvedOutcomeRows` owns that mapping.
+- The browser compares the server, Minecraft version, and loader context after
+  dependency planning and before the install request. A changed context refuses
+  the install instead of using a stale lookup.
+- A server install is successful only when the selected version's own file
+  appears in the server's installed list. A dependency-only response keeps the
+  per-item outcome rows visible, does not record the root mod as installed and
+  reports failure even when the server reported `success`.
+
+# Consequences
+
+Dependency plans cannot silently omit a requirement, substitute a different
+pinned version, or install into a context other than the one that was planned.
+
+# Read next
+
+- [Mods browser target context](mods-browser-target-context.md)

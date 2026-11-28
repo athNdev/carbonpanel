@@ -22,10 +22,12 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/operation"
+	"github.com/athNdev/carbon-panel/internal/playerskin"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 var _ carbonpanelv1connect.PlayerServiceHandler = (*PlayerService)(nil)
@@ -110,6 +112,11 @@ type PlayerService struct {
 	skins      skinProvider
 	deep       deepProvider
 
+	// usercache resolves player names to online UUIDs through each server's
+	// own usercache.json, so offline-mode and name-only identities can still
+	// resolve a skin without any third-party name lookup.
+	usercache *playerskin.UsercacheResolver
+
 	// edition is the effective player edition from controller configuration.
 	// It gates manual allowlist adds so a Bedrock/unknown edition is refused
 	// explicitly instead of falling into a Java-only command adapter.
@@ -120,8 +127,19 @@ type PlayerService struct {
 	lastIngest map[string]time.Time
 }
 
+// usercacheTTL bounds how long one server's parsed usercache.json is trusted.
+// It matches the roster ingestion cadence, so a player added to a server's
+// cache is reflected without hammering the file on every roster load.
+const usercacheTTL = 15 * time.Minute
+
 func NewPlayerService(store *storage.Store, log *logger.Logger, collector *metrics.Collector) *PlayerService {
-	return &PlayerService{store: store, log: log, metrics: collector, lastIngest: make(map[string]time.Time)}
+	return &PlayerService{
+		store:      store,
+		log:        log,
+		metrics:    collector,
+		usercache:  playerskin.NewUsercacheResolver(usercacheTTL),
+		lastIngest: make(map[string]time.Time),
+	}
 }
 
 func (s *PlayerService) shouldIngest(serverID string) bool {
@@ -261,9 +279,38 @@ func (s *PlayerService) aliasesFor(ctx context.Context, identityID string) []sto
 	return out
 }
 
-func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID string) (v1.PlayerPresence, *v1.PlayerObservation, time.Time) {
+// newestPlayerSessionJoinedAt returns the newest session evidence for an
+// identity: (joinedAt, true, nil) when session rows exist, (nil, false, nil)
+// when there are none. Read failures are returned separately so callers do not
+// confuse a query error with never-observed evidence. A returned zero time means
+// rows exist but carry no usable join timestamp (legacy rows).
+func (s *PlayerService) newestPlayerSessionJoinedAt(ctx context.Context, identityID string) (*time.Time, bool, error) {
+	var session storage.PlayerSession
+	err := s.store.DB().WithContext(ctx).
+		Where("identity_id = ?", identityID).
+		Order("joined_at DESC").First(&session).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return &session.JoinedAt, true, nil
+}
+
+// presenceFor classifies presence for one identity. Only a real in-game
+// observation backs a timestamp: identity.last_seen_at (stamped by roster,
+// session or metrics ingestion), the newest observed session, or the live
+// metrics sample. An identity that was only registered — for example a manual
+// allowlist add before the first join — reports OFFLINE with no timestamp at
+// all rather than a plausible-looking fabricated one.
+func (s *PlayerService) presenceFor(ctx context.Context, identity *storage.PlayerIdentity, serverID string) (v1.PlayerPresence, *v1.PlayerObservation, *time.Time) {
 	now := time.Now().UTC()
-	lastSeen := identity.LastSeenAt
+	var lastSeen *time.Time
+	if identity.LastSeenAt != nil && !identity.LastSeenAt.IsZero() {
+		stamp := identity.LastSeenAt.UTC()
+		lastSeen = &stamp
+	}
 	source := v1.PlayerDataSource_PLAYER_DATA_SOURCE_PRESENCE
 	confidence := v1.PlayerConfidence_PLAYER_CONFIDENCE_STALE
 	presence := v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED
@@ -276,7 +323,8 @@ func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID s
 					presence = v1.PlayerPresence_PLAYER_PRESENCE_ONLINE
 					confidence = v1.PlayerConfidence_PLAYER_CONFIDENCE_DETECTED
 					if !m.LastUpdated.IsZero() {
-						lastSeen = m.LastUpdated
+						stamp := m.LastUpdated
+						lastSeen = &stamp
 					}
 					break
 				}
@@ -284,19 +332,55 @@ func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID s
 		}
 	}
 	if presence == v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED {
+		if lastSeen == nil {
+			joined, hasSessions, err := s.newestPlayerSessionJoinedAt(ctx, identity.ID)
+			switch {
+			case err != nil:
+				s.log.Debug("Failed to load newest player session for %s: %v", identity.ID, err)
+				o := observation(
+					v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
+					v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN,
+					time.Time{},
+					"Session lookup failed; absence of data is not offline.",
+				)
+				return v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED, o, nil
+			case joined != nil && !joined.IsZero():
+				// Session rows prove the panel observed the player in game at
+				// this time even without a stamped last_seen_at.
+				stamp := joined.UTC()
+				lastSeen = &stamp
+			case !hasSessions:
+				// No stored observation and no session evidence: the identity
+				// was only registered and has never been seen in game. OFFLINE
+				// is reported with NO timestamp — never a plausible fake.
+				o := observation(
+					v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
+					v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN,
+					time.Time{},
+					"Registered in the panel but never observed in game; no last-seen time is claimed.",
+				)
+				return v1.PlayerPresence_PLAYER_PRESENCE_OFFLINE, o, nil
+			}
+		}
 		switch {
-		case lastSeen.IsZero():
-			confidence = v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN
-		case now.Sub(lastSeen) <= 15*time.Minute:
-			presence = v1.PlayerPresence_PLAYER_PRESENCE_RECENTLY_SEEN
+		case lastSeen != nil:
+			if now.Sub(*lastSeen) <= 15*time.Minute {
+				presence = v1.PlayerPresence_PLAYER_PRESENCE_RECENTLY_SEEN
+			} else {
+				presence = v1.PlayerPresence_PLAYER_PRESENCE_OFFLINE
+			}
 			source = v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB
 		default:
-			presence = v1.PlayerPresence_PLAYER_PRESENCE_OFFLINE
-			source = v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB
+			// Session rows exist but carry no usable timestamp: the honest
+			// state stays unobserved rather than claimed offline.
+			confidence = v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN
 		}
 	}
-	o := observation(source, confidence, lastSeen, "")
-	if lastSeen.IsZero() {
+	o := observation(source, confidence, time.Time{}, "")
+	if lastSeen != nil {
+		o.ObservedAt = timestamppb.New(*lastSeen)
+	}
+	if lastSeen == nil {
 		o.ConflictNote = "No fresh observation; absence of data is not offline."
 	}
 	return presence, o, lastSeen
@@ -619,16 +703,23 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 	stateFilter := normalizeRosterFilter(msg.StateFilter)
 	accessFilter := normalizeRosterFilter(msg.AccessFilter)
 	serverName := map[string]string{}
-	access := map[string]storage.PlayerAccessState{}
+	accessStates := map[string][]storage.PlayerAccessState{}
+	usercacheRoots := map[string]string{}
 	out := make([]*v1.PlayerSummary, 0, len(identities))
 	for _, identity := range identities {
-		presence, obs, lastSeen := s.presenceFor(&identity, msg.ServerId)
+		presence, obs, lastSeen := s.presenceFor(ctx, &identity, msg.ServerId)
+		states := s.statesFor(ctx, identity.ID, accessStates)
 		serverID := msg.ServerId
 		if serverID == "" {
 			var session storage.PlayerSession
 			if err := s.store.DB().WithContext(ctx).Where("identity_id = ?", identity.ID).
 				Order("joined_at DESC").First(&session).Error; err == nil {
 				serverID = session.ServerID
+			} else {
+				// No session evidence: fall back to the most recently observed
+				// access/allowlist entry so the row still carries the server
+				// the player is registered on and moderation stays targetable.
+				serverID = mostRecentAccessServer(states)
 			}
 		}
 		name := "unassigned"
@@ -640,21 +731,7 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 				name = server.Name
 				serverName[serverID] = name
 			}
-			key := identity.ID + "|" + serverID
-			if cachedState, ok := access[key]; ok {
-				state = cachedState
-			} else {
-				states, err := s.store.ListPlayerAccess(ctx, identity.ID)
-				if err == nil {
-					for _, candidate := range states {
-						if candidate.ServerID == serverID {
-							state = candidate
-							break
-						}
-					}
-				}
-				access[key] = state
-			}
+			state = accessStateFor(states, serverID)
 		}
 		band := "unverified"
 		if state.Banned {
@@ -683,19 +760,17 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 			Operator:            state.Operator,
 			Banned:              state.Banned,
 			SkinRef:             identity.ID,
-			SkinAvailable:       identity.PrimaryUUID != "",
+			SkinAvailable:       s.skinAvailableFor(ctx, &identity, serverID, usercacheRoots),
 			AccessBand:          band,
 		}
-		if !lastSeen.IsZero() {
-			summary.LastSeen = timestamppb.New(lastSeen)
+		if lastSeen != nil {
+			summary.LastSeen = timestamppb.New(*lastSeen)
 		}
 		out = append(out, summary)
 	}
 
 	ascending := func(a, b *v1.PlayerSummary) bool {
 		switch msg.SortBy {
-		case "last_seen":
-			return stampBefore(a.LastSeen, b.LastSeen)
 		case "server":
 			return a.ServerName < b.ServerName
 		case "presence":
@@ -705,6 +780,23 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if msg.SortBy == "last_seen" {
+			// The plain ascending/descending reversal cannot express NULLS
+			// LAST in both directions, so the last-seen order is compared
+			// directly: identities without any observation always sort after
+			// observed ones, whatever the direction.
+			ai, aj := out[i].LastSeen, out[j].LastSeen
+			if (ai == nil) != (aj == nil) {
+				return aj == nil
+			}
+			if ai == nil {
+				return false
+			}
+			if msg.SortDescending {
+				return aj.AsTime().Before(ai.AsTime())
+			}
+			return ai.AsTime().Before(aj.AsTime())
+		}
 		if msg.SortDescending {
 			return ascending(out[j], out[i])
 		}
@@ -742,14 +834,96 @@ func presenceStateName(p v1.PlayerPresence) string {
 	}
 }
 
-func stampBefore(a, b interface{ AsTime() time.Time }) bool {
-	if a == nil {
-		return b != nil
+// statesFor loads observed access states once per identity per request.
+func (s *PlayerService) statesFor(ctx context.Context, identityID string, cache map[string][]storage.PlayerAccessState) []storage.PlayerAccessState {
+	if states, ok := cache[identityID]; ok {
+		return states
 	}
-	if b == nil {
+	states, err := s.store.ListPlayerAccess(ctx, identityID)
+	if err != nil {
+		s.log.Debug("Failed to load access states for %s: %v", identityID, err)
+		states = nil
+	}
+	cache[identityID] = states
+	return states
+}
+
+// mostRecentAccessServer picks the server of the newest observed access or
+// allowlist entry, so a player with no sessions still carries a server on the
+// cross-server roster (and moderation keeps a target).
+func mostRecentAccessServer(states []storage.PlayerAccessState) string {
+	latest := ""
+	var at time.Time
+	for _, state := range states {
+		if state.ServerID == "" {
+			continue
+		}
+		if latest == "" || state.ObservedAt.After(at) {
+			latest, at = state.ServerID, state.ObservedAt
+		}
+	}
+	return latest
+}
+
+func accessStateFor(states []storage.PlayerAccessState, serverID string) storage.PlayerAccessState {
+	for _, state := range states {
+		if state.ServerID == serverID {
+			return state
+		}
+	}
+	return storage.PlayerAccessState{}
+}
+
+// usercacheRoot maps a server to the controller-visible data root that holds
+// its usercache.json. Node-aware (ADR 0005): a transport-only remote node has
+// no controller-side root and resolves nothing rather than guessing a local
+// path. An empty result means "no readable root".
+func (s *PlayerService) usercacheRoot(ctx context.Context, serverID string) string {
+	server, err := s.store.GetServer(ctx, serverID)
+	if err != nil {
+		return ""
+	}
+	root, err := dataRootFor(ctx, s.store, server, false)
+	if err != nil {
+		return ""
+	}
+	return root
+}
+
+// usercacheUUIDFor resolves a player name through the owning server's own
+// usercache.json. Every failure is soft: no resolution, no error.
+func (s *PlayerService) usercacheUUIDFor(ctx context.Context, serverID, name string) (string, bool) {
+	if s.usercache == nil || strings.TrimSpace(serverID) == "" || strings.TrimSpace(name) == "" {
+		return "", false
+	}
+	root := s.usercacheRoot(ctx, serverID)
+	if root == "" {
+		return "", false
+	}
+	return s.usercache.Lookup(root, name)
+}
+
+// skinAvailableFor reports whether a skin can plausibly be resolved for the
+// identity: a real online UUID, or a name the owning server's usercache.json
+// maps to one. A false value lets the console skip the request entirely
+// instead of caching a placeholder as if the player had no skin.
+func (s *PlayerService) skinAvailableFor(ctx context.Context, identity *storage.PlayerIdentity, serverID string, rootCache map[string]string) bool {
+	if identity.PrimaryUUID != "" && !identity.OfflineUUID {
+		return true
+	}
+	if s.usercache == nil || serverID == "" || strings.TrimSpace(identity.CurrentName) == "" {
 		return false
 	}
-	return a.AsTime().Before(b.AsTime())
+	root, ok := rootCache[serverID]
+	if !ok {
+		root = s.usercacheRoot(ctx, serverID)
+		rootCache[serverID] = root
+	}
+	if root == "" {
+		return false
+	}
+	_, resolved := s.usercache.Lookup(root, identity.CurrentName)
+	return resolved
 }
 
 // GetPlayer returns grouped detail with provenance on every non-authoritative
@@ -763,7 +937,7 @@ func (s *PlayerService) GetPlayer(ctx context.Context, req *connect.Request[v1.G
 	if err != nil {
 		return nil, err
 	}
-	presence, obs, lastSeen := s.presenceFor(identity, msg.ServerId)
+	presence, obs, lastSeen := s.presenceFor(ctx, identity, msg.ServerId)
 	detail := &v1.PlayerDetail{
 		Ref:                 playerRef(identity),
 		Aliases:             protoAliases(s.aliasesFor(ctx, identity.ID)),
@@ -775,8 +949,8 @@ func (s *PlayerService) GetPlayer(ctx context.Context, req *connect.Request[v1.G
 	if !identity.FirstSeenAt.IsZero() {
 		detail.FirstSeen = timestamppb.New(identity.FirstSeenAt)
 	}
-	if !lastSeen.IsZero() {
-		detail.LastSeen = timestamppb.New(lastSeen)
+	if lastSeen != nil {
+		detail.LastSeen = timestamppb.New(*lastSeen)
 	}
 
 	states, err := s.store.ListPlayerAccess(ctx, identity.ID)
@@ -980,11 +1154,11 @@ func (s *PlayerService) ListPlayerCapabilities(ctx context.Context, req *connect
 }
 
 func (s *PlayerService) GetPlayerSkin(ctx context.Context, req *connect.Request[v1.GetPlayerSkinRequest]) (*connect.Response[v1.GetPlayerSkinResponse], error) {
-	return s.skin(ctx, req.Msg.IdentityKey, req.Msg.SkinRef, req.Msg.Kind, false)
+	return s.skin(ctx, req.Msg.IdentityKey, req.Msg.SkinRef, req.Msg.Kind, false, req.Msg.ServerId)
 }
 
 func (s *PlayerService) RefreshPlayerSkin(ctx context.Context, req *connect.Request[v1.RefreshPlayerSkinRequest]) (*connect.Response[v1.RefreshPlayerSkinResponse], error) {
-	asset, err := s.loadSkin(ctx, req.Msg.IdentityKey, "face", true)
+	asset, err := s.loadSkin(ctx, req.Msg.IdentityKey, "face", true, req.Msg.ServerId)
 	if err != nil {
 		return nil, err
 	}
@@ -994,15 +1168,15 @@ func (s *PlayerService) RefreshPlayerSkin(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&v1.RefreshPlayerSkinResponse{Asset: asset}), nil
 }
 
-func (s *PlayerService) skin(ctx context.Context, identityKey, skinRef, kind string, refresh bool) (*connect.Response[v1.GetPlayerSkinResponse], error) {
-	asset, err := s.loadSkin(ctx, identityKey, kind, refresh)
+func (s *PlayerService) skin(ctx context.Context, identityKey, skinRef, kind string, refresh bool, serverID string) (*connect.Response[v1.GetPlayerSkinResponse], error) {
+	asset, err := s.loadSkin(ctx, identityKey, kind, refresh, serverID)
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&v1.GetPlayerSkinResponse{Asset: asset}), nil
 }
 
-func (s *PlayerService) loadSkin(ctx context.Context, identityKey, kind string, refresh bool) (*v1.PlayerSkinAsset, error) {
+func (s *PlayerService) loadSkin(ctx context.Context, identityKey, kind string, refresh bool, serverID string) (*v1.PlayerSkinAsset, error) {
 	if s.skins == nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("skin proxy is not configured"))
 	}
@@ -1014,6 +1188,21 @@ func (s *PlayerService) loadSkin(ctx context.Context, identityKey, kind string, 
 		return nil, err
 	}
 	uuid := identity.PrimaryUUID
+	if uuid == "" || identity.OfflineUUID {
+		// The identity has no authoritative online UUID (name-only or a
+		// panel-derived offline pseudo-UUID). Before giving up, try the owning
+		// server's own usercache.json: the first-party, on-disk name→UUID map
+		// the server itself wrote. RBAC scope is unchanged: the server is only
+		// read to locate that file.
+		if resolved, ok := s.usercacheUUIDFor(ctx, serverID, identity.CurrentName); ok {
+			uuid = resolved
+		} else if identity.OfflineUUID {
+			// A panel-derived offline pseudo-UUID can never resolve upstream;
+			// request the local silhouette instead of caching a Mojang 404
+			// against a key that will never become valid.
+			uuid = ""
+		}
+	}
 	if uuid == "" {
 		uuid = "00000000-0000-0000-0000-000000000000"
 	}
@@ -1043,6 +1232,12 @@ func (s *PlayerService) GetPlayerDeepData(ctx context.Context, req *connect.Requ
 	}
 	if msg.Kind != "stats" && msg.Kind != "advancements" && msg.Kind != "character" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("kind must be stats, advancements or character"))
+	}
+	if strings.TrimSpace(msg.ServerId) == "" {
+		// The snapshot files live on a server. Without a server scope there is
+		// nothing to read, and a missing-server error would send the caller
+		// looking for a server that was never named.
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("server id is required for player deep data"))
 	}
 	identity, err := s.identity(ctx, msg.IdentityKey)
 	if err != nil {
@@ -1095,6 +1290,12 @@ func (s *PlayerService) auditPlayer(ctx context.Context, ip, event, serverID, id
 
 // actionContext resolves the server, identity and adapter for a mutation.
 func (s *PlayerService) actionContext(ctx context.Context, serverID, identityKey, name string) (*storage.Server, *storage.PlayerIdentity, playerSource, string, error) {
+	if strings.TrimSpace(serverID) == "" {
+		// A player with no observed session or access entry has no server (and
+		// therefore no adapter) to act through. Refuse with an actionable
+		// argument error instead of a misleading NotFound for an empty id.
+		return nil, nil, nil, "", connect.NewError(connect.CodeInvalidArgument, errors.New("player is not associated with a server yet"))
+	}
 	server, err := s.server(ctx, serverID)
 	if err != nil {
 		return nil, nil, nil, "", err
@@ -1382,7 +1583,9 @@ func (s *PlayerService) resolveManualAllowlistTarget(ctx context.Context, server
 	}
 
 	if looked.Status == "found" && isCanonicalUUID(looked.UUID) && strings.TrimSpace(looked.Name) != "" {
-		identity, err := s.store.EnsurePlayerIdentity(ctx, looked.UUID, looked.Name, "", "", false)
+		// Recorded, not observed: an operator's allowlist add is not proof the
+		// player ever joined, so last_seen_at must stay untouched.
+		identity, err := s.store.EnsurePlayerIdentityRecorded(ctx, looked.UUID, looked.Name, "", "", false)
 		if err != nil {
 			return nil, "", connect.NewError(connect.CodeInternal, err)
 		}

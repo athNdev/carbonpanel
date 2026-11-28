@@ -498,14 +498,50 @@ try {
   await page.getByRole("checkbox", { name: /Start Immediately/ }).check();
   await page.getByRole("button", { name: "Next Step" }).click();
   await page.getByRole("button", { name: "Mods", exact: true }).click();
-  await page.getByRole("button", { name: "Browse mods", exact: true }).click();
-  await page.getByText("Fixture Optimization", { exact: true }).waitFor();
-  assert.equal(await page.getByText("Client-only Project").count(), 0);
-  await page.getByRole("button", { name: "Select Version" }).click();
-  await page.getByRole("button", { name: "Add to server setup" }).click();
-  await page.getByText("Selected", { exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Browse & install", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Browse compatible mods" })
+    .waitFor();
+  // The dialog's accessible name follows the selected mod, so keep the scope
+  // on the single modal while asserting the initial and detail states by text.
+  const browseDialog = page.getByRole("dialog");
+  await browseDialog
+    .getByText("Fixture Optimization", { exact: true })
+    .waitFor();
+  assert.equal(await browseDialog.getByText("Client-only Project").count(), 0);
+  const openingSearch = (
+    await page.evaluate(() => globalThis.__wizardCalls)
+  ).find((call) => call.method === "searchMods")?.payload;
+  assert.deepEqual(
+    [
+      openingSearch?.serverId,
+      openingSearch?.loader,
+      openingSearch?.mcVersion,
+      openingSearch?.side,
+    ],
+    ["", "fabric", "1.21.1", "server"],
+    "the initial catalog request must keep the same server-side filter as later searches",
+  );
+  await browseDialog.getByRole("button", { name: "Select Version" }).click();
+  await browseDialog
+    .getByRole("button", { name: "Add to server setup" })
+    .click();
+  await browseDialog.getByText("Selected", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
-  await page.getByText(/Fixture Optimization 1\.0/).waitFor();
+  await browseDialog.waitFor({ state: "hidden" });
+  const removeQueued = page.getByRole("button", {
+    name: "Remove Fixture Optimization",
+    exact: true,
+  });
+  await removeQueued.waitFor();
+  const queuedCard = removeQueued.locator(
+    'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " bg-card ")][1]',
+  );
+  await queuedCard.getByText("Fixture Optimization", { exact: true }).waitFor();
+  await queuedCard.getByText("v1.0", { exact: true }).waitFor();
+  await queuedCard.getByText("Selected", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Modules", exact: true }).click();
   await page
     .getByRole("button", { name: "Add Resource Pack Host", exact: true })

@@ -945,9 +945,21 @@ func (s *Server) MigrateServerLogSubscriptions(serverID, oldContainerID, newCont
 	}
 }
 
-// SetHibernationManager attaches the HibernationManager to expose hibernation metrics (SCH-6).
+// SetHibernationManager attaches the HibernationManager to expose hibernation metrics (SCH-6)
+// and to let an operator freeze a running server on demand.
 func (s *Server) SetHibernationManager(m *docker.HibernationManager) {
 	if s.metricsHandler != nil {
 		s.metricsHandler.SetHibernationManager(m)
+	}
+	if s.serverService != nil {
+		s.serverService.SetHibernationManager(m)
+	}
+}
+
+// SetDeepSleepManager attaches the DeepSleepManager so an operator can put a
+// running server into deep sleep on demand.
+func (s *Server) SetDeepSleepManager(m *docker.DeepSleepManager) {
+	if s.serverService != nil {
+		s.serverService.SetDeepSleepManager(m)
 	}
 }

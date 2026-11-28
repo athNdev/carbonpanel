@@ -42,6 +42,10 @@ service ServerService {
   rpc StartServer(StartServerRequest) returns (StartServerResponse);
   // Stop server container
   rpc StopServer(StopServerRequest) returns (StopServerResponse);
+  // Pause server container with cgroup freezer
+  rpc PauseServer(PauseServerRequest) returns (PauseServerResponse);
+  // Stop server container into deep sleep
+  rpc DeepSleepServer(DeepSleepServerRequest) returns (DeepSleepServerResponse);
   // Stop and start container
   rpc RestartServer(RestartServerRequest) returns (RestartServerResponse);
   // Destroy and recreate container from scratch
@@ -224,6 +228,30 @@ message StopServerRequest {
 
 // Stop operation status
 message StopServerResponse {
+  string status = 1;
+}
+
+// Server to pause
+message PauseServerRequest {
+  string id = 1;
+  // Idempotency key for this pause. Repeating it does not pause twice.
+  string request_id = 2;
+}
+
+// Pause operation status
+message PauseServerResponse {
+  string status = 1;
+}
+
+// Server to deep sleep
+message DeepSleepServerRequest {
+  string id = 1;
+  // Idempotency key for this deep sleep. Repeating it does not sleep twice.
+  string request_id = 2;
+}
+
+// Deep sleep operation status
+message DeepSleepServerResponse {
   string status = 1;
 }
 

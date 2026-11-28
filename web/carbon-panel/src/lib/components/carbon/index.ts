@@ -22,3 +22,5 @@ export { default as CarbonAccordionItem } from './CarbonAccordionItem.svelte';
 export { default as CarbonStructuredList } from './CarbonStructuredList.svelte';
 export { default as CarbonErrorState } from './CarbonErrorState.svelte';
 export { default as CarbonEmptyState } from './CarbonEmptyState.svelte';
+export { default as CarbonSpinner } from './CarbonSpinner.svelte';
+export { default as CarbonFloatingActionBar } from './CarbonFloatingActionBar.svelte';

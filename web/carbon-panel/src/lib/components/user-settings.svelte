@@ -179,7 +179,7 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			await rpcClient.user.createUser(request);
 
-			toast.success('User created successfully');
+			toast.success('User created');
 			showCreateDialog = false;
 			newUserForm = {
 				username: '',
@@ -205,7 +205,7 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			await rpcClient.user.updateUser(request);
 
-			toast.success('User updated successfully');
+			toast.success('User updated');
 			showEditDialog = false;
 			editingUser = null;
 			await loadUsers();
@@ -229,7 +229,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const request = create(DeleteUserRequestSchema, { id: user.id });
 			await rpcClient.user.deleteUser(request);
 
-			toast.success('User deleted successfully');
+			toast.success('User deleted');
 			await loadUsers();
 		} catch (error: unknown) {
 			toast.error(error instanceof Error ? error.message : 'Failed to delete user');
@@ -377,7 +377,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="flex items-center justify-center py-16">
 						<div class="space-y-3 text-center">
 							<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
-							<div class="text-muted-foreground">Loading users...</div>
+							<div class="text-muted-foreground">Loading users…</div>
 						</div>
 					</div>
 				{:else if users.length === 0}
@@ -1088,10 +1088,10 @@ one at https://mozilla.org/MPL/2.0/.
 					<CarbonButton onclick={createInvite} disabled={creatingInvite} class="h-11 gap-2 px-8">
 						{#if creatingInvite}
 							<Loader2 class="h-4 w-4 animate-spin" />
-							Creating...
+							Creating…
 						{:else}
 							<TicketPlus class="h-4 w-4" />
-							Create & Copy URL
+							Create and copy URL
 						{/if}
 					</CarbonButton>
 				</div>
@@ -1103,7 +1103,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmOpen}
 	title="Delete user?"
 	message="Their sessions end and the account is removed. This cannot be undone."
-	confirmLabel="Delete User"
+	confirmLabel="Delete user"
 	danger
 	onconfirm={confirmDeleteUser}
 	onclose={() => (pendingDelete = null)}

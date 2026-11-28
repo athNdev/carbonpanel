@@ -30,10 +30,17 @@ type PlayerIdentity struct {
 	FloodgateUUID string `json:"floodgate_uuid" gorm:"index;size:36"`
 	CurrentName   string `json:"current_name" gorm:"size:64"`
 	OfflineUUID   bool   `json:"offline_uuid"`
-	FirstSeenAt   time.Time
-	LastSeenAt    time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// FirstSeenAt is when the panel first recorded this identity, whether
+	// through an in-game observation or an operator action.
+	FirstSeenAt time.Time
+	// LastSeenAt is the last time the panel observed this identity in game
+	// through roster, session or metrics ingestion. It is nil for identities
+	// that were only registered — for example a manual allowlist add before
+	// the first join — and is never backfilled with a plausible guess, because
+	// an operator action is not a presence observation.
+	LastSeenAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // PlayerAlias records only names this panel actually observed. Mojang removed
@@ -119,10 +126,17 @@ var ErrPlayerActionChanged = errors.New("player action request id reused for a d
 // playerKey builds an opaque, non-guessable identity key.
 func playerKey() string { return "pl_" + strings.ReplaceAll(uuid.NewString(), "-", "") }
 
-// EnsurePlayerIdentity returns the identity for an observed UUID/name pair,
-// creating one when needed. Online UUIDs are authoritative; offline UUIDs are
-// kept distinct and never merged by name alone.
-func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xuid, floodgateUUID string, offline bool) (*PlayerIdentity, error) {
+// SourceManualAllowlist marks identities registered by an operator's manual
+// allowlist add. It records the operator's intent, never proof that the
+// player joined, so it does not update last_seen_at.
+const SourceManualAllowlist = "manual_allowlist"
+
+// ensurePlayerIdentity returns the identity for a UUID/name pair, creating or
+// updating it as needed. When observed is true the call is treated as a live
+// in-game observation and last_seen_at is stamped on create and update; when
+// false the identity is only registered or refreshed and last_seen_at is left
+// untouched (nil for a new row).
+func (s *Store) ensurePlayerIdentity(ctx context.Context, primaryUUID, name, xuid, floodgateUUID string, offline, observed bool) (*PlayerIdentity, error) {
 	uuidValue := strings.TrimSpace(primaryUUID)
 	xuidValue := strings.TrimSpace(xuid)
 	var identity PlayerIdentity
@@ -137,12 +151,17 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 	}
 	err := q.First(&identity).Error
 	if err == nil {
-		updates := map[string]any{"last_seen_at": time.Now().UTC()}
+		updates := map[string]any{}
+		if observed {
+			updates["last_seen_at"] = time.Now().UTC()
+		}
 		if name != "" {
 			updates["current_name"] = name
 		}
-		if err := s.db.WithContext(ctx).Model(&identity).Updates(updates).Error; err != nil {
-			return nil, err
+		if len(updates) > 0 {
+			if err := s.db.WithContext(ctx).Model(&identity).Updates(updates).Error; err != nil {
+				return nil, err
+			}
 		}
 		if name != "" {
 			if err := s.RecordAlias(ctx, identity.ID, name, "", "structured", time.Now().UTC()); err != nil {
@@ -163,7 +182,9 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 		CurrentName:   strings.TrimSpace(name),
 		OfflineUUID:   offline,
 		FirstSeenAt:   now,
-		LastSeenAt:    now,
+	}
+	if observed {
+		identity.LastSeenAt = &now
 	}
 	if err := s.db.WithContext(ctx).Create(&identity).Error; err != nil {
 		return nil, err
@@ -174,6 +195,24 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 		}
 	}
 	return &identity, nil
+}
+
+// EnsurePlayerIdentity returns the identity for an observed UUID/name pair,
+// creating one when needed. The call represents a live in-game observation
+// (roster, session or metrics ingestion): last_seen_at is stamped on create
+// and on every re-observation. Online UUIDs are authoritative; offline UUIDs
+// are kept distinct and never merged by name alone.
+func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xuid, floodgateUUID string, offline bool) (*PlayerIdentity, error) {
+	return s.ensurePlayerIdentity(ctx, primaryUUID, name, xuid, floodgateUUID, offline, true)
+}
+
+// EnsurePlayerIdentityRecorded registers or refreshes an identity WITHOUT
+// claiming an in-game observation. It is used when the panel learns of a
+// player through an operator action (a manual allowlist add) or an identity
+// lookup refresh: last_seen_at is left untouched, so a player who never
+// joined never reports a fabricated "last seen".
+func (s *Store) EnsurePlayerIdentityRecorded(ctx context.Context, primaryUUID, name, xuid, floodgateUUID string, offline bool) (*PlayerIdentity, error) {
+	return s.ensurePlayerIdentity(ctx, primaryUUID, name, xuid, floodgateUUID, offline, false)
 }
 
 // OfflineUUIDFor derives a stable, server-scoped pseudo UUID for a name that
@@ -187,12 +226,16 @@ func OfflineUUIDFor(serverID, name string) string {
 }
 
 // EnsureOfflinePlayerIdentity records a name-only observation from presence or
-// metrics. The derived UUID is a local index key, not a Minecraft online id.
+// metrics ingestion. The derived UUID is a local index key, not a Minecraft
+// online id. A manual_allowlist source only registers the identity: an
+// operator add is not an in-game observation, so last_seen_at stays unset
+// instead of being stamped with a plausible time the player never earned.
 func (s *Store) EnsureOfflinePlayerIdentity(ctx context.Context, name, serverID, source string) (*PlayerIdentity, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, errors.New("player name is required")
 	}
-	identity, err := s.EnsurePlayerIdentity(ctx, OfflineUUIDFor(serverID, name), name, "", "", true)
+	observed := !strings.EqualFold(strings.TrimSpace(source), SourceManualAllowlist)
+	identity, err := s.ensurePlayerIdentity(ctx, OfflineUUIDFor(serverID, name), name, "", "", true, observed)
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +302,12 @@ func (s *Store) GetPlayerIdentity(ctx context.Context, key string) (*PlayerIdent
 	return &identity, nil
 }
 
+// playerIdentityOrder sorts identities with the most recent in-game
+// observation first. Identities without any observation (last_seen_at IS
+// NULL) always sort after observed ones, so a freshly registered identity
+// never floats above players who were actually seen in game.
+const playerIdentityOrder = "last_seen_at IS NULL, last_seen_at DESC"
+
 // ListPlayerIdentities returns identities matching a bounded search. A server
 // filter is applied through observed sessions so the RBAC object scope holds.
 func (s *Store) ListPlayerIdentities(ctx context.Context, serverID, query string, limit int) ([]PlayerIdentity, error) {
@@ -271,10 +320,10 @@ func (s *Store) ListPlayerIdentities(ctx context.Context, serverID, query string
 	}
 	if needle := strings.TrimSpace(query); needle != "" {
 		like := "%" + needle + "%"
-		q = q.Where("current_name LIKE ? OR primary_uuid LIKE ? OR xuid LIKE ? OR id IN (SELECT identity_id FROM player_aliases WHERE name LIKE ?)", like, like, like, like)
+		q = q.Where("id = ? OR current_name LIKE ? OR primary_uuid LIKE ? OR xuid LIKE ? OR id IN (SELECT identity_id FROM player_aliases WHERE name LIKE ?)", needle, like, like, like, like)
 	}
 	var out []PlayerIdentity
-	err := q.Order("last_seen_at DESC").Limit(limit).Find(&out).Error
+	err := q.Order(playerIdentityOrder).Limit(limit).Find(&out).Error
 	return out, err
 }
 
@@ -301,7 +350,7 @@ func (s *Store) FindPlayerIdentitiesByExact(ctx context.Context, uuid, name stri
 	}
 	q = q.Where(strings.Join(conditions, " OR "), args...)
 	var out []PlayerIdentity
-	err := q.Order("last_seen_at DESC").Limit(50).Find(&out).Error
+	err := q.Order(playerIdentityOrder).Limit(50).Find(&out).Error
 	return out, err
 }
 

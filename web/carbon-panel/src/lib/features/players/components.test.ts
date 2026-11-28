@@ -38,6 +38,38 @@ test('player detail keeps Character and Progress deep fields in separate state',
 	);
 });
 
+test('player detail marks a failed deep section as attempted instead of retrying forever', () => {
+	const s = readFileSync(
+		new URL('../../../routes/players/[key]/+page.svelte', import.meta.url),
+		'utf8'
+	);
+	// The attempted marker has to be written in the finally block. A section
+	// that stayed un-attempted after a failure would be requested again on
+	// every state change, which is what left the Character tab spinning.
+	assert.match(
+		s,
+		/\}\s*finally\s*\{[\s\S]{0,500}loadedSections = \{ \.\.\.loadedSections, \[tab\]: true \}/,
+		'a failed section is still marked as attempted'
+	);
+	assert.doesNotMatch(
+		s,
+		/if \(generation === sectionGenerations\[tab\]\)\s*\n\s*loadedSections = \{ \.\.\.loadedSections, \[tab\]: true \};\s*\n\s*\} catch/,
+		'the attempted marker is not written only on the success path'
+	);
+});
+
+test('player detail skips the deep snapshot request without a server scope', () => {
+	const s = readFileSync(
+		new URL('../../../routes/players/[key]/+page.svelte', import.meta.url),
+		'utf8'
+	);
+	assert.match(
+		s,
+		/if \(!primaryServerId\) \{[\s\S]{0,400}break;/,
+		'no server scope means no deep data request'
+	);
+});
+
 test('PlayerRoster derives server options without an effect write loop', () => {
 	const s = source('PlayerRoster.svelte');
 	assert.match(

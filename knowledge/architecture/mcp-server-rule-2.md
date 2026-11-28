@@ -15,7 +15,7 @@ holds the pinned first-slice declarations and the 27-name mount list mirroring
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 243 mounted RPCs and fails on a
+coverage drift test still enumerates the 245 mounted RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
 or a missing `WorldViewService`. `family_content_descriptors.json` is compared

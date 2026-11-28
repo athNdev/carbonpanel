@@ -300,9 +300,9 @@ const SHELL_FOCUS = [
 	'Toggle Navigation',
 	'Carbon Panel',
 	'A1 A11y Reviewer',
-	'Overview',
+	'Dashboard',
 	/^Servers\b/,
-	'Create Server'
+	'Create server'
 ];
 // Seeded roster, library and view rows. Timestamps are RFC3339 protojson, and
 // enums use their schema names, so the real generated client decodes them.
@@ -1580,7 +1580,15 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
         waitUntil: "domcontentloaded",
       });
       await page.locator("#server-detail-tabs-tab-world").click();
-      await page.locator("[data-server-tab-panel]").waitFor();		}
+      // Every visited tab mounts its own server tab panel, so the bare
+      // [data-server-tab-panel] selector matches more than one element and
+      // Playwright's strict mode refuses it. Scope the wait to the world
+      // panel that the click above opened.
+      await page
+        .locator("#server-detail-tabs-panel-world [data-server-tab-panel]")
+        .first()
+        .waitFor();
+		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await check(`route /servers ${theme}: empty state is exposed`, async () => {
@@ -1636,7 +1644,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByLabel('Username', { exact: true }).waitFor();
 				await page.getByLabel('Password', { exact: true }).waitFor();
 				await page.getByRole('button', { name: 'Show password' }).waitFor();
-				await page.getByRole('button', { name: 'Sign In', exact: true }).waitFor();
+				await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
 				const metrics = await page.evaluate(() => ({
 					scrollWidth: document.documentElement.scrollWidth,
 					innerWidth: window.innerWidth
@@ -1646,7 +1654,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				}
 				await page.getByLabel('Username', { exact: true }).fill('review');
 				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
-				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+				await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 				const announced = page
 					.getByRole('alert')
 					.filter({ hasText: 'Invalid username or password' });
@@ -1654,7 +1662,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				if (!(await announced.first().evaluate((node) => node === document.activeElement))) {
 					throw new Error('Failed sign-in did not focus the error message');
 				}
-				const recovery = page.getByRole('button', { name: 'Forgot access? Recovery' });
+				const recovery = page.getByRole('button', { name: 'Lost access? Use a recovery key' });
 				await recovery.click();
 				if (!(await page.getByLabel('Recovery Key', { exact: true }).evaluate((node) => node === document.activeElement))) {
 					throw new Error('Opening recovery did not focus the recovery key field');
@@ -1710,13 +1718,31 @@ async function assertTabPanels(tablist, selectedId) {
 		new Set(tabs.map((tab) => tab.id)).size !== tabs.length ||
 		tabs.filter((tab) => tab.selected).length !== 1 ||
 		tabs.find((tab) => tab.selected)?.tabId !== selectedId ||
-		tabs.some((tab) =>
-			tab.tabIdCount !== 1 || !tab.id || tab.count !== 1 || tab.role !== 'tabpanel' ||
-			tab.labelledBy !== tab.tabId || tab.visible !== tab.selected ||
-			tab.tabIndex !== (tab.selected ? 0 : -1) ||
-			tab.panelTabIndex !== (tab.selected ? 0 : -1) ||
-			(!tab.selected && (!tab.hidden || tab.children !== 0))
-		)
+		tabs.some((tab) => {
+			if (
+				tab.tabIdCount !== 1 ||
+				!tab.id ||
+				tab.count !== 1 ||
+				tab.role !== 'tabpanel' ||
+				tab.labelledBy !== tab.tabId ||
+				tab.visible !== tab.selected ||
+				tab.tabIndex !== (tab.selected ? 0 : -1)
+			) {
+				return true;
+			}
+			if (tab.selected) {
+				return tab.hidden || tab.panelTabIndex !== 0;
+			}
+			// Inactive panels must be hidden. Transient panels are unmounted
+			// placeholders (children 0, panelTabIndex -1); OSS-464 persistent
+			// editable panels stay mounted behind hidden with tabindex=0 so
+			// unsaved edits survive tab switches.
+			return (
+				!tab.hidden ||
+				(tab.panelTabIndex !== -1 && tab.panelTabIndex !== 0) ||
+				(tab.children !== 0 && tab.panelTabIndex !== 0)
+			);
+		})
 	) {
 		throw new Error(`Tab panels for ${selectedId}: ${JSON.stringify(tabs)}`);
 	}
@@ -1754,14 +1780,14 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			for (const tab of ['Browse', 'Imported', 'Favorites']) {
 				await page.getByRole('tab', { name: new RegExp(tab) }).first().waitFor({ timeout: 10000 });
 			}
-			await page.getByPlaceholder('Search modpacks by name or description...').waitFor();
+			await page.getByPlaceholder('Search modpacks by name or description…').waitFor();
 			return 'description, content area, three tabs and search control visible';
 		});
 
 		await check(`modpacks @${width} ${theme}: library and import tab targets, keyboard switching and lazy controls`, async () => {
 			const browse = page.getByTestId('tab-browse');
 			const library = page.getByRole('tablist').filter({ has: browse });
-			const search = page.getByPlaceholder('Search modpacks by name or description...');
+			const search = page.getByPlaceholder('Search modpacks by name or description…');
 			await assertTabPanels(library, 'modpacks-tab-browse');
 			await browse.focus();
 			await page.keyboard.press('ArrowRight');
@@ -1778,15 +1804,15 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			await search.waitFor();
 			await tabIntoPanel(page, 'modpacks-panel-browse');
 
-			await page.getByRole('button', { name: 'Import Modpack', exact: true }).click();
-			const dialog = page.getByRole('dialog', { name: 'Import Modpack' });
+			await page.getByRole('button', { name: 'Import modpack', exact: true }).click();
+			const dialog = page.getByRole('dialog', { name: 'Import modpack' });
 			try {
 				await page.waitForFunction(() =>
 					document.activeElement?.matches('[role="dialog"] button[aria-label="Close modal"]')
 				);
 				const methods = dialog.getByRole('tablist');
 				await assertTabPanels(methods, 'import-method-tab-zip');
-				const urlInput = dialog.getByLabel('Modpack Archive URL *', { exact: true });
+				const urlInput = dialog.getByLabel('Modpack archive URL *', { exact: true });
 				if (await urlInput.count()) throw new Error('Inactive URL import form is mounted');
 				await methods.getByTestId('tab-zip').focus();
 				await page.keyboard.press('ArrowRight');
@@ -1838,7 +1864,7 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 
 		await check(`modpacks @${width} ${theme}: refused search exposes the error state and Retry`, async () => {
 			state.modpacks = 'refused';
-			await page.getByPlaceholder('Search modpacks by name or description...').fill('refusal-probe');
+			await page.getByPlaceholder('Search modpacks by name or description…').fill('refusal-probe');
 			await page.getByRole('button', { name: 'Search', exact: true }).first().click();
 			await page.getByText('Failed to search modpacks').first().waitFor({ timeout: 10000 });
 			await page.getByRole('button', { name: 'Retry', exact: true }).first().waitFor();
@@ -1859,7 +1885,7 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 			await page.getByRole('heading', { name: 'Modpack Studio', level: 1 }).waitFor();
 			await page.getByText('Visual workspace for custom modpacks:', { exact: false }).first().waitFor();
 			await page.getByRole('button', { name: 'Create Modpack' }).first().waitFor();
-			await page.getByRole('button', { name: 'Import Modpack' }).first().waitFor();
+			await page.getByRole('button', { name: 'Import modpack' }).first().waitFor();
 			await page.getByRole('link', { name: 'Browse Modpacks' }).first().waitFor();
 			await page.getByPlaceholder('Search modpack projects...').waitFor();
 			return 'studio heading, description, three controls and project search visible';
@@ -1983,7 +2009,7 @@ async function runNarrowSettingsJourney(browser, base) {
 						await assertHorizontallyVisible(save);
 						state.savedMotd = undefined;
 						await save.press('Enter');
-						await page.getByText('Global settings saved successfully', { exact: true }).waitFor();
+						await page.getByText('Global settings saved', { exact: true }).waitFor();
 						if (state.savedMotd !== 'Ready to save') throw new Error('Keyboard Save did not submit MOTD');
 					});
 					await check(`server configuration ${label}: find, edit and stage across categories`, async () => {

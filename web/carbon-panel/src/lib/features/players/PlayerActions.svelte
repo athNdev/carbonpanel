@@ -53,9 +53,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		action: PlayerActionKind;
 		/** Called after a successful action or undo so the host can refresh. */
 		onDone?: () => void | Promise<void>;
+		/**
+		 * When set, the action cannot apply at all (for example a player with
+		 * no associated server). The button is disabled and the reason is shown
+		 * as a tooltip instead of sending an RPC that must fail.
+		 */
+		unavailableReason?: string;
 	}
 
-	let { serverId, targets, action, onDone }: Props = $props();
+	let { serverId, targets, action, onDone, unavailableReason = '' }: Props = $props();
+
+	const unavailable = $derived(unavailableReason.trim() !== '');
 
 	let open = $state(false);
 	let reason = $state('');
@@ -190,7 +198,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function perform() {
-		if (!canAct || busy || targets.length === 0) return;
+		if (!canAct || busy || targets.length === 0 || unavailable) return;
 		busy = true;
 		errorMessage = null;
 		undoMessage = '';
@@ -282,7 +290,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<CarbonButton
 		kind={actionIsDestructive(action) ? 'danger' : 'secondary'}
 		size="sm"
-		disabled={!canAct || targets.length === 0}
+		disabled={!canAct || targets.length === 0 || unavailable}
+		title={unavailable ? unavailableReason.trim() : undefined}
 		onclick={() => {
 			reason = '';
 			results = [];

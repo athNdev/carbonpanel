@@ -221,6 +221,8 @@ func registerToolHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFunc, o
 	registerOK[v1.GetServerRequest, v1.GetServerResponse](mux, "/carbonpanel.v1.ServerService/GetServer", ic, olderMode)
 	registerOK[v1.StartServerRequest, v1.StartServerResponse](mux, "/carbonpanel.v1.ServerService/StartServer", ic, olderMode)
 	registerOK[v1.StopServerRequest, v1.StopServerResponse](mux, "/carbonpanel.v1.ServerService/StopServer", ic, olderMode)
+	registerOK[v1.PauseServerRequest, v1.PauseServerResponse](mux, "/carbonpanel.v1.ServerService/PauseServer", ic, olderMode)
+	registerOK[v1.DeepSleepServerRequest, v1.DeepSleepServerResponse](mux, "/carbonpanel.v1.ServerService/DeepSleepServer", ic, olderMode)
 	registerOK[v1.RestartServerRequest, v1.RestartServerResponse](mux, "/carbonpanel.v1.ServerService/RestartServer", ic, olderMode)
 
 	registerOK[v1.LookupPlayerRequest, v1.LookupPlayerResponse](mux, "/carbonpanel.v1.PlayerService/LookupPlayer", ic, olderMode)

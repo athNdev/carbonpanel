@@ -33,7 +33,7 @@ function fromBase64Url(value: string): Uint8Array {
 	return bytes;
 }
 
-/** Encode a WorldRef as an opaque, URL-safe key used by /worlds/[server]/[world]. */
+/** Encode a WorldRef as an opaque, URL-safe key used by the server World tab. */
 export function encodeWorldKey(ref: WorldRef | undefined): string {
 	if (!ref) return '';
 	const packed: Packed = [

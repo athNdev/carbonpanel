@@ -8,28 +8,39 @@ package worldview
 import (
 	"strconv"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/worldterrain"
 )
 
 const nativeManifestPath = "native/manifest.json"
 
 type nativeTileAsset struct {
-	x, z int
+	x, z      int
+	dimension worldterrain.Dimension
 }
 
 // Native paths allow one protocol-specific manifest and only canonical decimal
-// tile coordinates. Tile coordinates are converted to storage paths by the
-// renderer after resolving the session's current world on the controller.
+// tile coordinates under a served dimension. Tile coordinates are converted
+// to storage paths by the renderer after resolving the session's current
+// world on the controller.
 func parseNativeTileAsset(asset string) (nativeTileAsset, bool) {
-	const prefix = "native/overworld/"
-	path, ok := strings.CutPrefix(asset, prefix)
+	rest, ok := strings.CutPrefix(asset, "native/")
 	if !ok {
 		return nativeTileAsset{}, false
 	}
-	path, ok = strings.CutSuffix(path, ".png")
+	dimensionID, remainder, ok := strings.Cut(rest, "/")
 	if !ok {
 		return nativeTileAsset{}, false
 	}
-	xText, zText, ok := strings.Cut(path, "/")
+	dimension, ok := worldterrain.DimensionByID(dimensionID)
+	if !ok {
+		return nativeTileAsset{}, false
+	}
+	remainder, ok = strings.CutSuffix(remainder, ".png")
+	if !ok {
+		return nativeTileAsset{}, false
+	}
+	xText, zText, ok := strings.Cut(remainder, "/")
 	if !ok {
 		return nativeTileAsset{}, false
 	}
@@ -38,5 +49,5 @@ func parseNativeTileAsset(asset string) (nativeTileAsset, bool) {
 	if xErr != nil || zErr != nil || strconv.FormatInt(x, 10) != xText || strconv.FormatInt(z, 10) != zText {
 		return nativeTileAsset{}, false
 	}
-	return nativeTileAsset{x: int(x), z: int(z)}, true
+	return nativeTileAsset{x: int(x), z: int(z), dimension: dimension}, true
 }

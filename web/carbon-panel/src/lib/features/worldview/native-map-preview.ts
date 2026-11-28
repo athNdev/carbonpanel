@@ -102,6 +102,7 @@ export async function loadNativePreview(path: string, signal: AbortSignal): Prom
 					break;
 				}
 				case 'empty':
+				case 'unchanged':
 					break;
 				default:
 					recordFailure(result.status);

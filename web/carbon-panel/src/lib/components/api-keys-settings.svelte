@@ -59,7 +59,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	async function testCurseForge() {
 		if (!cfApiKey.trim()) {
-			toast.error('Please enter a CurseForge API key before testing');
+			toast.error('Enter a CurseForge API key first');
 			return;
 		}
 
@@ -119,7 +119,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			};
 
 			await rpcClient.config.updateGlobalSettings({ updates });
-			toast.success('API key settings saved successfully');
+			toast.success('API key settings saved');
 		} catch (err) {
 			console.error('Failed to save API keys:', err);
 			toast.error('Failed to save API key settings');
@@ -170,7 +170,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<p class="font-medium text-foreground">How to get a CurseForge API Key:</p>
 				<ol class="mt-2 list-inside list-decimal space-y-1">
 					<li>
-						Log in to the
+						Sign in to the
 						<a
 							href="https://console.curseforge.com/#/api-keys"
 							target="_blank"
@@ -181,7 +181,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</a>.
 					</li>
 					<li>Generate a new API Key for your organization or personal project.</li>
-					<li>Paste the generated key below and click "Test Connection" to verify.</li>
+					<li>Paste the generated key below and test the connection to verify.</li>
 				</ol>
 			</div>
 
@@ -204,10 +204,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				>
 					{#if testingCf}
 						<Loader2 class="h-4 w-4 animate-spin" />
-						<span>Testing...</span>
+						<span>Testing…</span>
 					{:else}
 						<ShieldCheck class="h-4 w-4" />
-						<span>Test Connection</span>
+						<span>Test connection</span>
 					{/if}
 				</CarbonButton>
 			</div>
@@ -305,7 +305,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				label="User-Agent Header"
 				placeholder="CarbonPanel/1.0 (contact@example.com)"
 				bind:value={modrinthUserAgent}
-				helperText="Modrinth API policy encourages client identification including application name and contact info."
+				helperText="Modrinth asks for a User-Agent that identifies the application and a contact address."
 				class="font-mono [&_input]:bg-background"
 			/>
 
@@ -319,10 +319,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				>
 					{#if testingModrinth}
 						<Loader2 class="h-4 w-4 animate-spin" />
-						<span>Testing...</span>
+						<span>Testing…</span>
 					{:else}
 						<ShieldCheck class="h-4 w-4" />
-						<span>Test Connection</span>
+						<span>Test connection</span>
 					{/if}
 				</CarbonButton>
 			</div>
@@ -366,10 +366,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		>
 			{#if saving}
 				<Loader2 class="h-4 w-4 animate-spin" />
-				<span>Saving...</span>
+				<span>Saving…</span>
 			{:else}
 				<Save class="h-4 w-4" />
-				<span>Save API Keys</span>
+				<span>Save API keys</span>
 			{/if}
 		</CarbonButton>
 	</div>

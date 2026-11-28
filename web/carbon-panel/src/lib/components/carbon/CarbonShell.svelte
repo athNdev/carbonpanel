@@ -225,9 +225,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// matching the regular-weight labels. The previous filled Material paths
 	// mixed two optical conventions in the same column.
 	const navItems: NavItem[] = [
-		{ href: '/', label: 'Overview', icon: LayoutGrid },
+		{ href: '/', label: 'Dashboard', icon: LayoutGrid },
 		{ href: '/servers', label: 'Servers', icon: Server, badge: true },
-		{ href: '/servers/new', label: 'Create Server', icon: CirclePlus },
+		{ href: '/servers/new', label: 'Create server', icon: CirclePlus },
 		{ href: '/players', label: 'Players', icon: Users },
 		{ href: '/library', label: 'World Library', icon: LibraryBig },
 		{ href: '/modpacks/studio', label: 'Modpack Studio', icon: Blocks },
@@ -558,7 +558,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<p class="text-xs text-destructive-text">{passwordError}</p>
 					{/if}
 					{#if passwordDone}
-						<p class="text-xs text-success-text">Password changed successfully.</p>
+						<p class="text-xs text-success-text">Password changed.</p>
 					{/if}
 					<div class="flex items-center justify-end gap-3">
 						<CarbonButton
@@ -574,7 +574,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							disabled={passwordSaving}
 							class="rounded-none"
 						>
-							{#if passwordSaving}Updating...{:else}Update password{/if}
+							{#if passwordSaving}Updating…{:else}Update password{/if}
 						</CarbonButton>
 					</div>
 				</div>

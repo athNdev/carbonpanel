@@ -89,6 +89,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let deepFieldsByTab = $state<Record<string, PlayerField[]>>({});
 	let deepNoteByTab = $state<Record<string, string>>({});
 	let skinRef = $state('');
+	// Whether the server reported a resolvable skin for this identity; while it
+	// is false the avatar skips the request instead of caching a placeholder.
+	let skinAvailable = $state(false);
 
 	let sectionLoading = $state<Record<string, boolean>>({});
 	let sectionError = $state<Record<string, string | null>>({});
@@ -102,6 +105,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	const activeDeepNote = $derived(deepNoteByTab[activeTab] ?? '');
 
 	function resetSections() {
+		for (const tab of TABS) sectionGenerations[tab.id] = (sectionGenerations[tab.id] ?? 0) + 1;
 		sessions = [];
 		accessStates = [];
 		history = [];
@@ -109,6 +113,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		deepNoteByTab = {};
 		capabilities = [];
 		skinRef = '';
+		skinAvailable = false;
 		sectionLoading = {};
 		sectionError = {};
 		loadedSections = {};
@@ -156,8 +161,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (generation !== detailGeneration) return;
 			const match = response.players.find((p) => p.ref?.identityKey === key);
 			skinRef = match?.skinRef ?? '';
+			skinAvailable = match?.skinAvailable ?? false;
 		} catch {
-			if (generation === detailGeneration) skinRef = '';
+			if (generation === detailGeneration) {
+				skinRef = '';
+				skinAvailable = false;
+			}
 		}
 	}
 
@@ -219,6 +228,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				case 'character':
 				case 'progress': {
 					const kind = tab === 'character' ? 'character' : 'stats';
+					if (!primaryServerId) {
+						// The snapshot files live on a server. Without a server
+						// scope there is nothing to read, and asking for it
+						// would only produce a failing request.
+						deepNoteByTab = {
+							...deepNoteByTab,
+							[tab]: 'This identity is not linked to a server, so no snapshot is available.'
+						};
+						break;
+					}
 					const response = await rpcClient.player.getPlayerDeepData(
 						create(GetPlayerDeepDataRequestSchema, {
 							identityKey: key,
@@ -235,8 +254,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				default:
 					break;
 			}
-			if (generation === sectionGenerations[tab])
-				loadedSections = { ...loadedSections, [tab]: true };
 		} catch (error) {
 			if (generation === sectionGenerations[tab])
 				sectionError = {
@@ -244,8 +261,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					[tab]: formatRpcError(error, `Could not load ${tab} data.`)
 				};
 		} finally {
-			if (generation === sectionGenerations[tab])
+			if (generation === sectionGenerations[tab]) {
+				// The section counts as attempted even when it failed. A failed
+				// section must not retry itself: the loading flag is read by the
+				// effect that starts the load, so a section that stayed
+				// un-attempted would be requested again on every state change.
+				// The error state carries an explicit retry action instead.
+				loadedSections = { ...loadedSections, [tab]: true };
 				sectionLoading = { ...sectionLoading, [tab]: false };
+			}
 		}
 	}
 
@@ -317,6 +341,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					serverId={primaryServerId}
 					size="md"
 					refreshable
+					{skinAvailable}
+					showFullSkin
 				/>
 			{/if}
 		{/snippet}
@@ -390,12 +416,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<PlayerProvenance observation={detail.presenceObservation} compact />
 								</div>
 								<div>
-									<p class="mono-label">First / last seen</p>
+									<p class="mono-label">First recorded / last observed</p>
 									<p class="font-mono text-xs text-foreground">
-										{formatTimestamp(detail.firstSeen, 'unavailable')} · {formatTimestamp(
-											detail.lastSeen,
-											'unavailable'
-										)}
+										{formatTimestamp(detail.firstSeen, 'unavailable')} ·
+										{#if detail.lastSeen}
+											{formatTimestamp(detail.lastSeen, 'unavailable')}
+										{:else}
+											<span class="text-muted-foreground">Never observed</span>
+										{/if}
+									</p>
+									<p class="mt-1 text-xs text-muted-foreground">
+										First recorded is when this panel first observed the identity; it is not a
+										presence claim.
 									</p>
 								</div>
 							</div>

@@ -23,7 +23,9 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
+	"github.com/athNdev/carbon-panel/internal/indexers/hangar"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
+	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
@@ -155,12 +157,13 @@ type ModOnlineManager struct {
 	httpClient        *http.Client
 	modrinthBaseURL   string
 	curseForgeBaseURL string
+	hangarBaseURL     string
 }
 
 type ModOnlineOptions struct {
-	HTTPClient                         *http.Client
-	ModrinthBaseURL, CurseForgeBaseURL string
-	StorageResolver                    *nodestorage.Resolver
+	HTTPClient                                        *http.Client
+	ModrinthBaseURL, CurseForgeBaseURL, HangarBaseURL string
+	StorageResolver                                   *nodestorage.Resolver
 }
 
 func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer, options ...ModOnlineOptions) *ModOnlineManager {
@@ -181,6 +184,7 @@ func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *
 		httpClient:        indexers.ProtectCredentialsOnRedirect(client),
 		modrinthBaseURL:   option.ModrinthBaseURL,
 		curseForgeBaseURL: option.CurseForgeBaseURL,
+		hangarBaseURL:     option.HangarBaseURL,
 	}
 }
 
@@ -247,18 +251,34 @@ func (m *ModOnlineManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func normalizeLoaderName(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	s = strings.TrimPrefix(s, "mod_loader_")
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.Trim(s, "-")
 	switch {
 	case strings.Contains(s, "neoforge"):
 		return "neoforge"
 	case strings.Contains(s, "forge") || strings.Contains(s, "curseforge"):
 		return "forge"
+	case s == "fabric-quilt" || s == "quilt-fabric":
+		return "fabric"
 	case strings.Contains(s, "quilt"):
 		return "quilt"
 	case strings.Contains(s, "fabric"):
 		return "fabric"
+	case strings.Contains(s, "papermc"):
+		return "paper"
 	default:
 		return s
 	}
+}
+
+// pluginLoader reports whether a normalized loader name belongs to the
+// Bukkit/Paper plugin family. It reuses the loader table in
+// minecraft.GetModLoaderInfo (a loader is plugin-capable exactly when its
+// content directory is "plugins") so classification cannot drift from the
+// install path's directory resolution or the proto supports_plugins flag.
+func pluginLoader(loader string) bool {
+	return minecraft.GetModLoaderInfo(storage.ModLoader(loader)).ModsDirectory == "plugins"
 }
 
 func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, server *storage.Server) {
@@ -318,6 +338,30 @@ func (m *ModOnlineManager) Search(ctx context.Context, server *storage.Server, p
 			apiKey = *globalSettings.CFAPIKey
 		}
 		results = m.searchCurseForge(ctx, apiKey, p.Query, loader, mcVersion, installedMods)
+	} else if pluginLoader(loader) {
+		// Plugin-capable loaders browse plugin sources: Hangar (the native
+		// Bukkit/Paper index) merged with Modrinth's plugin catalog. Both
+		// result sets keep their own platform label so versions and installs
+		// route back to the source they came from.
+		token := ""
+		ua := "CarbonPanel/1.0 (CarbonPanel-admin)"
+		if globalSettings != nil {
+			if globalSettings.ModrinthToken != nil && *globalSettings.ModrinthToken != "" {
+				token = *globalSettings.ModrinthToken
+			}
+			if globalSettings.ModrinthUserAgent != nil && *globalSettings.ModrinthUserAgent != "" {
+				ua = *globalSettings.ModrinthUserAgent
+			}
+		}
+		results = indexers.MergeLabeledResults(func(r SearchModResult) string {
+			if r.Title != "" {
+				return r.Title
+			}
+			return r.Slug
+		},
+			m.searchHangar(ctx, ua, p.Query, mcVersion, installedMods),
+			m.searchModrinthType(ctx, token, ua, "plugin", p.Query, "paper", mcVersion, installedMods),
+		)
 	} else {
 		// Modrinth
 		token := ""
@@ -349,25 +393,23 @@ func (m *ModOnlineManager) Search(ctx context.Context, server *storage.Server, p
 }
 
 func (m *ModOnlineManager) searchModrinth(ctx context.Context, token, ua, query, loader, mcVersion string, installed map[string]bool) []SearchModResult {
+	return m.searchModrinthType(ctx, token, ua, "mod", query, loader, mcVersion, installed)
+}
+
+// searchModrinthType narrows Modrinth to a project type. The plugin path uses
+// "plugin" (with the paper facet) so Paper-family servers do not wade through
+// fabric/forge mods; the default mod path is unchanged.
+func (m *ModOnlineManager) searchModrinthType(ctx context.Context, token, ua, projectType, query, loader, mcVersion string, installed map[string]bool) []SearchModResult {
 	if loader == "vanilla" {
 		loader = ""
 	}
 	provider := m.modrinthClient(token, ua)
-	mrResp, err := provider.Search(ctx, modrinth.SearchOptions{ProjectType: "mod", Query: query, Loader: loader, GameVersion: mcVersion, Limit: 25})
+	mrResp, err := provider.Search(ctx, modrinth.SearchOptions{ProjectType: projectType, Query: query, Loader: loader, GameVersion: mcVersion, Limit: 25})
 	if err != nil {
 		return []SearchModResult{}
 	}
 	var results []SearchModResult
 	for _, hit := range mrResp.Hits {
-		isInstalled := false
-		lowerSlug := strings.ToLower(hit.Slug)
-		for k := range installed {
-			if strings.Contains(k, lowerSlug) {
-				isInstalled = true
-				break
-			}
-		}
-
 		results = append(results, SearchModResult{
 			ID:          hit.ProjectID,
 			Slug:        hit.Slug,
@@ -380,11 +422,63 @@ func (m *ModOnlineManager) searchModrinth(ctx context.Context, token, ua, query,
 			Platform:    "modrinth",
 			ClientSide:  hit.ClientSide,
 			ServerSide:  hit.ServerSide,
-			Installed:   isInstalled,
+			Installed:   jarNameMatchesSlug(installed, hit.Slug),
 		})
 	}
 
 	return results
+}
+
+// searchHangar queries the plugin indexers for the Paper-family loader.
+// Failures degrade to an empty page so one provider error never blanks the
+// whole search, matching the Modrinth/CurseForge behavior.
+func (m *ModOnlineManager) searchHangar(ctx context.Context, ua, query, mcVersion string, installed map[string]bool) []SearchModResult {
+	pluginResults, err := m.hangarIndexer(ua).SearchPlugins(ctx, query, mcVersion, 25)
+	if err != nil {
+		m.log.Warn("hangar plugin search failed: %v", err)
+		return []SearchModResult{}
+	}
+	results := make([]SearchModResult, 0, len(pluginResults))
+	for _, p := range pluginResults {
+		results = append(results, SearchModResult{
+			ID:          p.ID,
+			Slug:        p.Slug,
+			Title:       p.Name,
+			Description: p.Summary,
+			IconURL:     p.IconURL,
+			Author:      p.Author,
+			Downloads:   p.DownloadCount,
+			Categories:  p.Platforms,
+			Platform:    p.Indexer,
+			Installed:   jarNameMatchesSlug(installed, p.Slug),
+		})
+	}
+	return results
+}
+
+// hangarIndexer builds the Hangar plugin indexer. An explicit base URL
+// (self-hosted proxies, tests) wins over the registry factory.
+func (m *ModOnlineManager) hangarIndexer(ua string) indexers.PluginIndexer {
+	if m.hangarBaseURL != "" {
+		return hangar.NewClientWithOptions(nil, hangar.Options{BaseURL: m.hangarBaseURL, UserAgent: ua, HTTPClient: m.httpClient})
+	}
+	if idx, err := indexers.NewPluginIndexer("hangar", "", nil); err == nil {
+		return idx
+	}
+	return hangar.NewClient(nil)
+}
+
+// jarNameMatchesSlug reports whether any installed jar name contains the
+// project slug — the loose installed-state heuristic the browse UI has always
+// used (a slug rarely appears inside an unrelated jar name).
+func jarNameMatchesSlug(installed map[string]bool, slug string) bool {
+	lowerSlug := strings.ToLower(slug)
+	for k := range installed {
+		if strings.Contains(k, lowerSlug) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *ModOnlineManager) searchCurseForge(ctx context.Context, apiKey, query, loader, mcVersion string, installed map[string]bool) []SearchModResult {
@@ -410,15 +504,6 @@ func (m *ModOnlineManager) searchCurseForge(ctx context.Context, apiKey, query, 
 			cats = append(cats, c.Name)
 		}
 
-		isInstalled := false
-		lowerSlug := strings.ToLower(mod.Slug)
-		for k := range installed {
-			if strings.Contains(k, lowerSlug) {
-				isInstalled = true
-				break
-			}
-		}
-
 		results = append(results, SearchModResult{
 			ID:          fmt.Sprintf("%d", mod.ID),
 			Slug:        mod.Slug,
@@ -429,7 +514,7 @@ func (m *ModOnlineManager) searchCurseForge(ctx context.Context, apiKey, query, 
 			Downloads:   int64(mod.DownloadCount),
 			Categories:  cats,
 			Platform:    "curseforge",
-			Installed:   isInstalled,
+			Installed:   jarNameMatchesSlug(installed, mod.Slug),
 		})
 	}
 
@@ -456,7 +541,8 @@ func (m *ModOnlineManager) handleVersions(w http.ResponseWriter, r *http.Request
 // resolution, file/dependency mapping and provider error mapping are identical
 // for the legacy JSON adapter and the generated ModBrowseService.
 func (m *ModOnlineManager) Versions(ctx context.Context, server *storage.Server, slug string, p ModVersionParams) ([]ModVersionItem, *ModBrowseError) {
-	platform := strings.ToLower(p.Platform)
+	platform := strings.ToLower(strings.TrimSpace(p.Platform))
+	explicitProvider := platform == "hangar" || platform == "modrinth" || platform == "curseforge"
 	if platform == "" {
 		platform = "modrinth"
 	}
@@ -493,6 +579,25 @@ func (m *ModOnlineManager) Versions(ctx context.Context, server *storage.Server,
 		}
 		if globalSettings.ModrinthUserAgent != nil && *globalSettings.ModrinthUserAgent != "" {
 			ua = *globalSettings.ModrinthUserAgent
+		}
+	}
+
+	// Plugin searches merge Hangar and Modrinth, so a slug may belong to
+	// either index. The plugin-native index is tried first only when the
+	// caller did not select a provider. An explicit provider pins the lookup
+	// and reports its own misses instead of falling back to the other index.
+	if explicitProvider {
+		switch platform {
+		case "hangar":
+			return m.hangarVersions(ctx, ua, slug, mcVersion)
+		case "modrinth":
+			return m.modrinthVersions(ctx, token, ua, slug, loader, mcVersion)
+		}
+	}
+	if pluginLoader(loader) {
+		versions, browseErr := m.hangarVersions(ctx, ua, slug, mcVersion)
+		if browseErr == nil && len(versions) > 0 {
+			return versions, nil
 		}
 	}
 	return m.modrinthVersions(ctx, token, ua, slug, loader, mcVersion)
@@ -569,6 +674,44 @@ func (m *ModOnlineManager) modrinthVersions(ctx context.Context, token, ua, slug
 
 	m.enrichModrinthDependencyTitles(ctx, token, ua, versions)
 
+	return versions, nil
+}
+
+// hangarVersions resolves a plugin's versions through the Hangar plugin index
+// and maps them onto the browse version items. An empty author is fine: the
+// client resolves the project namespace from the slug.
+func (m *ModOnlineManager) hangarVersions(ctx context.Context, ua, slug, mcVersion string) ([]ModVersionItem, *ModBrowseError) {
+	pluginVersions, err := m.hangarIndexer(ua).PluginVersions(ctx, "", slug, mcVersion)
+	if err != nil {
+		var providerErr *indexers.IndexerError
+		if errors.As(err, &providerErr) && providerErr.StatusCode != 0 {
+			return nil, &ModBrowseError{Status: providerErr.StatusCode, Message: fmt.Sprintf("hangar returned %d", providerErr.StatusCode)}
+		} else if errors.As(err, &providerErr) && providerErr.Kind == indexers.ErrDecode {
+			return nil, &ModBrowseError{Status: http.StatusInternalServerError, Message: "failed to parse versions"}
+		}
+		return nil, &ModBrowseError{Status: http.StatusBadGateway, Message: fmt.Sprintf("failed to fetch versions: %v", err)}
+	}
+	versions := make([]ModVersionItem, 0, len(pluginVersions))
+	for _, v := range pluginVersions {
+		deps := make([]ModDependencyItem, 0, len(v.Dependencies))
+		for _, d := range v.Dependencies {
+			deps = append(deps, ModDependencyItem{
+				ProjectID:      d.ProjectID,
+				DependencyType: d.DependencyType,
+				Title:          d.Name,
+			})
+		}
+		versions = append(versions, ModVersionItem{
+			ID:            v.ID,
+			VersionNumber: v.VersionNumber,
+			Name:          v.VersionNumber,
+			VersionType:   v.VersionType,
+			FileName:      v.FileName,
+			DownloadURL:   v.DownloadURL,
+			FileSize:      v.Size,
+			Dependencies:  deps,
+		})
+	}
 	return versions, nil
 }
 
@@ -817,6 +960,10 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 	if modsDir == "" {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "server does not support mods"}
 	}
+	// modsDirectory resolves through minecraft.GetModsPath, so Paper-family
+	// loaders already land on <dataRoot>/plugins: the same handler serves
+	// mods and plugins by loader, and the filename/size checks below apply
+	// unchanged to plugin jars.
 
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("failed to create mods directory: %v", err)}

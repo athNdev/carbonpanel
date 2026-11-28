@@ -203,113 +203,125 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		return nil, fmt.Errorf("server not found")
 	}
 
-	live, err := s.GetServerConfig(ctx, serverID)
-	if err != nil {
-		if !errors.Is(err, ErrServerConfigNotFound) {
-			return nil, fmt.Errorf("failed to read current server config: %w", err)
-		}
-		live = s.CreateDefaultServerConfig(serverID)
-	}
-	current, err := ServerConfigToMap(live)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read current server config: %w", err)
-	}
-	if err := validateStagedConfigFields(live, changes); err != nil {
-		return nil, err
-	}
-
-	diff := DiffMaps(current, changes)
-	if len(diff) == 0 {
-		return nil, fmt.Errorf("no differences vs current config")
-	}
-	payload, err := json.Marshal(diff)
-	if err != nil {
-		return nil, err
-	}
-	baseSnap := make(map[string]any, len(diff))
-	for key := range diff {
-		if value, ok := current[key]; ok {
-			baseSnap[key] = value
-		} else {
-			baseSnap[key] = nil
-		}
-	}
-	basePayload, err := json.Marshal(baseSnap)
-	if err != nil {
-		return nil, err
-	}
-
-	window := string(opts.Window)
+	window := opts.Window
 	if window == "" {
-		window = string(mode)
-	}
-	batch, err := s.ensureOpenBatch(ctx, serverID, window)
-	if err != nil {
-		return nil, err
-	}
-	if opts.SetBatchWindow {
-		batch.Window = string(opts.Window)
-		batch.ApplyAt = opts.ApplyAt
-		batch.IdleMinutes = opts.IdleMinutes
-		if err := s.db.WithContext(ctx).Save(batch).Error; err != nil {
-			return nil, err
-		}
-		if err := s.db.WithContext(ctx).Model(&StagedConfigChange{}).
-			Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
-			Updates(map[string]any{
-				"apply_mode":   string(mode),
-				"apply_at":     opts.ApplyAt,
-				"idle_minutes": opts.IdleMinutes,
-			}).Error; err != nil {
-			return nil, err
+		window = UpdateWindowNextRestart
+		if mode == StagedApplyScheduled {
+			window = UpdateWindow(mode)
 		}
 	}
-
 	staged := &StagedConfigChange{
 		ID:          uuid.New().String(),
 		ServerID:    serverID,
-		BatchID:     batch.ID,
-		Payload:     string(payload),
-		BasePayload: string(basePayload),
 		ApplyMode:   mode,
 		CronExpr:    cronExpr,
 		ApplyAt:     opts.ApplyAt,
 		IdleMinutes: opts.IdleMinutes,
 		Status:      StagedStatusStaged,
 	}
-	if err := s.db.WithContext(ctx).Create(staged).Error; err != nil {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batch, err := ensureOpenBatch(tx, serverID, window)
+		if err != nil {
+			return err
+		}
+		if err := requireBatchAdmission(tx, serverID); err != nil {
+			return err
+		}
+		live := &ServerConfig{}
+		err = tx.Where("server_id = ?", serverID).First(live).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to read current server config: %w", err)
+			}
+			live = createDefaultServerConfig(tx, serverID)
+		}
+		current, err := ServerConfigToMap(live)
+		if err != nil {
+			return fmt.Errorf("failed to read current server config: %w", err)
+		}
+		if err := validateStagedConfigFields(live, changes); err != nil {
+			return err
+		}
+
+		diff := DiffMaps(current, changes)
+		if len(diff) == 0 {
+			return fmt.Errorf("no differences vs current config")
+		}
+		payload, err := json.Marshal(diff)
+		if err != nil {
+			return err
+		}
+		baseSnap := make(map[string]any, len(diff))
+		for key := range diff {
+			if value, ok := current[key]; ok {
+				baseSnap[key] = value
+			} else {
+				baseSnap[key] = nil
+			}
+		}
+		basePayload, err := json.Marshal(baseSnap)
+		if err != nil {
+			return err
+		}
+
+		content, err := hasBatchContent(tx, batch.ID)
+		if err != nil {
+			return err
+		}
+		if mode == StagedApplyScheduled {
+			if content {
+				return fmt.Errorf("%w: open batch %s has staged content; apply or discard that content before staging cron config", ErrUpdateBatchConflict, batch.ID)
+			}
+			pending, err := hasBatchConfig(tx, batch.ID)
+			if err != nil {
+				return err
+			}
+			if pending {
+				return fmt.Errorf("%w: open batch %s already has staged config waiting on window %q; apply or discard that config before staging cron config", ErrUpdateBatchConflict, batch.ID, batch.Window)
+			}
+			// An empty batch carries no content and no config, so its window can
+			// be retargeted to isolate the cron config. A batch with content or
+			// pending config was refused above and must never be retargeted.
+			if UpdateWindow(batch.Window) != UpdateWindow(StagedApplyScheduled) {
+				if err := setBatchWindow(tx, batch, UpdateWindow(StagedApplyScheduled), StagedApplyScheduled, nil, 0); err != nil {
+					return err
+				}
+			}
+		} else {
+			cron, err := hasBatchCronConfig(tx, batch.ID)
+			if err != nil {
+				return err
+			}
+			if cron {
+				return fmt.Errorf("%w: open batch %s has an independently scheduled config row; apply or discard that config before staging another change", ErrUpdateBatchConflict, batch.ID)
+			}
+			if !batchWindowMatches(batch, window, opts.ApplyAt, opts.IdleMinutes) {
+				if content {
+					return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
+				}
+				if !opts.SetBatchWindow {
+					pending, err := hasBatchConfig(tx, batch.ID)
+					if err != nil {
+						return err
+					}
+					if pending {
+						return batchWindowConflict(batch, window, opts.ApplyAt, opts.IdleMinutes)
+					}
+				}
+				if err := setBatchWindow(tx, batch, window, mode, opts.ApplyAt, opts.IdleMinutes); err != nil {
+					return err
+				}
+			}
+		}
+		staged.BatchID = batch.ID
+		staged.Payload = string(payload)
+		staged.BasePayload = string(basePayload)
+		return tx.Create(staged).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	return staged, nil
-}
-
-func (s *Store) ensureOpenBatch(ctx context.Context, serverID, window string) (*ServerUpdateBatch, error) {
-	var batch ServerUpdateBatch
-	err := s.db.WithContext(ctx).Where("open_key = ?", serverID).First(&batch).Error
-	if err == nil {
-		return &batch, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	key := serverID
-	batch = ServerUpdateBatch{
-		ID:       uuid.New().String(),
-		ServerID: serverID,
-		OpenKey:  &key,
-		Window:   window,
-		Status:   UpdateBatchOpen,
-	}
-	if err := s.db.WithContext(ctx).Create(&batch).Error; err != nil {
-		if isUniqueViolation(err) {
-			if err := s.db.WithContext(ctx).Where("open_key = ?", serverID).First(&batch).Error; err != nil {
-				return nil, err
-			}
-			return &batch, nil
-		}
-		return nil, err
-	}
-	return &batch, nil
 }
 
 // ListStagedConfigChanges returns staged records for a server, newest first.
@@ -453,7 +465,7 @@ func (s *Store) ApplyStagedConfigChange(ctx context.Context, id string) (*Staged
 		live := &ServerConfig{}
 		err := tx.Where("server_id = ?", staged.ServerID).First(live).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			live = s.CreateDefaultServerConfig(staged.ServerID)
+			live = createDefaultServerConfig(tx, staged.ServerID)
 		} else if err != nil {
 			return fmt.Errorf("failed to read live server config: %w", err)
 		}
@@ -539,7 +551,7 @@ func (s *Store) RollbackStagedConfigChange(ctx context.Context, id string) (*Sta
 			return fmt.Errorf("staged config change has no recorded previous state to roll back to")
 		}
 
-		if err := restoreStagedConfigPrevious(tx, s, &staged); err != nil {
+		if err := restoreStagedConfigPrevious(tx, &staged); err != nil {
 			return err
 		}
 
@@ -558,7 +570,7 @@ func (s *Store) RollbackStagedConfigChange(ctx context.Context, id string) (*Sta
 	return rolledBack, nil
 }
 
-func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChange) error {
+func restoreStagedConfigPrevious(tx *gorm.DB, staged *StagedConfigChange) error {
 	if staged.PreviousPayload == "" {
 		return fmt.Errorf("staged config change has no recorded previous state to roll back to")
 	}
@@ -577,7 +589,7 @@ func restoreStagedConfigPrevious(tx *gorm.DB, s *Store, staged *StagedConfigChan
 	live := &ServerConfig{}
 	err := tx.Where("server_id = ?", staged.ServerID).First(live).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		live = s.CreateDefaultServerConfig(staged.ServerID)
+		live = createDefaultServerConfig(tx, staged.ServerID)
 	} else if err != nil {
 		return fmt.Errorf("failed to read live server config: %w", err)
 	}
@@ -623,7 +635,7 @@ func (s *Store) RevertStagedConfigApplyToStaged(ctx context.Context, id string) 
 		if err := tx.Where("id = ?", id).First(&staged).Error; err != nil {
 			return fmt.Errorf("staged config change not found: %w", err)
 		}
-		if err := restoreStagedConfigPrevious(tx, s, &staged); err != nil {
+		if err := restoreStagedConfigPrevious(tx, &staged); err != nil {
 			return err
 		}
 
@@ -645,7 +657,7 @@ func (s *Store) RevertStagedConfigApplyToStaged(ctx context.Context, id string) 
 
 // RestageOpenBatchRolledBackConfigs reconciles existing open batches whose config rows
 // were left rolled_back by a failed publication attempt, making them retryable again.
-// It does not touch configs outside open batches.
+// It leaves independently scheduled rows and configs outside open batches alone.
 func (s *Store) RestageOpenBatchRolledBackConfigs(ctx context.Context, batchID string) error {
 	if batchID == "" {
 		return nil
@@ -659,7 +671,7 @@ func (s *Store) RestageOpenBatchRolledBackConfigs(ctx context.Context, batchID s
 	}
 	var rows []StagedConfigChange
 	if err := s.db.WithContext(ctx).
-		Where("batch_id = ? AND status = ?", batchID, StagedStatusRolledBack).
+		Where("batch_id = ? AND status = ? AND apply_mode <> ?", batchID, StagedStatusRolledBack, StagedApplyScheduled).
 		Find(&rows).Error; err != nil {
 		return err
 	}

@@ -14,7 +14,11 @@ import (
 	"github.com/athNdev/carbon-panel/internal/rcon"
 )
 
-const rconCallTimeout = 2 * time.Second
+// rconCallTimeout bounds one typed action over a direct RCON connection.
+// Dialing an unreachable RCON endpoint can cost the dial timeout by itself,
+// and the caller falls back to docker exec afterwards, so this budget covers
+// connect + authenticate + command rather than a single hop.
+const rconCallTimeout = 10 * time.Second
 
 // sendFunc is seam for the real RCON client and for fixtures.
 type sendFunc func(ctx context.Context, info ServerInfo, command string) (string, error)

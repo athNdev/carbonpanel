@@ -4,7 +4,7 @@ title: Deep sleep and wake
 description: A player knock must not start an intentionally stopped server. Hibernation and deep sleep share one idle-power module.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/docker/freezer.go, internal/docker/sleep.go, internal/docker/idle.go, internal/docker/sleep_wake_policy_test.go, docs/runbook-sleep-baseline.md, docs/deep-sleep-tier-b.md]
+code_refs: [internal/docker/freezer.go, internal/docker/sleep.go, internal/docker/idle.go, internal/docker/sleep_wake_policy_test.go, internal/rpc/services/server.go, internal/rbac/mapping.go, docs/runbook-sleep-baseline.md, docs/deep-sleep-tier-b.md]
 sources:
   - title: Sleep baseline runbook
     resource: ../../docs/runbook-sleep-baseline.md

@@ -14,15 +14,23 @@ import (
 )
 
 func TestNativeTileAssetUsesCanonicalCoordinates(t *testing.T) {
-	if got, ok := parseNativeTileAsset("native/overworld/-5/0.png"); !ok || got != (nativeTileAsset{x: -5}) {
+	if got, ok := parseNativeTileAsset("native/overworld/-5/0.png"); !ok || got.x != -5 || got.z != 0 || got.dimension != worldterrain.Overworld {
 		t.Fatalf("valid native tile was rejected: %+v (%t)", got, ok)
 	}
+	if got, ok := parseNativeTileAsset("native/nether/-5/0.png"); !ok || got.dimension != worldterrain.Nether {
+		t.Fatalf("nether tile was rejected: %+v (%t)", got, ok)
+	}
+	if got, ok := parseNativeTileAsset("native/end/3/4.png"); !ok || got.dimension != worldterrain.End {
+		t.Fatalf("end tile was rejected: %+v (%t)", got, ok)
+	}
 	for _, path := range []string{
-		"native/overworld/0/0.png/extra", "native/nether/0/1.png",
+		"native/overworld/0/0.png/extra",
 		"native/overworld/../../level.dat", "native/overworld/0/1/2.png",
 		"native/overworld/000/01.png", "native/overworld/+1/-0.png",
 		"native/overworld/2147483648/0.png", "native/overworld/0/1.jpg",
 		"native/overworld/-0/0.png", "native/overworld/1e3/0.png",
+		"native/DIM-1/0/0.png", "native/overworld%2f/0/0.png",
+		"native//0/0.png", "native/0/0.png",
 	} {
 		if got, ok := parseNativeTileAsset(path); ok {
 			t.Errorf("unsafe or noncanonical map asset %q selected %+v", path, got)

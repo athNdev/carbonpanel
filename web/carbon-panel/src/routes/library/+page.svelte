@@ -351,10 +351,12 @@ SPDX-License-Identifier: MPL-2.0
 										>{shortId(ref.revision)}</code
 									>{/if}
 								{#if checkPermission(auth.permissions, 'world_view', 'read', server.id)}
+									<!-- eslint-disable svelte/no-navigation-without-resolve -- resolve() present; query appended -->
 									<a
 										class="focus-ring text-xs text-accent-text hover:underline"
-										href={resolve(`/worlds?server=${encodeURIComponent(server.id)}`)}>View map</a
+										href={resolve('/servers/[id]', { id: server.id }) + '?tab=world'}>View map</a
 									>
+									<!-- eslint-enable svelte/no-navigation-without-resolve -->
 								{/if}
 							</div>
 						</li>
@@ -419,7 +421,7 @@ SPDX-License-Identifier: MPL-2.0
 		{:else}
 			<CarbonDataTable
 				title="Library entries"
-				description="Revisions are immutable; opening an entry shows its provenance, bindings and compatibility report."
+				description="Revisions are immutable; opening an entry shows its provenance, bindings, and compatibility report."
 			>
 				{#snippet header()}
 					<tr>

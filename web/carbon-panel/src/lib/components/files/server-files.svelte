@@ -10,7 +10,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { Progress } from '$lib/components/ui/progress';
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -22,16 +22,7 @@ one at https://mozilla.org/MPL/2.0/.
 		DialogTitle
 	} from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import {
-		Loader2,
-		Folder,
-		X,
-		FilePlus,
-		FolderPlus,
-		Upload,
-		RefreshCw,
-		Search
-	} from '@lucide/svelte';
+	import { Folder, X, FilePlus, FolderPlus, Upload, RefreshCw, Search } from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
 	import { toast } from 'svelte-sonner';
@@ -896,7 +887,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<Search class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 			<input
 				class="h-8 min-w-0 flex-1 rounded-none border border-border bg-background px-2 font-sans text-xs text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
-				placeholder="Search files..."
+				placeholder="Search files…"
 				value={filterText}
 				oninput={(e) => (filterText = (e.target as HTMLInputElement).value)}
 			/>
@@ -963,8 +954,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Loading state -->
 	{#if loading}
-		<div class="flex flex-1 items-center justify-center">
-			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+		<div class="flex flex-1 items-center justify-center py-8">
+			<CarbonSpinner size="md" label="Loading" description="Loading files…" />
 		</div>
 	{:else if files.length === 0}
 		<div class="flex flex-1 flex-col items-center justify-center text-muted-foreground">
@@ -1169,7 +1160,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmBulkOpen}
 	title="Delete selected items?"
 	message="The selected files and folders are permanently removed."
-	confirmLabel="Delete All"
+	confirmLabel="Delete all"
 	danger
 	onconfirm={confirmBulkDelete}
 	onclose={() => (pendingBulkCount = 0)}

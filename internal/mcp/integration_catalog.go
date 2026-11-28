@@ -26,6 +26,7 @@ var exposedTools = []ToolSpec{
 	{Name: "create_server", Procedure: "/carbonpanel.v1.ServerService/CreateServer", Class: Class("review"), Confirm: true, Description: "Create one server from bounded scalar options. Requires confirm=true and a request_id.", Source: "server"},
 	{Name: "create_task", Procedure: "/carbonpanel.v1.TaskService/CreateTask", Class: Class("review"), Confirm: true, Description: "Create one bounded scheduled task. SCRIPT/WEBHOOK/MODPACK_UPDATE are refused. Requires confirm=true.", Source: "server"},
 	{Name: "create_user", Procedure: "/carbonpanel.v1.UserService/CreateUser", Class: Class("review"), Confirm: true, Description: "Create one user. Confirm-gated; supply a one-time password out of band.", Source: "admin"},
+	{Name: "deep_sleep_server", Procedure: "/carbonpanel.v1.ServerService/DeepSleepServer", Class: Class("review"), Confirm: true, Description: "Park one running server into deep sleep while retaining its world and proxy route. Requires confirm=true.", Source: "server"},
 	{Name: "delete_datapack", Procedure: "/carbonpanel.v1.DatapackService/DeleteDatapack", Class: Class("review"), Confirm: true, Description: "Delete one installed datapack. Destructive; requires confirm=true.", Source: "content"},
 	{Name: "delete_file", Procedure: "/carbonpanel.v1.FileService/DeleteFile", Class: Class("review"), Confirm: true, Description: "Delete one server-relative file or directory. Requires confirm=true; stage records the deletion without touching live bytes.", Source: "content"},
 	{Name: "delete_invite", Procedure: "/carbonpanel.v1.AuthService/DeleteInvite", Class: Class("review"), Confirm: true, Description: "Revoke one registration invite by exact id. Confirm-gated; response is empty and contains no invite code.", Source: "admin"},
@@ -108,7 +109,7 @@ var exposedTools = []ToolSpec{
 	{Name: "get_world_revision", Procedure: "/carbonpanel.v1.WorldService/GetRevision", Class: Class("safe"), Confirm: false, Description: "Get one immutable world revision.", Source: "first_slice"},
 	{Name: "get_world_view_status", Procedure: "/carbonpanel.v1.WorldViewService/GetWorldViewStatus", Class: Class("safe"), Confirm: false, Description: "Get pollable status for one server-local world.", Source: "first_slice"},
 	{Name: "import_remote_modpack", Procedure: "/carbonpanel.v1.ModpackService/ImportRemoteModpack", Class: Class("review"), Confirm: true, Description: "Import a modpack from an operator-supplied https URL. Requires confirm=true. The proto credential fields auth_token (modpack.proto:176) and allow_private_network (modpack.proto:177) are deliberately not exposed to MCP arguments.", Source: "content"},
-	{Name: "import_uploaded_mod", Procedure: "/carbonpanel.v1.ModService/ImportUploadedMod", Class: Class("review"), Confirm: true, Description: "Import a previously uploaded jar session into one server's mods. Requires confirm=true. No raw bytes are carried by the tool.", Source: "content"},
+	{Name: "import_uploaded_mod", Procedure: "/carbonpanel.v1.ModService/ImportUploadedMod", Class: Class("review"), Confirm: true, Description: "Import a previously uploaded jar session into one server's mods via the staged safe path (compatibility-sensitive uploads are never live-installed). Requires confirm=true. No raw bytes are carried by the tool.", Source: "content"},
 	{Name: "import_uploaded_modpack", Procedure: "/carbonpanel.v1.ModpackService/ImportUploadedModpack", Class: Class("review"), Confirm: true, Description: "Import a previously uploaded modpack session. Requires confirm=true; no raw bytes in the tool.", Source: "content"},
 	{Name: "init_file_download", Procedure: "/carbonpanel.v1.FileService/InitFileDownload", Class: Class("review"), Confirm: false, Description: "Open a bounded single-file download session. The tool returns session metadata; the byte stream is the scoped GET /api/v1/download/{sessionId} flow.", Source: "content"},
 	{Name: "init_upload", Procedure: "/carbonpanel.v1.UploadService/InitUpload", Class: Class("review"), Confirm: true, Description: "Create a bounded upload session. Requires confirm=true; follow with upload_chunk and get_upload_status.", Source: "content"},
@@ -148,6 +149,7 @@ var exposedTools = []ToolSpec{
 	{Name: "move_file", Procedure: "/carbonpanel.v1.FileService/MoveFile", Class: Class("review"), Confirm: true, Description: "Move one server-relative file or directory. Requires confirm=true.", Source: "content"},
 	{Name: "packwiz_get_pack", Procedure: "/carbonpanel.v1.PackwizService/GetPack", Class: Class("safe"), Confirm: false, Description: "Read Packwiz pack metadata and a page of content across mods, datapacks, resource packs and shaders. Requires global modpacks/read. Omits download URLs, paths and raw options.", Source: "content"},
 	{Name: "packwiz_list_packs", Procedure: "/carbonpanel.v1.PackwizService/ListPacks", Class: Class("safe"), Confirm: false, Description: "List Packwiz Studio packs. Requires global modpacks/read. Use next_offset to page through pack summaries.", Source: "content"},
+	{Name: "pause_server", Procedure: "/carbonpanel.v1.ServerService/PauseServer", Class: Class("review"), Confirm: true, Description: "Freeze one running server with the cgroup freezer while retaining its container and world. Requires confirm=true.", Source: "server"},
 	{Name: "ping_node", Procedure: "/carbonpanel.v1.NodeService/PingNode", Class: Class("safe"), Confirm: false, Description: "Ping one configured node by exact id for status and latency. No discovery, no TLS material.", Source: "server"},
 	{Name: "player_service_ban_player", Procedure: "/carbonpanel.v1.PlayerService/BanPlayer", Class: Class("review"), Confirm: true, Description: "Ban one player on one server by exact identity key. Requires confirm=true and a bounded reason.", Source: "integration"},
 	{Name: "player_service_bulk_player_action", Procedure: "/carbonpanel.v1.PlayerService/BulkPlayerAction", Class: Class("review"), Confirm: true, Description: "Apply one bounded typed action to a small list of exact identity keys. Requires confirm=true.", Source: "integration"},
@@ -224,9 +226,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 253
-	IntegrationMountedRPCs = 243
+	IntegrationDeclaredRPCs = 255
+	IntegrationMountedRPCs = 245
 	IntegrationExcludedOps = 76
-	IntegrationSupportedOps = 205
-	IntegrationCombinedTools = 216
+	IntegrationSupportedOps = 207
+	IntegrationCombinedTools = 218
 )

@@ -12,7 +12,12 @@ import (
 	"time"
 )
 
-const execCallTimeout = 2 * time.Second
+// execCallTimeout bounds one typed action over the node executor. The
+// sender's command path may try a direct RCON dial first and fall back to
+// docker exec (each with its own shorter bound), and an exec across a
+// proxied or remote daemon costs several API round trips — the caller's
+// budget must accommodate the whole sequence, not one hop.
+const execCallTimeout = 10 * time.Second
 
 // execAdapter uses a caller-supplied executor scoped to the owning node. It
 // never falls back to a controller-local Docker socket or database.

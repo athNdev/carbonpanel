@@ -354,7 +354,20 @@ func (m *DeepSleepManager) SleepServer(ctx context.Context, serverID string) err
 		return fmt.Errorf("sleep already in flight for server %s", serverID)
 	}
 	defer m.endTransition(serverID)
+	return m.sleepServer(ctx, serverID)
+}
 
+// SleepServerHeld is like SleepServer but assumes the caller already holds the
+// process-wide lifecycle transition for serverID. Manual RPC requests use this
+// to avoid claiming the same transition twice.
+func (m *DeepSleepManager) SleepServerHeld(ctx context.Context, serverID string) error {
+	if m.store == nil {
+		return fmt.Errorf("store is nil")
+	}
+	return m.sleepServer(ctx, serverID)
+}
+
+func (m *DeepSleepManager) sleepServer(ctx context.Context, serverID string) error {
 	srv, err := m.store.GetServer(ctx, serverID)
 	if err != nil {
 		return fmt.Errorf("server %s not found: %w", serverID, err)

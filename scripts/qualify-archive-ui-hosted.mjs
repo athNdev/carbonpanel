@@ -297,10 +297,18 @@ async function capture(page, outDir, name, viewport, theme, screenshots, fullPag
   return file;
 }
 
+// The login form exposes stable test ids (the same attributes the review plans
+// in scripts/review/plan-*.json use). Placeholder text is product copy and the
+// copy audit rewrites it, so the driver must not key off it.
+export const LOGIN_SELECTORS = Object.freeze({
+  username: 'input[data-testid="auth-login-username"]',
+  password: 'input[data-testid="auth-login-password"]',
+});
+
 async function login(page, base, credentials, timeouts) {
   await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
-  const username = page.locator('input[placeholder="Enter your username"]');
-  const password = page.locator('input[placeholder="Enter your password"]');
+  const username = page.locator(LOGIN_SELECTORS.username);
+  const password = page.locator(LOGIN_SELECTORS.password);
   await username.waitFor({ timeout: timeouts.routeMs });
   await username.fill(credentials.username);
   await password.fill(credentials.password);

@@ -80,6 +80,49 @@ func TestWorkTempMountFollowsTheDataBind(t *testing.T) {
 	}
 }
 
+// The /data bind source is the path on the DAEMON's filesystem. When a panel
+// running on Windows talks to a Linux daemon through a translated mapping
+// (CARBONPANEL_HOST_DATA_PATH), that source is a POSIX path; joining the
+// work-temp segment with the panel OS's filepath would rewrite it with
+// backslashes and runc would refuse the mount
+// ("\\root\\carbon-panel\\...: no such file or directory").
+func TestWorkTempMountKeepsTheDaemonPathStyle(t *testing.T) {
+	posix := &container.HostConfig{Mounts: []mount.Mount{{
+		Type:   mount.TypeBind,
+		Source: "/root/carbon-panel/data/servers/one",
+		Target: "/data",
+	}}}
+	applyServerRootfs(posix, &container.Config{}, nil)
+	for _, m := range posix.Mounts {
+		if m.Target != serverWorkTempContainerPath {
+			continue
+		}
+		if m.Source != "/root/carbon-panel/data/servers/one/.tmp" {
+			t.Fatalf("posix daemon work temp source = %q, want the forward-slash daemon path", m.Source)
+		}
+		if strings.ContainsRune(m.Source, '\\') {
+			t.Fatalf("posix daemon work temp source = %q, backslash leaked from the panel OS", m.Source)
+		}
+	}
+
+	windows := &container.HostConfig{Mounts: []mount.Mount{{
+		Type:   mount.TypeBind,
+		Source: `C:\panel\data\servers\one`,
+		Target: "/data",
+	}}}
+	applyServerRootfs(windows, &container.Config{}, nil)
+	for _, m := range windows.Mounts {
+		if m.Target != serverWorkTempContainerPath {
+			continue
+		}
+		if !strings.HasSuffix(m.Source, ".tmp") ||
+			(!strings.Contains(m.Source, `C:\panel\data\servers\one`) &&
+				!strings.Contains(m.Source, "C:/panel/data/servers/one")) {
+			t.Fatalf("windows daemon work temp source = %q, want the drive path preserved", m.Source)
+		}
+	}
+}
+
 func TestEnsureServerWorkTempIsStickyAndWritable(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(serverWorkTempHostPath(root), 0o755); err != nil {

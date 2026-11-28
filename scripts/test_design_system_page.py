@@ -95,6 +95,36 @@ class DesignSystemPageTests(unittest.TestCase):
             self.assertIn(name, section, f"{name} is not named in its section")
             self.assertIn("props-table", section, f"{name} has no prop table")
 
+    def test_component_count_claims_match_the_export_list(self):
+        exports = re.findall(
+            r"export \{ default as (\w+) \} from", EXPORTS.read_text(encoding="utf-8")
+        )
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn(f"{len(exports)} components", page,
+                      "footer/hero count claim does not match the export list")
+        self.assertNotIn("nineteen", page.lower())
+
+    def test_action_bar_section_documents_the_real_api(self):
+        page = PAGE.read_text(encoding="utf-8")
+        section = page.split('id="c-floating-action-bar"', 1)[1].split("</article>", 1)[0]
+        self.assertIn("onSelectSection", section)
+        self.assertIn("dirtySections", section)
+        self.assertIn("DirtySectionEntry", section)
+        self.assertIn("carbon-shake", section)
+        for removed in ("onsaveall", "onundoall", "onopensection"):
+            self.assertNotIn(removed, section, f"stale prop {removed} still documented")
+
+    def test_page_documents_layer_scale_shake_and_mods_patterns(self):
+        page = PAGE.read_text(encoding="utf-8")
+        for documented in ("z-[60]", "carbon-shake", "Mods management patterns",
+                           "mod-update-summary.ts", "mods-browser-store.svelte.ts",
+                           "internal/rpc/services/mod_update_preview.go"):
+            self.assertIn(documented, page)
+        self.assertNotIn("mod-update-ui.ts", page,
+                         "the removed update panel mapping is still documented")
+        self.assertNotIn("updateOutcomeLabel", page,
+                         "the removed update outcome mapping is still documented")
+
     def test_theme_preview_toggle_is_present(self):
         page = PAGE.read_text(encoding="utf-8")
         self.assertIn("data-theme-toggle", page)

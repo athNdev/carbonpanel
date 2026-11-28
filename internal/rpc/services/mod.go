@@ -28,7 +28,6 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
-	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -341,82 +340,16 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 		)
 	}
 
-	if msg.GetStage() {
-		stageResp, stageErr := s.stageUploadedMod(ctx, msg, server, tempPath, originalFilename)
-		if stageErr != nil {
-			s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename, "error": stageErr.Error()})
-			return nil, stageErr
-		}
-		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename})
-		return stageResp, nil
+	// Compatibility-sensitive mod uploads without declared loader/version
+	// context follow the documented safe path: stage the bytes instead of
+	// installing them live. This is fail-closed for unknown loaders.
+	stageResp, stageErr := s.stageUploadedMod(ctx, msg, server, tempPath, originalFilename)
+	if stageErr != nil {
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename, "error": stageErr.Error()})
+		return nil, stageErr
 	}
-
-	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
-	if err != nil {
-		return nil, storageError(err)
-	}
-
-	// Get the correct mods directory based on mod loader
-	modsDir := minecraft.GetModsPath(root, server.ModLoader)
-	if modsDir == "" {
-		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "server type does not support mods"})
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("this server type does not support mods"))
-	}
-
-	// Create mods directory if needed
-	if err := os.MkdirAll(modsDir, 0755); err != nil {
-		s.log.Error("Failed to create mods directory: %v", err)
-		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "failed to create mods directory"})
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create mods directory"))
-	}
-
-	// Move file from temp location to mods dir
-	modPath := filepath.Join(modsDir, originalFilename)
-	if err := os.Rename(tempPath, modPath); err != nil {
-		if err := files.CopyFile(tempPath, modPath); err != nil {
-			s.log.Error("Failed to move mod file: %v", err)
-			s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "failed to save mod"})
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save mod"))
-		}
-		os.Remove(tempPath)
-	}
-
-	// Cleanup the upload session
-	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
-
-	// Get file info for the response
-	info, err := os.Stat(modPath)
-	if err != nil {
-		s.log.Error("Failed to stat mod file: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get mod info"))
-	}
-
-	// Use provided display name or derive from filename
-	displayName := msg.DisplayName
-	if displayName == "" {
-		displayName = originalFilename
-		if ext := filepath.Ext(displayName); ext != "" {
-			displayName = displayName[:len(displayName)-len(ext)]
-		}
-	}
-
-	// Create mod record
-	mod := &v1.Mod{
-		Id:          uuid.NewSHA1(uuid.NameSpaceURL, []byte(msg.ServerId+originalFilename)).String(),
-		ServerId:    msg.ServerId,
-		FileName:    originalFilename,
-		DisplayName: displayName,
-		Description: msg.Description,
-		Enabled:     true,
-		FileSize:    info.Size(),
-		UploadedAt:  timestamppb.New(info.ModTime()),
-	}
-
-	s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "display_name": displayName})
-	return connect.NewResponse(&v1.ImportUploadedModResponse{
-		Mod:     mod,
-		Message: "Mod uploaded successfully",
-	}), nil
+	s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename})
+	return stageResp, nil
 }
 
 // stageUploadedMod keeps a validated jar out of the live mods directory.

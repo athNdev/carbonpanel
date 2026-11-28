@@ -12,7 +12,12 @@ one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonConfirm,
+		CarbonErrorState,
+		CarbonSpinner
+	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
@@ -637,7 +642,7 @@ one at https://mozilla.org/MPL/2.0/.
 					clearEventTriggers: !isEventScheduled
 				});
 				await rpcClient.task.updateTask(request);
-				toast.success('Task updated successfully');
+				toast.success('Task updated');
 			} else {
 				const request = create(CreateTaskRequestSchema, {
 					serverId: server.id,
@@ -657,7 +662,7 @@ one at https://mozilla.org/MPL/2.0/.
 					eventTriggers: isEventScheduled ? eventTriggers : []
 				});
 				await rpcClient.task.createTask(request);
-				toast.success('Task created successfully');
+				toast.success('Task created');
 			}
 			showCreateDialog = false;
 			resetForm();
@@ -686,7 +691,7 @@ one at https://mozilla.org/MPL/2.0/.
 		try {
 			const request = create(TriggerTaskRequestSchema, { id: task.id });
 			await rpcClient.task.triggerTask(request);
-			toast.success('Task triggered successfully');
+			toast.success('Task triggered');
 			await loadTasks();
 		} catch (error: unknown) {
 			toast.error(error instanceof Error ? error.message : 'Failed to trigger task');
@@ -707,7 +712,7 @@ one at https://mozilla.org/MPL/2.0/.
 		try {
 			const request = create(DeleteTaskRequestSchema, { id: task.id });
 			await rpcClient.task.deleteTask(request);
-			toast.success('Task deleted successfully');
+			toast.success('Task deleted');
 			await loadTasks();
 		} catch (_e) {
 			toast.error('Failed to delete task');
@@ -911,7 +916,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#if loading}
 		<div class="flex flex-1 items-center justify-center py-8">
-			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+			<CarbonSpinner size="md" label="Loading" description="Loading tasks…" />
 		</div>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-auto p-4">
@@ -1696,9 +1701,9 @@ one at https://mozilla.org/MPL/2.0/.
 					<Button onclick={saveTask} disabled={!taskName.trim() || creating} class="min-w-[120px]">
 						{#if creating}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							{selectedTask ? 'Saving...' : 'Creating...'}
+							{selectedTask ? 'Saving…' : 'Creating…'}
 						{:else}
-							{selectedTask ? 'Save Changes' : 'Create Task'}
+							{selectedTask ? 'Save changes' : 'Create task'}
 						{/if}
 					</Button>
 				</div>
@@ -1789,8 +1794,8 @@ one at https://mozilla.org/MPL/2.0/.
 <CarbonConfirm
 	bind:open={confirmOpen}
 	title="Delete task?"
-	message="Scheduled executions stop. Run history is kept. This cannot be undone."
-	confirmLabel="Delete Task"
+	message="Scheduled runs stop; run history is kept. This cannot be undone."
+	confirmLabel="Delete task"
 	danger
 	onconfirm={confirmDeleteTask}
 	onclose={() => (pendingDelete = null)}

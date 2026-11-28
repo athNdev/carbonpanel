@@ -57,6 +57,8 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.ServerService/DeleteServer":         {Resource: ResourceServers, Action: ActionDelete, ObjectIDField: "id"},
 	"/carbonpanel.v1.ServerService/StartServer":          {Resource: ResourceServers, Action: ActionStart, ObjectIDField: "id"},
 	"/carbonpanel.v1.ServerService/StopServer":           {Resource: ResourceServers, Action: ActionStop, ObjectIDField: "id"},
+	"/carbonpanel.v1.ServerService/PauseServer":          {Resource: ResourceServers, Action: ActionStop, ObjectIDField: "id"},
+	"/carbonpanel.v1.ServerService/DeepSleepServer":      {Resource: ResourceServers, Action: ActionStop, ObjectIDField: "id"},
 	"/carbonpanel.v1.ServerService/RestartServer":        {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
 	"/carbonpanel.v1.ServerService/RecreateServer":       {Resource: ResourceServers, Action: ActionRestart, ObjectIDField: "id"},
 	"/carbonpanel.v1.ServerService/SendCommand":          {Resource: ResourceServers, Action: ActionCommand, ObjectIDField: "id"},

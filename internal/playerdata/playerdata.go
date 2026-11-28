@@ -55,9 +55,10 @@ type Result struct {
 
 // Reader resolves node-owned storage and reads bounded snapshots from it.
 type Reader struct {
-	store    *db.Store
-	resolver *nodestorage.Resolver
-	bases    map[string]string
+	store        *db.Store
+	resolver     *nodestorage.Resolver
+	bases        map[string]string
+	baseExplicit map[string]bool
 }
 
 // Source values reported on fields.
@@ -124,6 +125,7 @@ func NewReader(store *db.Store, resolver *nodestorage.Resolver) *Reader {
 			KindAdvancements: DefaultAdvancementsBase,
 			KindCharacter:    DefaultPlayerDataBase,
 		},
+		baseExplicit: map[string]bool{},
 	}
 }
 
@@ -140,6 +142,7 @@ func (r *Reader) SetBase(kind, rel string) error {
 		return err
 	}
 	r.bases[kind] = clean
+	r.baseExplicit[kind] = true
 	return nil
 }
 
@@ -189,6 +192,75 @@ func canonicalUUID(s string) (string, error) {
 	return s, nil
 }
 
+// candidatePaths lists the locations a snapshot file can live in, most
+// specific first.
+//
+// Minecraft writes player data into the level folder: a Paper server stores
+// <data-root>/world/playerdata/<uuid>.dat and the matching stats and
+// advancements files. The level folder is configurable, so it is resolved
+// from the server's own configuration; the vanilla "world" folder is used when
+// that configuration is unknown.
+//
+// Minecraft writes the UUID with its dashes, so the dashed file name is tried
+// first. The undashed form is still accepted because some tooling copies the
+// files under that name.
+//
+// The root-relative base stays the last candidate: a server whose data root
+// is the world folder itself, or an explicit SetBase override, keeps working.
+func (r *Reader) candidatePaths(ctx context.Context, server *db.Server, base, kind, ext, dashed, undashed string) []string {
+	var bases []string
+	if r.usesDefaultBase(kind, base) {
+		level := r.levelName(ctx, server)
+		if level != "" {
+			bases = append(bases, path.Join(level, base))
+		}
+	}
+	bases = append(bases, base)
+
+	candidates := make([]string, 0, len(bases)*2)
+	for _, candidateBase := range bases {
+		candidates = append(candidates, path.Join(candidateBase, dashed+ext))
+	}
+	for _, candidateBase := range bases {
+		candidates = append(candidates, path.Join(candidateBase, undashed+ext))
+	}
+	return candidates
+}
+
+// usesDefaultBase reports whether a kind still uses implicit discovery. An
+// explicit SetBase override is used verbatim and never re-prefixed with the
+// level folder, even if it matches the default base name.
+func (r *Reader) usesDefaultBase(kind, base string) bool {
+	if r.baseExplicit[kind] {
+		return false
+	}
+	switch kind {
+	case KindStats:
+		return base == DefaultStatsBase
+	case KindAdvancements:
+		return base == DefaultAdvancementsBase
+	case KindCharacter:
+		return base == DefaultPlayerDataBase
+	default:
+		return false
+	}
+}
+
+// levelName resolves the server's save folder. An unknown configuration falls
+// back to the vanilla "world" folder; the root-relative locations are still
+// tried, so an unreadable configuration never hides a snapshot that is stored
+// directly in the data root.
+func (r *Reader) levelName(ctx context.Context, server *db.Server) string {
+	if r.store != nil && server != nil {
+		if cfg, err := r.store.GetServerConfig(ctx, server.ID); err == nil {
+			if name := cfg.ActualLevelName(); name != "" {
+				return name
+			}
+		}
+	}
+	return "world"
+}
+
 // Read returns a bounded, read-only snapshot for one player data file.
 func (r *Reader) Read(ctx context.Context, server *db.Server, uuid, kind string) (Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -206,25 +278,27 @@ func (r *Reader) Read(ctx context.Context, server *db.Server, uuid, kind string)
 		return Result{}, err
 	}
 
-	var rel string
+	var ext string
 	var limit int64
 	var parse func([]byte, *db.Server) []Field
 	switch kind {
 	case KindStats:
-		rel = path.Join(base, id+".json")
+		ext = ".json"
 		limit = statsLimit
 		parse = parseStats
 	case KindAdvancements:
-		rel = path.Join(base, id+".json")
+		ext = ".json"
 		limit = advancementsLimit
 		parse = parseAdvancements
 	case KindCharacter:
-		rel = path.Join(base, id+".dat")
+		ext = ".dat"
 		limit = nbtLimit
 		parse = parseCharacter
 	default:
 		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedKind, kind)
 	}
+	dashed := id[0:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:32]
+	candidates := r.candidatePaths(ctx, server, base, kind, ext, dashed, id)
 
 	// Reproduce services.storageNodeInfo minimally: legacy aliases designate
 	// the controller's own daemon; every other id must resolve to a real node
@@ -239,10 +313,24 @@ func (r *Reader) Read(ctx context.Context, server *db.Server, uuid, kind string)
 	}
 	defer func() { _ = acc.Close() }()
 
-	data, fi, err := readBounded(ctx, acc, rel, limit)
+	var (
+		data []byte
+		fi   os.FileInfo
+		rel  string
+	)
+	for _, candidate := range candidates {
+		rel = candidate
+		data, fi, err = readBounded(ctx, acc, rel, limit)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return Result{}, err
+		}
+	}
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return notPresentResult(kind, rel, server, time.Time{}), nil
+			return notPresentResult(kind, candidates[0], server, time.Time{}), nil
 		}
 		return Result{}, err
 	}

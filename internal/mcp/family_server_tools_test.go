@@ -81,6 +81,8 @@ func registerFamilyRPCHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFu
 	registerOK[v1.UpdateServerRequest, v1.UpdateServerResponse](mux, "/carbonpanel.v1.ServerService/UpdateServer", ic, "")
 	registerOK[v1.DeleteServerRequest, v1.DeleteServerResponse](mux, "/carbonpanel.v1.ServerService/DeleteServer", ic, "")
 	registerOK[v1.RecreateServerRequest, v1.RecreateServerResponse](mux, "/carbonpanel.v1.ServerService/RecreateServer", ic, "")
+	registerOK[v1.PauseServerRequest, v1.PauseServerResponse](mux, "/carbonpanel.v1.ServerService/PauseServer", ic, "")
+	registerOK[v1.DeepSleepServerRequest, v1.DeepSleepServerResponse](mux, "/carbonpanel.v1.ServerService/DeepSleepServer", ic, "")
 	registerOK[v1.SendCommandRequest, v1.SendCommandResponse](mux, "/carbonpanel.v1.ServerService/SendCommand", ic, "")
 	registerOK[v1.UploadToMCLogsRequest, v1.UploadToMCLogsResponse](mux, "/carbonpanel.v1.ServerService/UploadToMCLogs", ic, "")
 	registerOK[v1.MigrateServerRequest, v1.MigrateServerResponse](mux, "/carbonpanel.v1.ServerService/MigrateServer", ic, "")
@@ -268,7 +270,7 @@ type famCase struct {
 
 func famCases() []famCase {
 	return []famCase{
-		// ServerService — 11
+		// ServerService — 13
 		{"server", "get_server_logs", map[string]any{"id": "srv-1", "tail": 10}, "serverOps", true},
 		{"server", "clear_server_logs", map[string]any{"id": "srv-1", "confirm": true}, "serverOps", true},
 		{"server", "get_next_available_port", map[string]any{}, "serverOps", true},
@@ -278,6 +280,8 @@ func famCases() []famCase {
 		{"server", "update_server", map[string]any{"id": "srv-1", "name": "renamed", "confirm": true}, "serverOps", true},
 		{"server", "delete_server", map[string]any{"id": "srv-1", "keep_data": true, "confirm": true}, "serverOps", true},
 		{"server", "recreate_server", map[string]any{"id": "srv-1", "confirm": true}, "serverOps", true},
+		{"server", "pause_server", map[string]any{"id": "srv-1", "request_id": "req-pause-1", "confirm": true}, "serverOps", true},
+		{"server", "deep_sleep_server", map[string]any{"id": "srv-1", "request_id": "req-sleep-1", "confirm": true}, "serverOps", true},
 		{"server", "send_command", map[string]any{"id": "srv-1", "command": "list", "confirm": true}, "serverOps", true},
 		{"server", "upload_to_mclogs", map[string]any{"id": "srv-1", "confirm": true}, "serverOps", true},
 		{"server", "migrate_server", map[string]any{"id": "srv-1", "target_node_id": "node-1", "request_id": "req-2", "confirm": true}, "serverOps", true},
@@ -334,12 +338,12 @@ func famCases() []famCase {
 }
 
 func TestFamilyServerDescriptorInventory(t *testing.T) {
-	if len(FamilyServerDescriptors) != 54 {
-		t.Fatalf("listed RPC descriptors = %d, want 54", len(FamilyServerDescriptors))
+	if len(FamilyServerDescriptors) != 56 {
+		t.Fatalf("listed RPC descriptors = %d, want 56", len(FamilyServerDescriptors))
 	}
 	included := FamilyServerIncludedDescriptors()
-	if len(included) != FamilyServerToolCount || FamilyServerReachableCount() != 53 {
-		t.Fatalf("included=%d count=%d reachable=%d, want 53 each", len(included), FamilyServerToolCount, FamilyServerReachableCount())
+	if len(included) != FamilyServerToolCount || FamilyServerReachableCount() != 55 {
+		t.Fatalf("included=%d count=%d reachable=%d, want 55 each", len(included), FamilyServerToolCount, FamilyServerReachableCount())
 	}
 	excluded := FamilyServerExcludedDescriptors()
 	if len(excluded) != FamilyServerExcludedRPCCount || excluded[0].Name != "scan_nodes" {
@@ -351,8 +355,8 @@ func TestFamilyServerDescriptorInventory(t *testing.T) {
 	if len(FamilyServerExcludedSurfaces) != 11 {
 		t.Fatalf("excluded surfaces = %d, want 11", len(FamilyServerExcludedSurfaces))
 	}
-	if got := FamilyServerListedCount(); got != 65 {
-		t.Fatalf("listed count = %d, want 65", got)
+	if got := FamilyServerListedCount(); got != 67 {
+		t.Fatalf("listed count = %d, want 67", got)
 	}
 	if len(famCases()) != FamilyServerReachableCount() {
 		t.Fatalf("test cases = %d, reachable tools = %d", len(famCases()), FamilyServerReachableCount())

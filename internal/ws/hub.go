@@ -732,6 +732,18 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		return
 	}
 
+	// Status-aware rejections for the panel's own frozen and deep-sleep
+	// states, with the same messages the command sender returns so every
+	// console path reads alike.
+	switch server.Status {
+	case storage.StatusPaused:
+		c.sendCommandResult(msg.ServerId, false, "", command.ErrServerPaused.Error())
+		return
+	case storage.StatusDeepSleep:
+		c.sendCommandResult(msg.ServerId, false, "", "server is in deep sleep; it wakes when a player connects - wake it first to run commands")
+		return
+	}
+
 	// Check server status
 	dockerCli, err := c.hub.dockerFor(server.NodeID)
 	if err != nil || dockerCli == nil {
@@ -740,6 +752,11 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 	}
 	status, err := dockerCli.GetContainerStatus(ctx, server.ContainerID)
 	if err != nil || status != storage.StatusRunning {
+		if status == storage.StatusPaused {
+			// A container paused outside the panel is frozen the same way.
+			c.sendCommandResult(msg.ServerId, false, "", command.ErrServerPaused.Error())
+			return
+		}
 		c.sendCommandResult(msg.ServerId, false, "", "server is not running")
 		return
 	}

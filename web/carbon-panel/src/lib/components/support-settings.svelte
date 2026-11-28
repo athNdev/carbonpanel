@@ -116,7 +116,7 @@ one at https://mozilla.org/MPL/2.0/.
 					githubUsername = '';
 					issueDescription = '';
 					stepsToReproduce = '';
-					toast.success('Support bundle uploaded successfully!', {
+					toast.success('Support bundle uploaded', {
 						description: 'Save your reference ID for support requests.'
 					});
 				} else {
@@ -134,8 +134,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 				if (response.bundleId) {
 					bundlePath = response.bundleId;
-					toast.success('Support bundle generated!', {
-						description: 'Click the download button to save the bundle.'
+					toast.success('Support bundle generated', {
+						description: 'Download the bundle to save it.'
 					});
 				} else {
 					toast.error('Failed to generate support bundle', {
@@ -172,7 +172,7 @@ one at https://mozilla.org/MPL/2.0/.
 			URL.revokeObjectURL(url);
 			// Clear the bundle path after download
 			bundlePath = null;
-			toast.success('Support bundle downloaded!');
+			toast.success('Support bundle downloaded');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error occurred';
 			toast.error('Failed to download support bundle', {
@@ -185,7 +185,7 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!referenceId) return;
 		const success = await copyToClipboard(referenceId);
 		if (success) {
-			toast.success('Reference ID copied to clipboard!');
+			toast.success('Reference ID copied');
 		} else {
 			toast.error('Failed to copy to clipboard');
 		}
@@ -306,7 +306,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<div id="support-server-selection" class="border-t border-border px-5 py-4">
 				{#if loadingServers}
 					<div class="flex items-center justify-center py-4">
-						<CarbonInlineLoading description="Loading servers..." />
+						<CarbonInlineLoading description="Loading servers…" />
 					</div>
 				{:else if servers.length === 0}
 					<p class="py-4 text-center font-sans text-xs text-muted-foreground">
@@ -413,7 +413,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<textarea
 						id="description"
 						rows={3}
-						placeholder="Describe the issue you're experiencing..."
+						placeholder="Describe the issue you're experiencing…"
 						bind:value={issueDescription}
 						class="focus-ring w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-sans text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-border"
 					></textarea>
@@ -426,7 +426,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<textarea
 						id="steps"
 						rows={3}
-						placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
+						placeholder="1. Go to…&#10;2. Click on…&#10;3. See error…"
 						bind:value={stepsToReproduce}
 						class="focus-ring w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-sans text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-border"
 					></textarea>
@@ -453,7 +453,7 @@ one at https://mozilla.org/MPL/2.0/.
 					{#if !generating}
 						<Download class="h-4 w-4" />
 					{/if}
-					<span>{generating ? 'Generating bundle...' : 'Generate and download'}</span>
+					<span>{generating ? 'Generating bundle…' : 'Generate and download'}</span>
 				</CarbonButton>
 
 				<CarbonButton
@@ -467,7 +467,7 @@ one at https://mozilla.org/MPL/2.0/.
 					{#if !uploading}
 						<Send class="h-4 w-4" />
 					{/if}
-					<span>{uploading ? 'Uploading...' : 'Upload to support'}</span>
+					<span>{uploading ? 'Uploading…' : 'Upload to support'}</span>
 				</CarbonButton>
 			</div>
 			<p class="mt-3 font-sans text-xs text-muted-foreground">
@@ -508,9 +508,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-success-text" />
 				<div class="min-w-0 flex-1 space-y-4">
 					<div>
-						<p class="font-sans text-sm font-semibold text-foreground">
-							Support bundle uploaded successfully
-						</p>
+						<p class="font-sans text-sm font-semibold text-foreground">Support bundle uploaded</p>
 						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Include this reference ID when you contact support.
 						</p>
@@ -542,7 +540,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<div class="border-t border-border pt-3">
 						<p class="font-sans text-xs font-semibold text-foreground">
-							Please include this reference ID when:
+							Include this reference ID when:
 						</p>
 						<ul class="mt-1 space-y-1 font-sans text-xs text-muted-foreground">
 							<li>Requesting help in our Discord server</li>
@@ -557,7 +555,7 @@ one at https://mozilla.org/MPL/2.0/.
 						rel="noopener noreferrer"
 						class="focus-ring inline-flex items-center gap-1 font-sans text-xs text-accent-text hover:text-accent-text hover:underline"
 					>
-						For more info and links to Discord/GitHub, please visit our site!
+						For more info and links to Discord/GitHub, visit the project site.
 						<ExternalLink class="h-3 w-3" />
 					</a>
 				</div>
@@ -575,8 +573,8 @@ one at https://mozilla.org/MPL/2.0/.
 				</p>
 				<p class="font-sans text-xs leading-relaxed text-muted-foreground">
 					Support bundles contain server configurations, logs, and database information. While we
-					take privacy seriously and handle your data securely, please review the bundle contents
-					before uploading if you have sensitive information.
+					take privacy seriously and handle your data securely, review the bundle contents before
+					uploading if you have sensitive information.
 				</p>
 			</div>
 		</div>

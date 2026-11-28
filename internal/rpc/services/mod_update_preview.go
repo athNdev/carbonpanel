@@ -19,14 +19,14 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
-// providerLookupPrefix marks a failed provider lookup so a scheduled policy can
+// providerLookupPrefix marks a failed provider lookup so the preview can
 // distinguish a provider outage from a genuinely unidentified local upload.
-const providerLookupPrefix = "Provider lookup failed: "
-
-// providerLookupReason is the client-visible form of providerLookupPrefix.
-// Provider diagnostics can carry response bodies, request URLs and transport
-// details, so they stay in the logs and never reach the preview reason.
-const providerLookupReason = providerLookupPrefix + "Try again later."
+// Provider errors may embed response bodies, request URLs and transport
+// details, so the client-visible reason is fixed instead of echoing them.
+const (
+	providerLookupPrefix = "Provider lookup failed: "
+	providerLookupReason = providerLookupPrefix + "Try again later."
+)
 
 type modUpdateLookup interface {
 	GetProjects(context.Context, []string) ([]modrinth.ProjectDetails, error)

@@ -8,17 +8,17 @@
   },
   "bootstrap": {
     "path": "/login",
-    "detectSelector": "input[placeholder=\"Enter your username\"]",
-    "usernameSelector": "input[placeholder=\"Choose admin username\"]",
-    "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
-    "confirmSelector": "input[placeholder=\"Confirm your password\"]",
+    "detectSelector": "[data-testid=\"auth-login-username\"]",
+    "usernameSelector": "[data-testid=\"auth-bootstrap-username\"]",
+    "passwordSelector": "[data-testid=\"auth-bootstrap-password\"]",
+    "confirmSelector": "[data-testid=\"auth-bootstrap-password-confirm\"]",
     "submitSelector": "button[type=\"submit\"]",
     "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
   "login": {
     "path": "/login",
-    "usernameSelector": "input[placeholder=\"Enter your username\"]",
-    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "usernameSelector": "[data-testid=\"auth-login-username\"]",
+    "passwordSelector": "[data-testid=\"auth-login-password\"]",
     "submitSelector": "button[type=\"submit\"]",
     "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
@@ -40,7 +40,7 @@
       "name": "create modpack control is present"
     },
     {
-      "assertVisible": "button:has-text(\"Import Modpack\")",
+      "assertVisible": "button:has-text(\"Import modpack\")",
       "name": "import modpack control is present"
     },
     {

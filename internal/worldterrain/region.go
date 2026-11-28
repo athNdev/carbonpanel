@@ -41,9 +41,11 @@ func readAt(r io.ReaderAt, buf []byte, offset int64) error {
 	return err
 }
 
-// readSurface reads the selected sector range only. The first region sector
-// contains the 1024 packed locations and the second their Unix timestamps.
-func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget) (worldlib.JavaChunkSurface, error) {
+// readSurfaceInSpan reads the selected sector range only. The first region
+// sector contains the 1024 packed locations and the second their Unix
+// timestamps. surfaceUnderRoof passes the dimension's bedrock-roof policy to
+// the surface scan.
+func readSurfaceInSpan(ctx context.Context, r io.ReaderAt, entry []byte, budget *readBudget, span worldlib.JavaDimensionSpan, surfaceUnderRoof bool) (worldlib.JavaChunkSurface, error) {
 	var result worldlib.JavaChunkSurface
 	location := binary.BigEndian.Uint32(entry)
 	first, count := int64(location>>8), int(location&0xff)
@@ -59,7 +61,7 @@ func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readB
 	if size < 0 || size > int64(count*sectorBytes-5) {
 		return result, errors.New("invalid Anvil chunk length")
 	}
-	if header[4]&0x80 != 0 || header[4] < 1 || header[4] > 3 {
+	if header[4]&0x80 != 0 || header[4] < 1 || header[4] > 4 {
 		return result, worldlib.ErrJavaChunkUnsupported
 	}
 	if size == 0 {
@@ -80,10 +82,13 @@ func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readB
 	if err != nil {
 		return result, err
 	}
-	return worldlib.ParseJavaChunkSurface(raw)
+	return worldlib.ParseJavaChunkSurfaceInSpan(raw, span, surfaceUnderRoof)
 }
 
 func unpackChunk(ctx context.Context, compression byte, packed []byte, budget *readBudget) ([]byte, error) {
+	if compression == 4 {
+		return unpackLZ4Chunk(packed, budget)
+	}
 	var data io.Reader = bytes.NewReader(packed)
 	if compression == 1 || compression == 2 {
 		var (

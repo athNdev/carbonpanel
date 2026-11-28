@@ -219,7 +219,7 @@ SPDX-License-Identifier: MPL-2.0
 <div class="space-y-6 font-sans text-foreground">
 	<CarbonPageHeader
 		title="Create world from configuration"
-		description="A version-driven, grouped wizard. Every control comes from the capability schema and states when it applies."
+		description="Fields are grouped by capability schema and state when they apply."
 	>
 		{#snippet tag()}
 			<CarbonTag type="blue" size="sm">CONFIGURATION</CarbonTag>
@@ -356,11 +356,11 @@ SPDX-License-Identifier: MPL-2.0
 			</nav>
 
 			{#if schemaBusy && !schema}
-				<CarbonInlineLoading description="Loading the version-driven schema..." />
+				<CarbonInlineLoading description="Loading schema…" />
 			{:else if !schema}
 				<CarbonEmptyState
 					title="No schema available"
-					description="Set a target edition and Minecraft version, then reload the schema. Controls are never invented by the UI."
+					description="Set an edition and Minecraft version, then reload the schema."
 				/>
 			{:else}
 				<section

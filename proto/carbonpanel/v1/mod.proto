@@ -96,7 +96,9 @@ message ImportUploadedModRequest {
   string upload_session_id = 2;
   string display_name = 3;
   string description = 4;
-  // stage keeps the jar out of the live mods directory until the batch applies.
+  // Stage requests the documented safe path. Compatibility-sensitive mod
+  // uploads without declared loader/version context are always staged (never
+  // live-installed), even if this field is false/omitted.
   bool stage = 5;
 }
 

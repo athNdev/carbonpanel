@@ -156,7 +156,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/SearchMods"},
 		Sources: []string{
 			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
-			"internal/rpc/handlers/mod_search.go:285:func (m *ModOnlineManager) Search(",
+			"internal/rpc/handlers/mod_search.go:300:func (m *ModOnlineManager) Search(ctx context.Context",
 			"internal/rpc/handlers/mod_search.go:210:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},

@@ -38,8 +38,8 @@ func everyDeclaredProcedure(t *testing.T) map[string]bool {
 		}
 		return true
 	})
-	if len(out) != 253 {
-		t.Fatalf("declared proto RPCs: got %d, want 253", len(out))
+	if len(out) != 255 {
+		t.Fatalf("declared proto RPCs: got %d, want 255", len(out))
 	}
 	return out
 }
@@ -237,14 +237,14 @@ func TestFamilyAudit(t *testing.T) {
 				t.Errorf("declared RPC %s is missing from the matrix", procedure)
 			}
 		}
-		if declaredOps != 253 || mountedOps != 243 || unmountedOps != 10 || nonRPC != 28 {
-			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 253/243/10/28",
+		if declaredOps != 255 || mountedOps != 245 || unmountedOps != 10 || nonRPC != 28 {
+			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 255/245/10/28",
 				declaredOps, mountedOps, unmountedOps, nonRPC)
 		}
 
 		want := FamilyAuditCounts{
-			DeclaredRPCs:              253,
-			MountedReachable:          243,
+			DeclaredRPCs:              255,
+			MountedReachable:          245,
 			ListedInToolCatalog:       recordedListed,
 			ReachableByToolOrComposed: recordedReachable,
 			VerifiedByFixture:         recordedVerified,

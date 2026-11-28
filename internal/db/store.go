@@ -477,6 +477,13 @@ func (s *Store) SyncServerConfigWithServer(ctx context.Context, server *Server) 
 }
 
 func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
+	return createDefaultServerConfig(s.db, serverID)
+}
+
+// createDefaultServerConfig builds the default config through db so callers
+// already holding a transaction read global settings on that transaction
+// instead of waiting for a second pool connection.
+func createDefaultServerConfig(db *gorm.DB, serverID string) *ServerConfig {
 	boolPtr := func(b bool) *bool { return &b }
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
@@ -518,7 +525,7 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 
 	// Get global settings and copy non-nil values
 	var globalSettings ServerConfig
-	err := s.db.Where("id = ?", GlobalSettingsID).First(&globalSettings).Error
+	err := db.Where("id = ?", GlobalSettingsID).First(&globalSettings).Error
 	if err == nil {
 		// Use reflection to copy non-nil values from global settings
 		globalValue := reflect.ValueOf(&globalSettings).Elem()

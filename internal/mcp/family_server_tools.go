@@ -330,6 +330,14 @@ type famConfirmIDArgs struct {
 
 func (a famConfirmIDArgs) Confirmation() bool { return a.Confirm }
 
+type famLifecycleArgs struct {
+	ID        string `json:"id" jsonschema:"exact server id, 1 to 128 characters"`
+	RequestID string `json:"request_id,omitempty" jsonschema:"idempotency key, at most 128 characters"`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"must be true to perform this lifecycle mutation"`
+}
+
+func (a famLifecycleArgs) Confirmation() bool { return a.Confirm }
+
 type famServerIDArgs struct {
 	ServerID string `json:"server_id" jsonschema:"exact server id, never empty; 1 to 128 characters"`
 }
@@ -744,6 +752,24 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 			return nil, err
 		}
 		return invoke(ctx, cl.Server.RecreateServer, v1.RecreateServerRequest{Id: in.ID})
+	})
+	addFamilyTool(s, "pause_server", c, func(ctx context.Context, cl *FamilyServerClients, in famLifecycleArgs) (any, error) {
+		if err := famID("pause_server", "id", in.ID); err != nil {
+			return nil, err
+		}
+		if err := famOptID("pause_server", "request_id", in.RequestID); err != nil {
+			return nil, err
+		}
+		return invoke(ctx, cl.Server.PauseServer, v1.PauseServerRequest{Id: in.ID, RequestId: in.RequestID})
+	})
+	addFamilyTool(s, "deep_sleep_server", c, func(ctx context.Context, cl *FamilyServerClients, in famLifecycleArgs) (any, error) {
+		if err := famID("deep_sleep_server", "id", in.ID); err != nil {
+			return nil, err
+		}
+		if err := famOptID("deep_sleep_server", "request_id", in.RequestID); err != nil {
+			return nil, err
+		}
+		return invoke(ctx, cl.Server.DeepSleepServer, v1.DeepSleepServerRequest{Id: in.ID, RequestId: in.RequestID})
 	})
 	addFamilyTool(s, "list_server_players", c, func(ctx context.Context, cl *FamilyServerClients, in famServerIDArgs) (any, error) {
 		if err := famID("list_server_players", "server_id", in.ServerID); err != nil {

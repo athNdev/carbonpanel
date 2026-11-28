@@ -1675,6 +1675,204 @@ func (x *StopServerResponse) GetStatus() string {
 	return ""
 }
 
+// Server to pause
+type PauseServerRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Idempotency key for this pause. Repeating it does not pause twice.
+	RequestId     string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PauseServerRequest) Reset() {
+	*x = PauseServerRequest{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PauseServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PauseServerRequest) ProtoMessage() {}
+
+func (x *PauseServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PauseServerRequest.ProtoReflect.Descriptor instead.
+func (*PauseServerRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *PauseServerRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PauseServerRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+// Pause operation status
+type PauseServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PauseServerResponse) Reset() {
+	*x = PauseServerResponse{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PauseServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PauseServerResponse) ProtoMessage() {}
+
+func (x *PauseServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PauseServerResponse.ProtoReflect.Descriptor instead.
+func (*PauseServerResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *PauseServerResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+// Server to deep sleep
+type DeepSleepServerRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Idempotency key for this deep sleep. Repeating it does not sleep twice.
+	RequestId     string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeepSleepServerRequest) Reset() {
+	*x = DeepSleepServerRequest{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeepSleepServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeepSleepServerRequest) ProtoMessage() {}
+
+func (x *DeepSleepServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeepSleepServerRequest.ProtoReflect.Descriptor instead.
+func (*DeepSleepServerRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *DeepSleepServerRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DeepSleepServerRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+// Deep sleep operation status
+type DeepSleepServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeepSleepServerResponse) Reset() {
+	*x = DeepSleepServerResponse{}
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeepSleepServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeepSleepServerResponse) ProtoMessage() {}
+
+func (x *DeepSleepServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeepSleepServerResponse.ProtoReflect.Descriptor instead.
+func (*DeepSleepServerResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *DeepSleepServerResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
 // Server to restart
 type RestartServerRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1687,7 +1885,7 @@ type RestartServerRequest struct {
 
 func (x *RestartServerRequest) Reset() {
 	*x = RestartServerRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1699,7 +1897,7 @@ func (x *RestartServerRequest) String() string {
 func (*RestartServerRequest) ProtoMessage() {}
 
 func (x *RestartServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1712,7 +1910,7 @@ func (x *RestartServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartServerRequest.ProtoReflect.Descriptor instead.
 func (*RestartServerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{22}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RestartServerRequest) GetId() string {
@@ -1739,7 +1937,7 @@ type RestartServerResponse struct {
 
 func (x *RestartServerResponse) Reset() {
 	*x = RestartServerResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1751,7 +1949,7 @@ func (x *RestartServerResponse) String() string {
 func (*RestartServerResponse) ProtoMessage() {}
 
 func (x *RestartServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1764,7 +1962,7 @@ func (x *RestartServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartServerResponse.ProtoReflect.Descriptor instead.
 func (*RestartServerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{23}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RestartServerResponse) GetStatus() string {
@@ -1784,7 +1982,7 @@ type RecreateServerRequest struct {
 
 func (x *RecreateServerRequest) Reset() {
 	*x = RecreateServerRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1796,7 +1994,7 @@ func (x *RecreateServerRequest) String() string {
 func (*RecreateServerRequest) ProtoMessage() {}
 
 func (x *RecreateServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1809,7 +2007,7 @@ func (x *RecreateServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecreateServerRequest.ProtoReflect.Descriptor instead.
 func (*RecreateServerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{24}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RecreateServerRequest) GetId() string {
@@ -1829,7 +2027,7 @@ type RecreateServerResponse struct {
 
 func (x *RecreateServerResponse) Reset() {
 	*x = RecreateServerResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1841,7 +2039,7 @@ func (x *RecreateServerResponse) String() string {
 func (*RecreateServerResponse) ProtoMessage() {}
 
 func (x *RecreateServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1854,7 +2052,7 @@ func (x *RecreateServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecreateServerResponse.ProtoReflect.Descriptor instead.
 func (*RecreateServerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{25}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RecreateServerResponse) GetStatus() string {
@@ -1876,7 +2074,7 @@ type SendCommandRequest struct {
 
 func (x *SendCommandRequest) Reset() {
 	*x = SendCommandRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1888,7 +2086,7 @@ func (x *SendCommandRequest) String() string {
 func (*SendCommandRequest) ProtoMessage() {}
 
 func (x *SendCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1901,7 +2099,7 @@ func (x *SendCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendCommandRequest.ProtoReflect.Descriptor instead.
 func (*SendCommandRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{26}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SendCommandRequest) GetId() string {
@@ -1937,7 +2135,7 @@ type SendCommandResponse struct {
 
 func (x *SendCommandResponse) Reset() {
 	*x = SendCommandResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1949,7 +2147,7 @@ func (x *SendCommandResponse) String() string {
 func (*SendCommandResponse) ProtoMessage() {}
 
 func (x *SendCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1962,7 +2160,7 @@ func (x *SendCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendCommandResponse.ProtoReflect.Descriptor instead.
 func (*SendCommandResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{27}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SendCommandResponse) GetSuccess() bool {
@@ -1996,7 +2194,7 @@ type UploadToMCLogsRequest struct {
 
 func (x *UploadToMCLogsRequest) Reset() {
 	*x = UploadToMCLogsRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2008,7 +2206,7 @@ func (x *UploadToMCLogsRequest) String() string {
 func (*UploadToMCLogsRequest) ProtoMessage() {}
 
 func (x *UploadToMCLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2021,7 +2219,7 @@ func (x *UploadToMCLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadToMCLogsRequest.ProtoReflect.Descriptor instead.
 func (*UploadToMCLogsRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{28}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UploadToMCLogsRequest) GetId() string {
@@ -2041,7 +2239,7 @@ type UploadToMCLogsResponse struct {
 
 func (x *UploadToMCLogsResponse) Reset() {
 	*x = UploadToMCLogsResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2053,7 +2251,7 @@ func (x *UploadToMCLogsResponse) String() string {
 func (*UploadToMCLogsResponse) ProtoMessage() {}
 
 func (x *UploadToMCLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2066,7 +2264,7 @@ func (x *UploadToMCLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadToMCLogsResponse.ProtoReflect.Descriptor instead.
 func (*UploadToMCLogsResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{29}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *UploadToMCLogsResponse) GetUrl() string {
@@ -2090,7 +2288,7 @@ type MigrateServerRequest struct {
 
 func (x *MigrateServerRequest) Reset() {
 	*x = MigrateServerRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2102,7 +2300,7 @@ func (x *MigrateServerRequest) String() string {
 func (*MigrateServerRequest) ProtoMessage() {}
 
 func (x *MigrateServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2115,7 +2313,7 @@ func (x *MigrateServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrateServerRequest.ProtoReflect.Descriptor instead.
 func (*MigrateServerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{30}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *MigrateServerRequest) GetId() string {
@@ -2161,7 +2359,7 @@ type MigrateServerResponse struct {
 
 func (x *MigrateServerResponse) Reset() {
 	*x = MigrateServerResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2173,7 +2371,7 @@ func (x *MigrateServerResponse) String() string {
 func (*MigrateServerResponse) ProtoMessage() {}
 
 func (x *MigrateServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2186,7 +2384,7 @@ func (x *MigrateServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrateServerResponse.ProtoReflect.Descriptor instead.
 func (*MigrateServerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{31}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *MigrateServerResponse) GetSuccess() bool {
@@ -2241,7 +2439,7 @@ type ListServerPlayersRequest struct {
 
 func (x *ListServerPlayersRequest) Reset() {
 	*x = ListServerPlayersRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2253,7 +2451,7 @@ func (x *ListServerPlayersRequest) String() string {
 func (*ListServerPlayersRequest) ProtoMessage() {}
 
 func (x *ListServerPlayersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2266,7 +2464,7 @@ func (x *ListServerPlayersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListServerPlayersRequest.ProtoReflect.Descriptor instead.
 func (*ListServerPlayersRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{32}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListServerPlayersRequest) GetServerId() string {
@@ -2287,7 +2485,7 @@ type ListServerPlayersResponse struct {
 
 func (x *ListServerPlayersResponse) Reset() {
 	*x = ListServerPlayersResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2299,7 +2497,7 @@ func (x *ListServerPlayersResponse) String() string {
 func (*ListServerPlayersResponse) ProtoMessage() {}
 
 func (x *ListServerPlayersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2312,7 +2510,7 @@ func (x *ListServerPlayersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListServerPlayersResponse.ProtoReflect.Descriptor instead.
 func (*ListServerPlayersResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{33}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ListServerPlayersResponse) GetPlayers() []string {
@@ -2341,7 +2539,7 @@ type ExportServerArchiveRequest struct {
 
 func (x *ExportServerArchiveRequest) Reset() {
 	*x = ExportServerArchiveRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2353,7 +2551,7 @@ func (x *ExportServerArchiveRequest) String() string {
 func (*ExportServerArchiveRequest) ProtoMessage() {}
 
 func (x *ExportServerArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2366,7 +2564,7 @@ func (x *ExportServerArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportServerArchiveRequest.ProtoReflect.Descriptor instead.
 func (*ExportServerArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{34}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ExportServerArchiveRequest) GetServerId() string {
@@ -2402,7 +2600,7 @@ type ExportServerArchiveResponse struct {
 
 func (x *ExportServerArchiveResponse) Reset() {
 	*x = ExportServerArchiveResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[35]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2612,7 @@ func (x *ExportServerArchiveResponse) String() string {
 func (*ExportServerArchiveResponse) ProtoMessage() {}
 
 func (x *ExportServerArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[35]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2625,7 @@ func (x *ExportServerArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportServerArchiveResponse.ProtoReflect.Descriptor instead.
 func (*ExportServerArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{35}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ExportServerArchiveResponse) GetSessionId() string {
@@ -2462,7 +2660,7 @@ type PreviewServerArchiveRequest struct {
 
 func (x *PreviewServerArchiveRequest) Reset() {
 	*x = PreviewServerArchiveRequest{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[36]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2474,7 +2672,7 @@ func (x *PreviewServerArchiveRequest) String() string {
 func (*PreviewServerArchiveRequest) ProtoMessage() {}
 
 func (x *PreviewServerArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[36]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2487,7 +2685,7 @@ func (x *PreviewServerArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreviewServerArchiveRequest.ProtoReflect.Descriptor instead.
 func (*PreviewServerArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{36}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *PreviewServerArchiveRequest) GetUploadId() string {
@@ -2516,7 +2714,7 @@ type ServerArchiveFinding struct {
 
 func (x *ServerArchiveFinding) Reset() {
 	*x = ServerArchiveFinding{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[37]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2528,7 +2726,7 @@ func (x *ServerArchiveFinding) String() string {
 func (*ServerArchiveFinding) ProtoMessage() {}
 
 func (x *ServerArchiveFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[37]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2541,7 +2739,7 @@ func (x *ServerArchiveFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerArchiveFinding.ProtoReflect.Descriptor instead.
 func (*ServerArchiveFinding) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{37}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ServerArchiveFinding) GetSeverity() ServerArchiveFindingSeverity {
@@ -2579,7 +2777,7 @@ type ServerArchiveDestination struct {
 
 func (x *ServerArchiveDestination) Reset() {
 	*x = ServerArchiveDestination{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2591,7 +2789,7 @@ func (x *ServerArchiveDestination) String() string {
 func (*ServerArchiveDestination) ProtoMessage() {}
 
 func (x *ServerArchiveDestination) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[38]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2604,7 +2802,7 @@ func (x *ServerArchiveDestination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerArchiveDestination.ProtoReflect.Descriptor instead.
 func (*ServerArchiveDestination) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{38}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ServerArchiveDestination) GetId() string {
@@ -2648,7 +2846,7 @@ type PreviewServerArchiveResponse struct {
 
 func (x *PreviewServerArchiveResponse) Reset() {
 	*x = PreviewServerArchiveResponse{}
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2660,7 +2858,7 @@ func (x *PreviewServerArchiveResponse) String() string {
 func (*PreviewServerArchiveResponse) ProtoMessage() {}
 
 func (x *PreviewServerArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_server_proto_msgTypes[39]
+	mi := &file_carbonpanel_v1_server_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2673,7 +2871,7 @@ func (x *PreviewServerArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreviewServerArchiveResponse.ProtoReflect.Descriptor instead.
 func (*PreviewServerArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{39}
+	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *PreviewServerArchiveResponse) GetFormat() ServerArchiveFormat {
@@ -2907,6 +3105,18 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x02 \x01(\tR\trequestId\",\n" +
 	"\x12StopServerResponse\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"C\n" +
+	"\x12PauseServerRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\"-\n" +
+	"\x13PauseServerResponse\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"G\n" +
+	"\x16DeepSleepServerRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\"1\n" +
+	"\x17DeepSleepServerResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"E\n" +
 	"\x14RestartServerRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
@@ -3009,7 +3219,7 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"*SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP\x10\x02\x122\n" +
 	".SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE\x10\x03\x123\n" +
 	"/SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE\x10\x04\x122\n" +
-	".SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER\x10\x052\xcf\r\n" +
+	".SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER\x10\x052\x8b\x0f\n" +
 	"\rServerService\x12V\n" +
 	"\vListServers\x12\".carbonpanel.v1.ListServersRequest\x1a#.carbonpanel.v1.ListServersResponse\x12P\n" +
 	"\tGetServer\x12 .carbonpanel.v1.GetServerRequest\x1a!.carbonpanel.v1.GetServerResponse\x12\\\n" +
@@ -3023,7 +3233,9 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\fDeleteServer\x12#.carbonpanel.v1.DeleteServerRequest\x1a$.carbonpanel.v1.DeleteServerResponse\x12V\n" +
 	"\vStartServer\x12\".carbonpanel.v1.StartServerRequest\x1a#.carbonpanel.v1.StartServerResponse\x12S\n" +
 	"\n" +
-	"StopServer\x12!.carbonpanel.v1.StopServerRequest\x1a\".carbonpanel.v1.StopServerResponse\x12\\\n" +
+	"StopServer\x12!.carbonpanel.v1.StopServerRequest\x1a\".carbonpanel.v1.StopServerResponse\x12V\n" +
+	"\vPauseServer\x12\".carbonpanel.v1.PauseServerRequest\x1a#.carbonpanel.v1.PauseServerResponse\x12b\n" +
+	"\x0fDeepSleepServer\x12&.carbonpanel.v1.DeepSleepServerRequest\x1a'.carbonpanel.v1.DeepSleepServerResponse\x12\\\n" +
 	"\rRestartServer\x12$.carbonpanel.v1.RestartServerRequest\x1a%.carbonpanel.v1.RestartServerResponse\x12_\n" +
 	"\x0eRecreateServer\x12%.carbonpanel.v1.RecreateServerRequest\x1a&.carbonpanel.v1.RecreateServerResponse\x12V\n" +
 	"\vSendCommand\x12\".carbonpanel.v1.SendCommandRequest\x1a#.carbonpanel.v1.SendCommandResponse\x12_\n" +
@@ -3044,7 +3256,7 @@ func file_carbonpanel_v1_server_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_server_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_carbonpanel_v1_server_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_carbonpanel_v1_server_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_carbonpanel_v1_server_proto_goTypes = []any{
 	(ServerArchiveFormat)(0),             // 0: carbonpanel.v1.ServerArchiveFormat
 	(ServerArchiveConsistency)(0),        // 1: carbonpanel.v1.ServerArchiveConsistency
@@ -3072,90 +3284,98 @@ var file_carbonpanel_v1_server_proto_goTypes = []any{
 	(*StartServerResponse)(nil),          // 23: carbonpanel.v1.StartServerResponse
 	(*StopServerRequest)(nil),            // 24: carbonpanel.v1.StopServerRequest
 	(*StopServerResponse)(nil),           // 25: carbonpanel.v1.StopServerResponse
-	(*RestartServerRequest)(nil),         // 26: carbonpanel.v1.RestartServerRequest
-	(*RestartServerResponse)(nil),        // 27: carbonpanel.v1.RestartServerResponse
-	(*RecreateServerRequest)(nil),        // 28: carbonpanel.v1.RecreateServerRequest
-	(*RecreateServerResponse)(nil),       // 29: carbonpanel.v1.RecreateServerResponse
-	(*SendCommandRequest)(nil),           // 30: carbonpanel.v1.SendCommandRequest
-	(*SendCommandResponse)(nil),          // 31: carbonpanel.v1.SendCommandResponse
-	(*UploadToMCLogsRequest)(nil),        // 32: carbonpanel.v1.UploadToMCLogsRequest
-	(*UploadToMCLogsResponse)(nil),       // 33: carbonpanel.v1.UploadToMCLogsResponse
-	(*MigrateServerRequest)(nil),         // 34: carbonpanel.v1.MigrateServerRequest
-	(*MigrateServerResponse)(nil),        // 35: carbonpanel.v1.MigrateServerResponse
-	(*ListServerPlayersRequest)(nil),     // 36: carbonpanel.v1.ListServerPlayersRequest
-	(*ListServerPlayersResponse)(nil),    // 37: carbonpanel.v1.ListServerPlayersResponse
-	(*ExportServerArchiveRequest)(nil),   // 38: carbonpanel.v1.ExportServerArchiveRequest
-	(*ExportServerArchiveResponse)(nil),  // 39: carbonpanel.v1.ExportServerArchiveResponse
-	(*PreviewServerArchiveRequest)(nil),  // 40: carbonpanel.v1.PreviewServerArchiveRequest
-	(*ServerArchiveFinding)(nil),         // 41: carbonpanel.v1.ServerArchiveFinding
-	(*ServerArchiveDestination)(nil),     // 42: carbonpanel.v1.ServerArchiveDestination
-	(*PreviewServerArchiveResponse)(nil), // 43: carbonpanel.v1.PreviewServerArchiveResponse
-	(*Server)(nil),                       // 44: carbonpanel.v1.Server
-	(*timestamppb.Timestamp)(nil),        // 45: google.protobuf.Timestamp
-	(ModLoader)(0),                       // 46: carbonpanel.v1.ModLoader
-	(*AdditionalPort)(nil),               // 47: carbonpanel.v1.AdditionalPort
-	(*DockerOverrides)(nil),              // 48: carbonpanel.v1.DockerOverrides
+	(*PauseServerRequest)(nil),           // 26: carbonpanel.v1.PauseServerRequest
+	(*PauseServerResponse)(nil),          // 27: carbonpanel.v1.PauseServerResponse
+	(*DeepSleepServerRequest)(nil),       // 28: carbonpanel.v1.DeepSleepServerRequest
+	(*DeepSleepServerResponse)(nil),      // 29: carbonpanel.v1.DeepSleepServerResponse
+	(*RestartServerRequest)(nil),         // 30: carbonpanel.v1.RestartServerRequest
+	(*RestartServerResponse)(nil),        // 31: carbonpanel.v1.RestartServerResponse
+	(*RecreateServerRequest)(nil),        // 32: carbonpanel.v1.RecreateServerRequest
+	(*RecreateServerResponse)(nil),       // 33: carbonpanel.v1.RecreateServerResponse
+	(*SendCommandRequest)(nil),           // 34: carbonpanel.v1.SendCommandRequest
+	(*SendCommandResponse)(nil),          // 35: carbonpanel.v1.SendCommandResponse
+	(*UploadToMCLogsRequest)(nil),        // 36: carbonpanel.v1.UploadToMCLogsRequest
+	(*UploadToMCLogsResponse)(nil),       // 37: carbonpanel.v1.UploadToMCLogsResponse
+	(*MigrateServerRequest)(nil),         // 38: carbonpanel.v1.MigrateServerRequest
+	(*MigrateServerResponse)(nil),        // 39: carbonpanel.v1.MigrateServerResponse
+	(*ListServerPlayersRequest)(nil),     // 40: carbonpanel.v1.ListServerPlayersRequest
+	(*ListServerPlayersResponse)(nil),    // 41: carbonpanel.v1.ListServerPlayersResponse
+	(*ExportServerArchiveRequest)(nil),   // 42: carbonpanel.v1.ExportServerArchiveRequest
+	(*ExportServerArchiveResponse)(nil),  // 43: carbonpanel.v1.ExportServerArchiveResponse
+	(*PreviewServerArchiveRequest)(nil),  // 44: carbonpanel.v1.PreviewServerArchiveRequest
+	(*ServerArchiveFinding)(nil),         // 45: carbonpanel.v1.ServerArchiveFinding
+	(*ServerArchiveDestination)(nil),     // 46: carbonpanel.v1.ServerArchiveDestination
+	(*PreviewServerArchiveResponse)(nil), // 47: carbonpanel.v1.PreviewServerArchiveResponse
+	(*Server)(nil),                       // 48: carbonpanel.v1.Server
+	(*timestamppb.Timestamp)(nil),        // 49: google.protobuf.Timestamp
+	(ModLoader)(0),                       // 50: carbonpanel.v1.ModLoader
+	(*AdditionalPort)(nil),               // 51: carbonpanel.v1.AdditionalPort
+	(*DockerOverrides)(nil),              // 52: carbonpanel.v1.DockerOverrides
 }
 var file_carbonpanel_v1_server_proto_depIdxs = []int32{
-	44, // 0: carbonpanel.v1.ListServersResponse.servers:type_name -> carbonpanel.v1.Server
-	44, // 1: carbonpanel.v1.GetServerResponse.server:type_name -> carbonpanel.v1.Server
-	45, // 2: carbonpanel.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	48, // 0: carbonpanel.v1.ListServersResponse.servers:type_name -> carbonpanel.v1.Server
+	48, // 1: carbonpanel.v1.GetServerResponse.server:type_name -> carbonpanel.v1.Server
+	49, // 2: carbonpanel.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
 	9,  // 3: carbonpanel.v1.GetServerLogsResponse.logs:type_name -> carbonpanel.v1.LogEntry
 	14, // 4: carbonpanel.v1.GetNextAvailablePortResponse.used_ports:type_name -> carbonpanel.v1.UsedPort
-	46, // 5: carbonpanel.v1.CreateServerRequest.mod_loader:type_name -> carbonpanel.v1.ModLoader
-	47, // 6: carbonpanel.v1.CreateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
-	48, // 7: carbonpanel.v1.CreateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
-	44, // 8: carbonpanel.v1.CreateServerResponse.server:type_name -> carbonpanel.v1.Server
-	47, // 9: carbonpanel.v1.UpdateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
-	48, // 10: carbonpanel.v1.UpdateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
-	44, // 11: carbonpanel.v1.UpdateServerResponse.server:type_name -> carbonpanel.v1.Server
-	44, // 12: carbonpanel.v1.MigrateServerResponse.server:type_name -> carbonpanel.v1.Server
+	50, // 5: carbonpanel.v1.CreateServerRequest.mod_loader:type_name -> carbonpanel.v1.ModLoader
+	51, // 6: carbonpanel.v1.CreateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
+	52, // 7: carbonpanel.v1.CreateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
+	48, // 8: carbonpanel.v1.CreateServerResponse.server:type_name -> carbonpanel.v1.Server
+	51, // 9: carbonpanel.v1.UpdateServerRequest.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
+	52, // 10: carbonpanel.v1.UpdateServerRequest.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
+	48, // 11: carbonpanel.v1.UpdateServerResponse.server:type_name -> carbonpanel.v1.Server
+	48, // 12: carbonpanel.v1.MigrateServerResponse.server:type_name -> carbonpanel.v1.Server
 	0,  // 13: carbonpanel.v1.ExportServerArchiveRequest.format:type_name -> carbonpanel.v1.ServerArchiveFormat
 	1,  // 14: carbonpanel.v1.ExportServerArchiveRequest.consistency:type_name -> carbonpanel.v1.ServerArchiveConsistency
 	2,  // 15: carbonpanel.v1.ServerArchiveFinding.severity:type_name -> carbonpanel.v1.ServerArchiveFindingSeverity
 	3,  // 16: carbonpanel.v1.ServerArchiveFinding.code:type_name -> carbonpanel.v1.ServerArchiveFindingCode
 	0,  // 17: carbonpanel.v1.PreviewServerArchiveResponse.format:type_name -> carbonpanel.v1.ServerArchiveFormat
-	46, // 18: carbonpanel.v1.PreviewServerArchiveResponse.mod_loader:type_name -> carbonpanel.v1.ModLoader
-	41, // 19: carbonpanel.v1.PreviewServerArchiveResponse.findings:type_name -> carbonpanel.v1.ServerArchiveFinding
-	42, // 20: carbonpanel.v1.PreviewServerArchiveResponse.destinations:type_name -> carbonpanel.v1.ServerArchiveDestination
+	50, // 18: carbonpanel.v1.PreviewServerArchiveResponse.mod_loader:type_name -> carbonpanel.v1.ModLoader
+	45, // 19: carbonpanel.v1.PreviewServerArchiveResponse.findings:type_name -> carbonpanel.v1.ServerArchiveFinding
+	46, // 20: carbonpanel.v1.PreviewServerArchiveResponse.destinations:type_name -> carbonpanel.v1.ServerArchiveDestination
 	4,  // 21: carbonpanel.v1.ServerService.ListServers:input_type -> carbonpanel.v1.ListServersRequest
 	6,  // 22: carbonpanel.v1.ServerService.GetServer:input_type -> carbonpanel.v1.GetServerRequest
 	8,  // 23: carbonpanel.v1.ServerService.GetServerLogs:input_type -> carbonpanel.v1.GetServerLogsRequest
 	11, // 24: carbonpanel.v1.ServerService.ClearServerLogs:input_type -> carbonpanel.v1.ClearServerLogsRequest
 	13, // 25: carbonpanel.v1.ServerService.GetNextAvailablePort:input_type -> carbonpanel.v1.GetNextAvailablePortRequest
 	16, // 26: carbonpanel.v1.ServerService.CreateServer:input_type -> carbonpanel.v1.CreateServerRequest
-	38, // 27: carbonpanel.v1.ServerService.ExportServerArchive:input_type -> carbonpanel.v1.ExportServerArchiveRequest
-	40, // 28: carbonpanel.v1.ServerService.PreviewServerArchive:input_type -> carbonpanel.v1.PreviewServerArchiveRequest
+	42, // 27: carbonpanel.v1.ServerService.ExportServerArchive:input_type -> carbonpanel.v1.ExportServerArchiveRequest
+	44, // 28: carbonpanel.v1.ServerService.PreviewServerArchive:input_type -> carbonpanel.v1.PreviewServerArchiveRequest
 	18, // 29: carbonpanel.v1.ServerService.UpdateServer:input_type -> carbonpanel.v1.UpdateServerRequest
 	20, // 30: carbonpanel.v1.ServerService.DeleteServer:input_type -> carbonpanel.v1.DeleteServerRequest
 	22, // 31: carbonpanel.v1.ServerService.StartServer:input_type -> carbonpanel.v1.StartServerRequest
 	24, // 32: carbonpanel.v1.ServerService.StopServer:input_type -> carbonpanel.v1.StopServerRequest
-	26, // 33: carbonpanel.v1.ServerService.RestartServer:input_type -> carbonpanel.v1.RestartServerRequest
-	28, // 34: carbonpanel.v1.ServerService.RecreateServer:input_type -> carbonpanel.v1.RecreateServerRequest
-	30, // 35: carbonpanel.v1.ServerService.SendCommand:input_type -> carbonpanel.v1.SendCommandRequest
-	32, // 36: carbonpanel.v1.ServerService.UploadToMCLogs:input_type -> carbonpanel.v1.UploadToMCLogsRequest
-	34, // 37: carbonpanel.v1.ServerService.MigrateServer:input_type -> carbonpanel.v1.MigrateServerRequest
-	36, // 38: carbonpanel.v1.ServerService.ListServerPlayers:input_type -> carbonpanel.v1.ListServerPlayersRequest
-	5,  // 39: carbonpanel.v1.ServerService.ListServers:output_type -> carbonpanel.v1.ListServersResponse
-	7,  // 40: carbonpanel.v1.ServerService.GetServer:output_type -> carbonpanel.v1.GetServerResponse
-	10, // 41: carbonpanel.v1.ServerService.GetServerLogs:output_type -> carbonpanel.v1.GetServerLogsResponse
-	12, // 42: carbonpanel.v1.ServerService.ClearServerLogs:output_type -> carbonpanel.v1.ClearServerLogsResponse
-	15, // 43: carbonpanel.v1.ServerService.GetNextAvailablePort:output_type -> carbonpanel.v1.GetNextAvailablePortResponse
-	17, // 44: carbonpanel.v1.ServerService.CreateServer:output_type -> carbonpanel.v1.CreateServerResponse
-	39, // 45: carbonpanel.v1.ServerService.ExportServerArchive:output_type -> carbonpanel.v1.ExportServerArchiveResponse
-	43, // 46: carbonpanel.v1.ServerService.PreviewServerArchive:output_type -> carbonpanel.v1.PreviewServerArchiveResponse
-	19, // 47: carbonpanel.v1.ServerService.UpdateServer:output_type -> carbonpanel.v1.UpdateServerResponse
-	21, // 48: carbonpanel.v1.ServerService.DeleteServer:output_type -> carbonpanel.v1.DeleteServerResponse
-	23, // 49: carbonpanel.v1.ServerService.StartServer:output_type -> carbonpanel.v1.StartServerResponse
-	25, // 50: carbonpanel.v1.ServerService.StopServer:output_type -> carbonpanel.v1.StopServerResponse
-	27, // 51: carbonpanel.v1.ServerService.RestartServer:output_type -> carbonpanel.v1.RestartServerResponse
-	29, // 52: carbonpanel.v1.ServerService.RecreateServer:output_type -> carbonpanel.v1.RecreateServerResponse
-	31, // 53: carbonpanel.v1.ServerService.SendCommand:output_type -> carbonpanel.v1.SendCommandResponse
-	33, // 54: carbonpanel.v1.ServerService.UploadToMCLogs:output_type -> carbonpanel.v1.UploadToMCLogsResponse
-	35, // 55: carbonpanel.v1.ServerService.MigrateServer:output_type -> carbonpanel.v1.MigrateServerResponse
-	37, // 56: carbonpanel.v1.ServerService.ListServerPlayers:output_type -> carbonpanel.v1.ListServerPlayersResponse
-	39, // [39:57] is the sub-list for method output_type
-	21, // [21:39] is the sub-list for method input_type
+	26, // 33: carbonpanel.v1.ServerService.PauseServer:input_type -> carbonpanel.v1.PauseServerRequest
+	28, // 34: carbonpanel.v1.ServerService.DeepSleepServer:input_type -> carbonpanel.v1.DeepSleepServerRequest
+	30, // 35: carbonpanel.v1.ServerService.RestartServer:input_type -> carbonpanel.v1.RestartServerRequest
+	32, // 36: carbonpanel.v1.ServerService.RecreateServer:input_type -> carbonpanel.v1.RecreateServerRequest
+	34, // 37: carbonpanel.v1.ServerService.SendCommand:input_type -> carbonpanel.v1.SendCommandRequest
+	36, // 38: carbonpanel.v1.ServerService.UploadToMCLogs:input_type -> carbonpanel.v1.UploadToMCLogsRequest
+	38, // 39: carbonpanel.v1.ServerService.MigrateServer:input_type -> carbonpanel.v1.MigrateServerRequest
+	40, // 40: carbonpanel.v1.ServerService.ListServerPlayers:input_type -> carbonpanel.v1.ListServerPlayersRequest
+	5,  // 41: carbonpanel.v1.ServerService.ListServers:output_type -> carbonpanel.v1.ListServersResponse
+	7,  // 42: carbonpanel.v1.ServerService.GetServer:output_type -> carbonpanel.v1.GetServerResponse
+	10, // 43: carbonpanel.v1.ServerService.GetServerLogs:output_type -> carbonpanel.v1.GetServerLogsResponse
+	12, // 44: carbonpanel.v1.ServerService.ClearServerLogs:output_type -> carbonpanel.v1.ClearServerLogsResponse
+	15, // 45: carbonpanel.v1.ServerService.GetNextAvailablePort:output_type -> carbonpanel.v1.GetNextAvailablePortResponse
+	17, // 46: carbonpanel.v1.ServerService.CreateServer:output_type -> carbonpanel.v1.CreateServerResponse
+	43, // 47: carbonpanel.v1.ServerService.ExportServerArchive:output_type -> carbonpanel.v1.ExportServerArchiveResponse
+	47, // 48: carbonpanel.v1.ServerService.PreviewServerArchive:output_type -> carbonpanel.v1.PreviewServerArchiveResponse
+	19, // 49: carbonpanel.v1.ServerService.UpdateServer:output_type -> carbonpanel.v1.UpdateServerResponse
+	21, // 50: carbonpanel.v1.ServerService.DeleteServer:output_type -> carbonpanel.v1.DeleteServerResponse
+	23, // 51: carbonpanel.v1.ServerService.StartServer:output_type -> carbonpanel.v1.StartServerResponse
+	25, // 52: carbonpanel.v1.ServerService.StopServer:output_type -> carbonpanel.v1.StopServerResponse
+	27, // 53: carbonpanel.v1.ServerService.PauseServer:output_type -> carbonpanel.v1.PauseServerResponse
+	29, // 54: carbonpanel.v1.ServerService.DeepSleepServer:output_type -> carbonpanel.v1.DeepSleepServerResponse
+	31, // 55: carbonpanel.v1.ServerService.RestartServer:output_type -> carbonpanel.v1.RestartServerResponse
+	33, // 56: carbonpanel.v1.ServerService.RecreateServer:output_type -> carbonpanel.v1.RecreateServerResponse
+	35, // 57: carbonpanel.v1.ServerService.SendCommand:output_type -> carbonpanel.v1.SendCommandResponse
+	37, // 58: carbonpanel.v1.ServerService.UploadToMCLogs:output_type -> carbonpanel.v1.UploadToMCLogsResponse
+	39, // 59: carbonpanel.v1.ServerService.MigrateServer:output_type -> carbonpanel.v1.MigrateServerResponse
+	41, // 60: carbonpanel.v1.ServerService.ListServerPlayers:output_type -> carbonpanel.v1.ListServerPlayersResponse
+	41, // [41:61] is the sub-list for method output_type
+	21, // [21:41] is the sub-list for method input_type
 	21, // [21:21] is the sub-list for extension type_name
 	21, // [21:21] is the sub-list for extension extendee
 	0,  // [0:21] is the sub-list for field type_name
@@ -3168,16 +3388,16 @@ func file_carbonpanel_v1_server_proto_init() {
 	}
 	file_carbonpanel_v1_common_proto_init()
 	file_carbonpanel_v1_server_proto_msgTypes[14].OneofWrappers = []any{}
-	file_carbonpanel_v1_server_proto_msgTypes[26].OneofWrappers = []any{}
 	file_carbonpanel_v1_server_proto_msgTypes[30].OneofWrappers = []any{}
-	file_carbonpanel_v1_server_proto_msgTypes[39].OneofWrappers = []any{}
+	file_carbonpanel_v1_server_proto_msgTypes[34].OneofWrappers = []any{}
+	file_carbonpanel_v1_server_proto_msgTypes[43].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_server_proto_rawDesc), len(file_carbonpanel_v1_server_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   40,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

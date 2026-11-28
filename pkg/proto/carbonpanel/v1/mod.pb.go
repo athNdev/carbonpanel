@@ -509,7 +509,9 @@ type ImportUploadedModRequest struct {
 	UploadSessionId string                 `protobuf:"bytes,2,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
 	DisplayName     string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Description     string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	// stage keeps the jar out of the live mods directory until the batch applies.
+	// Stage requests the documented safe path. Compatibility-sensitive mod
+	// uploads without declared loader/version context are always staged (never
+	// live-installed), even if this field is false/omitted.
 	Stage         bool `protobuf:"varint,5,opt,name=stage,proto3" json:"stage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

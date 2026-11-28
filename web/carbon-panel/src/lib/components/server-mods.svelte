@@ -9,21 +9,8 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import {
-		Loader2,
-		Upload,
-		Download,
-		Trash2,
-		Package,
-		FileText,
-		X,
-		Boxes,
-		Search,
-		Check,
-		Ban,
-		RefreshCw
-	} from '@lucide/svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { Upload, Download, Trash2, FileText, X, Boxes, Search, Check, Ban } from '@lucide/svelte';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { ModLoader, type Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { Mod } from '$lib/proto/carbonpanel/v1/mod_pb';
@@ -35,7 +22,11 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonTag,
 		CarbonInlineLoading,
 		CarbonButton,
-		CarbonConfirm
+		CarbonConfirm,
+		CarbonSpinner,
+		CarbonDataTable,
+		CarbonEmptyState,
+		CarbonErrorState
 	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
@@ -48,6 +39,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let mods = $state<Mod[]>([]);
 	let loading = $state(true);
+	// E1: a failed load must never render as the "No mods installed" success
+	// state; the error carries its own retry affordance.
+	let loadError = $state('');
 	let uploading = $state(false);
 	let uploadProgress = $state<UploadProgress | null>(null);
 	let currentUploadFilename = $state('');
@@ -60,20 +54,31 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let hasLoaded = false;
 	let requestNumber = 0;
+	// Status-strip ownership: update checks take a token so an older in-flight
+	// check can never overwrite a newer result on the strip.
+	let statusNumber = 0;
 	let updateStatus = $state('');
-	// A check runs against an already-listed set. Keeping it separate from
-	// `loading` leaves the rows on screen while the provider is queried.
-	let checking = $state(false);
-	let previousServerId = '';
+	let previousServerId = $state(server.id);
+
+	// E3: per-row pending state so double-clicks cannot double-apply.
+	let busyMods = $state<Record<string, 'toggle' | 'delete'>>({});
 
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
+			// E4: an in-flight upload must not import the old file into the new
+			// server. Aborting and cancelling the session happens before the
+			// state reset; the upload flow also re-checks the target server id.
+			cancelCurrentUpload();
 			updateStatus = '';
-			checking = false;
 			mods = [];
 			loading = true;
+			loadError = '';
 			uploading = false;
+			uploadProgress = null;
+			currentUploadFilename = '';
+			uploadAbortController = null;
+			busyMods = {};
 			hasLoaded = false;
 		}
 		if (active && !hasLoaded) {
@@ -102,52 +107,50 @@ one at https://mozilla.org/MPL/2.0/.
 		return result;
 	});
 
-	function startUpdateCheck() {
-		if (checking || loading || uploading || !mods.length) return;
-		void loadMods(true);
-	}
-
 	async function loadMods(checkUpdates = false) {
 		const serverId = server.id;
 		const request = ++requestNumber;
 		const isCurrent = () => request === requestNumber && server.id === serverId;
-		// The check trigger keeps focus while a check runs: it is only
-		// aria-disabled, never natively disabled, so Enter/Space do not send a
-		// keyboard user back to the top of the page. Restore focus defensively
-		// if an unrelated path did drop it to the document.
-		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		checking = checkUpdates;
-		updateStatus = checkUpdates ? 'Checking installed files for compatible releases…' : '';
+		// Only a check writes the status strip; plain refreshes never do.
+		const statusToken = checkUpdates ? ++statusNumber : 0;
+		const ownsStatus = () => statusToken !== 0 && statusToken === statusNumber;
+		if (checkUpdates) {
+			updateStatus = 'Checking installed files for compatible releases…';
+		}
 		// A vanilla server has no mods directory, and asking for one returns an
 		// error the RPC interceptor turns into a toast - on a tab that already
 		// explains the server cannot take mods. Do not make the call.
 		if (!canHaveMods()) {
 			mods = [];
 			loading = false;
-			checking = false;
 			return;
 		}
 		try {
-			// A check keeps the current rows visible; only the first load (or a
-			// mutation-triggered refresh) replaces them with the loading state.
-			if (!checkUpdates) loading = true;
+			loading = true;
+			// checkUpdates hashes every installed jar server-side, so it only
+			// rides along when the operator explicitly asks for a check.
 			const response = await rpcClient.mod.listMods({ serverId, checkUpdates });
 			if (!isCurrent()) return;
 			mods = response.mods;
-			if (checkUpdates) {
+			loadError = '';
+			if (checkUpdates && ownsStatus()) {
 				updateStatus = summarizeModUpdateCheck(mods.map((mod) => mod.updatePreview?.state));
 			}
-		} catch (_e) {
+		} catch (error) {
 			if (isCurrent()) {
-				updateStatus = checkUpdates ? 'Update check failed. Try again.' : '';
-				toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
+				// E1: record the failure so the error state renders instead of the
+				// empty state, with a retry affordance.
+				loadError = checkUpdates
+					? 'The update check failed. The installed list was not refreshed.'
+					: 'Failed to read the installed mods from the server.';
+				if (checkUpdates && ownsStatus()) updateStatus = 'Update check failed. Try again.';
+				// E2: the interceptor already toasted the formatted RPC error.
+				if (!wasRpcErrorToasted(error))
+					toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
 			}
 		} finally {
 			if (isCurrent()) {
 				loading = false;
-				checking = false;
-				if (focused && !document.activeElement?.isConnected) focused.focus();
-				else if (focused && document.activeElement === document.body) focused.focus();
 			}
 		}
 	}
@@ -157,11 +160,20 @@ one at https://mozilla.org/MPL/2.0/.
 		const fileList = input.files;
 		if (!fileList || fileList.length === 0) return;
 
+		// E4: the upload is bound to the server it was started on. A server
+		// switch aborts it and the import re-checks the target before running.
+		const targetServerId = server.id;
+		// The batch keeps its own controller reference: a server switch tears
+		// the shared state down (sets it to null), and the remaining files
+		// must see the aborted signal instead of dereferencing a nulled
+		// controller and reporting a misleading "failed to upload" toast.
+		const batchController = new AbortController();
+		uploadAbortController = batchController;
 		uploading = true;
-		uploadAbortController = new AbortController();
 
 		try {
 			for (const file of Array.from(fileList)) {
+				if (batchController.signal.aborted) break;
 				currentUploadFilename = file.name;
 				uploadProgress = null;
 
@@ -169,18 +181,25 @@ one at https://mozilla.org/MPL/2.0/.
 					onProgress: (progress) => {
 						uploadProgress = progress;
 					},
-					signal: uploadAbortController.signal
+					signal: batchController.signal
 				});
 
+				if (server.id !== targetServerId || uploadAbortController === null) {
+					toast.info(`Server changed — upload of ${file.name} was discarded`);
+					continue;
+				}
 				await rpcClient.mod.importUploadedMod({
-					serverId: server.id,
+					serverId: targetServerId,
 					uploadSessionId: result.sessionId,
 					displayName: file.name,
 					description: ''
 				});
+				if (server.id !== targetServerId || batchController.signal.aborted) break;
 			}
-			toast.success(`Uploaded ${fileList.length} mod(s)`);
-			await loadMods();
+			if (server.id === targetServerId && !batchController.signal.aborted) {
+				toast.success(`Staged ${fileList.length} mod(s) for the next apply window`);
+				await loadMods();
+			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message === 'Upload cancelled') {
 				toast.info('Upload cancelled');
@@ -206,6 +225,8 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function toggleMod(mod: Mod) {
+		if (busyMods[mod.id]) return;
+		busyMods = { ...busyMods, [mod.id]: 'toggle' };
 		try {
 			await rpcClient.mod.updateMod({
 				serverId: server.id,
@@ -216,8 +237,11 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			toast.success(`Mod ${!mod.enabled ? 'enabled' : 'disabled'}`);
 			await loadMods();
-		} catch (_e) {
-			toast.error('Failed to toggle mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to toggle mod');
+		} finally {
+			const { [mod.id]: _settled, ...rest } = busyMods;
+			busyMods = rest;
 		}
 	}
 
@@ -231,7 +255,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function confirmDeleteMod() {
 		const mod = pendingDelete;
-		if (!mod) return;
+		if (!mod || busyMods[mod.id]) return;
+		busyMods = { ...busyMods, [mod.id]: 'delete' };
 		try {
 			await rpcClient.mod.deleteMod({
 				serverId: server.id,
@@ -239,9 +264,11 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			toast.success('Mod deleted');
 			await loadMods();
-		} catch (_e) {
-			toast.error('Failed to delete mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to delete mod');
 		} finally {
+			const { [mod.id]: _settled, ...rest } = busyMods;
+			busyMods = rest;
 			pendingDelete = null;
 		}
 	}
@@ -259,8 +286,8 @@ one at https://mozilla.org/MPL/2.0/.
 			a.download = mod.fileName;
 			a.click();
 			URL.revokeObjectURL(url);
-		} catch (_e) {
-			toast.error('Failed to download mod');
+		} catch (error) {
+			if (!wasRpcErrorToasted(error)) toast.error('Failed to download mod');
 		}
 	}
 
@@ -306,27 +333,17 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#snippet actions()}
 		{#if canHaveMods()}
-			<!--
-				Icon-only below sm. The full label otherwise wraps onto a third
-				action row at 390 px and takes the height the mod list needs. One
-				element only, so the tab order and accessible name stay stable.
-			-->
 			<CarbonButton
 				kind="secondary"
 				size="sm"
-				class="max-sm:px-2! {checking ? 'opacity-50' : ''}"
 				disabled={loading || uploading || !mods.length}
-				aria-disabled={checking ? 'true' : undefined}
-				aria-label="Check for updates"
-				title="Check for updates"
-				onclick={startUpdateCheck}
+				onclick={() => loadMods(true)}
 			>
-				<RefreshCw class="h-4 w-4 sm:hidden {checking ? 'animate-spin' : ''}" />
-				<span class="hidden sm:inline">Check for updates</span>
+				Check for updates
 			</CarbonButton>
 			<CarbonButton kind="primary" size="sm" onclick={() => (browserDialogOpen = true)}>
 				<Boxes class="h-4 w-4" />
-				<span>Browse Mods</span>
+				<span>Browse & Install</span>
 			</CarbonButton>
 			<CarbonButton
 				kind="secondary"
@@ -335,7 +352,7 @@ one at https://mozilla.org/MPL/2.0/.
 				disabled={uploading}
 			>
 				{#if uploading}
-					<Loader2 class="h-4 w-4 animate-spin" />
+					<CarbonSpinner size="sm" label="Uploading mod" />
 				{:else}
 					<Upload class="h-4 w-4" />
 				{/if}
@@ -351,7 +368,6 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 		{/if}
 	{/snippet}
-	<p role="status" class="px-3 text-sm text-muted-foreground">{updateStatus}</p>
 	{#snippet toolbar()}
 		{#if canHaveMods()}
 			<div
@@ -387,7 +403,7 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={modFilter === 'enabled'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {modFilter ===
 						'enabled'
-							? 'border-[#198038] bg-[#198038] text-white'
+							? 'border-success bg-success text-white'
 							: 'border-success/50 bg-card text-success-text hover:bg-secondary'}"
 					>
 						Enabled ({mods.filter((m) => m.enabled).length})
@@ -406,8 +422,19 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 		{/if}
+	{/snippet}
+
+	<!-- Status strip: one place the eye checks after any operation. Upload
+		progress lives inline here instead of in its own floating bar. -->
+	<div class="border-y border-border bg-card px-3 py-2" role="status">
+		<div class="flex items-center gap-2 text-sm text-muted-foreground">
+			{#if updateStatus.startsWith('Checking')}
+				<CarbonSpinner size="sm" label="Checking installed mods for updates" />
+			{/if}
+			<span class="min-w-0 flex-1">{updateStatus}</span>
+		</div>
 		{#if uploading && uploadProgress}
-			<div class="border-t border-border bg-card p-3 text-xs">
+			<div class="mt-2 text-xs">
 				<div class="mb-1 flex items-center justify-between">
 					<span class="truncate font-mono text-foreground">Uploading: {currentUploadFilename}</span>
 					<div class="flex items-center gap-2">
@@ -436,131 +463,187 @@ one at https://mozilla.org/MPL/2.0/.
 				</p>
 			</div>
 		{/if}
-	{/snippet}
-	<div class="min-h-0 flex-1 overflow-auto bg-background" aria-busy={checking ? 'true' : undefined}>
+	</div>
+
+	<div class="min-h-0 flex-1 overflow-auto bg-background">
 		{#if !canHaveMods()}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
-				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
-				<p class="text-sm font-semibold text-foreground">Mod loader incompatible</p>
-				<p class="mt-1 max-w-sm text-xs text-muted-foreground">
-					To install mods or plugins, configure this server to use Fabric, Forge, NeoForge, Paper,
-					or Purpur.
-				</p>
+			<div class="p-6">
+				<CarbonEmptyState
+					title="This server type doesn't load mods or plugins"
+					description="To install mods or plugins, configure this server to use Fabric, Forge, NeoForge, Paper, or Purpur."
+				/>
 			</div>
 		{:else if loading}
 			<div class="flex items-center justify-center p-12">
 				<CarbonInlineLoading description="Reading {getModsDirectory()}/ directory..." />
 			</div>
+		{:else if loadError}
+			<!-- E1: a failed load is never rendered as the empty state. -->
+			<div class="p-6">
+				<CarbonErrorState
+					title="Couldn't load installed mods"
+					message={loadError}
+					retryLabel="Retry"
+					onretry={() => loadMods()}
+				/>
+			</div>
 		{:else if mods.length === 0}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
-				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
-				<p class="text-sm font-semibold text-foreground">No mods installed</p>
-				<p class="mt-1 text-xs text-muted-foreground">
-					Browse the repository or upload .jar files directly to get started.
-				</p>
+			<div class="p-6">
+				<CarbonEmptyState
+					title="No mods installed"
+					description="Browse the repository or upload .jar files directly to get started."
+					actionLabel="Browse & install"
+					onaction={() => (browserDialogOpen = true)}
+				/>
 			</div>
 		{:else if filteredMods.length === 0}
 			<div class="p-8 text-center text-xs text-muted-foreground">
 				No mods match your search query or filter.
 			</div>
 		{:else}
-			<!-- Carbon DataTable rows -->
-			<div class="divide-y divide-border border-b border-border">
-				{#each filteredMods as mod (mod.id)}
-					<div
-						class="group flex items-center justify-between gap-4 rounded-none bg-card p-3.5 transition-colors hover:bg-secondary"
-					>
-						<div class="flex min-w-0 items-center gap-3.5">
-							<!-- Enable/Disable Carbon Toggle -->
-							<button
-								type="button"
-								onclick={() => toggleMod(mod)}
-								class="flex h-7 cursor-pointer items-center gap-1 rounded-none border px-2 font-mono text-xs transition-colors select-none {mod.enabled
-									? 'border-success bg-success/20 text-success-text'
-									: 'border-border bg-background text-muted-foreground'}"
-								title={mod.enabled ? 'Click to disable' : 'Click to enable'}
+			<div class="installed-mods-table">
+				<CarbonDataTable
+					title="Installed content"
+					description="{filteredMods.length} of {mods.length} in {getModsDirectory()}/"
+				>
+					{#snippet header()}
+						<tr class="installed-mods-header">
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Name</th
 							>
-								{#if mod.enabled}
-									<Check class="h-3 w-3" />
-									<span class="text-xs uppercase">Active</span>
-								{:else}
-									<Ban class="h-3 w-3" />
-									<span class="text-xs uppercase">Disabled</span>
-								{/if}
-							</button>
-
-							<!-- Info -->
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<h4
-										class="truncate text-sm font-medium text-foreground {mod.enabled
-											? ''
-											: 'line-through opacity-70'}"
-									>
-										{mod.displayName}
-									</h4>
-									{#if mod.version}
-										<span
-											class="border border-border bg-background px-1.5 py-0 font-mono text-xs text-muted-foreground"
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Status</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase">File</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase">Size</th
+							>
+							<th
+								scope="col"
+								class="detail px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Updated</th
+							>
+							<th scope="col" class="px-3 py-2.5 text-xs font-semibold tracking-wider uppercase"
+								>Update</th
+							>
+							<th
+								scope="col"
+								class="px-3 py-2.5 text-right text-xs font-semibold tracking-wider uppercase"
+								>Actions</th
+							>
+						</tr>
+					{/snippet}
+					{#each filteredMods as mod (mod.id)}
+						<tr class="transition-colors hover:bg-secondary">
+							<td class="px-3 py-3 align-top">
+								<div class="flex min-w-0 flex-col gap-1">
+									<div class="flex items-center gap-2">
+										<h4
+											class="truncate text-sm font-medium text-foreground {mod.enabled
+												? ''
+												: 'line-through opacity-70'}"
 										>
-											{mod.version}
-										</span>
+											{mod.displayName}
+										</h4>
+										{#if mod.version}
+											<span
+												class="border border-border bg-background px-1.5 py-0 font-mono text-xs text-muted-foreground"
+											>
+												{mod.version}
+											</span>
+										{/if}
+									</div>
+									{#if mod.description}
+										<p class="line-clamp-1 max-w-sm font-sans text-xs text-muted-foreground">
+											{mod.description}
+										</p>
 									{/if}
 								</div>
-								<div
-									class="mt-0.5 flex flex-wrap items-center gap-3 font-mono text-xs text-muted-foreground"
+							</td>
+							<td class="px-3 py-3 align-top">
+								<button
+									type="button"
+									onclick={() => toggleMod(mod)}
+									disabled={busyMods[mod.id] !== undefined}
+									class="flex h-7 cursor-pointer items-center gap-1 rounded-none border px-2 font-mono text-xs transition-colors select-none disabled:cursor-not-allowed disabled:opacity-50 {mod.enabled
+										? 'border-success bg-success/20 text-success-text'
+										: 'border-border bg-background text-muted-foreground'}"
+									title={mod.enabled ? 'Click to disable' : 'Click to enable'}
+									aria-label="{mod.enabled ? 'Disable' : 'Enable'} {mod.displayName}"
 								>
-									<span class="flex items-center gap-1 text-muted-foreground">
-										<FileText class="h-3 w-3" />
-										{mod.fileName}
-									</span>
-									<span>{formatBytes(Number(mod.fileSize))}</span>
-									{#if mod.uploadedAt}
-										<span
-											>{new Date(Number(mod.uploadedAt.seconds) * 1000).toLocaleDateString()}</span
-										>
+									{#if mod.enabled}
+										<Check class="h-3 w-3" />
+										<span class="text-xs uppercase">Active</span>
+									{:else}
+										<Ban class="h-3 w-3" />
+										<span class="text-xs uppercase">Disabled</span>
 									{/if}
-								</div>
+								</button>
+							</td>
+							<td
+								class="detail max-w-[180px] truncate px-3 py-3 align-top font-mono text-xs text-muted-foreground"
+							>
+								<span class="flex items-center gap-1">
+									<FileText class="h-3 w-3 shrink-0" />
+									<span class="truncate">{mod.fileName}</span>
+								</span>
+							</td>
+							<td class="detail px-3 py-3 align-top font-mono text-xs text-muted-foreground">
+								{formatBytes(Number(mod.fileSize))}
+							</td>
+							<td class="detail px-3 py-3 align-top font-mono text-xs text-muted-foreground">
+								{#if mod.uploadedAt}
+									{new Date(Number(mod.uploadedAt.seconds) * 1000).toLocaleDateString()}
+								{:else}
+									—
+								{/if}
+							</td>
+							<td class="px-3 py-3 align-top">
 								{#if mod.updatePreview}
 									{#if mod.updatePreview.installedVersion}
 										<p class="mt-1 text-xs break-words text-muted-foreground">
-											Modrinth · Installed {mod.updatePreview.installedVersion}
+											{mod.updatePreview.provider || 'Modrinth'} · Installed
+											{mod.updatePreview.installedVersion}
 											{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
 												· Candidate {mod.updatePreview.candidateVersion}
 											{/if}
 										</p>
 									{/if}
 									<p class="mt-1 text-sm text-muted-foreground">{mod.updatePreview.reason}</p>
+								{:else}
+									<span class="font-mono text-xs text-muted-foreground">—</span>
 								{/if}
-								{#if mod.description}
-									<p class="mt-1 line-clamp-1 font-sans text-xs text-muted-foreground">
-										{mod.description}
-									</p>
-								{/if}
-							</div>
-						</div>
-
-						<!-- Actions -->
-						<div class="flex shrink-0 items-center border border-border bg-background">
-							<button
-								type="button"
-								onclick={() => downloadMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-								title="Download .jar"
-							>
-								<Download class="h-3.5 w-3.5" />
-							</button>
-							<button
-								type="button"
-								onclick={() => deleteMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20"
-								title="Delete mod"
-							>
-								<Trash2 class="h-3.5 w-3.5" />
-							</button>
-						</div>
-					</div>
-				{/each}
+							</td>
+							<td class="px-3 py-3 text-right align-top">
+								<div class="inline-flex items-center border border-border bg-background">
+									<button
+										type="button"
+										onclick={() => downloadMod(mod)}
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+										title="Download {getModsDirectory() === 'plugins' ? 'plugin' : 'mod'} file"
+										aria-label="Download {mod.fileName}"
+									>
+										<Download class="h-3.5 w-3.5" />
+									</button>
+									<button
+										type="button"
+										onclick={() => deleteMod(mod)}
+										disabled={busyMods[mod.id] !== undefined}
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-50"
+										title="Delete {mod.displayName}"
+										aria-label="Delete {mod.displayName}"
+									>
+										<Trash2 class="h-3.5 w-3.5" />
+									</button>
+								</div>
+							</td>
+						</tr>
+					{/each}
+				</CarbonDataTable>
 			</div>
 		{/if}
 	</div>
@@ -573,6 +656,7 @@ one at https://mozilla.org/MPL/2.0/.
 	message="The file is removed from the server. This cannot be undone."
 	confirmLabel="Delete Mod"
 	danger
+	confirming={Boolean(pendingDelete && busyMods[pendingDelete.id] === 'delete')}
 	onconfirm={confirmDeleteMod}
 	onclose={() => (pendingDelete = null)}
 >
@@ -580,3 +664,52 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if pendingDelete}{pendingDelete.displayName}{/if}
 	{/snippet}
 </CarbonConfirm>
+
+<style>
+	/* Container-query collapse for the installed table: File/Size/Updated hide
+		under 800px, and narrow containers fall back to a card grid (<420px).
+		The wrapper div lives in this component, so the anchor selector matches
+		and the :global descendants survive pruning. */
+	.installed-mods-table {
+		container-type: inline-size;
+	}
+	@container (max-width: 800px) {
+		.installed-mods-table :global(.detail) {
+			display: none;
+		}
+	}
+	@container (max-width: 420px) {
+		.installed-mods-table :global(thead) {
+			display: none;
+		}
+		.installed-mods-table :global(tbody),
+		.installed-mods-table :global(tr) {
+			display: block;
+		}
+		.installed-mods-table :global(tr) {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 6px 10px;
+			padding: 12px;
+		}
+		.installed-mods-table :global(td) {
+			padding: 0;
+			min-width: 0;
+		}
+		.installed-mods-table :global(td:first-child) {
+			grid-column: 1 / 3;
+		}
+		.installed-mods-table :global(td:nth-child(2)) {
+			grid-column: 1;
+			grid-row: 2;
+		}
+		.installed-mods-table :global(td:nth-child(6)) {
+			grid-column: 2;
+			grid-row: 2;
+		}
+		.installed-mods-table :global(td:nth-child(7)) {
+			grid-column: 2;
+			grid-row: 3;
+		}
+	}
+</style>

@@ -430,9 +430,81 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 }
 
+/*
+	OSS-464: refusal feedback for the floating action bar. TranslateX only, so
+	it never affects layout; it re-fires through the data-shake attribute
+	toggle (see CarbonFloatingActionBar). The global prefers-reduced-motion and
+	[data-carbon-motion='reduced'] blocks zero the duration, leaving the bar's
+	live-region announcement as the feedback channel — no reduced-motion
+	exemption is added here.
+*/
+@keyframes carbon-shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	15% {
+		transform: translateX(-4px);
+	}
+	30% {
+		transform: translateX(4px);
+	}
+	45% {
+		transform: translateX(-2px);
+	}
+	60% {
+		transform: translateX(2px);
+	}
+}
+
+.carbon-floating-action-bar[data-shake] {
+	animation: carbon-shake var(--motion-slow) var(--ease-in-out-standard) 2;
+}
+
 @layer utilities {
 	.motion-fade-in {
 		animation: var(--carbon-animation-fade-in);
+	}
+
+	/*
+		Opacity-only entrances for page-level containers. A 6px rise on a
+		container that owns the page frame reads as the whole app bobbing
+		vertically on every route change, so page-level wrappers and grids
+		fade in place; inner cards, tiles and rows keep .motion-rise-in and
+		.motion-stagger. .motion-fade-in is the plain single fade; the
+		.motion-stagger-fade variant keeps the staggered arrival chain below
+		while dropping the translate.
+	*/
+	.motion-fade-in-only {
+		animation: var(--carbon-animation-fade-in);
+	}
+
+	.motion-stagger-fade > * {
+		animation: var(--carbon-animation-fade-in);
+	}
+	.motion-stagger-fade > *:nth-child(1) {
+		animation-delay: 0ms;
+	}
+	.motion-stagger-fade > *:nth-child(2) {
+		animation-delay: calc(var(--motion-stagger-step) * 1);
+	}
+	.motion-stagger-fade > *:nth-child(3) {
+		animation-delay: calc(var(--motion-stagger-step) * 2);
+	}
+	.motion-stagger-fade > *:nth-child(4) {
+		animation-delay: calc(var(--motion-stagger-step) * 3);
+	}
+	.motion-stagger-fade > *:nth-child(5) {
+		animation-delay: calc(var(--motion-stagger-step) * 4);
+	}
+	.motion-stagger-fade > *:nth-child(6) {
+		animation-delay: calc(var(--motion-stagger-step) * 5);
+	}
+	.motion-stagger-fade > *:nth-child(7) {
+		animation-delay: calc(var(--motion-stagger-step) * 6);
+	}
+	.motion-stagger-fade > *:nth-child(n + 8) {
+		animation-delay: calc(var(--motion-stagger-step) * 7);
 	}
 
 	.motion-rise-in {

@@ -207,12 +207,21 @@ test('roster sort treats a missing last_seen as unavailable, never an epoch', ()
 		summary('old', 'Old', { lastSeen: timestampFromDate(new Date('2020-01-01T00:00:00Z')) }),
 		summary('new', 'New', { lastSeen: timestampFromDate(new Date('2025-01-01T00:00:00Z')) })
 	];
-	// Ascending: unavailable first, then oldest, then newest.
+	// Never-observed identities have no observation at all: they sort after
+	// observed rows in BOTH directions and never inherit a sentinel epoch.
 	assert.deepEqual(
 		filterAndSortPlayers(players, { ...DEFAULT_ROSTER_FILTER, sortBy: 'lastSeen' }).map(
 			(p) => p.ref?.name
 		),
-		['Never', 'Old', 'New']
+		['Old', 'New', 'Never']
+	);
+	assert.deepEqual(
+		filterAndSortPlayers(players, {
+			...DEFAULT_ROSTER_FILTER,
+			sortBy: 'lastSeen',
+			sortDescending: true
+		}).map((p) => p.ref?.name),
+		['New', 'Old', 'Never']
 	);
 });
 

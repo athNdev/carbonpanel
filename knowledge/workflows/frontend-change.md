@@ -51,6 +51,8 @@ sources:
 - Carbon controls and Monaco with deferred RPC responses to verify this seam.
 - fullscreen mode renders the same pane as the inline console, so the toolbar,
 - A frontend-only fix must not bypass an authorization check in the backend.
+- The Docker Overrides JSON editor normalizes parsed JSON to a `DockerOverrides`
+  message; a plain object breaks save snapshots and leaves the form dirty.
 - No page may scroll horizontally at 360/768/1440 widths. Wide tables and tab
 - Verify with the overflow audit pattern before calling a surface responsive.
 - [RPC contract](../architecture/rpc-contract.md)

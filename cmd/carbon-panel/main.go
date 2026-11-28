@@ -565,6 +565,7 @@ func main() {
 	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
 	rpcServer.SetAdmissionCoordinator(admission)
 	rpcServer.SetHibernationManager(hibernationMgr)
+	rpcServer.SetDeepSleepManager(deepSleepMgr)
 
 	// The auth manager persists the recovery key. Announce the secret only
 	// when this process generated it; later starts log the path alone so a
@@ -685,6 +686,10 @@ func main() {
 	// Self-heal can start a replacement container, so it shares the same
 	// in-process node gate as RPC and scheduler starts (OSS-405).
 	reconcilerEngine.SetAdmissionCoordinator(admission)
+	// A released lifecycle transition ends the reconciler's blind window:
+	// converge the server's stored status immediately instead of waiting for
+	// the next sweep, so rapid start/stop cycles never read stale.
+	docker.SetTransitionEndNotifier(reconciler.NotifyTransitionEnded)
 	// Module containers get the same level-triggered convergence as server
 	// containers: an externally removed or recreated sidecar is adopted or
 	// recorded as stopped instead of drifting away from its row.

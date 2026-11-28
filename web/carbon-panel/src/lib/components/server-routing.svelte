@@ -26,10 +26,11 @@ one at https://mozilla.org/MPL/2.0/.
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Globe, Save, Copy, AlertCircle, CheckCircle2, XCircle } from '@lucide/svelte';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
+	import { dirtySections } from '$lib/stores/dirty-sections.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/carbonpanel/v1/proxy_pb';
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonSpinner } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let {
@@ -81,13 +82,20 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	});
 
-	async function loadRoutingInfo() {
+	async function loadRoutingInfo(preserveDirty = false) {
 		try {
 			loading = true;
 			const response = await rpcClient.proxy.getServerRouting({ serverId: server.id });
 			routingInfo = response;
-			hostname = response.proxyHostname || '';
-			originalHostname = hostname;
+			const next = response.proxyHostname || '';
+			if (preserveDirty && hostname !== originalHostname) {
+				// Keep the user's in-flight edit; only move the baseline when the
+				// section is clean so a concurrent edit stays dirty (OSS-464).
+				originalHostname = next;
+			} else {
+				hostname = next;
+				originalHostname = next;
+			}
 		} catch (_e) {
 			toast.error('Failed to load routing information');
 		} finally {
@@ -132,25 +140,45 @@ one at https://mozilla.org/MPL/2.0/.
 		return true;
 	}
 
-	async function saveRouting() {
-		if (!validateHostname(hostname)) return;
+	/**
+	 * Shared save path for the section button and the floating action bar
+	 * (OSS-464). Keeps this section's own semantics: inline hostname
+	 * validation, the conflict surfaced on the field, other failures toasted,
+	 * and a reload of the authoritative routing state after success (the
+	 * reload re-baselines `originalHostname`, so the section is clean the
+	 * moment the save resolves). `rethrow` lets the bar aggregate failures —
+	 * including a failed validation — while the buttons keep swallowing them.
+	 * On any failure `originalHostname` never moves, so the section stays dirty.
+	 */
+	async function saveRouting(rethrow = false): Promise<void> {
+		if (!validateHostname(hostname)) {
+			if (rethrow) throw new Error(hostnameError || 'Invalid hostname');
+			return;
+		}
 
+		const sent = hostname;
 		saving = true;
 		try {
 			await rpcClient.proxy.updateServerRouting({
 				serverId: server.id,
-				proxyHostname: hostname
+				proxyHostname: sent
 			});
 			toast.success('Routing configuration saved');
-			originalHostname = hostname;
-			// Reload routing info to get updated server state
-			await loadRoutingInfo();
+			// Re-baseline to what was actually saved. If the user edited the
+			// hostname during the in-flight RPC, keep that edit dirty instead of
+			// silently discarding it.
+			originalHostname = sent;
+			// Refresh routing metadata; preserve a concurrent edit.
+			await loadRoutingInfo(hostname !== sent);
 			await loadAllRoutes();
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message.includes('Conflict')) {
 				hostnameError = 'Hostname already in use by another server';
 			} else {
 				toast.error('Failed to save routing configuration');
+			}
+			if (rethrow) {
+				throw error instanceof Error ? error : new Error('Failed to save routing configuration');
 			}
 		} finally {
 			saving = false;
@@ -177,6 +205,25 @@ one at https://mozilla.org/MPL/2.0/.
 		const port = routingInfo?.listenPort || 25565;
 		return port === 25565 ? host : `${host}:${port}`;
 	}
+
+	// OSS-464: the floating bar and the lifecycle gate read this section's
+	// dirty state through the registry. Undo maps to the existing Cancel
+	// behavior (revert to the loaded hostname, client-side only), and the
+	// bar's save keeps this section's own semantics — see saveRouting.
+	onMount(() => {
+		dirtySections.register({
+			id: 'routing',
+			label: 'Routing',
+			isDirty: () => hasChanges,
+			save: () => saveRouting(true),
+			undo: () => {
+				hostname = originalHostname;
+				hostnameError = '';
+			},
+			saving: () => saving
+		});
+		return () => dirtySections.unregister('routing');
+	});
 </script>
 
 <ServerTabPanel
@@ -200,7 +247,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="primary"
 				size="sm"
-				onclick={saveRouting}
+				onclick={() => saveRouting(false)}
 				disabled={!hasChanges || saving || !!hostnameError}
 			>
 				{#if saving}
@@ -215,7 +262,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="p-4 sm:p-6">
 		{#if loading}
 			<div class="flex items-center justify-center py-8">
-				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+				<CarbonSpinner size="md" label="Loading" description="Loading routing…" />
 			</div>
 		{:else if !routingInfo?.proxyEnabled}
 			<Alert>
@@ -344,7 +391,10 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								Cancel
 							</Button>
-							<Button onclick={saveRouting} disabled={!hasChanges || saving || !!hostnameError}>
+							<Button
+								onclick={() => saveRouting(false)}
+								disabled={!hasChanges || saving || !!hostnameError}
+							>
 								{#if saving}
 									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 								{:else}
@@ -374,7 +424,7 @@ one at https://mozilla.org/MPL/2.0/.
 											<p class="text-xs text-muted-foreground">
 												{route.serverId === server.id
 													? '(This server)'
-													: `Server: ${route.serverId.slice(0, 8)}...`}
+													: `Server: ${route.serverId.slice(0, 8)}…`}
 											</p>
 										</div>
 										{#if route.active}

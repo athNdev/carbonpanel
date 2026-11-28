@@ -199,7 +199,17 @@ func (m *HibernationManager) HibernateServer(ctx context.Context, serverID strin
 		return fmt.Errorf("hibernate already in flight for server %s", serverID)
 	}
 	defer m.endTransition(serverID)
+	return m.hibernateServer(ctx, serverID)
+}
 
+// HibernateServerHeld is like HibernateServer but assumes the caller already
+// holds the process-wide lifecycle transition for serverID. Manual RPC requests
+// use this to avoid claiming the same transition twice.
+func (m *HibernationManager) HibernateServerHeld(ctx context.Context, serverID string) error {
+	return m.hibernateServer(ctx, serverID)
+}
+
+func (m *HibernationManager) hibernateServer(ctx context.Context, serverID string) error {
 	srv, err := m.store.GetServer(ctx, serverID)
 	if err != nil {
 		return fmt.Errorf("server %s not found: %w", serverID, err)

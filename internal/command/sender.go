@@ -29,6 +29,61 @@ type DockerExecutor interface {
 	ExecCommand(ctx context.Context, containerID string, command string) (string, error)
 }
 
+// containerStatusChecker is the optional container-inspect surface of a
+// DockerExecutor; *docker.Client implements it. The sender uses it to catch
+// a container paused outside the panel, where the DB status alone would not.
+type containerStatusChecker interface {
+	GetContainerStatus(ctx context.Context, containerID string) (storage.ServerStatus, error)
+}
+
+// Tuning for the command sender's timeouts.
+const (
+	// execFallbackTimeout bounds the docker-exec fallback so a container
+	// that never answers cannot hang the caller.
+	execFallbackTimeout = 5 * time.Second
+	// pauseCheckTimeout bounds the optional container inspect used to detect
+	// a container paused outside the panel.
+	pauseCheckTimeout = 2 * time.Second
+)
+
+// Status-aware command rejections. These exact messages are shared with the
+// WebSocket console (internal/ws hub) so every console path reads the same.
+var (
+	// ErrServerPaused reports a command sent to a frozen (paused) server.
+	ErrServerPaused = errors.New("server is frozen (paused); resume the server before sending commands")
+)
+
+// rejectFrozenServer refuses commands for a server that cannot run them: a
+// frozen (paused) container has no live process to answer RCON, and docker
+// exec into it is rejected by the daemon or queues on a cgroup-frozen
+// process. The DB status covers the panel's own freeze decision; the
+// container inspect (when the executor supports it) also catches a container
+// paused outside the panel. Inspect failures fail open: this is a usability
+// guard, not an authorization check.
+//
+// Deep sleep is deliberately not rejected here: the deep-sleep manager sends
+// its graceful "save-all"/"stop" through this sender after pre-setting the
+// DB status to deepsleep, and refusing those would break the sleep flow.
+func (s *Sender) rejectFrozenServer(ctx context.Context, server *storage.Server, executor DockerExecutor) error {
+	if server.Status == storage.StatusPaused {
+		return ErrServerPaused
+	}
+	checker, ok := executor.(containerStatusChecker)
+	if !ok {
+		return nil
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
+	defer cancel()
+	status, err := checker.GetContainerStatus(checkCtx, server.ContainerID)
+	if err != nil {
+		return nil
+	}
+	if status == storage.StatusPaused {
+		return ErrServerPaused
+	}
+	return nil
+}
+
 type Sender struct {
 	store   *storage.Store
 	config  *config.Config
@@ -88,7 +143,18 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 		return "", err
 	}
 
-	// old docker exec command
+	// A frozen (paused) server cannot run commands; refuse here with an
+	// actionable error instead of letting RCON time out and exec fail with a
+	// daemon-internal message.
+	if err := s.rejectFrozenServer(ctx, server, executor); err != nil {
+		return "", err
+	}
+
+	// old docker exec command. The exec runs under its own deadline so a
+	// container that never answers (a wedge that raced the paused checks
+	// above) cannot hang the caller: the Docker client honours ctx for
+	// create/attach/inspect, and a read wedged inside the exec stream is
+	// abandoned with this call's deadline instead of blocking forever.
 	dockerExec := func(cause error) (string, error) {
 		if executor == nil {
 			if cause != nil {
@@ -96,14 +162,33 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 			}
 			return "", fmt.Errorf("no docker executor available")
 		}
-		output, err := executor.ExecCommand(ctx, server.ContainerID, command)
-		if err != nil {
-			if cause != nil {
-				return "", fmt.Errorf("rcon path failed: %w; fallback exec failed: %v", cause, err)
-			}
-			return "", fmt.Errorf("fallback exec failed: %w", err)
+		execCtx, cancel := context.WithTimeout(ctx, execFallbackTimeout)
+		defer cancel()
+		type execOutcome struct {
+			output string
+			err    error
 		}
-		return output, nil
+		done := make(chan execOutcome, 1)
+		go func() {
+			output, execErr := executor.ExecCommand(execCtx, server.ContainerID, command)
+			done <- execOutcome{output: output, err: execErr}
+		}()
+		select {
+		case out := <-done:
+			if out.err != nil {
+				if cause != nil {
+					return "", fmt.Errorf("rcon path failed: %w; fallback exec failed: %v", cause, out.err)
+				}
+				return "", fmt.Errorf("fallback exec failed: %w", out.err)
+			}
+			return out.output, nil
+		case <-execCtx.Done():
+			execErr := fmt.Errorf("docker exec did not answer within %s", execFallbackTimeout)
+			if cause != nil {
+				return "", fmt.Errorf("rcon path failed: %w; fallback exec failed: %v", cause, execErr)
+			}
+			return "", execErr
+		}
 	}
 
 	// Remote nodes run on isolated Docker bridge networks that are not routable

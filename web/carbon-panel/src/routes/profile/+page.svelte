@@ -199,7 +199,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function changePassword() {
 		if (!passwordForm.oldPassword || !passwordForm.newPassword) {
-			toast.error('Please fill in all fields');
+			toast.error('Fill in all fields');
 			return;
 		}
 
@@ -216,7 +216,7 @@ one at https://mozilla.org/MPL/2.0/.
 		saving = true;
 		try {
 			await authStore.changePassword(passwordForm.oldPassword, passwordForm.newPassword);
-			toast.success('Password changed successfully');
+			toast.success('Password changed');
 			passwordForm = {
 				oldPassword: '',
 				newPassword: '',
@@ -397,7 +397,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<CarbonTextInput
 									revealable
 									type="password"
-									label="Current Password"
+									label="Current password"
 									autocomplete="current-password"
 									bind:value={passwordForm.oldPassword}
 									required
@@ -406,7 +406,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<CarbonTextInput
 									revealable
 									type="password"
-									label="New Password"
+									label="New password"
 									autocomplete="new-password"
 									placeholder="Minimum 12 characters"
 									bind:value={passwordForm.newPassword}
@@ -416,9 +416,9 @@ one at https://mozilla.org/MPL/2.0/.
 								<CarbonTextInput
 									revealable
 									type="password"
-									label="Confirm New Password"
+									label="Confirm new password"
 									autocomplete="new-password"
-									placeholder="Confirm your new password"
+									placeholder="Repeat new password"
 									bind:value={passwordForm.confirmPassword}
 									required
 									disabled={saving}
@@ -430,10 +430,10 @@ one at https://mozilla.org/MPL/2.0/.
 								>
 									{#if saving}
 										<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-										Updating Password...
+										Updating password…
 									{:else}
 										<Key class="mr-2 h-4 w-4" />
-										Update Password
+										Update password
 									{/if}
 								</CarbonButton>
 							</form>
@@ -458,7 +458,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#snippet tokenToolbar()}
 			<CarbonButton size="sm" class="rounded-none" onclick={() => (showCreateTokenDialog = true)}>
 				<Plus class="mr-1.5 h-3.5 w-3.5" />
-				Create Token
+				Create token
 			</CarbonButton>
 		{/snippet}
 
@@ -492,7 +492,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<tr>
 						<td colspan="5" class="py-12 text-center">
 							<div class="flex items-center justify-center">
-								<CarbonInlineLoading description="Loading API tokens..." />
+								<CarbonInlineLoading description="Loading API tokens…" />
 							</div>
 						</td>
 					</tr>
@@ -570,7 +570,7 @@ one at https://mozilla.org/MPL/2.0/.
 <!-- Create API Token Modal with Carbon Design System Fidelity -->
 <CarbonModal
 	bind:open={showCreateTokenDialog}
-	title={createdToken ? 'Token Created Successfully' : 'Create New API Token'}
+	title={createdToken ? 'Token created' : 'Create new API token'}
 	description={createdToken
 		? 'Copy your token now — it will not be displayed again'
 		: 'Provision a new programmatic access token'}
@@ -597,8 +597,8 @@ one at https://mozilla.org/MPL/2.0/.
 						type="button"
 						onclick={copyToken}
 						class="absolute top-2 right-2 cursor-pointer rounded-none border border-border bg-card p-1.5 text-foreground transition-colors hover:bg-accent"
-						title="Copy Token"
-						aria-label="Copy Token"
+						title="Copy token"
+						aria-label="Copy token"
 					>
 						{#if copied}
 							<Check class="h-4 w-4 text-success-text" />
@@ -614,10 +614,9 @@ one at https://mozilla.org/MPL/2.0/.
 			>
 				<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 				<div>
-					<p class="font-semibold">Save this secret now</p>
+					<p class="font-semibold">Save this token now</p>
 					<p class="mt-0.5 text-muted-foreground">
-						This bearer token will never be displayed again. Store it securely in your secrets
-						manager or CI/CD environment.
+						This token is shown once. Store it in a secrets manager or CI secret.
 					</p>
 				</div>
 			</div>
@@ -639,10 +638,10 @@ one at https://mozilla.org/MPL/2.0/.
 				<CarbonButton kind="secondary" onclick={copyToken} class="rounded-none">
 					{#if copied}
 						<Check class="mr-2 h-4 w-4" />
-						Copied!
+						Copied
 					{:else}
 						<Copy class="mr-2 h-4 w-4" />
-						Copy Token
+						Copy token
 					{/if}
 				</CarbonButton>
 				<CarbonButton kind="primary" onclick={closeCreateDialog} class="rounded-none">
@@ -653,7 +652,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{:else}
 		<div class="space-y-4">
 			<CarbonTextInput
-				label="Token Name *"
+				label="Token name *"
 				placeholder="e.g. CI/CD Deployment, Monitoring Bot"
 				bind:value={newTokenForm.name}
 				disabled={creatingToken}
@@ -661,7 +660,7 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 
 			<CarbonSelect
-				label="Expiration Duration"
+				label="Expiration duration"
 				bind:value={newTokenForm.expiresInDays}
 				disabled={creatingToken}
 				helperText={newTokenForm.expiresInDays
@@ -702,10 +701,10 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					{#if creatingToken}
 						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Creating...
+						Creating…
 					{:else}
 						<KeyRound class="mr-2 h-4 w-4" />
-						Create Token
+						Create token
 					{/if}
 				</CarbonButton>
 			</div>
@@ -716,7 +715,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmDeleteOpen}
 	title="Revoke API token?"
 	message="Any automation using this token stops working immediately."
-	confirmLabel="Revoke Token"
+	confirmLabel="Revoke token"
 	danger
 	onconfirm={confirmDeleteToken}
 	onclose={() => (pendingDeleteToken = null)}

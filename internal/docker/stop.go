@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package docker
 
 import (
@@ -22,6 +21,13 @@ const (
 	DefaultStopWindow = 60 * time.Second
 	// MaxStopWindow caps a per-server override so a bad config cannot pin a worker.
 	MaxStopWindow = 180 * time.Second
+	// DefaultInteractiveStopWindow is how long a user-initiated stop waits
+	// before Docker escalates to SIGKILL when no override is configured. The
+	// interactive RPC holds the server's lifecycle transition and operation
+	// journal for the whole window, so the legacy 60s default kept every later
+	// start failing fast ("hang") behind it. Internal paths (reconciler, sleep
+	// manager) keep DefaultStopWindow.
+	DefaultInteractiveStopWindow = 20 * time.Second
 )
 
 // errContainerGone means Docker has no such container. Callers treat that as
@@ -35,6 +41,25 @@ func StopWindow(cfg *models.ServerConfig) time.Duration {
 		return DefaultStopWindow
 	}
 	return clampStopWindow(time.Duration(*cfg.StopDuration) * time.Second)
+}
+
+// InteractiveStopWindow returns the save window for a user-initiated stop.
+// A missing or non-positive StopDuration uses the short
+// DefaultInteractiveStopWindow; an explicit override is honored up to
+// MaxStopWindow so an operator who deliberately configured a longer save
+// window keeps it.
+func InteractiveStopWindow(cfg *models.ServerConfig) time.Duration {
+	if cfg == nil || cfg.StopDuration == nil {
+		return DefaultInteractiveStopWindow
+	}
+	window := time.Duration(*cfg.StopDuration) * time.Second
+	if window <= 0 {
+		return DefaultInteractiveStopWindow
+	}
+	if window > MaxStopWindow {
+		return MaxStopWindow
+	}
+	return window
 }
 
 // StopTimeoutSeconds is the Docker stop timeout for window. Docker sends

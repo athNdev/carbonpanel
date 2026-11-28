@@ -233,17 +233,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return x === null || z === null ? null : { x, z };
 	});
 
-	function mapLink(point: MapPoint): string {
-		const path = resolve('/worlds/[server]/[world]', {
-			server: serverId,
-			world: effectiveWorldKey
-		});
-		const url = new URL(path, page.url.origin);
-		url.searchParams.set('x', String(point.x));
-		url.searchParams.set('z', String(point.z));
-		return url.href;
-	}
-
 	function parseNumber(value: string | null): number | null {
 		if (value === null || value.trim() === '') return null;
 		const parsed = Number(value);
@@ -1025,7 +1014,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									title="World terrain"
 									preservePositionOnRenewal
 									location={nativeLocation}
-									{mapLink}
 									markers={nativeMarkers}
 									markersUnavailable={Boolean(overlaysError)}
 									onReopen={() => void loadSession()}

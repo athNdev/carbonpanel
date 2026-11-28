@@ -304,7 +304,9 @@ export type ImportUploadedModRequest = Message<'carbonpanel.v1.ImportUploadedMod
 	description: string;
 
 	/**
-	 * stage keeps the jar out of the live mods directory until the batch applies.
+	 * Stage requests the documented safe path. Compatibility-sensitive mod
+	 * uploads without declared loader/version context are always staged (never
+	 * live-installed), even if this field is false/omitted.
 	 *
 	 * @generated from field: bool stage = 5;
 	 */

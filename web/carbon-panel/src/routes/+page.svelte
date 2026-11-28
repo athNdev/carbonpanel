@@ -101,7 +101,7 @@ one at https://mozilla.org/MPL/2.0/.
 		try {
 			const outcome = await serverActions.perform(server.id, action);
 			if (outcome.kind === 'superseded') return;
-			toast.success(`${action === 'start' ? 'Starting' : 'Stopping'} ${server.name}...`);
+			toast.success(`${action === 'start' ? 'Starting' : 'Stopping'} ${server.name}…`);
 		} catch (error) {
 			toast.error(
 				`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -312,7 +312,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="space-y-6 bg-background text-foreground" data-testid="showcase-dashboard-content">
 		<CarbonPageHeader
 			title="Cluster Overview"
-			description="Hardware utilization, game servers status, and network routing topology"
+			description="Hardware utilization, server status, and routing topology"
 		>
 			{#snippet tag()}
 				<CarbonTag type="blue" size="sm">Carbon Panel</CarbonTag>
@@ -335,14 +335,14 @@ one at https://mozilla.org/MPL/2.0/.
 					href={resolve('/servers/new')}
 				>
 					<Plus class="h-4 w-4" />
-					<span>Create Server</span>
+					<span>Create server</span>
 				</CarbonButton>
 			{/snippet}
 		</CarbonPageHeader>
 
 		<!-- Carbon KPI Tiles -->
 		<div
-			class="motion-stagger grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
+			class="motion-stagger-fade grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-kpi-tiles"
 		>
 			<!-- Tile 1: Total Servers -->
@@ -609,7 +609,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div>
 							<h2 class="font-sans text-base font-semibold text-foreground">Server Overview</h2>
 							<p class="mt-0.5 font-sans text-xs text-muted-foreground">
-								Instance telemetry & state across cluster
+								Server telemetry and state across the cluster
 							</p>
 						</div>
 						<a
@@ -631,7 +631,7 @@ one at https://mozilla.org/MPL/2.0/.
 							</div>
 							<h3 class="text-sm font-semibold text-foreground">No servers configured</h3>
 							<p class="mt-1 mb-4 font-mono text-xs text-muted-foreground">
-								Create your first Minecraft server instance
+								Create your first Minecraft server
 							</p>
 							<CarbonButton
 								kind="primary"
@@ -640,7 +640,7 @@ one at https://mozilla.org/MPL/2.0/.
 								class="inline-flex justify-center gap-2"
 							>
 								<Plus class="h-3.5 w-3.5" />
-								<span>Create Server</span>
+								<span>Create server</span>
 							</CarbonButton>
 						</div>
 					{:else}
@@ -744,9 +744,7 @@ one at https://mozilla.org/MPL/2.0/.
 															type="button"
 															onclick={() => handleServerAction('start', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-success-text transition-colors hover:bg-secondary hover:text-success-text"
-															title={server.status === ServerStatus.DEEPSLEEP
-																? 'Wake Server'
-																: 'Start Server'}
+															title={server.status === ServerStatus.DEEPSLEEP ? 'Wake' : 'Start'}
 															aria-label={(server.status === ServerStatus.DEEPSLEEP
 																? 'Wake '
 																: 'Start ') + server.name}
@@ -758,7 +756,7 @@ one at https://mozilla.org/MPL/2.0/.
 																type="button"
 																onclick={() => handleServerAction('stop', server)}
 																class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
-																title="Stop Server"
+																title="Stop"
 																aria-label={'Stop ' + server.name}
 															>
 																<StopCircle class="h-4 w-4" />
@@ -769,7 +767,7 @@ one at https://mozilla.org/MPL/2.0/.
 															type="button"
 															onclick={() => handleServerAction('start', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-accent-text transition-colors hover:bg-secondary hover:text-accent-text"
-															title="Resume Server"
+															title="Resume"
 															aria-label={'Resume ' + server.name}
 														>
 															<PlayCircle class="h-4 w-4" />
@@ -778,7 +776,7 @@ one at https://mozilla.org/MPL/2.0/.
 															type="button"
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
-															title="Stop Server"
+															title="Stop"
 															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />
@@ -788,7 +786,7 @@ one at https://mozilla.org/MPL/2.0/.
 															type="button"
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
-															title="Stop Server"
+															title="Stop"
 															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />

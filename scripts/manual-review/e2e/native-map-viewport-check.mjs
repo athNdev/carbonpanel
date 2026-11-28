@@ -161,6 +161,7 @@ async function runPackagedWorldView(browser) {
         ListCapabilities: {rendererType: native.rendererType, capabilities: [{name: "map.2d", supported: true}]},
         ListServers: {servers: [runningServer, {...runningServer, id:"stopped", name:"Stopped fixture", status:"SERVER_STATUS_STOPPED"}]},
         ListBindings: {configuredLevelName:"overworld", bindings:[]},
+        GetServer: {server: runningServer},
       };
       await route.fulfill({ json: responses[method] ?? {} });
     });
@@ -169,11 +170,11 @@ async function runPackagedWorldView(browser) {
     );
     await page.route("**" + session + "**", async (route) => {
       if (route.request().url().endsWith("/native/manifest.json")) {
-        await route.fulfill({json: {tileBlocks: 128, dimension: "overworld", spawn: {x: 12, z: -34}}});
+        await route.fulfill({json: {tileBlocks: 128, dimension: "overworld", spawn: {x: 12, z: -34}, dimensions: ["overworld", "nether"]}});
         return;
       }
-      const match = route.request().url().match(/\/native\/overworld\/(-?\d+)\/(-?\d+)\.png$/);
-      assert.ok(match, "packaged map requests exactly one scoped tile");
+      const match = route.request().url().match(/\/native\/([a-z0-9_-]+)\/(-?\d+)\/(-?\d+)\.png$/);
+      assert.ok(match, "packaged map requests one scoped tile");
       tileRequests += 1;
       if (!savingTile) {
         savingTile = match[0];
@@ -191,7 +192,12 @@ async function runPackagedWorldView(browser) {
     const completedSave = page.waitForResponse((response) =>
       savingTile && response.url().endsWith(savingTile) && response.status() === 200
     );
-    await page.goto(origin + "worlds/" + native.serverId + "/" + key + "?dimension=nether");
+    // Both the /worlds inventory and the server page's map dialog exist at
+    // this head. This packaged pass enters through the dialog's ?map=<world
+    // key> deep link; the /worlds row and card open paths are covered below.
+    // The world-only grant still renders the map while the World tab behind
+    // it stays denied for worlds/read.
+    await page.goto(origin + "servers/" + native.serverId + "?tab=world&map=" + key + "&dimension=nether");
     await completedSave;
     assert.ok(savingTileRetried, "a tile interrupted by a save retries under the same map session");
     await page.getByRole("heading", { name: "World terrain" }).waitFor();
@@ -213,14 +219,12 @@ async function runPackagedWorldView(browser) {
     assert.equal(await page.getByRole("button", { name: "Show player markers", exact: true }).count(), 0);
     assert.doesNotMatch(await page.locator("body").innerText(), /Private position|Player position|Region boundary|Nether location/);
     await page.screenshot({path: path.join(evidence, "packaged-world-view-native.png")});
-    await surface.getByRole("button", { name: "Copy map link", exact: true }).click();
-    const copy = new URL(await page.evaluate(() => window.__copiedMapLink));
-    assert.equal(copy.origin, new URL(origin).origin);
-    assert.equal(copy.pathname, "/worlds/" + native.serverId + "/" + key);
-    assert.deepEqual(Object.fromEntries(copy.searchParams), { x: "12", z: "-34" });
-    copy.searchParams.set("x", "-128");
-    copy.searchParams.set("z", "92");
-    await page.goto(copy.href);
+    // The "Copy map link" action is no longer rendered at this head (removed
+    // with the map dialog refactor and recorded in src/lib/changelog.md), so
+    // main's copy assertion cannot be restored. The dialog's ?map=<world key>
+    // URL still carries the x/z camera query, so the deep link remains the
+    // way to restore a camera position.
+    await page.goto(origin + "servers/" + native.serverId + "?map=" + key + "&x=-128&z=92");
     await page.getByTestId("native-map-coordinates").getByText("X: -128 · Z: 92").waitFor();
     await page.locator('[role=application] img').first().waitFor();
     selectedRenderer = blueMap;
@@ -231,7 +235,28 @@ async function runPackagedWorldView(browser) {
     await page.locator('[role=application] img').first().waitFor();
     assert.equal(await surface.locator("iframe").count(), 0);
     results.push("status polling reissues sessions when the rendering mode changes in either direction");
-    results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
+    results.push("the packaged World View dialog renders native tiles and scoped Overworld markers without an iframe or module");
+    // The native viewport's own dimension switch serves the requested
+    // dimension's tiles under the same map session and keeps the camera;
+    // panel-owned markers stay Overworld-scoped.
+    const netherTile = page.waitForResponse(
+      (response) => response.url().includes("/native/nether/") && response.ok()
+    );
+    await page.getByRole("combobox", { name: "Dimension", exact: true }).selectOption("nether");
+    await netherTile;
+    assert.equal(
+      await page.getByTestId("native-map-coordinates").innerText(),
+      "X: -128 · Z: 92",
+      "the dimension switch preserves the camera",
+    );
+    await surface.getByText("Markers are only placed on the Overworld map.").waitFor();
+    assert.equal(
+      await surface.getByRole("button", { name: "Waypoint: Village gate", exact: true }).count(),
+      0,
+    );
+    results.push("the native dimension switch serves nether tiles in the same session, keeps the camera, and keeps markers Overworld-scoped");
+    // /worlds still exists at this head; keep main's row/card open-path
+    // checks alongside the dialog and dimension-switch checks above.
     for (const width of [360, 1440]) {
       await page.setViewportSize({width, height: 900});
       await page.goto(origin + "worlds?server=" + native.serverId);

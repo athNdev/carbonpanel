@@ -125,7 +125,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const outcome = await serverActions.perform(server.id, action);
 			if (outcome.kind === 'superseded') return;
 			toast.success(
-				`${action === 'recreate' ? 'Recreating' : action === 'stop' ? 'Stopping' : action === 'restart' ? 'Restarting' : 'Starting'} ${server.name}...`
+				`${action === 'recreate' ? 'Recreating' : action === 'stop' ? 'Stopping' : action === 'restart' ? 'Restarting' : 'Starting'} ${server.name}…`
 			);
 		} catch (error) {
 			toast.error(
@@ -181,10 +181,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div class="h-full flex-1 space-y-6 bg-background font-sans text-foreground">
-	<CarbonPageHeader
-		title="Servers"
-		description="Manage, inspect, and deploy your Minecraft server instances"
-	>
+	<CarbonPageHeader title="Servers" description="Manage, inspect, and deploy Minecraft servers">
 		{#snippet tag()}
 			<CarbonTag type="blue" size="sm">MANAGEMENT</CarbonTag>
 		{/snippet}
@@ -196,7 +193,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="justify-center gap-2"
 			>
 				<Plus class="h-4 w-4" />
-				<span>Create Server</span>
+				<span>Create server</span>
 			</CarbonButton>
 		{/snippet}
 	</CarbonPageHeader>
@@ -212,7 +209,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<input
 					type="search"
 					aria-label="Search servers"
-					placeholder="Search by name, description, version, loader, or port..."
+					placeholder="Search by name, description, version, loader, or port…"
 					bind:value={searchQuery}
 					onkeydown={(e) => e.key === 'Escape' && (searchQuery = '')}
 					class="h-9 w-full rounded-none border-b border-input bg-background pr-3 pl-9 font-sans text-xs text-foreground transition-all placeholder:text-muted-foreground focus:border-b-2 focus:border-primary focus:outline-none"
@@ -283,8 +280,8 @@ one at https://mozilla.org/MPL/2.0/.
 				<button
 					type="button"
 					onclick={() => (viewMode = 'table')}
-					title="Table View"
-					aria-label="Table View"
+					title="Table view"
+					aria-label="Table view"
 					aria-pressed={viewMode === 'table'}
 					class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none transition-colors {viewMode ===
 					'table'
@@ -296,8 +293,8 @@ one at https://mozilla.org/MPL/2.0/.
 				<button
 					type="button"
 					onclick={() => (viewMode = 'tiles')}
-					title="Tile View"
-					aria-label="Tile View"
+					title="Tile view"
+					aria-label="Tile view"
 					aria-pressed={viewMode === 'tiles'}
 					class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none transition-colors {viewMode ===
 					'tiles'
@@ -354,8 +351,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<h3 class="mb-1 text-base font-semibold text-foreground">No servers configured</h3>
 				<p class="mx-auto mb-6 max-w-md font-sans text-xs text-muted-foreground">
-					Create your first Minecraft server instance to begin managing containers and game
-					topology.
+					Create your first Minecraft server.
 				</p>
 				<CarbonButton
 					kind="primary"
@@ -364,7 +360,7 @@ one at https://mozilla.org/MPL/2.0/.
 					class="inline-flex justify-center gap-2"
 				>
 					<Plus class="h-4 w-4" />
-					<span>Create Server</span>
+					<span>Create server</span>
 				</CarbonButton>
 			{:else}
 				<div
@@ -373,9 +369,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<Search class="h-7 w-7" />
 				</div>
 				<h3 class="mb-1 text-base font-semibold text-foreground">No matching servers</h3>
-				<p class="text-xs text-muted-foreground">
-					Try adjusting your search criteria or status filter.
-				</p>
+				<p class="text-xs text-muted-foreground">Adjust the search or status filter.</p>
 				<CarbonButton
 					kind="secondary"
 					size="sm"
@@ -405,8 +399,8 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<tr>
 						<th scope="col" class="w-28 px-3 py-3">Status</th>
-						<th scope="col" class="px-3 py-3">Server Instance</th>
-						<th scope="col" class="px-3 py-3">Engine & Loader</th>
+						<th scope="col" class="px-3 py-3">Server</th>
+						<th scope="col" class="px-3 py-3">Minecraft & loader</th>
 						<th scope="col" class="hidden px-3 py-3 md:table-cell">Host / Port</th>
 						<th scope="col" class="hidden px-3 py-3 md:table-cell">Memory</th>
 						<th scope="col" class="px-3 py-3">Players & TPS</th>
@@ -579,7 +573,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 									<a
 										href={resolve('/servers/[id]', { id: server.id })}
-										title="View Details"
+										title="View details"
 										aria-label={`View details for ${server.name}`}
 										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-accent-text transition-colors hover:bg-primary/20"
 									>
@@ -596,7 +590,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Carbon Tile / Grid Layout -->
 	{:else}
 		<div
-			class="motion-stagger grid grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 [&>*]:min-w-0"
+			class="motion-stagger-fade grid grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 [&>*]:min-w-0"
 		>
 			{#each filteredServers as server (server.id)}
 				<div
@@ -784,17 +778,17 @@ one at https://mozilla.org/MPL/2.0/.
 		message={deleteDisposition === 'export'
 			? 'A zip of the world downloads now. The container, the world, and the server stay in the panel.'
 			: deleteDisposition === 'detach'
-				? 'The container keeps running and the world stays on disk. The panel forgets this server. Its host port stays reserved. A proxy name is dropped the next time the panel starts.'
+				? 'The container keeps running and the world stays on disk. The server is removed from the panel. Its host port stays reserved; the proxy name is dropped at the next panel start.'
 				: deleteDisposition === 'keep'
 					? 'The container is removed and the server leaves the panel. The world directory stays on disk.'
-					: 'This action cannot be undone. The container and the server files are removed.'}
+					: 'This will stop and remove the container, delete all files and data, and remove mods and configurations. This action cannot be undone.'}
 		confirmLabel={deleteDisposition === 'export'
 			? 'Export world'
 			: deleteDisposition === 'detach'
 				? 'Detach server'
 				: deleteDisposition === 'keep'
 					? 'Remove from panel'
-					: 'Delete Server'}
+					: 'Delete server'}
 		danger={deleteDisposition !== 'export'}
 		confirming={loading}
 		onconfirm={confirmDeleteServer}

@@ -298,13 +298,13 @@ one at https://mozilla.org/MPL/2.0/.
 				checked={proxyEnabled}
 				onchange={(e) => (proxyEnabled = e.currentTarget.checked)}
 				disabled={loading || saving}
-				aria-label="Enable proxy system"
+				aria-label="Enable proxy"
 			/>
 		</div>
 		<div class="space-y-4">
 			<CarbonTextInput
 				id="base-url"
-				label="Base Domain"
+				label="Base domain"
 				bind:value={baseURL}
 				placeholder="minecraft.example.com"
 				disabled={saving || !proxyEnabled}
@@ -322,10 +322,10 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					{#if saving}
 						<Loader2 class="h-4 w-4 animate-spin" />
-						<span>Saving...</span>
+						<span>Saving…</span>
 					{:else}
 						<Save class="h-4 w-4" />
-						<span>Save Configuration</span>
+						<span>Save configuration</span>
 					{/if}
 				</CarbonButton>
 			</div>
@@ -334,7 +334,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	{#if loading}
 		<div class="flex items-center justify-center rounded-none border border-border bg-card p-12">
-			<CarbonInlineLoading description="Loading proxy configuration..." />
+			<CarbonInlineLoading description="Loading proxy configuration…" />
 		</div>
 	{:else if !proxyEnabled}
 		<div
@@ -343,7 +343,7 @@ one at https://mozilla.org/MPL/2.0/.
 		>
 			<Info class="mt-0.5 h-4 w-4 shrink-0 text-accent-text" />
 			<p class="text-xs text-muted-foreground">
-				Enable the proxy system to allow servers to use custom hostnames instead of direct port
+				Enable the proxy to allow servers to use custom hostnames instead of direct port
 				connections.
 			</p>
 		</div>
@@ -622,7 +622,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<div>
 									<p class="font-mono text-xs text-foreground">{route.hostname}</p>
 									<p class="text-xs text-muted-foreground">
-										Server: {route.serverId.slice(0, 8)}...
+										Server: {route.serverId.slice(0, 8)}…
 									</p>
 								</div>
 							</div>

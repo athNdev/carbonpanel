@@ -20,7 +20,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		operationActionLabel,
 		outcomeTagType
 	} from './server-operations';
-	import { CarbonConfirm, CarbonTag } from '$lib/components/carbon';
+	import { CarbonConfirm, CarbonTag, CarbonSpinner } from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
 
@@ -219,11 +219,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</tbody>
 			</table>
 		</div>
-	{:else if loading || !loadError}
+	{:else if loading}
+		<div class="flex items-center justify-center py-8" role="status">
+			<CarbonSpinner size="md" label="Loading" description="Loading operations…" />
+		</div>
+	{:else if !loadError}
 		<p role="status" class="py-6 text-sm text-muted-foreground">
-			{loading
-				? 'Loading operations…'
-				: 'No operations yet. Start, stop or restart to populate this journal.'}
+			No operations yet. Start, stop or restart to populate this journal.
 		</p>
 	{/if}
 </div>

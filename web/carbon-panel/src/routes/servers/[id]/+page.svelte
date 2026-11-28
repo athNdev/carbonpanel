@@ -22,6 +22,7 @@ one at https://mozilla.org/MPL/2.0/.
 		serverStatusTone as getStatusTagType
 	} from '$lib/features/servers/presentation';
 	import { serversStore, serverInventory, serverActions } from '$lib/stores/servers';
+	import { dirtySections, dirtySectionLabels } from '$lib/stores/dirty-sections.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ServerLifecycleActions from '$lib/components/fragments/ServerLifecycleActions.svelte';
@@ -50,7 +51,9 @@ one at https://mozilla.org/MPL/2.0/.
 		Users,
 		Archive,
 		Database,
-		Globe2
+		Globe2,
+		Snowflake,
+		Moon
 	} from '@lucide/svelte';
 	import {
 		DropdownMenu,
@@ -63,7 +66,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { GetServerRoutingResponse } from '$lib/proto/carbonpanel/v1/proxy_pb';
 
 	import { enumToString } from '$lib/utils';
-	import { effectiveLoader } from '$lib/utils/mod-loader';
+	import { effectiveLoader, isModpackPlatform } from '$lib/utils/mod-loader';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import {
 		CarbonTag,
@@ -71,7 +74,9 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm,
 		CarbonModal,
 		CarbonErrorState,
-		CarbonPageHeader
+		CarbonFloatingActionBar,
+		CarbonPageHeader,
+		CarbonSpinner
 	} from '$lib/components/carbon';
 	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
@@ -119,6 +124,22 @@ one at https://mozilla.org/MPL/2.0/.
 	let activeTab = $derived(
 		subViewTabs.find((tab) => tab.id === detailUrl.searchParams.get('tab'))?.id ?? 'overview'
 	);
+
+	// OSS-464: the editable sections (Overview → Server Settings, Configuration,
+	// Routing) stay mounted once visited so unsaved edits — and their registry
+	// entries — survive tab switches. Deep links start with their target
+	// already visited.
+	const persistentTabs: ReadonlySet<string> = new Set(['overview', 'configuration', 'routing']);
+	// The on-demand placeholder panels only cover the tabs that mount on demand.
+	const transientTabs = subViewTabs.filter((tab) => !persistentTabs.has(tab.id));
+	let visitedOverview = $state(activeTab === 'overview');
+	let visitedConfiguration = $state(activeTab === 'configuration');
+	let visitedRouting = $state(activeTab === 'routing');
+	$effect(() => {
+		if (activeTab === 'overview') visitedOverview = true;
+		else if (activeTab === 'configuration') visitedConfiguration = true;
+		else if (activeTab === 'routing') visitedRouting = true;
+	});
 
 	// Older copied Configuration links contained only a category or property fragment.
 	// Confirm it against this server's catalog before changing the default tab.
@@ -275,8 +296,37 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	async function handleServerAction(action: 'start' | 'stop' | 'restart' | 'recreate') {
+	/**
+	 * OSS-464: Start, Restart and Force Recreate are refused while any
+	 * registered section holds unsaved edits — the floating action bar shakes
+	 * and a toast names the sections. Stop and Delete are deliberately not
+	 * gated: they neither consume nor destroy unsaved edits (see
+	 * docs/plans/live-terrain-and-save-flow.md, Part B3).
+	 */
+	const gatedServerActions: ReadonlySet<string> = new Set(['start', 'restart', 'recreate']);
+
+	function refuseGatedAction(
+		action: 'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep'
+	): boolean {
+		const labels = dirtySectionLabels();
+		if (labels.length === 0) return true;
+		dirtySections.requestShake();
+		const verb =
+			action === 'start' ? 'starting' : action === 'restart' ? 'restarting' : 'recreating';
+		toast.error(
+			labels.length === 1
+				? `Save or undo your changes in ${labels[0]} before ${verb} the server.`
+				: `Unsaved changes in: ${labels.join(', ')}. Save or undo before ${verb} the server.`
+		);
+		return false;
+	}
+
+	async function handleServerAction(
+		action: 'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep'
+	) {
 		if (!server) return;
+
+		if (gatedServerActions.has(action) && !refuseGatedAction(action)) return;
 
 		actionLoading = true;
 
@@ -285,7 +335,17 @@ one at https://mozilla.org/MPL/2.0/.
 			const outcome = await serverActions.perform(target.id, action);
 			if (outcome.kind === 'superseded') return;
 			toast.success(
-				`Server is ${action === 'recreate' ? 'recreating' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'starting'}...`
+				action === 'recreate'
+					? 'Server is recreating...'
+					: action === 'stop'
+						? 'Server is stopping...'
+						: action === 'restart'
+							? 'Server is restarting...'
+							: action === 'pause'
+								? 'Server is freezing...'
+								: action === 'deepsleep'
+									? 'Server is going into deep sleep...'
+									: 'Server is starting...'
 			);
 		} catch (error) {
 			toast.error(
@@ -342,11 +402,50 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
+<!--
+	Shared render-failure UI for every tab boundary. The persistent editable
+	panels (OSS-464) each own a boundary so a throw in a hidden section can
+	never blank the visible tab.
+-->
+{#snippet tabFailed(error: unknown, reset: () => void)}
+	<div
+		class="flex min-h-64 flex-col items-center justify-center gap-3 border border-border bg-card p-6 text-center"
+		role="alert"
+	>
+		<p class="font-mono text-sm text-destructive-text">This tab failed to render</p>
+		<p class="max-w-lg text-xs break-words text-muted-foreground">
+			{error instanceof Error && error.message ? error.message : String(error)}
+		</p>
+		<div class="mt-1 flex items-center gap-2">
+			<button
+				type="button"
+				onclick={reset}
+				class="flex h-8 cursor-pointer items-center border border-primary bg-primary px-4 font-sans text-xs text-primary-foreground transition-colors hover:bg-[var(--button-primary-hover)]"
+			>
+				Retry
+			</button>
+			<a
+				href={resolve('/servers')}
+				class="flex h-8 items-center border border-border bg-card px-4 font-sans text-xs text-foreground transition-colors hover:bg-accent"
+			>
+				Back to servers
+			</a>
+		</div>
+	</div>
+{/snippet}
+
 {#if loading && !server}
-	<div class="flex h-96 items-center justify-center bg-background">
-		<div class="flex flex-col items-center gap-3">
-			<div class="h-10 w-10 animate-spin border-4 border-primary border-t-transparent"></div>
-			<p class="font-mono text-xs text-muted-foreground">Connecting to server daemon...</p>
+	<div class="flex h-96 flex-col items-center justify-center gap-6 bg-background">
+		<CarbonSpinner size="lg" label="Loading server" description="Connecting to server daemon..." />
+		<!-- Skeleton tiles mirror the runtime tile grid below so it does not pop in. -->
+		<div
+			class="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+			aria-hidden="true"
+		>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
+			<div class="motion-skeleton h-[140px] border border-border"></div>
 		</div>
 	</div>
 {:else if server}
@@ -429,6 +528,22 @@ one at https://mozilla.org/MPL/2.0/.
 									<RefreshCcw class="h-3.5 w-3.5" />
 									<span>Force Recreate</span>
 								</DropdownMenuItem>
+								{#if server.status === ServerStatus.RUNNING}
+									<DropdownMenuItem
+										class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
+										onclick={() => handleServerAction('pause')}
+									>
+										<Snowflake class="h-3.5 w-3.5" />
+										<span>Freeze Server</span>
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
+										onclick={() => handleServerAction('deepsleep')}
+									>
+										<Moon class="h-3.5 w-3.5" />
+										<span>Deep Sleep</span>
+									</DropdownMenuItem>
+								{/if}
 								<DropdownMenuItem
 									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-destructive-text hover:bg-destructive/20"
 									onclick={() => handleDeleteServer()}
@@ -483,31 +598,52 @@ one at https://mozilla.org/MPL/2.0/.
 					<h2 class="text-sm font-semibold">Engine specs</h2>
 					<Info class="h-4 w-4 text-[var(--chart-4)]" />
 				</div>
-				<dl class="mt-3 grid [grid-template-columns:max-content_minmax(0,1fr)] gap-2 text-xs">
-					<dt class="text-muted-foreground">Minecraft</dt>
-					<dd class="font-mono font-medium">{server.mcVersion || 'Latest'}</dd>
-					<dt class="text-muted-foreground">Loader</dt>
-					<dd class="flex flex-wrap items-center gap-1.5">
-						<CarbonTag type="teal" size="sm"
-							>{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
-								'vanilla'}</CarbonTag
-						>
-						{#if server.loaderVersion}<span class="font-mono break-all">{server.loaderVersion}</span
-							>{/if}
-					</dd>
-					{#if server.javaVersion}
-						<dt class="text-muted-foreground">Java</dt>
-						<dd class="font-mono">JDK {server.javaVersion}</dd>
-					{/if}
-				</dl>
-				<dl class="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-3 text-xs">
-					<div class="flex gap-2">
-						<dt class="text-muted-foreground">Port</dt>
-						<dd class="font-mono">{server.port}</dd>
+				<dl class="mt-3 divide-y divide-border text-xs">
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Minecraft</dt>
+						<dd class="text-right font-mono font-medium text-foreground">
+							{server.mcVersion || 'Latest'}
+						</dd>
 					</div>
-					<div class="flex gap-2">
-						<dt class="text-muted-foreground">Max players</dt>
-						<dd class="font-mono">{server.maxPlayers}</dd>
+					{#if isModpackPlatform(server.modLoader)}
+						<div class="flex items-center justify-between gap-3 py-2">
+							<dt class="font-mono text-xs text-muted-foreground uppercase">Modpack</dt>
+							<dd class="text-right font-mono text-foreground">
+								{enumToString(ModLoader, server.modLoader)}
+							</dd>
+						</div>
+					{/if}
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Loader</dt>
+						<dd class="flex flex-wrap items-center justify-end gap-1.5 text-right">
+							<CarbonTag type="teal" size="sm"
+								>{enumToString(
+									ModLoader,
+									effectiveLoader(server.modLoader, server.modpackLoader)
+								) || 'vanilla'}</CarbonTag
+							>
+							{#if server.loaderVersion}<span class="font-mono break-all text-foreground"
+									>{server.loaderVersion}</span
+								>{/if}
+						</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Java</dt>
+						<dd class="text-right font-mono text-foreground">
+							{#if server.javaVersion}
+								JDK {server.javaVersion}
+							{:else}
+								<span class="text-muted-foreground">—</span>
+							{/if}
+						</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Port</dt>
+						<dd class="text-right font-mono text-foreground">{server.port}</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 py-2">
+						<dt class="font-mono text-xs text-muted-foreground uppercase">Max players</dt>
+						<dd class="text-right font-mono text-foreground">{server.maxPlayers}</dd>
 					</div>
 				</dl>
 			</div>
@@ -660,33 +796,63 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tab Content Areas -->
 			<CarbonInactiveTabPanels
-				tabs={subViewTabs}
+				tabs={transientTabs}
 				selectedTab={activeTab}
 				idPrefix="server-detail-tabs"
 			/>
 
-			<div
-				id={`server-detail-tabs-panel-${activeTab}`}
-				role="tabpanel"
-				aria-labelledby={`server-detail-tabs-tab-${activeTab}`}
-				class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
-				tabindex="0"
-			>
-				<!--
-						A throw while a tab panel renders must never be able to wedge the
-						whole content area. Without this boundary, Svelte's effect flush
-						abandons the batch: the tab indicator (a separate binding) still
-						moves, while the panel below keeps rendering the previous tab's
-						content. That is exactly the reported "Console is selected but shows
-						the Settings panel" symptom, and it recurred for months because a
-						single render-path throw permanently wedged this `{#if}`.
+			<!--
+					OSS-464: CarbonInactiveTabPanels only covers the transient tabs, so
+					a persistent tab that has never been visited would leave its tab
+					button's aria-controls pointing at a nonexistent panel id. Inert
+					placeholder panels hold the id until the keep-mounted panel below
+					takes it over on first visit.
+				-->
+			{#if !visitedOverview}
+				<div
+					id="server-detail-tabs-panel-overview"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-overview"
+					hidden
+				></div>
+			{/if}
+			{#if !visitedConfiguration}
+				<div
+					id="server-detail-tabs-panel-configuration"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-configuration"
+					hidden
+				></div>
+			{/if}
+			{#if !visitedRouting}
+				<div
+					id="server-detail-tabs-panel-routing"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-routing"
+					hidden
+				></div>
+			{/if}
 
-						`svelte:boundary` contains the failure to this panel, keeps the rest
-						of the page interactive, and offers a retry instead of a dead tab.
-					-->
-				<div class="flex h-full min-h-0 flex-1 flex-col">
-					<svelte:boundary>
-						{#if activeTab === 'overview'}
+			<!--
+					OSS-464: the editable sections stay mounted once visited so unsaved
+					edits — and their dirty-section registry entries — survive tab
+					switches. Inactive visits keep them in the DOM behind the hidden
+					attribute (Tailwind's preflight forces display: none !important on
+					[hidden], which wins over the display utilities below). Each panel
+					owns a boundary so a throw in a hidden section cannot blank the
+					visible tab; the remaining tabs keep mounting on demand below.
+				-->
+			{#if visitedOverview}
+				<div
+					id="server-detail-tabs-panel-overview"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-overview"
+					hidden={activeTab !== 'overview'}
+					class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+					tabindex="0"
+				>
+					<div class="flex h-full min-h-0 flex-1 flex-col">
+						<svelte:boundary>
 							<ServerTabPanel
 								title="Server Settings"
 								description="Modify runtime container settings and server parameters"
@@ -694,72 +860,116 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								<ServerSettings {server} onUpdate={loadServer} />
 							</ServerTabPanel>
-						{:else if activeTab === 'console'}
-							<ServerConsole {server} active={activeTab === 'console'} />
-						{:else if activeTab === 'configuration'}
-							<ServerConfiguration {server} />
-						{:else if activeTab === 'mods'}
-							<ServerMods {server} active={activeTab === 'mods'} />
-						{:else if activeTab === 'datapacks'}
-							<ServerDatapacks {server} />
-						{:else if activeTab === 'world'}
-							<ServerWorld {server} active={activeTab === 'world'} onopenmap={openMap} />
-						{:else if activeTab === 'modules'}
-							<ServerModules {server} active={activeTab === 'modules'} />
-						{:else if activeTab === 'files'}
-							<ServerFiles {server} active={activeTab === 'files'} />
-						{:else if activeTab === 'tasks'}
-							<ServerTasks {server} active={activeTab === 'tasks'} />
-						{:else if activeTab === 'backups'}
-							<ServerBackups {server} active={activeTab === 'backups'} />
-						{:else if activeTab === 'players'}
-							<ServerPlayers {server} active={activeTab === 'players'} />
-						{:else if activeTab === 'activity'}
-							<ServerTabPanel
-								title="Activity"
-								description="Lifecycle outcomes and recorded actions for this server"
-								mode="form"
-							>
-								<div class="flex flex-col gap-6 p-4 sm:p-6">
-									{#key serverId}
-										<ServerOperations {serverId} active={activeTab === 'activity'} />
-										<ServerActivity {serverId} active={activeTab === 'activity'} />
-									{/key}
-								</div>
-							</ServerTabPanel>
-						{:else if activeTab === 'routing'}
-							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
-						{/if}
-
-						{#snippet failed(error, reset)}
-							<div
-								class="flex min-h-64 flex-col items-center justify-center gap-3 border border-border bg-card p-6 text-center"
-								role="alert"
-							>
-								<p class="font-mono text-sm text-destructive-text">This tab failed to render</p>
-								<p class="max-w-lg text-xs break-words text-muted-foreground">
-									{error instanceof Error && error.message ? error.message : String(error)}
-								</p>
-								<div class="mt-1 flex items-center gap-2">
-									<button
-										type="button"
-										onclick={reset}
-										class="flex h-8 cursor-pointer items-center border border-primary bg-primary px-4 font-sans text-xs text-primary-foreground transition-colors hover:bg-[var(--button-primary-hover)]"
-									>
-										Retry
-									</button>
-									<a
-										href={resolve('/servers')}
-										class="flex h-8 items-center border border-border bg-card px-4 font-sans text-xs text-foreground transition-colors hover:bg-accent"
-									>
-										Back to servers
-									</a>
-								</div>
-							</div>
-						{/snippet}
-					</svelte:boundary>
+							{#snippet failed(error, reset)}
+								{@render tabFailed(error, reset)}
+							{/snippet}
+						</svelte:boundary>
+					</div>
 				</div>
-			</div>
+			{/if}
+
+			{#if visitedConfiguration}
+				<div
+					id="server-detail-tabs-panel-configuration"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-configuration"
+					hidden={activeTab !== 'configuration'}
+					class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+					tabindex="0"
+				>
+					<div class="flex h-full min-h-0 flex-1 flex-col">
+						<svelte:boundary>
+							<ServerConfiguration {server} />
+							{#snippet failed(error, reset)}
+								{@render tabFailed(error, reset)}
+							{/snippet}
+						</svelte:boundary>
+					</div>
+				</div>
+			{/if}
+
+			{#if visitedRouting}
+				<div
+					id="server-detail-tabs-panel-routing"
+					role="tabpanel"
+					aria-labelledby="server-detail-tabs-tab-routing"
+					hidden={activeTab !== 'routing'}
+					class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+					tabindex="0"
+				>
+					<div class="flex h-full min-h-0 flex-1 flex-col">
+						<svelte:boundary>
+							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
+							{#snippet failed(error, reset)}
+								{@render tabFailed(error, reset)}
+							{/snippet}
+						</svelte:boundary>
+					</div>
+				</div>
+			{/if}
+
+			{#if !persistentTabs.has(activeTab)}
+				<div
+					id={`server-detail-tabs-panel-${activeTab}`}
+					role="tabpanel"
+					aria-labelledby={`server-detail-tabs-tab-${activeTab}`}
+					class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+					tabindex="0"
+				>
+					<!--
+							A throw while a tab panel renders must never be able to wedge the
+							whole content area. Without this boundary, Svelte's effect flush
+							abandons the batch: the tab indicator (a separate binding) still
+							moves, while the panel below keeps rendering the previous tab's
+							content. That is exactly the reported "Console is selected but shows
+							the Settings panel" symptom, and it recurred for months because a
+							single render-path throw permanently wedged this `{#if}`.
+
+							`svelte:boundary` contains the failure to this panel, keeps the rest
+							of the page interactive, and offers a retry instead of a dead tab.
+						-->
+					<div class="flex h-full min-h-0 flex-1 flex-col">
+						<svelte:boundary>
+							{#if activeTab === 'console'}
+								<ServerConsole {server} active={activeTab === 'console'} />
+							{:else if activeTab === 'mods'}
+								<ServerMods {server} active={activeTab === 'mods'} />
+							{:else if activeTab === 'datapacks'}
+								<ServerDatapacks {server} />
+							{:else if activeTab === 'world'}
+								<ServerWorld {server} active={activeTab === 'world'} onopenmap={openMap} />
+							{:else if activeTab === 'modules'}
+								<ServerModules {server} active={activeTab === 'modules'} />
+							{:else if activeTab === 'files'}
+								<ServerFiles {server} active={activeTab === 'files'} />
+							{:else if activeTab === 'tasks'}
+								<ServerTasks {server} active={activeTab === 'tasks'} />
+							{:else if activeTab === 'backups'}
+								<ServerBackups {server} active={activeTab === 'backups'} />
+							{:else if activeTab === 'players'}
+								<ServerPlayers {server} active={activeTab === 'players'} />
+							{:else if activeTab === 'activity'}
+								<ServerTabPanel
+									title="Activity"
+									description="Lifecycle outcomes and recorded actions for this server"
+									mode="form"
+								>
+									<div class="flex flex-col gap-6 p-4 sm:p-6">
+										{#key serverId}
+											<ServerOperations {serverId} active={activeTab === 'activity'} />
+											<ServerActivity {serverId} active={activeTab === 'activity'} />
+										{/key}
+									</div>
+								</ServerTabPanel>
+							{/if}
+
+							{#snippet failed(error, reset)}
+								{@render tabFailed(error, reset)}
+							{/snippet}
+						</svelte:boundary>
+					</div>
+				</div>
+			{/if}
 		</div>
 	</div>
 {:else}
@@ -782,6 +992,8 @@ one at https://mozilla.org/MPL/2.0/.
 <ScrollToTop />
 
 {#if server}
+	<!-- OSS-464: floating save/undo bar over the server view sections. -->
+	<CarbonFloatingActionBar onSelectSection={selectServerTab} />
 	<CarbonConfirm
 		bind:open={confirmDeleteOpen}
 		title={deleteDisposition === 'export'
@@ -794,7 +1006,7 @@ one at https://mozilla.org/MPL/2.0/.
 		message={deleteDisposition === 'export'
 			? 'A zip of the world downloads now. The container, the world, and this server stay in the panel.'
 			: deleteDisposition === 'detach'
-				? 'The container keeps running and the world stays on disk. The panel forgets this server. Its host port stays reserved. A proxy name is dropped the next time the panel starts.'
+				? 'The container keeps running and the world stays on disk. The server is removed from the panel. Its host port stays reserved; the proxy name is dropped at the next panel start.'
 				: deleteDisposition === 'keep'
 					? 'This stops and removes the container and drops the server from the panel. The world directory stays on disk.'
 					: 'This will stop and remove the container, delete all files and data, and remove mods and configurations. This action cannot be undone.'}

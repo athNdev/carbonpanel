@@ -79,6 +79,8 @@ export async function checkFieldAppearance(page, base) {
     await page.goto(base + "/servers/ready");
     const text = page.getByLabel("Server Name", { exact: true });
     const number = page.getByLabel("Memory (MB)", { exact: true });
+    // The server detail page's settings section uses the snake_case trigger id;
+    // the create-server wizard uses the camelCase one (#modLoader).
     const select = page.locator("#mod_loader");
     await text.waitFor();
     assert.equal(
@@ -135,17 +137,19 @@ export async function checkFieldAppearance(page, base) {
     });
     await page.goto(base + "/servers");
     const search = page.getByPlaceholder(
-      "Search by name, description, version, loader, or port...",
+      "Search by name, description, version, loader, or port…",
     );
     await search.waitFor();
     assert.equal((await appearance(search)).fill, idle.fill);
     assert.equal((await appearance(search)).width, "2px");
-    await page.goto(base + "/worlds");
-    const nativeSelect = page.getByLabel("Map status", { exact: true });
-    await nativeSelect.waitFor();
-    const nativeStyle = await appearance(nativeSelect);
-    assert.equal(nativeStyle.fill, idle.fill);
-    assert.equal(nativeStyle.width, "2px");
+    await page.goto(base + "/servers/new");
+    await page.locator("#name").fill("Field Appearance Check");
+    await page.getByRole("button", { name: "Next Step" }).click();
+    const loaderSelect = page.locator("#modLoader");
+    await loaderSelect.waitFor();
+    const loaderStyle = await appearance(loaderSelect);
+    assert.equal(loaderStyle.fill, idle.fill);
+    assert.equal(loaderStyle.width, "2px");
     const controls = await page.evaluate(() => {
       const box = document.createElement("div");
       document.body.append(box);

@@ -314,7 +314,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				enabled: newNode.enabled
 			});
 
-			toast.success(`Node "${newNode.name}" added successfully`);
+			toast.success(`Node "${newNode.name}" added`);
 			showAddDialog = false;
 			// Reset form
 			newNode = {
@@ -409,7 +409,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				enabled: editingNode.enabled
 			});
 
-			toast.success(`Node "${editingNode.name}" updated successfully`);
+			toast.success(`Node "${editingNode.name}" updated`);
 			showEditDialog = false;
 			editingNode = null;
 			await loadNodes();
@@ -549,7 +549,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					title="Scan local network interfaces for active Docker daemons"
 				>
 					<Radio class="h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
-					<span>{scanning ? 'Scanning...' : 'Auto-detect'}</span>
+					<span>{scanning ? 'Scanning…' : 'Auto-detect'}</span>
 				</CarbonButton>
 				<CarbonButton
 					kind="secondary"
@@ -568,7 +568,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					onclick={() => (showAddDialog = true)}
 				>
 					<Plus class="h-4 w-4" />
-					<span>Add Docker Node</span>
+					<span>Add Docker node</span>
 				</CarbonButton>
 			</div>
 		</div>
@@ -618,7 +618,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{#if loading}
 		<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 			<div class="flex items-center justify-center px-5 py-16">
-				<CarbonInlineLoading description="Loading Docker nodes..." />
+				<CarbonInlineLoading description="Loading Docker nodes…" />
 			</div>
 		</CarbonTile>
 	{:else if nodes.length === 0}
@@ -633,7 +633,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</p>
 					<h3 class="font-sans text-base font-semibold text-foreground">No Docker nodes found</h3>
 					<p class="mx-auto max-w-md font-sans text-xs text-muted-foreground">
-						Add a remote Docker host to scale server instances across multiple physical machines, or
+						Add a remote Docker host to scale servers across multiple physical machines, or
 						auto-detect daemons listening on your local network.
 					</p>
 				</div>
@@ -646,7 +646,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						disabled={scanning}
 					>
 						<Radio class="h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
-						<span>{scanning ? 'Scanning...' : 'Auto-detect Daemons'}</span>
+						<span>{scanning ? 'Scanning…' : 'Auto-detect daemons'}</span>
 					</CarbonButton>
 					<CarbonButton
 						kind="primary"
@@ -655,7 +655,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						onclick={() => (showAddDialog = true)}
 					>
 						<Plus class="h-4 w-4" />
-						<span>Add Docker Node</span>
+						<span>Add Docker node</span>
 					</CarbonButton>
 				</div>
 			</div>
@@ -842,7 +842,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						>
 							{#if pingingNodeId === node.id}
 								<Loader2 class="h-4 w-4 animate-spin" />
-								<span>Pinging...</span>
+								<span>Pinging…</span>
 							{:else}
 								<Activity class="h-4 w-4" />
 								<span>Ping</span>
@@ -883,7 +883,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonModal
 	bind:open={showDetectedDialog}
 	title="Docker daemons detected"
-	description="Auto-detect found reachable Docker daemons on this host's network. Register the ones you want the placement engine to use — you can adjust names, IPs, and limits later."
+	description="Reachable Docker daemons found on this host's network. Register the ones the placement engine should use; names, IPs, and limits can be changed later."
 	size="xl"
 	hasFooter={false}
 >
@@ -910,7 +910,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					>
 						{#if addingDaemonHost === d.host}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							Adding...
+							Adding…
 						{:else if d.alreadyRegistered}
 							Added
 						{:else}
@@ -1128,9 +1128,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			>
 				{#if isSaving}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-					Adding...
+					Adding…
 				{:else}
-					Add Node
+					Add node
 				{/if}
 			</CarbonButton>
 		</div>
@@ -1397,9 +1397,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			>
 				{#if isSaving}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-					Saving...
+					Saving…
 				{:else}
-					Save Changes
+					Save changes
 				{/if}
 			</CarbonButton>
 		</div>
@@ -1409,7 +1409,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmOpen}
 	title="Delete Docker node?"
 	message="The node is removed from the panel. Containers on it are left untouched."
-	confirmLabel="Delete Node"
+	confirmLabel="Delete node"
 	danger
 	onconfirm={confirmDeleteNode}
 	onclose={() => (pendingDelete = null)}

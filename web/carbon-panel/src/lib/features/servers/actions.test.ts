@@ -10,6 +10,8 @@ for (const action of [
 	'stop',
 	'restart',
 	'recreate',
+	'pause',
+	'deepsleep',
 	'delete',
 	'keep',
 	'detach',
@@ -33,6 +35,8 @@ for (const action of [
 				stopServer: rpc('stop'),
 				restartServer: rpc('restart'),
 				recreateServer: rpc('recreate'),
+				pauseServer: rpc('pause'),
+				deepSleepServer: rpc('deepsleep'),
 				deleteServer: rpc('delete'),
 				exportWorld: async (payload) => {
 					calls.push({ name: 'export', payload });
@@ -52,12 +56,14 @@ for (const action of [
 			}
 		);
 		const deleting = ['delete', 'keep', 'detach', 'export'].includes(action);
+		const lifecycleAction = action as
+			'start' | 'stop' | 'restart' | 'recreate' | 'pause' | 'deepsleep';
 		const first = deleting
 			? actions.perform('server', 'delete', action as 'delete' | 'keep' | 'detach' | 'export')
-			: actions.perform('server', action as 'start' | 'stop' | 'restart' | 'recreate');
+			: actions.perform('server', lifecycleAction);
 		const second = deleting
 			? actions.perform('server', 'delete', action as 'delete' | 'keep' | 'detach' | 'export')
-			: actions.perform('server', action as 'start' | 'stop' | 'restart' | 'recreate');
+			: actions.perform('server', lifecycleAction);
 		assert.equal(first, second);
 		assert.equal(calls.length, 1);
 		const payload = calls[0].payload as {
@@ -101,6 +107,8 @@ test('failed lifecycle attempts release idempotency and do not delete inventory'
 			stopServer: async () => {},
 			restartServer: async () => {},
 			recreateServer: async () => {},
+			pauseServer: async () => {},
+			deepSleepServer: async () => {},
 			deleteServer: async () => {},
 			exportWorld: async () => ({ sessionId: 's', filename: 'f' })
 		},
@@ -135,6 +143,8 @@ test('account reset isolates pending action results and new idempotency keys', a
 			stopServer: async () => {},
 			restartServer: async () => {},
 			recreateServer: async () => {},
+			pauseServer: async () => {},
+			deepSleepServer: async () => {},
 			deleteServer: async (request) => {
 				ids.push(request.requestId);
 				await new Promise<void>((resolve) => releases.push(resolve));
@@ -173,6 +183,8 @@ for (const reset of [false, true]) {
 				stopServer: async () => {},
 				restartServer: async () => {},
 				recreateServer: async () => {},
+				pauseServer: async () => {},
+				deepSleepServer: async () => {},
 				deleteServer: async () => assert.fail('export deleted'),
 				exportWorld: () =>
 					new Promise((_yes, no) => {

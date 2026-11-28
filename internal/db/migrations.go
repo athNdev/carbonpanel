@@ -201,7 +201,41 @@ func migrations() []*gormigrate.Migration {
 				return rollbackNodeControlContractColumns(tx)
 			},
 		},
+		{
+			ID: playerLastSeenObservationMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return backfillPlayerLastSeenObservations(tx)
+			},
+			Rollback: func(tx *gorm.DB) error {
+				// Forward-only: the nulls written by the backfill are the
+				// corrected state. A pre-fix last_seen value on a session-less
+				// identity cannot be distinguished from a real observation's
+				// timestamp, so there is nothing safe to restore.
+				return nil
+			},
+		},
 	}
+}
+
+const playerLastSeenObservationMigrationID = "20261123_001_player_last_seen_observation"
+
+// backfillPlayerLastSeenObservations clears last_seen_at for identities that
+// have no session rows. Before observation sources were separated, a manual
+// allowlist add stamped last_seen_at with the time of the add even though the
+// player had never been observed in game, and that fabricated timestamp then
+// surfaced as presence and sorted the never-joined player to the top of the
+// roster. A session row is the evidence that an observation was real, so rows
+// without one are reset to "never observed". The statement is idempotent and
+// touches only the player identity index, never world or server data.
+func backfillPlayerLastSeenObservations(tx *gorm.DB) error {
+	if err := tx.Exec(`
+		UPDATE player_identities SET last_seen_at = NULL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM player_sessions WHERE player_sessions.identity_id = player_identities.id
+		)`).Error; err != nil {
+		return fmt.Errorf("backfill player last-seen observations: %w", err)
+	}
+	return nil
 }
 
 const nodeControlContractMigrationID = "20261118_001_node_control_contract"

@@ -83,6 +83,9 @@ func (o *StagedConfigOperations) Stage(ctx context.Context, serverID string, cha
 		mode = storage.StagedApplyOnRestart
 	}
 	staged, err := o.store.StageConfigChange(ctx, serverID, changes, mode, strings.TrimSpace(cronExpr))
+	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+		return nil, stagedError(http.StatusConflict, err.Error())
+	}
 	if err != nil {
 		return nil, stagedError(http.StatusBadRequest, fmt.Sprintf("failed to stage config change: %v", err))
 	}

@@ -13,7 +13,8 @@ import (
 	"image/color"
 	"image/png"
 	"io/fs"
-	"path"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,15 +30,14 @@ const (
 	chunksPerTile  = TileBlocks / chunkBlocks
 	tilesPerRegion = regionChunks / chunksPerTile
 	worldLimit     = 30_000_000 / TileBlocks
-	noSurface      = worldlib.JavaOverworldMinY - 1
 )
 
 var (
 	ErrTileCoordinate     = errors.New("terrain tile coordinate is outside the Java world bounds")
 	ErrTileLevel          = errors.New("terrain level must be a single relative world directory")
 	ErrTerrainMissing     = errors.New("no saved terrain is available in this tile")
-	ErrTerrainUnsupported = errors.New("this tile has no supported Java Overworld chunks")
-	ErrTerrainUnreadable  = errors.New("this tile has no readable Java Overworld chunks")
+	ErrTerrainUnsupported = errors.New("this tile has no supported Java terrain chunks")
+	ErrTerrainUnreadable  = errors.New("this tile has no readable Java terrain chunks")
 	ErrRegionChanged      = errors.New("region changed while reading the Anvil tile")
 	ErrTileBudget         = errors.New("tile exceeds the Anvil read or decode budget")
 )
@@ -48,18 +48,28 @@ type ReadStorage interface {
 	OpenRead(context.Context, string) (storageworker.ReadHandle, error)
 }
 
-// TileCoord addresses a TileBlocks-square tile of the vanilla-height Overworld.
+// regionStater is implemented by storage backends that can report file
+// metadata. When the backend cannot, tiles simply carry no freshness
+// validator and clients fall back to unconditional refetches.
+type regionStater interface {
+	Stat(rel string) (os.FileInfo, error)
+}
+
+// TileCoord addresses a TileBlocks-square tile of one saved dimension.
 type TileCoord struct{ X, Z int }
 
 // Tile contains a top-down PNG and its source coverage. Unavailable
 // chunks and void columns are transparent. Save timestamps come from the
 // region header and are zero when the rendered chunks have no timestamp.
+// RegionModified is the opaque region-file freshness validator at render
+// time; it is empty when the storage cannot report one.
 type Tile struct {
 	PNG                                                                []byte
 	RenderedChunks, MissingChunks, UnsupportedChunks, UnreadableChunks int
 	ProvisionalChunks                                                  int
 	TimestampedChunks                                                  int
 	OldestSavedAt, NewestSavedAt                                       time.Time
+	RegionModified                                                     string
 }
 
 // SupportsDataVersion reports the Java save-version interval the core can read.
@@ -67,11 +77,23 @@ func SupportsDataVersion(version int64) bool {
 	return worldlib.SupportsJavaOverworldDataVersion(version)
 }
 
-// RenderOverworldTile reads one vanilla-height Java region through the
-// owning server's confined storage. It neither changes the save nor requests
-// game assets. The caller owns concurrency, authorization and cache policy.
+// RenderOverworldTile reads one vanilla-height Java Overworld region through
+// the owning server's confined storage. It neither changes the save nor
+// requests game assets. The caller owns concurrency, authorization and cache
+// policy.
 func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, coord TileCoord) (Tile, error) {
+	return RenderDimensionTile(ctx, store, level, Overworld, coord)
+}
+
+// RenderDimensionTile reads one region of the named saved dimension through
+// the owning server's confined storage. Dimensions outside the vanilla set
+// are refused; their saves would need game-generated fixtures before they
+// can be trusted.
+func RenderDimensionTile(ctx context.Context, store ReadStorage, level string, dimension Dimension, coord TileCoord) (Tile, error) {
 	var tile Tile
+	if !dimension.valid() {
+		return tile, ErrTileLevel
+	}
 	if err := ctx.Err(); err != nil {
 		return tile, err
 	}
@@ -84,9 +106,17 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 	if store == nil {
 		return tile, errors.New("world terrain storage is unavailable")
 	}
-	rx, rz := floorDiv(coord.X, tilesPerRegion), floorDiv(coord.Z, tilesPerRegion)
-	name := fmt.Sprintf("r.%d.%d.mca", rx, rz)
-	source, err := store.OpenRead(ctx, path.Join(level, "region", name))
+	regionPath := dimension.RegionPath(level, coord)
+	// The freshness validator is captured BEFORE the read: any later region
+	// rewrite then advances past it, so a conditional revalidation can never
+	// answer 304 for content older than the validator. (Capturing after the
+	// render could hide a save that landed between render and Stat.)
+	if stater, ok := store.(regionStater); ok {
+		if info, statErr := stater.Stat(regionPath); statErr == nil && info != nil {
+			tile.RegionModified = RegionFreshnessValidator(info)
+		}
+	}
+	source, err := store.OpenRead(ctx, regionPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return tile, ErrTerrainMissing
 	}
@@ -103,12 +133,14 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 		return tile, fmt.Errorf("%w: read Anvil header: %w", ErrTerrainUnreadable, err)
 	}
 
+	noSurface := int16(dimension.Span.MinY - 1)
 	grid := make([]int16, TileBlocks*TileBlocks)
 	blocks := make([]string, len(grid))
 	waterDepths := make([]uint8, len(grid))
 	for i := range grid {
 		grid[i] = noSurface
 	}
+	rx, rz := floorDiv(coord.X, tilesPerRegion), floorDiv(coord.Z, tilesPerRegion)
 	startX := (coord.X - rx*tilesPerRegion) * chunksPerTile
 	startZ := (coord.Z - rz*tilesPerRegion) * chunksPerTile
 	var budget readBudget
@@ -124,7 +156,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 				tile.MissingChunks++
 				continue
 			}
-			chunk, err := readSurface(ctx, source, entry, &budget)
+			chunk, err := readSurfaceInSpan(ctx, source, entry, &budget, dimension.Span, dimension.SurfaceUnderRoof)
 			if ctx.Err() != nil {
 				return Tile{}, ctx.Err()
 			}
@@ -176,7 +208,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&out, shadeGrid(grid, blocks, waterDepths, provisional)); err != nil {
+	if err := encoder.Encode(&out, shadeGrid(dimension, noSurface, grid, blocks, waterDepths, provisional)); err != nil {
 		return Tile{}, fmt.Errorf("encode terrain tile: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -184,6 +216,23 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 	}
 	tile.PNG = out.Bytes()
 	return tile, nil
+}
+
+// RegionFreshnessValidator returns the opaque freshness validator for a
+// region file: its size and modification time. Tile responses expose it and
+// conditional tile requests echo it back; an unchanged validator means the
+// region file was not rewritten since the render, so the tile is still
+// current.
+func RegionFreshnessValidator(info os.FileInfo) string {
+	if info == nil {
+		return ""
+	}
+	modified := info.ModTime()
+	if modified.IsZero() {
+		return ""
+	}
+	return `"` + strconv.FormatInt(info.Size(), 10) + "-" +
+		strconv.FormatInt(modified.UnixNano(), 10) + `"`
 }
 
 func sameTileEntries(before, after []byte, startX, startZ int) bool {
@@ -220,35 +269,69 @@ func (t *Tile) recordSave(seconds uint32) {
 	}
 }
 
-// Elevation colors keep chunks visible when block data is unavailable.
-var elevation = [...]struct {
+// Elevation gradients keep chunks visible when block data is unavailable.
+// Each table spans its dimension's Y range with hues that read at one pixel
+// per block.
+type elevationStop struct {
 	y       int
 	r, g, b int
-}{
-	{worldlib.JavaOverworldMinY, 27, 57, 73},
-	{16, 44, 91, 111},
-	{63, 66, 125, 109},
-	{96, 108, 148, 91},
-	{170, 159, 153, 114},
-	{240, 188, 174, 147},
-	{worldlib.JavaOverworldMaxY, 239, 235, 221},
 }
 
-func shadeGrid(grid []int16, blocks []string, waterDepths []uint8, provisional [chunksPerTile * chunksPerTile]bool) *image.NRGBA {
+var (
+	overworldElevation = [...]elevationStop{
+		{worldlib.JavaOverworldMinY, 27, 57, 73},
+		{16, 44, 91, 111},
+		{63, 66, 125, 109},
+		{96, 108, 148, 91},
+		{170, 159, 153, 114},
+		{240, 188, 174, 147},
+		{worldlib.JavaOverworldMaxY, 239, 235, 221},
+	}
+	netherElevation = [...]elevationStop{
+		{0, 38, 16, 18},
+		{16, 79, 30, 29},
+		{32, 97, 37, 33},
+		{64, 121, 53, 44},
+		{96, 148, 82, 62},
+		{127, 176, 120, 92},
+	}
+	endElevation = [...]elevationStop{
+		{0, 26, 26, 36},
+		{32, 72, 70, 92},
+		{64, 118, 116, 128},
+		{128, 168, 166, 152},
+		{192, 196, 196, 172},
+		{255, 222, 222, 192},
+	}
+)
+
+func elevationFor(dimension Dimension) []elevationStop {
+	switch dimension {
+	case Nether:
+		return netherElevation[:]
+	case End:
+		return endElevation[:]
+	default:
+		return overworldElevation[:]
+	}
+}
+
+func shadeGrid(dimension Dimension, noSurface int16, grid []int16, blocks []string, waterDepths []uint8, provisional [chunksPerTile * chunksPerTile]bool) *image.NRGBA {
+	gradient := elevationFor(dimension)
 	img := image.NewNRGBA(image.Rect(0, 0, TileBlocks, TileBlocks))
 	for z := 0; z < TileBlocks; z++ {
 		for x := 0; x < TileBlocks; x++ {
 			index := z*TileBlocks + x
 			height := int(grid[index])
-			if height == noSurface {
+			if height == int(noSurface) {
 				continue
 			}
-			l := neighborHeight(grid, x-1, z, height)
-			r := neighborHeight(grid, x+1, z, height)
-			n := neighborHeight(grid, x, z-1, height)
-			s := neighborHeight(grid, x, z+1, height)
+			l := neighborHeight(grid, x-1, z, height, noSurface)
+			r := neighborHeight(grid, x+1, z, height, noSurface)
+			n := neighborHeight(grid, x, z-1, height, noSurface)
+			s := neighborHeight(grid, x, z+1, height, noSurface)
 			shade := max(-26, min(26, (l-r)*3+(n-s)*2))
-			pixel := surfaceColor(blocks[index], int(waterDepths[index]), height, shade)
+			pixel := surfaceColor(blocks[index], int(waterDepths[index]), height, shade, gradient)
 			if provisional[(z/chunkBlocks)*chunksPerTile+x/chunkBlocks] {
 				pixel.A = 176
 			}
@@ -260,11 +343,11 @@ func shadeGrid(grid []int16, blocks []string, waterDepths []uint8, provisional [
 
 // The palette is authored for Carbon Panel. Block states provide the material
 // categories, while the heightmap gives them relief and keeps unknown blocks visible.
-func surfaceColor(block string, waterDepth, height, shade int) color.NRGBA {
+func surfaceColor(block string, waterDepth, height, shade int, gradient []elevationStop) color.NRGBA {
 	const vanilla = "minecraft:"
 	name, vanillaBlock := strings.CutPrefix(block, vanilla)
 	if !vanillaBlock {
-		return terrainColor(height, shade)
+		return terrainColor(height, shade, gradient)
 	}
 	var base [3]int
 	switch {
@@ -313,28 +396,28 @@ func surfaceColor(block string, waterDepth, height, shade int) color.NRGBA {
 		name == "fern" || name == "large_fern" || name == "moss_block" || name == "moss_carpet":
 		base = [3]int{105, 151, 77}
 	default:
-		return terrainColor(height, shade)
+		return terrainColor(height, shade, gradient)
 	}
 	channel := func(v int) uint8 { return uint8(max(0, min(255, v+shade))) }
 	return color.NRGBA{R: channel(base[0]), G: channel(base[1]), B: channel(base[2]), A: 255}
 }
 
-func neighborHeight(grid []int16, x, z, fallback int) int {
+func neighborHeight(grid []int16, x, z, fallback int, noSurface int16) int {
 	if x >= 0 && x < TileBlocks && z >= 0 && z < TileBlocks {
-		v := int(grid[z*TileBlocks+x])
+		v := grid[z*TileBlocks+x]
 		if v != noSurface {
-			return v
+			return int(v)
 		}
 	}
 	return fallback
 }
 
-func terrainColor(y, shade int) color.NRGBA {
+func terrainColor(y, shade int, gradient []elevationStop) color.NRGBA {
 	hi := 1
-	for y > elevation[hi].y {
+	for hi < len(gradient)-1 && y > gradient[hi].y {
 		hi++
 	}
-	a, b := elevation[hi-1], elevation[hi]
+	a, b := gradient[hi-1], gradient[hi]
 	mix := func(left, right int) uint8 {
 		blended := left + (right-left)*(y-a.y)/(b.y-a.y) + shade
 		return uint8(max(0, min(255, blended)))

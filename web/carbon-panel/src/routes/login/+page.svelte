@@ -169,7 +169,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		try {
 			await authStore.login(username, password);
-			toast.success('Logged in successfully');
+			toast.success('Signed in');
 			setTimeout(() => {
 				goto(resolve('/'));
 			}, 100);
@@ -202,11 +202,7 @@ one at https://mozilla.org/MPL/2.0/.
 				inviteValid ? inviteCode : undefined,
 				inviteValid && inviteRequiresPin ? invitePin : undefined
 			);
-			toast.success(
-				authStatus.firstUserSetup
-					? 'Admin account created successfully'
-					: 'Account created successfully'
-			);
+			toast.success(authStatus.firstUserSetup ? 'Admin account created' : 'Account created');
 			setTimeout(() => {
 				goto(resolve('/'));
 			}, 100);
@@ -254,7 +250,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let showAuthTabs = $derived((authStatus.allowRegistration || inviteValid) && localAuthEnabled);
 	const authTabs = [
-		{ id: 'login', label: 'Login' },
+		{ id: 'login', label: 'Sign in' },
 		{ id: 'register', label: 'Register' }
 	];
 
@@ -281,7 +277,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <svelte:head>
-	<title>Carbon Panel - Login</title>
+	<title>Carbon Panel — Sign in</title>
 </svelte:head>
 
 <main
@@ -301,9 +297,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<h1 class="text-2xl font-semibold tracking-wide text-foreground">Carbon Panel</h1>
 			</div>
 			{#if authStatus.firstUserSetup}
-				<p class="text-xs text-muted-foreground">
-					Welcome! Create your initial administrator account.
-				</p>
+				<p class="text-xs text-muted-foreground">Create the initial administrator account.</p>
 			{:else}
 				<p class="text-xs text-muted-foreground">Sign in to manage your Minecraft servers</p>
 			{/if}
@@ -324,14 +318,15 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		{#if statusPending}
-			<p role="status" class="text-sm text-muted-foreground">Checking sign-in options�</p>
+			<p role="status" class="text-sm text-muted-foreground">Checking sign-in options…</p>
 		{:else if authStatus.firstUserSetup}
 			<!-- First User Setup Form -->
 			<form onsubmit={handleSubmit} class="space-y-4">
 				<CarbonTextInput
-					label="Admin Username"
+					label="Admin username"
 					autocomplete="username"
 					placeholder="Choose admin username"
+					data-testid="auth-bootstrap-username"
 					bind:value={username}
 					required
 					disabled={loading}
@@ -349,7 +344,8 @@ one at https://mozilla.org/MPL/2.0/.
 					type="password"
 					label="Password"
 					autocomplete="new-password"
-					placeholder="Choose a strong password (min 12 chars)"
+					placeholder="Minimum 12 characters"
+					data-testid="auth-bootstrap-password"
 					bind:value={password}
 					required
 					disabled={loading}
@@ -357,9 +353,10 @@ one at https://mozilla.org/MPL/2.0/.
 				<CarbonTextInput
 					revealable
 					type="password"
-					label="Confirm Password"
+					label="Confirm password"
 					autocomplete="new-password"
-					placeholder="Confirm your password"
+					placeholder="Repeat password"
+					data-testid="auth-bootstrap-password-confirm"
 					bind:value={confirmPassword}
 					required
 					disabled={loading}
@@ -369,9 +366,8 @@ one at https://mozilla.org/MPL/2.0/.
 					class="rounded-none border-l-4 border-primary bg-background p-3.5 text-xs text-muted-foreground"
 				>
 					{#if oidcEnabled}
-						A local admin account is required for initial setup, even with SSO enabled. This ensures
-						you always have a fallback login to manage the system if your identity provider becomes
-						unavailable.
+						A local admin account is required for initial setup, even with SSO enabled, so the panel
+						stays manageable if the identity provider is unavailable.
 					{:else}
 						This account will have full administrator permissions and access to the control panel.
 					{/if}
@@ -383,7 +379,7 @@ one at https://mozilla.org/MPL/2.0/.
 					disabled={loading}
 					{loading}
 				>
-					{loading ? 'Creating admin account...' : 'Create Admin Account'}
+					{loading ? 'Creating admin account…' : 'Create admin account'}
 				</CarbonButton>
 			</form>
 		{:else}
@@ -405,7 +401,8 @@ one at https://mozilla.org/MPL/2.0/.
 							<CarbonTextInput
 								label="Username"
 								autocomplete="username"
-								placeholder="Enter your username"
+								placeholder="username"
+								data-testid="auth-login-username"
 								bind:value={username}
 								required
 								disabled={loading}
@@ -415,7 +412,8 @@ one at https://mozilla.org/MPL/2.0/.
 								type="password"
 								label="Password"
 								autocomplete="current-password"
-								placeholder="Enter your password"
+								placeholder="••••••••"
+								data-testid="auth-login-password"
 								bind:value={password}
 								required
 								disabled={loading}
@@ -426,7 +424,7 @@ one at https://mozilla.org/MPL/2.0/.
 								disabled={loading}
 								{loading}
 							>
-								{loading ? 'Signing in...' : 'Sign In'}
+								{loading ? 'Signing in…' : 'Sign in'}
 							</CarbonButton>
 						</form>
 					{/if}
@@ -494,7 +492,7 @@ one at https://mozilla.org/MPL/2.0/.
 							type="password"
 							label="Password"
 							autocomplete="new-password"
-							placeholder="Choose a password (min 12 chars)"
+							placeholder="Minimum 12 characters"
 							bind:value={password}
 							required
 							disabled={loading}
@@ -502,8 +500,8 @@ one at https://mozilla.org/MPL/2.0/.
 						<CarbonTextInput
 							revealable
 							type="password"
-							label="Confirm Password"
-							placeholder="Confirm your password"
+							label="Confirm password"
+							placeholder="Repeat password"
 							bind:value={confirmPassword}
 							required
 							disabled={loading}
@@ -514,7 +512,7 @@ one at https://mozilla.org/MPL/2.0/.
 								type="password"
 								label="Invite PIN"
 								autocomplete="off"
-								placeholder="Enter invite PIN"
+								placeholder="PIN"
 								bind:value={invitePin}
 								required
 								disabled={loading}
@@ -527,9 +525,9 @@ one at https://mozilla.org/MPL/2.0/.
 						>
 							{#if loading}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Creating account...
+								Creating account…
 							{:else}
-								Create Account
+								Create account
 							{/if}
 						</CarbonButton>
 					</form>
@@ -573,9 +571,9 @@ one at https://mozilla.org/MPL/2.0/.
 					>
 						{#if loading}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							Resetting...
+							Resetting…
 						{:else}
-							Reset Panel
+							Reset panel
 						{/if}
 					</CarbonButton>
 				</div>
@@ -589,7 +587,7 @@ one at https://mozilla.org/MPL/2.0/.
 					onclick={() => toggleRecovery(true)}
 				>
 					<KeyRound class="h-3.5 w-3.5" />
-					Forgot access? Recovery
+					Lost access? Use a recovery key
 				</button>
 			</div>
 		{/if}
@@ -608,7 +606,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="w-full justify-center rounded-none"
 				onclick={() => goto(resolve('/'))}
 			>
-				Continue as Guest
+				Continue as guest
 			</CarbonButton>
 		{/if}
 	</div>

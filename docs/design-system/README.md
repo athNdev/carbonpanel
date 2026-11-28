@@ -141,25 +141,31 @@ decorative animation before proceeding. The stored reduced-motion preference
 
 ## Component inventory
 
-| Need | Panel implementation | Cloud implementation | Contract |
-| --- | --- | --- | --- |
-| Action | CarbonButton | Button | One primary action per task; distinguish secondary and destructive actions. Kinds are primary, secondary, tertiary, ghost and danger. Tertiary and ghost stay quiet: accent text, transparent border, hover layer. A disabled/loading control must not execute. Labels stay on one line; icon and label are centred with a fixed gap. |
-| Page header | CarbonPageHeader | PageHeader | One title, optional tag, short description and right-aligned actions. The page shell owns the outer gutter; routes do not add their own page padding. |
-| Surface | CarbonTile | Tile | Group related content; a whole tile is interactive only when its destination is clear and keyboard-operable. Metric tiles share one hierarchy: sans semibold uppercase label, one large value, footer strip above a divider. Dividers sit above footers, never under headers. |
-| Status | CarbonTag | Tag | Include a readable state label; color is supplemental. |
-| Text input | CarbonTextInput / CarbonSelect | Field plus native control | Label, hint, invalid state and error association; retain entered data on recoverable errors. |
-| Table | CarbonDataTable | DataTable | Semantic headers, responsive overflow, honest loading/empty/error states, raw-value sorting. |
-| Dialog | CarbonModal / CarbonConfirm | Modal | Name, focus lifecycle, keyboard support and an explicit cancellation path. Confirm irreversible actions. |
-| Navigation | CarbonShell / CarbonTabs / CarbonBreadcrumbs | AppShell / Tabs | Identify current location and keep navigation predictable; do not expose inaccessible actions as usable. Tab selection uses an accent bar that paints above the active tab background; tabs support arrow-key travel. |
-| Feedback | CarbonInlineLoading / CarbonErrorState / CarbonEmptyState | LoadError / EmptyState / Toast | Explain what happened, whether data may be stale, and the next available step. |
+| Need            | Panel implementation                                                      | Cloud implementation           | Contract                                                                                                                                                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Action          | CarbonButton                                                              | Button                         | One primary action per task; distinguish secondary and destructive actions. Kinds are primary, secondary, tertiary, ghost and danger. Tertiary and ghost stay quiet: accent text, transparent border, hover layer. A disabled/loading control must not execute. Labels stay on one line; icon and label are centred with a fixed gap. |
+| Page header     | CarbonPageHeader                                                          | PageHeader                     | One title, optional tag, short description and right-aligned actions. The page shell owns the outer gutter; routes do not add their own page padding.                                                                                                                                                                                 |
+| Surface         | CarbonTile                                                                | Tile                           | Group related content; a whole tile is interactive only when its destination is clear and keyboard-operable. Metric tiles share one hierarchy: sans semibold uppercase label, one large value, footer strip above a divider. Dividers sit above footers, never under headers.                                                         |
+| Status          | CarbonTag                                                                 | Tag                            | Include a readable state label; color is supplemental.                                                                                                                                                                                                                                                                                |
+| Text input      | CarbonTextInput / CarbonSelect                                            | Field plus native control      | Label, hint, invalid state and error association; retain entered data on recoverable errors.                                                                                                                                                                                                                                          |
+| Table           | CarbonDataTable                                                           | DataTable                      | Semantic headers, responsive overflow, honest loading/empty/error states, raw-value sorting.                                                                                                                                                                                                                                          |
+| Dialog          | CarbonModal / CarbonConfirm                                               | Modal                          | Name, focus lifecycle, keyboard support and an explicit cancellation path. Confirm irreversible actions.                                                                                                                                                                                                                              |
+| Navigation      | CarbonShell / CarbonTabs / CarbonBreadcrumbs                              | AppShell / Tabs                | Identify current location and keep navigation predictable; do not expose inaccessible actions as usable. Tab selection uses an accent bar that paints above the active tab background; tabs support arrow-key travel.                                                                                                                 |
+| Feedback        | CarbonInlineLoading / CarbonSpinner / CarbonErrorState / CarbonEmptyState | LoadError / EmptyState / Toast | Explain what happened, whether data may be stale, and the next available step.                                                                                                                                                                                                                                                        |
+| Pending changes | CarbonFloatingActionBar                                                   | —                              | One save/undo surface per page while registered sections hold unsaved edits; chips deep-link to their section. Refusing a gated action shakes the bar and names the sections in a toast; the shake is inert under reduced motion and the toast and announcement carry the reason.                                                     |
 
 These are separate Svelte implementations, not a shared component package.
 Their props and behavior are not interchangeable. The tokenized Panel button,
 tile, input and tag and Cloud button/tag are initial adoption points. Many
 older Panel views and primitives still contain literal colors; changing a token
-will not yet update those literals. Cloud has its own component-level choices
-and external font loading. Audit and migrate each surface before claiming
-complete propagation or theme/accessibility conformance.
+will not yet update those literals. Known remaining literals include the
+ServerLifecycleActions landing fragment's deepsleep purple (`#8a3ffc`, hover
+`#6929c4`), its start-server green (`#198038`, hover `#0e6027`) and its warning
+hover (`#d2a106`) — none of which have a both-theme token equivalent — plus the
+terminal palettes in the console and module-log views. Cloud has its own
+component-level choices and external font loading. Audit and migrate each
+surface before claiming complete propagation or theme/accessibility
+conformance.
 
 ## Interaction patterns
 
@@ -197,6 +203,11 @@ complete propagation or theme/accessibility conformance.
 - **Destructive or expensive actions:** name the affected resource and
   consequences, require proportionate confirmation and make cancellation easy.
   Do not imply completion until the backend confirms it.
+- **Blocked actions:** refuse a gated action in one motion — shake the floating
+  action bar, announce the reason politely, and toast the sections that must be
+  saved or undone. Shake is reserved for that refusal; it never decorates
+  validation errors, and under reduced motion it is inert while the toast and
+  announcement carry the reason.
 - **Server health and metrics:** label units, timestamps and source. A missing
   metric is unavailable, not zero; distinguish disconnected, stale and
   stopped. Use shape/text in addition to color for state.

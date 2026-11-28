@@ -15,7 +15,7 @@ package mcp
 // FamilyServerToolCount is the number of executable coverage-gap tools. It is
 // pinned by TestFamilyServerDescriptorInventory so the exported list cannot
 // drift silently.
-const FamilyServerToolCount = 53
+const FamilyServerToolCount = 55
 
 // FamilyServerExcludedRPCCount is the single mounted RPC in these families that
 // stays out of the tool set: automatic Docker daemon discovery. Its exact
@@ -195,6 +195,14 @@ func buildFamilyServerDescriptors() []FamilyServerToolDescriptor {
 		famDesc("ServerService", "recreate_server", "RecreateServer", "servers/restart[id]", ClassReview, true, true,
 			"Destroy and recreate one server container from its retained data. Requires confirm=true.",
 			famIDArg("id", "exact server id"), famBoolArg("confirm", "must be true to recreate a container")),
+		famDesc("ServerService", "pause_server", "PauseServer", "servers/stop[id]", ClassReview, true, true,
+			"Freeze one running server with the cgroup freezer while retaining its container and world. Requires confirm=true.",
+			famIDArg("id", "exact server id"), famOptIDArg("request_id", "idempotency key"),
+			famBoolArg("confirm", "must be true to freeze a server")),
+		famDesc("ServerService", "deep_sleep_server", "DeepSleepServer", "servers/stop[id]", ClassReview, true, true,
+			"Park one running server into deep sleep while retaining its world and proxy route. Requires confirm=true.",
+			famIDArg("id", "exact server id"), famOptIDArg("request_id", "idempotency key"),
+			famBoolArg("confirm", "must be true to put a server into deep sleep")),
 		famDesc("ServerService", "list_server_players", "ListServerPlayers", "servers/read[server_id]", ClassSafe, false, false,
 			"Read the live online player list for one server. Read-only metrics; no health endpoint.",
 			famIDArg("server_id", "exact server id")),
@@ -426,11 +434,13 @@ var familyServerSources = map[string]string{
 	"/carbonpanel.v1.ServerService/CreateServer":                "internal/rbac/mapping.go:55; proto/carbonpanel/v1/server.proto:32",
 	"/carbonpanel.v1.ServerService/UpdateServer":                "internal/rbac/mapping.go:56; proto/carbonpanel/v1/server.proto:34",
 	"/carbonpanel.v1.ServerService/DeleteServer":                "internal/rbac/mapping.go:57; proto/carbonpanel/v1/server.proto:36",
-	"/carbonpanel.v1.ServerService/RecreateServer":              "internal/rbac/mapping.go:61; proto/carbonpanel/v1/server.proto:44",
-	"/carbonpanel.v1.ServerService/SendCommand":                 "internal/rbac/mapping.go:62; proto/carbonpanel/v1/server.proto:46",
-	"/carbonpanel.v1.ServerService/UploadToMCLogs":              "internal/rbac/mapping.go:63; proto/carbonpanel/v1/server.proto:48",
-	"/carbonpanel.v1.ServerService/MigrateServer":               "internal/rbac/mapping.go:64; proto/carbonpanel/v1/server.proto:50",
-	"/carbonpanel.v1.ServerService/ListServerPlayers":           "internal/rbac/mapping.go:65; proto/carbonpanel/v1/server.proto:52",
+	"/carbonpanel.v1.ServerService/RecreateServer":              "internal/rbac/mapping.go:63; proto/carbonpanel/v1/server.proto:48",
+	"/carbonpanel.v1.ServerService/PauseServer":                 "internal/rbac/mapping.go:60; proto/carbonpanel/v1/server.proto:42",
+	"/carbonpanel.v1.ServerService/DeepSleepServer":             "internal/rbac/mapping.go:61; proto/carbonpanel/v1/server.proto:44",
+	"/carbonpanel.v1.ServerService/SendCommand":                 "internal/rbac/mapping.go:64; proto/carbonpanel/v1/server.proto:50",
+	"/carbonpanel.v1.ServerService/UploadToMCLogs":              "internal/rbac/mapping.go:65; proto/carbonpanel/v1/server.proto:52",
+	"/carbonpanel.v1.ServerService/MigrateServer":               "internal/rbac/mapping.go:66; proto/carbonpanel/v1/server.proto:54",
+	"/carbonpanel.v1.ServerService/ListServerPlayers":           "internal/rbac/mapping.go:67; proto/carbonpanel/v1/server.proto:56",
 	"/carbonpanel.v1.ConfigService/GetServerConfig":             "internal/rbac/mapping.go:76; proto/carbonpanel/v1/config.proto:19",
 	"/carbonpanel.v1.ConfigService/UpdateServerConfig":          "internal/rbac/mapping.go:77; proto/carbonpanel/v1/config.proto:21",
 	"/carbonpanel.v1.ConfigService/GetUpdateBatch":              "internal/rbac/mapping.go:78; proto/carbonpanel/v1/config.proto:23",

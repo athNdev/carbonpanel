@@ -179,7 +179,7 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 			await rpcClient.role.createRole(request);
 
-			toast.success('Role created successfully');
+			toast.success('Role created');
 			showCreateDialog = false;
 			newRoleForm = { name: '', description: '', isDefault: false };
 			await loadRoles();
@@ -207,7 +207,7 @@ one at https://mozilla.org/MPL/2.0/.
 			const request = create(DeleteRoleRequestSchema, { id: role.id });
 			await rpcClient.role.deleteRole(request);
 
-			toast.success('Role deleted successfully');
+			toast.success('Role deleted');
 			await loadRoles();
 		} catch (error: unknown) {
 			toast.error(error instanceof Error ? error.message : 'Failed to delete role');
@@ -363,7 +363,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="flex items-center justify-center py-16">
 					<div class="space-y-3 text-center">
 						<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
-						<div class="text-muted-foreground">Loading roles...</div>
+						<div class="text-muted-foreground">Loading roles…</div>
 					</div>
 				</div>
 			{:else}
@@ -481,7 +481,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<DialogFooter>
 			<CarbonButton kind="tertiary" onclick={() => (showCreateDialog = false)}>Cancel</CarbonButton>
-			<CarbonButton onclick={createRole}>Create Role</CarbonButton>
+			<CarbonButton onclick={createRole}>Create role</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </Dialog>
@@ -791,10 +791,10 @@ one at https://mozilla.org/MPL/2.0/.
 					>
 						{#if savingPermissions}
 							<Loader2 class="h-4 w-4 animate-spin" />
-							Saving...
+							Saving…
 						{:else}
 							<Save class="h-4 w-4" />
-							Save Permissions
+							Save permissions
 						{/if}
 					</CarbonButton>
 				</div>
@@ -806,7 +806,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:open={confirmOpen}
 	title="Delete role?"
 	message="Users with this role lose its permissions. This cannot be undone."
-	confirmLabel="Delete Role"
+	confirmLabel="Delete role"
 	danger
 	onconfirm={confirmDeleteRole}
 	onclose={() => (pendingDelete = null)}

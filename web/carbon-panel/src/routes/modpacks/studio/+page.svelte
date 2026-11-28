@@ -411,7 +411,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 	{:else}
-		<div class="motion-stagger grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+		<div
+			class="motion-stagger-fade grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0"
+		>
 			{#each filteredPacks as pack (pack.id)}
 				<CarbonTile
 					class="group flex flex-col justify-between rounded-none border-border p-5 transition-colors hover:border-foreground/30"

@@ -15,13 +15,20 @@ one at https://mozilla.org/MPL/2.0/.
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
+	import { onMount } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { beginLifecycleRequest } from '$lib/lifecycle-request';
+	import { dirtySections } from '$lib/stores/dirty-sections.svelte';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
+	import { Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { CarbonAccordion, CarbonAccordionItem, CarbonConfirm } from '$lib/components/carbon';
+	import {
+		CarbonAccordion,
+		CarbonAccordionItem,
+		CarbonConfirm,
+		CarbonSpinner
+	} from '$lib/components/carbon';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -47,6 +54,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import { getUniqueDockerImages } from '$lib/utils';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { enumToString } from '$lib/utils';
+	import {
+		serverFormDiffersFromBaseline,
+		snapshotServerForm
+	} from '$lib/components/server-settings-snapshot';
 
 	interface Props {
 		server: Server;
@@ -57,64 +68,63 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let saving = $state(false);
 
-	function safeToString(data?: unknown): string | undefined {
-		if (!data) return undefined;
-		try {
-			return JSON.stringify(data, (_, value) =>
-				typeof value === 'bigint' ? value.toString() : value
-			);
-		} catch (e) {
-			console.error('Failed to parse dockerOverrides:', e);
-			return undefined;
-		}
-	}
-
-	let formData = $state<UpdateServerRequest>(
-		create(UpdateServerRequestSchema, {
-			id: server.id,
-			name: server.name,
-			description: server.description || '',
-			port: server.port,
-			maxPlayers: server.maxPlayers,
-			memory: server.memory,
-			modLoader: enumToString(ModLoader, server.modLoader),
-			mcVersion: server.mcVersion,
-			loaderVersion: server.loaderVersion,
-			dockerImage: server.dockerImage,
-			detached: server.detached,
-			autoStart: server.autoStart,
-			tpsCommand: server.tpsCommand || '',
-			autoHibernate: server.autoHibernate,
-			idleTimeoutMinutes: server.idleTimeoutMinutes,
-			autoDeepSleep: server.autoDeepSleep,
-			deepSleepTimeoutMinutes: server.deepSleepTimeoutMinutes,
+	/** The form baseline for a server; shared by init, server changes and undo. */
+	function serverFormValues(source: Server): UpdateServerRequest {
+		return create(UpdateServerRequestSchema, {
+			id: source.id,
+			name: source.name,
+			description: source.description || '',
+			port: source.port,
+			maxPlayers: source.maxPlayers,
+			memory: source.memory,
+			modLoader: enumToString(ModLoader, source.modLoader),
+			mcVersion: source.mcVersion,
+			loaderVersion: source.loaderVersion,
+			dockerImage: source.dockerImage,
+			detached: source.detached,
+			autoStart: source.autoStart,
+			tpsCommand: source.tpsCommand || '',
+			autoHibernate: source.autoHibernate,
+			idleTimeoutMinutes: source.idleTimeoutMinutes,
+			autoDeepSleep: source.autoDeepSleep,
+			deepSleepTimeoutMinutes: source.deepSleepTimeoutMinutes,
 			modpackId: '', // Not used in this context
 			modpackVersionId: '', // Not used in this context
-			additionalPorts: server.additionalPorts || [],
-			dockerOverrides: server.dockerOverrides
-		})
-	);
+			additionalPorts: source.additionalPorts || [],
+			dockerOverrides: source.dockerOverrides
+		});
+	}
 
-	let isDirty = $derived(
-		formData.name !== server.name ||
-			formData.description !== (server.description || '') ||
-			formData.port !== server.port ||
-			formData.maxPlayers !== server.maxPlayers ||
-			formData.memory !== server.memory ||
-			formData.modLoader !== enumToString(ModLoader, server.modLoader) ||
-			formData.mcVersion !== server.mcVersion ||
-			formData.dockerImage !== server.dockerImage ||
-			formData.detached !== server.detached ||
-			formData.autoStart !== server.autoStart ||
-			formData.tpsCommand !== (server.tpsCommand || '') ||
-			formData.autoHibernate !== server.autoHibernate ||
-			formData.idleTimeoutMinutes !== server.idleTimeoutMinutes ||
-			formData.autoDeepSleep !== server.autoDeepSleep ||
-			formData.deepSleepTimeoutMinutes !== server.deepSleepTimeoutMinutes ||
-			safeToString(formData.additionalPorts) !== safeToString(server.additionalPorts || []) ||
-			safeToString($state.snapshot(formData.dockerOverrides)) !==
-				safeToString(server.dockerOverrides)
-	);
+	let formData = $state<UpdateServerRequest>(serverFormValues(server));
+
+	/**
+	 * OSS-464: the dirty baseline — a deep snapshot of the form captured at
+	 * load and re-captured to the sent values after each successful save.
+	 * Comparing against this baseline instead of the live `server` store keeps
+	 * background inventory polls and a failed post-save refresh from sticking
+	 * the gate: the section is clean the moment its save resolves.
+	 */
+	let baseline = $state<UpdateServerRequest>(serverFormValues(server));
+
+	/**
+	 * Capture an independent snapshot of the reactive form state.
+	 *
+	 * Do not wrap `source` in `$state.snapshot` first: it deep-clones plain
+	 * objects with `copy[key] = ...`, which silently drops an own `__proto__`
+	 * map key (a legal Docker environment/label name) into the prototype
+	 * setter. protobuf-es's clone reads the reactive proxy directly and keeps
+	 * those keys.
+	 */
+	function snapshotForm(source: UpdateServerRequest): UpdateServerRequest {
+		return snapshotServerForm(source);
+	}
+
+	/** Field-by-field comparison of the form against its captured baseline. */
+	function formDiffersFromBaseline(form: UpdateServerRequest): boolean {
+		return serverFormDiffersFromBaseline(form, baseline);
+	}
+
+	let isDirty = $derived(formDiffersFromBaseline(formData));
 
 	// Available options
 	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
@@ -162,30 +172,10 @@ one at https://mozilla.org/MPL/2.0/.
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
 
-			// Reset form data to match new server
-			formData = create(UpdateServerRequestSchema, {
-				id: server.id,
-				name: server.name,
-				description: server.description || '',
-				port: server.port,
-				maxPlayers: server.maxPlayers,
-				memory: server.memory,
-				modLoader: enumToString(ModLoader, server.modLoader),
-				mcVersion: server.mcVersion,
-				loaderVersion: server.loaderVersion,
-				dockerImage: server.dockerImage,
-				detached: server.detached,
-				autoStart: server.autoStart,
-				tpsCommand: server.tpsCommand || '',
-				autoHibernate: server.autoHibernate,
-				idleTimeoutMinutes: server.idleTimeoutMinutes,
-				autoDeepSleep: server.autoDeepSleep,
-				deepSleepTimeoutMinutes: server.deepSleepTimeoutMinutes,
-				modpackId: '', // Not used in this context
-				modpackVersionId: '', // Not used in this context
-				additionalPorts: server.additionalPorts || [],
-				dockerOverrides: server.dockerOverrides
-			});
+			// Reset form data to match new server; the baseline resets with it so
+			// the previous server's edits cannot gate this server's actions.
+			formData = serverFormValues(server);
+			baseline = serverFormValues(server);
 			saving = false;
 			// Reload options for new server
 			loadOptions();
@@ -367,21 +357,60 @@ one at https://mozilla.org/MPL/2.0/.
 		};
 	}
 
-	async function handleSave() {
+	/**
+	 * Shared save path for the section button and the floating action bar
+	 * (OSS-464). Shows the section's own toasts either way; `rethrow` lets the
+	 * bar aggregate failures while the button path keeps swallowing them. On
+	 * success the baseline moves to the sent values (before the fire-and-forget
+	 * store refresh lands), so the section is clean immediately; on failure the
+	 * baseline never moves, so the section stays dirty.
+	 */
+	async function saveSettings(rethrow: boolean): Promise<void> {
 		if (!isDirty) return;
-
 		saving = true;
 		try {
+			// Capture what this request sends before awaiting it: edits typed while
+			// the request is in flight stay dirty against the sent baseline. Keeping
+			// the capture inside `try` means a snapshot failure still clears
+			// `saving` in `finally` and shows the failure toast instead of wedging
+			// the Save button and the editor.
+			const sent = snapshotForm(formData);
 			const request = create(UpdateServerRequestSchema, formData);
 			await rpcClient.server.updateServer(request);
+			baseline = sent;
 			toast.success('Server settings updated. Restart the server to apply changes.');
 			onUpdate?.();
-		} catch (_e) {
+		} catch (error) {
 			toast.error('Failed to update server settings');
+			if (rethrow) {
+				throw error instanceof Error ? error : new Error('Failed to update server settings');
+			}
 		} finally {
 			saving = false;
 		}
 	}
+
+	async function handleSave() {
+		await saveSettings(false);
+	}
+
+	// OSS-464: the floating bar and the lifecycle gate read this section's
+	// dirty state, save and undo through the registry. The closures keep the
+	// reactivity: the bar's $derived tracks isDirty/saving through them, and
+	// undo reverts the form to the captured baseline (client-side only).
+	onMount(() => {
+		dirtySections.register({
+			id: 'overview',
+			label: 'Server Settings',
+			isDirty: () => isDirty,
+			save: () => saveSettings(true),
+			undo: () => {
+				formData = snapshotForm(baseline);
+			},
+			saving: () => saving
+		});
+		return () => dirtySections.unregister('overview');
+	});
 
 	function getCompatibleModLoaders(_mcVersion: string) {
 		// The proto doesn't include version compatibility info, so all loaders are shown
@@ -812,7 +841,7 @@ one at https://mozilla.org/MPL/2.0/.
 						class="h-10 min-w-36 gap-2"
 					>
 						{#if migrating}
-							<Loader2 class="h-4 w-4 animate-spin" />
+							<CarbonSpinner size="sm" label="Migrating" />
 							Migrating...
 						{:else}
 							<ArrowRightLeft class="h-4 w-4" />
@@ -841,7 +870,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="flex animate-pulse items-center gap-2 rounded-md border border-primary/20 bg-primary/10 p-3 text-xs text-primary"
 					>
-						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						<CarbonSpinner size="sm" label="Migrating" />
 						<span>{migrationStep}</span>
 					</div>
 				{/if}
@@ -854,7 +883,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="flex justify-end pt-2">
 		<Button onclick={handleSave} disabled={!isDirty || saving} size="sm" class="min-w-[120px]">
 			{#if saving}
-				<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+				<CarbonSpinner size="sm" label="Saving" />
 			{:else}
 				<Save class="mr-2 h-4 w-4" />
 			{/if}

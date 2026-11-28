@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Paper, Purpur, Pufferfish, Folia, Spigot and Bukkit servers can browse and install plugins from Hangar (merged with Modrinth plugin results), with versions filtered by the server's Minecraft version and downloads written to the server's `plugins/` directory. Uploaded plugin jars are classified by their `plugin.yml` / `paper-plugin.yml` metadata.
+- Server mods can check installed files against Modrinth by SHA-512 and preview a compatible release with its exact candidate file and checksum. The preview is read-only and does not change the server.
+- Changing a server's Minecraft version is refused up front with the exact list of installed mods or plugins whose declared constraints cannot satisfy the target, instead of recreating into a broken state.
+- Starting a server while its previous stop is still finishing waits for the stop instead of failing, and the interactive stop window is shorter, so rapid start and stop clicks can no longer hold the server in a long transition.
+- The server map renders the Nether and the End alongside the Overworld, understands current save formats (including LZ4-compressed regions), and refreshes while Minecraft saves. A dimension picker keeps the camera in place, and the viewport states how old the visible save is.
+- Unsaved edits across the server view collect into one floating bar that names the changed sections and saves or undoes them together. Start, Restart and Force Recreate are refused with a shake and a toast until those edits are saved.
+- Mods and plugins share one browsing experience: the same search bar, result card and install-outcome list in the server view, the create-server add-ons step and the modpack studio, with dependency planning, per-row progress and a confirmed batch remove.
+
+### Changed
+
+- The mods browser shows what was added during the session: a count chip in the header, a collapsible "Added this session" summary, clearer installed badges and an explicit selected-version indicator.
+- Loading indicators use a theme-consistent Carbon arc spinner everywhere, including buttons, inline states, the app boot screen and the server view. Page-level section grids fade in without vertical movement, and the boot screen reserves the app header's height so the swap does not shift layout.
+- The server view's first-load state pairs the spinner with a skeleton of the runtime tiles, and every tab shares one loading treatment. The Engine Specs card fills its rows with unconditional Java, loader and modpack details.
+- A frozen (paused) or deep-sleeping server explains itself when commands are refused, the metrics collector no longer queues executions against paused containers, RCON timeouts close their connections, and the reconciler converges a server's stored status as soon as its lifecycle transition ends.
+- Crash loops surface as an errored status ("restarting repeatedly") instead of showing "starting" forever, container-event drops are counted and reported, and boot-failure detection recognises OOM and watchdog crash patterns.
+- Copy is consistent across the console: one sentence case for buttons and titles, a single ellipsis character, "server" instead of "instance", "Minecraft & loader" instead of "Engine & Loader", "sign in" instead of "log in", and toasts without exclamation marks or a redundant "successfully".
+
+### Fixed
+
+- Container creation no longer corrupts daemon-side bind paths on deployments where the panel's filesystem differs from the daemon's (for example a Windows panel against a WSL2 or remote Linux daemon): the work-temp mount keeps the daemon path's separator style, and the data directory is pre-created from the panel-side path.
+- Pressing Enter in the datapack search during server creation searches; it no longer submits the wizard.
+- Players added manually to a server no longer report a fabricated "last seen"; identities without a session record show "Never observed" and sort after observed players.
+- Player actions on the cross-server roster resolve each player's server from its allowlist record when no session exists, refuse empty targets with a clear message, and disable actions for rows without a server.
+- Player heads resolve through the server's own `usercache.json` when Mojang cannot identify an offline-mode identity, and the player detail view shows the full skin texture.
+- The map's "Copy map link" and the legacy standalone World View tab are removed; the map lives in the server's World tab and the library links there.
+- Switching between server tabs no longer discards edits typed in the Overview or Configuration tab.
+- The sign-in page no longer shows a replacement character where an ellipsis belongs, and the detach and delete dialogs describe the same outcome on both the server list and the server detail page.
+- Nether maps render the terrain below the bedrock roof instead of a blank tile that claimed to be complete, and toggling the map's live updates no longer reloads every visible tile.
+
 ## [2.1.0] - 2026-11-21
 
 ### Added

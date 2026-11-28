@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func (f *fakeStore) GetServer(_ context.Context, id string) (*db.Server, error) 
 	defer f.mu.Unlock()
 	s, ok := f.servers[id]
 	if !ok {
-		return nil, fmt.Errorf("server not found")
+		return nil, db.ErrServerNotFound
 	}
 	cp := *s
 	return &cp, nil
@@ -280,6 +281,8 @@ func TestDecide(t *testing.T) {
 		{"crash exit is flagged as error", running, existsCrash, false, true, errStatus, actNone, "exited with code 1"},
 		{"exited clean while stopping converges to stopped", stopping, existsExitedClean, false, true, stopped, actNone, ""},
 		{"restarting is left to settle", running, existsRestarting, false, true, "", actNone, ""},
+		{"restarting with a crash loop is reported", running, observedState{Exists: true, ContainerID: "c1", Status: starting, AbnormalExits: 3}, false, true, errStatus, actNone, "restarting repeatedly"},
+		{"restarting with a pre-threshold tally still settles", running, observedState{Exists: true, ContainerID: "c1", Status: starting, AbnormalExits: 2}, false, true, "", actNone, ""},
 		{"paused is preserved", running, existsPaused, false, true, paused, actNone, ""},
 		{"deepsleep + missing container is stable", deepsleep, existsDeleted, false, true, "", actNone, ""},
 		{"deepsleep + exited container is stable", deepsleep, existsExitedClean, false, true, "", actNone, ""},
@@ -567,9 +570,10 @@ func TestReconcileOOMKillIsReportedAsError(t *testing.T) {
 }
 
 type sequencedClient struct {
-	mu      sync.Mutex
-	summary *container.Summary
-	state   *docker.ContainerState
+	mu           sync.Mutex
+	summary      *container.Summary
+	state        *docker.ContainerState
+	observations int
 }
 
 func (c *sequencedClient) set(summary *container.Summary, state *docker.ContainerState) {
@@ -591,7 +595,14 @@ func (c *sequencedClient) ResolveContainer(context.Context, string) (*container.
 func (c *sequencedClient) ObserveContainer(context.Context, string) (*docker.ContainerState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.observations++
 	return c.state, nil
+}
+
+func (c *sequencedClient) observeCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.observations
 }
 
 func (c *sequencedClient) StartContainer(context.Context, string) error { return nil }
@@ -1090,4 +1101,650 @@ func TestReconcileRecoveryClearsStatusReason(t *testing.T) {
 	if got.StatusReason != "" {
 		t.Fatalf("reason = %q, a recovered server must not show a stale crash", got.StatusReason)
 	}
+}
+
+// --- restart-loop detection -------------------------------------------------
+
+func TestRestartLoopIsReportedAsError(t *testing.T) {
+	boot := time.Date(2026, 11, 20, 6, 0, 0, 0, time.UTC)
+	server := &db.Server{ID: "s1", Name: "Loop", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 1, StartedAt: boot},
+	}
+	bus := &fakeBus{}
+	r := newTestReconciler(t, store, cli, &fakeProxy{}, bus)
+
+	// Three distinct abnormal terminations: a new process start (StartedAt)
+	// between passes is a new death, repeats of the same one count once.
+	for i := 1; i <= 3; i++ {
+		cli.state.StartedAt = boot.Add(time.Duration(i) * time.Minute)
+		if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+	}
+
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusError {
+		t.Fatalf("status = %q, want error after 3 abnormal exits", got.Status)
+	}
+	if !contains(got.StatusReason, "restarting repeatedly (3 times in 10m)") {
+		t.Fatalf("reason = %q, want the restart-loop report", got.StatusReason)
+	}
+
+	// The tally was consumed by the report: a later pass observing the same
+	// death must not re-report it.
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("post-report pass: %v", err)
+	}
+	for _, e := range bus.events {
+		if e.Type == v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP {
+			return // one stop announcement for the crash is enough
+		}
+	}
+	t.Fatalf("events = %v, want a SERVER_STOP for the reported crash", bus.types())
+}
+
+func TestRestartLoopDoesNotFightAnOperatorStop(t *testing.T) {
+	boot := time.Date(2026, 11, 20, 6, 0, 0, 0, time.UTC)
+	server := &db.Server{ID: "s1", Name: "Loop", NodeID: "default", ContainerID: "c1", Status: db.StatusStopping}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 137, OOMKilled: true, StartedAt: boot},
+	}
+	r := newTestReconciler(t, store, cli, &fakeProxy{}, &fakeBus{})
+
+	// Three die events put the tally at the threshold; the pass that then
+	// observes the exited container (the same death, deduplicated) must
+	// still converge the operator's stop instead of repainting it as a
+	// crash loop.
+	code := 137
+	now := time.Now()
+	r.loops.recordDie("s1", &code, false, now)
+	r.loops.recordDie("s1", &code, false, now.Add(time.Second))
+	r.loops.recordDie("s1", &code, false, now.Add(2*time.Second))
+
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+	got, _ := store.GetServer(context.Background(), "s1")
+	if got.Status != db.StatusStopped {
+		t.Fatalf("status = %q, want stopped: the operator asked to stop", got.Status)
+	}
+	if contains(got.StatusReason, "restarting repeatedly") {
+		t.Fatalf("reason = %q, a requested stop must not be repainted as a crash loop", got.StatusReason)
+	}
+}
+
+func TestRestartTrackerForgivesStableRuntimeAndCleanExits(t *testing.T) {
+	now := time.Now()
+
+	tr := newRestartTracker()
+	code := 1
+	tr.recordDie("s1", &code, false, now)
+	tr.recordDie("s1", &code, false, now.Add(time.Second))
+	if got := tr.count("s1"); got != 2 {
+		t.Fatalf("tally after two die events = %d, want 2", got)
+	}
+	// A container that boots and stays up forgives the tally.
+	up := observedState{Exists: true, ContainerID: "c1", Status: db.StatusRunning, StartedAt: now.Add(-10 * time.Minute)}
+	if got := tr.observe("s1", up, now.Add(2*time.Second)); got != 0 {
+		t.Fatalf("tally after stable runtime = %d, want 0", got)
+	}
+	if got := tr.count("s1"); got != 0 {
+		t.Fatalf("tally after stable runtime = %d, want 0", got)
+	}
+
+	// A clean exit forgives the tally too.
+	tr.recordDie("s1", &code, false, now.Add(3*time.Second))
+	clean := observedState{Exists: true, ContainerID: "c1", Status: db.StatusStopped, ExitCode: 0, StartedAt: now.Add(4 * time.Second)}
+	if got := tr.observe("s1", clean, now.Add(5*time.Second)); got != 0 {
+		t.Fatalf("tally after clean exit = %d, want 0", got)
+	}
+
+	// A SIGTERM die forgives it as well.
+	tr.recordDie("s1", &code, false, now.Add(6*time.Second))
+	sigterm := exitCodeSIGTERM
+	tr.recordDie("s1", &sigterm, false, now.Add(7*time.Second))
+	if got := tr.count("s1"); got != 0 {
+		t.Fatalf("tally after SIGTERM die = %d, want 0", got)
+	}
+}
+
+func TestRestartTrackerWindowExpiresAndDeduplicates(t *testing.T) {
+	now := time.Now()
+
+	// One death observed by many passes counts once.
+	tr := newRestartTracker()
+	code := 1
+	tr.recordDie("s1", &code, false, now)
+	dead := observedState{Exists: true, ContainerID: "c1", Status: db.StatusStopped, ExitCode: 1, StartedAt: now}
+	for i := 0; i < 3; i++ {
+		if got := tr.observe("s1", dead, now.Add(time.Duration(i+1)*time.Second)); got != 1 {
+			t.Fatalf("pass %d tally = %d, want 1 (same death)", i+1, got)
+		}
+	}
+	if got := tr.count("s1"); got != 1 {
+		t.Fatalf("tally = %d, want 1", got)
+	}
+
+	// Deaths older than the window no longer count as consecutive.
+	expired := newRestartTracker()
+	expired.recordDie("s1", &code, false, now.Add(-restartLoopWindow-time.Minute))
+	if got := expired.count("s1"); got != 0 {
+		t.Fatalf("tally after the window lapsed = %d, want 0", got)
+	}
+
+	// The oom event counts without an exit code.
+	tr2 := newRestartTracker()
+	tr2.recordDie("s1", nil, true, now)
+	if got := tr2.count("s1"); got != 1 {
+		t.Fatalf("tally after an oom event = %d, want 1", got)
+	}
+}
+
+func TestDieEventsFeedTheRestartLoopDetector(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "Loop", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	// Docker keeps restarting the container: every observation is
+	// "restarting", so only the die events carry the deaths.
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStarting, Running: true},
+	}
+
+	// consume() is driven directly (no Start, no workers): a started pass
+	// would consume the tally the moment it crosses the threshold, which is
+	// the production behaviour but useless for observing the feed itself.
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	r.ctx = context.Background() // normally set by Start
+	ch := make(chan ContainerEvent, 8)
+	r.wg.Add(1)
+	go r.consume(ch)
+	t.Cleanup(r.Wait)
+
+	code := 1
+	for i := 0; i < 3; i++ {
+		ch <- ContainerEvent{ServerID: "s1", Action: "die", ContainerID: "c1", ExitCode: &code}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && r.loops.count("s1") < 3 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := r.loops.count("s1"); got != 3 {
+		t.Fatalf("die events recorded = %d, want 3", got)
+	}
+	close(ch) // consume returns, tally preserved for the deciding pass
+
+	// A pass against the restarting container must report the loop instead of
+	// leaving the row "starting" forever.
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusError || !contains(got.StatusReason, "restarting repeatedly (3 times in 10m)") {
+		t.Fatalf("status = %q reason = %q, want the crash loop reported", got.Status, got.StatusReason)
+	}
+}
+
+// --- deferred SERVER_STOP announcement --------------------------------------
+
+func TestOrphanedStopIsAnnouncedAfterOneSweep(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopping}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 0},
+	}
+	bus := &fakeBus{}
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, bus, nil, nil, Config{
+		SweepInterval: 20 * time.Millisecond,
+	})
+
+	// Pass 1: the stop converges, but the announcement is deferred because
+	// the DB said stopping (the RPC is presumed to own it) — and this store
+	// has no journal to prove otherwise.
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	got, _ := store.GetServer(context.Background(), "s1")
+	if got.Status != db.StatusStopped {
+		t.Fatalf("status = %q, want the stop converged", got.Status)
+	}
+	if types := bus.types(); len(types) != 0 {
+		t.Fatalf("events = %v, want the stop announcement deferred", types)
+	}
+
+	// The stop evidence persists past one sweep: the next pass announces it.
+	time.Sleep(40 * time.Millisecond)
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	types := bus.types()
+	if len(types) != 1 || types[0] != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP {
+		t.Fatalf("events = %v, want the deferred SERVER_STOP", types)
+	}
+}
+
+func TestDeferredStopAnnouncementIsDroppedWhenTheServerStartsAgain(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopping}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 0},
+	}
+	bus := &fakeBus{}
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, bus, nil, nil, Config{
+		SweepInterval: 20 * time.Millisecond,
+	})
+
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+
+	// The server came back up before the grace window elapsed on a pass: the
+	// stop announcement is moot and must be dropped.
+	cli.state = &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning}
+	store.mu.Lock()
+	store.servers["s1"].Status = db.StatusRunning
+	store.mu.Unlock()
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if types := bus.types(); len(types) != 0 {
+		t.Fatalf("events = %v, want no stop announcement after a restart", types)
+	}
+}
+
+type fakeJournalStore struct {
+	*fakeStore
+	assertErr error
+}
+
+func (f *fakeJournalStore) AssertNoServerOperation(_ context.Context, _ string) error {
+	return f.assertErr
+}
+
+// A21: a journal read failure means ownership is unknown. The stop
+// announcement must be deferred (not suppressed as owned) and re-emitted if the
+// stop evidence persists past one sweep.
+func TestJournalReadFailureDefersStopAnnouncement(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopping}
+	base := newFakeStore(server)
+	store := &fakeJournalStore{fakeStore: base, assertErr: errors.New("journal unavailable")}
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 0},
+	}
+	bus := &fakeBus{}
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, bus, nil, nil, Config{
+		SweepInterval: 20 * time.Millisecond,
+	})
+
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	got, _ := store.GetServer(context.Background(), "s1")
+	if got.Status != db.StatusStopped {
+		t.Fatalf("status = %q, want the stop converged", got.Status)
+	}
+	if types := bus.types(); len(types) != 0 {
+		t.Fatalf("events = %v, want the stop announcement deferred on read failure", types)
+	}
+
+	time.Sleep(40 * time.Millisecond)
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	types := bus.types()
+	if len(types) != 1 || types[0] != v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP {
+		t.Fatalf("events = %v, want the deferred SERVER_STOP after journal read failure", types)
+	}
+}
+
+// --- blind-window reduction around lifecycle transitions --------------------
+
+func TestTransitionEndTriggersConvergenceWithoutTheSweep(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopped}
+	store := newFakeStore(server)
+	cli := &sequencedClient{}
+	cli.set(&container.Summary{ID: "c1"}, &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning})
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour, // the sweep must not be what converges here
+		Workers:        1,
+	})
+
+	// A lifecycle transition (a start RPC) holds the lock before Start.
+	transition, err := docker.TryBeginServerTransition(server.ID)
+	if err != nil {
+		t.Fatalf("claim transition: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	// The startup pass hits the held lock and arms a bounded waiter.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, armed := r.transitionWaits.Load(server.ID); armed {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, armed := r.transitionWaits.Load(server.ID); !armed {
+		t.Fatal("a pass that hit the held transition did not arm a waiter")
+	}
+
+	// Releasing the transition must converge the server promptly, without
+	// waiting for the (one-hour) sweep.
+	transition.Release()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetServer(context.Background(), server.ID)
+		if err == nil && got.Status == db.StatusRunning {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	got, _ := store.GetServer(context.Background(), server.ID)
+	t.Fatalf("status after the transition ended = %s, want running", got.Status)
+}
+
+// TestReconcilerPassDoesNotNudgeItself wires the production transition-end hook
+// the way cmd/carbon-panel does. A convergence pass must release its own
+// transition quietly: notifying would queue another pass, and each pass would
+// keep queueing the next, spinning the reconciler instead of leaving it to
+// Docker events and the sweep. A genuine external release must still nudge.
+func TestReconcilerPassDoesNotNudgeItself(t *testing.T) {
+	server := &db.Server{ID: "srv-self-nudge", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	cli := &sequencedClient{}
+	cli.set(&container.Summary{ID: "c1"}, &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning})
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour, // never the reason a follow-up pass runs here
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	// The startup pass observes the already-running container once.
+	waitForObserveCalls(t, cli, 1)
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
+	}
+
+	// Wait deterministically for the startup pass to release its transition
+	// rather than guessing with a fixed delay. Claiming the transition proves
+	// the pass ended; claiming it while the pass still owned the lock would
+	// race and report ErrTransitionInFlight. A self-queued follow-up would have
+	// notified the hook before releasing, so the notification and observation
+	// counts still catch a self-nudge.
+	var external *docker.Transition
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var claimErr error
+		external, claimErr = docker.TryBeginServerTransition(server.ID)
+		if claimErr == nil {
+			break
+		}
+		if !errors.Is(claimErr, docker.ErrTransitionInFlight) {
+			t.Fatalf("external transition: %v", claimErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("startup pass never released its lifecycle transition")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := cli.observeCalls(); got != 1 {
+		t.Fatalf("startup pass scheduled %d follow-up observations, want 1 total", got)
+	}
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("reconciler's own release notified the transition-end hook %d times, want 0", got)
+	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("startup pass queued %d follow-up passes, want 0", got)
+	}
+
+	// An operator/lifecycle release is still a real transition end: it notifies
+	// and queues a convergence pass.
+	external.Release()
+	if got := notified.Load(); got != 1 {
+		t.Fatalf("external release notified %d times, want 1", got)
+	}
+	waitForObserveCalls(t, cli, 2)
+}
+
+// transientResolveClient fails every container resolution, modelling a
+// transient Docker outage. It embeds the sequenced fake for the methods the
+// failing path never reaches.
+type transientResolveClient struct {
+	sequencedClient
+	mu       sync.Mutex
+	resolves int
+}
+
+func (c *transientResolveClient) ResolveContainer(context.Context, string) (*container.Summary, error) {
+	c.mu.Lock()
+	c.resolves++
+	c.mu.Unlock()
+	return nil, errors.New("transient docker unavailable")
+}
+
+func (c *transientResolveClient) resolveCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resolves
+}
+
+func waitForResolveCalls(t *testing.T, cli *transientResolveClient, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cli.resolveCalls() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("container resolutions = %d, want at least %d", cli.resolveCalls(), want)
+}
+
+// deletedServerStore lists the server for the sweep but reports it deleted to
+// the convergence pass, modelling a row removed between list and reconcile.
+type deletedServerStore struct {
+	*fakeStore
+	mu       sync.Mutex
+	getCalls int
+}
+
+func (s *deletedServerStore) GetServer(context.Context, string) (*db.Server, error) {
+	s.mu.Lock()
+	s.getCalls++
+	s.mu.Unlock()
+	return nil, db.ErrServerNotFound
+}
+
+func (s *deletedServerStore) getServerCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getCalls
+}
+
+func pendingDebounceTimers(r *Reconciler) int {
+	r.deb.mu.Lock()
+	defer r.deb.mu.Unlock()
+	return len(r.deb.timers)
+}
+
+// TestReconcilerTransientFailureRequestsOneRetry: a pass that fails on a
+// transient error must release the transition normally so the transition-end
+// hook retries once, but a repeated failure must release quietly instead of
+// spinning the reconciler.
+func TestReconcilerTransientFailureRequestsOneRetry(t *testing.T) {
+	server := &db.Server{ID: "srv-transient", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := newFakeStore(server)
+	cli := &transientResolveClient{}
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	waitForResolveCalls(t, cli, 2)
+	if err := docker.WaitForServerTransition(ctx, server.ID); err != nil {
+		t.Fatalf("wait for retry pass: %v", err)
+	}
+	if got := notified.Load(); got != 1 {
+		t.Fatalf("transition releases notified %d times, want exactly 1 (one retry request)", got)
+	}
+	if got := cli.resolveCalls(); got != 2 {
+		t.Fatalf("container resolutions = %d, want exactly 2 (startup + one retry)", got)
+	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("failed retry queued %d follow-up passes, want 0", got)
+	}
+}
+
+// TestReconcilerDeletedServerNoOpDoesNotRetry: a server deleted between the
+// sweep listing and the pass is a deliberate no-op, not a failure to retry.
+func TestReconcilerDeletedServerNoOpDoesNotRetry(t *testing.T) {
+	server := &db.Server{ID: "srv-deleted", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusRunning}
+	store := &deletedServerStore{fakeStore: newFakeStore(server)}
+
+	var notified atomic.Int32
+	docker.SetTransitionEndNotifier(func(serverID string) {
+		notified.Add(1)
+		NotifyTransitionEnded(serverID)
+	})
+	t.Cleanup(func() { docker.SetTransitionEndNotifier(nil) })
+
+	r := New(store, fakeResolver{cli: &sequencedClient{}}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && store.getServerCalls() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := store.getServerCalls(); got == 0 {
+		t.Fatal("the deleted server's pass never ran")
+	}
+	if err := docker.WaitForServerTransition(ctx, server.ID); err != nil {
+		t.Fatalf("wait for deleted-server pass: %v", err)
+	}
+	if got := notified.Load(); got != 0 {
+		t.Fatalf("deleted-server no-op notified the transition-end hook %d times, want 0", got)
+	}
+	if got := store.getServerCalls(); got != 1 {
+		t.Fatalf("deleted server read %d times, want exactly 1 (no loop)", got)
+	}
+	if got := pendingDebounceTimers(r); got != 0 {
+		t.Fatalf("deleted-server no-op queued %d follow-up passes, want 0", got)
+	}
+}
+
+func waitForObserveCalls(t *testing.T, cli *sequencedClient, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cli.observeCalls() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("observations = %d, want at least %d", cli.observeCalls(), want)
+}
+
+func TestNotifyTransitionEndedNudgesTheActiveReconciler(t *testing.T) {
+	server := &db.Server{ID: "s1", Name: "S", NodeID: "default", ContainerID: "c1", Status: db.StatusStopped}
+	store := newFakeStore(server)
+	cli := &sequencedClient{}
+	cli.set(&container.Summary{ID: "c1"}, &docker.ContainerState{ContainerID: "c1", Status: db.StatusStopped, HasExited: true, ExitCode: 0})
+
+	r := New(store, fakeResolver{cli: cli}, &fakeProxy{}, &fakeBus{}, nil, nil, Config{
+		DebounceWindow: 5 * time.Millisecond,
+		SweepInterval:  time.Hour,
+		Workers:        1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		r.Stop()
+		r.Wait()
+	})
+
+	// Let the startup pass drain while the container is still down.
+	time.Sleep(60 * time.Millisecond)
+	cli.set(&container.Summary{ID: "c1"}, &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning})
+
+	NotifyTransitionEnded(server.ID)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetServer(context.Background(), server.ID)
+		if err == nil && got.Status == db.StatusRunning {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	got, _ := store.GetServer(context.Background(), server.ID)
+	t.Fatalf("status after NotifyTransitionEnded = %s, want running", got.Status)
 }

@@ -61,7 +61,7 @@
     "transport": "rpc",
     "registered_by": "content",
     "bounded_args": "server_id + single upload_session_id; display_name/description \u003c= 256 chars; stage",
-    "description": "Import a previously uploaded jar session into one server's mods. Requires confirm=true. No raw bytes are carried by the tool."
+    "description": "Import a previously uploaded jar session into one server's mods via the staged safe path (compatibility-sensitive uploads are never live-installed). Requires confirm=true. No raw bytes are carried by the tool."
   },
   {
     "tool": "update_mod",

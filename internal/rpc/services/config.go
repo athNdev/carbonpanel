@@ -333,19 +333,22 @@ func (s *ConfigService) stageServerConfig(ctx context.Context, config *storage.S
 	if err := applyConfigUpdates(&copied, msg.Updates); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	current, err := storage.ServerConfigToMap(config)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read server configuration"))
-	}
 	desired, err := storage.ServerConfigToMap(&copied)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read server configuration"))
 	}
-	diff := storage.DiffMaps(current, desired)
-	if len(diff) == 0 {
+	// Keep explicit values even when they equal this earlier read. The store
+	// computes the diff against the live config after admission.
+	updates := make(map[string]any, len(msg.Updates))
+	for key := range msg.Updates {
+		if value, ok := desired[key]; ok {
+			updates[key] = value
+		}
+	}
+	if len(updates) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no differences vs current config"))
 	}
-	if _, err := s.store.StageServerConfigUpdate(ctx, msg.ServerId, diff, window, applyAt, idleMinutes); err != nil {
+	if _, err := s.store.StageServerConfigUpdate(ctx, msg.ServerId, updates, window, applyAt, idleMinutes); err != nil {
 		return nil, connect.NewError(stageErrorCode(err), err)
 	}
 	categories, err := buildConfigCategories(config)
@@ -359,6 +362,9 @@ func (s *ConfigService) stageServerConfig(ctx context.Context, config *storage.S
 }
 
 func stageErrorCode(err error) connect.Code {
+	if errors.Is(err, storage.ErrUpdateBatchConflict) {
+		return connect.CodeFailedPrecondition
+	}
 	if strings.Contains(err.Error(), "server not found") {
 		return connect.CodeNotFound
 	}

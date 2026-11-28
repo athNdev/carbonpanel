@@ -4,7 +4,7 @@ title: "Map viewing — Rule"
 description: "WorldViewService observes worlds; it does not own them. A WorldRef"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds, web/carbon-panel/src/lib/components/worldview]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/lib/components/worldview]
 sources:
   - title: Parent concept
     resource: world-viewing.md
@@ -32,8 +32,8 @@ denials and scope changes clear the current map session. Renderer changes
 acquire a matching session before mounting the replacement map.
 
 The native viewport reads saved Overworld terrain through a scoped session.
-Renderer readiness does not imply live players. The native map also offers
-managed BlueMap setup with the existing authorization and consent checks.
+The `/worlds` list and `/worlds/[server]/[world]` routes stay the page-level
+entry points; the server dialog complements them. Renderer readiness does not imply players; BlueMap setup keeps the existing authorization and consent checks.
 Format checks and tiles share bounded workers. Deferred inventory checks keep
 world links visible. Active lifecycle operations temporarily refuse reads.
 The viewport bounds tile requests and aborts work outside the current view or

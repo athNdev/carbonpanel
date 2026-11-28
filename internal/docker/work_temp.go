@@ -97,6 +97,20 @@ func serverWorkTempHostPath(dataPath string) string {
 	return filepath.Join(dataPath, serverWorkTempDirName)
 }
 
+// joinDaemonPath appends name to a daemon-side bind source, preserving the
+// path style the daemon already received. The /data source was translated
+// for the daemon's filesystem (bindSource), which on a panel running on
+// Windows can be a POSIX path for a Linux daemon: a filepath.Join here
+// would rewrite it with backslashes and runc would refuse the mount. A
+// Windows daemon path keeps its separators; a forward-slash Windows path
+// stays forward-slashed, which Windows dockerd also accepts.
+func joinDaemonPath(dir, name string) string {
+	if strings.ContainsRune(dir, '\\') {
+		return filepath.Join(dir, name)
+	}
+	return strings.TrimRight(dir, "/") + "/" + name
+}
+
 // ensureWorkTempMount bind-mounts {data}/.tmp at /data/.tmp. Docker creates
 // the host directory on the daemon that owns the world, including a remote
 // node, so the panel does not mkdir a path it cannot see.
@@ -121,7 +135,7 @@ func ensureWorkTempMount(hostConfig *container.HostConfig) {
 	}
 	hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
 		Type:   mount.TypeBind,
-		Source: serverWorkTempHostPath(dataSource),
+		Source: joinDaemonPath(dataSource, serverWorkTempDirName),
 		Target: serverWorkTempContainerPath,
 		BindOptions: &mount.BindOptions{
 			CreateMountpoint: true,

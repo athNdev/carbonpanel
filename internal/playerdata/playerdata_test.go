@@ -26,7 +26,7 @@ import (
 
 const (
 	testUUID     = "00000000-0000-0000-0000-000000000001"
-	testUUIDFile = "00000000000000000000000000000001" // Minecraft filenames use the undashed form.
+	testUUIDFile = "00000000-0000-0000-0000-000000000001" // Minecraft playerdata/stats/advancements use dashed UUID filenames.
 )
 
 func localSetup(t *testing.T) (*Reader, string) {
@@ -343,6 +343,61 @@ func TestReadCharacterNBT(t *testing.T) {
 		if strings.Contains(f.Value, "\x00") || strings.Contains(f.Name, "UnrecognizedModPayload") {
 			t.Errorf("raw binary/unknown tag leaked into field %+v", f)
 		}
+	}
+}
+
+// TestReadCharacterFindsLevelFolder is the regression guard for the layout a
+// real Minecraft server uses: the player snapshot lives in the level folder
+// (world/playerdata/<uuid>.dat) and the file name keeps the UUID dashes.
+func TestReadCharacterFindsLevelFolder(t *testing.T) {
+	r, dir := localSetup(t)
+	writeRel(t, dir, "world/playerdata/"+testUUID+".dat", fullNBT())
+
+	res, err := r.Read(context.Background(), stoppedServer(dir), testUUID, KindCharacter)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(res.Fields) == 0 {
+		t.Fatal("Read() returned no fields for a level-folder player snapshot")
+	}
+	if _, ok := fieldNamed(res.Fields, "dimension"); !ok {
+		t.Fatalf("missing dimension field; got %+v", res.Fields)
+	}
+}
+
+// TestReadStatsFindsLevelFolder proves the stats snapshot is found in the
+// level folder too.
+func TestReadStatsFindsLevelFolder(t *testing.T) {
+	r, dir := localSetup(t)
+	stats := `{"DataVersion": 3953, "stats": {"minecraft:custom": {"minecraft:play_time": 60}}}`
+	writeRel(t, dir, "world/stats/"+testUUID+".json", []byte(stats))
+
+	res, err := r.Read(context.Background(), stoppedServer(dir), testUUID, KindStats)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	f, ok := fieldNamed(res.Fields, "play_time")
+	if !ok {
+		t.Fatalf("missing play_time field; got %+v", res.Fields)
+	}
+	if f.Value != "3s" {
+		t.Fatalf("play_time = %q, want %q", f.Value, "3s")
+	}
+}
+
+// TestReadCharacterAcceptsUndashedFileName keeps the undashed file name
+// working for tooling that copies the snapshot under that name.
+func TestReadCharacterAcceptsUndashedFileName(t *testing.T) {
+	r, dir := localSetup(t)
+	undashed := "00000000000000000000000000000001"
+	writeRel(t, dir, "world/playerdata/"+undashed+".dat", fullNBT())
+
+	res, err := r.Read(context.Background(), stoppedServer(dir), testUUID, KindCharacter)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f, ok := fieldNamed(res.Fields, "dimension"); !ok || f.Value != "minecraft:overworld" {
+		t.Fatalf("undashed snapshot dimension field = %+v, ok=%v", f, ok)
 	}
 }
 

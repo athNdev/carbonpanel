@@ -19,3 +19,4 @@
 - [Server lifecycle journal — Rules](lifecycle-journal-rules.md) — Persist the intent before calling Docker. If the intent cannot be stored,
 - [Server lifecycle journal — Rules (part 2)](lifecycle-journal-rules-2.md) — The support bundle always carries operations.json with that projection and
 - [Server lifecycle journal — Use this when](lifecycle-journal-use-this-when.md) — A server lifecycle action must survive a panel crash, or a server is stuck
+- [Windows panel with a WSL2 Docker daemon](windows-wsl2-daemon.md) — The split-filesystem deployment: path mapping, storage layout and container egress.

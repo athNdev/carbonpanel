@@ -62,6 +62,37 @@ const (
 	exitCodeSIGTERM = 143
 )
 
+// Restart-loop detection tuning. A container that dies abnormally three
+// times inside the window is a crash loop (Docker's restart policy masks
+// each individual death behind "restarting"), not a one-off crash. The
+// tally is forgiven once a container boots and stays up, or exits cleanly.
+const (
+	// restartLoopThreshold is how many consecutive abnormal terminations
+	// mark a crash loop.
+	restartLoopThreshold = 3
+	// restartLoopWindow bounds how far back abnormal terminations are
+	// counted; exits older than this no longer count as consecutive.
+	restartLoopWindow = 10 * time.Minute
+	// restartLoopWindowLabel renders restartLoopWindow in the persisted
+	// reason. Kept by hand in sync with restartLoopWindow.
+	restartLoopWindowLabel = "10m"
+	// restartLoopStableRuntime is how long a container must stay up before
+	// its crash-loop tally is forgiven: a server that boots and keeps
+	// running is no longer looping.
+	restartLoopStableRuntime = 5 * time.Minute
+)
+
+// transitionWaitTimeout bounds how long a blocked convergence pass watches
+// for the in-flight lifecycle operation to end. If the transition outlives
+// the wait, the next Docker event or the periodic sweep covers it.
+const transitionWaitTimeout = 2 * time.Minute
+
+// activeReconciler is the reconciler instance NotifyTransitionEnded routes
+// to. Start registers it and Stop releases it, so the pointer never
+// outlives a running event loop. The last Start wins: a panel process runs
+// one reconciler.
+var activeReconciler atomic.Pointer[Reconciler]
+
 // Store is the narrow database surface the Reconciler needs. *db.Store
 // satisfies it.
 //
@@ -75,6 +106,16 @@ type Store interface {
 	UpdateServerStatus(ctx context.Context, id string, status db.ServerStatus) error
 	UpdateServerStatusReason(ctx context.Context, id string, reason string) error
 	UpdateServerContainerID(ctx context.Context, id string, containerID string) error
+}
+
+// OperationJournal is the optional lifecycle-operation surface of the store;
+// *db.Store implements it. When available, the reconciler consults the
+// journal before suppressing a stopping→stopped transition, so a stop whose
+// RPC died before announcing is not swallowed.
+type OperationJournal interface {
+	// AssertNoServerOperation returns nil when no lifecycle operation still
+	// owns the server, and an error when one does.
+	AssertNoServerOperation(ctx context.Context, serverID string) error
 }
 
 // Client is the slice of *docker.Client the Reconciler drives.
@@ -189,6 +230,24 @@ type Reconciler struct {
 	backends map[string]backendRef
 	mu       sync.Mutex
 
+	// loops tracks consecutive abnormal container terminations per server
+	// (restart-loop detection). Fed by Docker die events and by observed
+	// container state; consumed and reset by reconciliation passes.
+	loops *restartTracker
+	// transitionWaits de-duplicates the bounded waiters that converge a
+	// server as soon as its lifecycle transition ends (one per server).
+	transitionWaits sync.Map
+	// pendingStops remembers suppressed stopping→stopped transitions whose
+	// SERVER_STOP announcement is re-emitted if the initiating RPC never
+	// finalizes (see suppressStopAnnouncement / flushPendingStops).
+	pendingStops map[string]pendingStop
+	// retries marks servers whose convergence pass failed since their last
+	// successful pass. The first failure of an episode releases the lifecycle
+	// transition normally so the transition-end hook retries immediately;
+	// later failures release quietly and fall back to the periodic sweep, so a
+	// persistent fault cannot spin the reconciler.
+	retries map[string]bool
+
 	ctx      context.Context
 	wg       sync.WaitGroup
 	stop     chan struct{}
@@ -215,21 +274,24 @@ func New(store Store, clients ClientResolver, proxy ProxyRouter, bus EventEmitte
 	}
 
 	return &Reconciler{
-		store:       store,
-		clients:     clients,
-		proxy:       proxy,
-		bus:         bus,
-		logMigrator: logMigrator,
-		log:         log,
-		cfg:         cfg,
-		deb:         newDebouncer(cfg.DebounceWindow),
-		admission:   serverruntime.NewAdmissionCoordinator(),
-		work:        make(chan string, workQueueDepth),
-		queued:      make(map[string]bool),
-		moduleWork:  make(chan string, workQueueDepth),
-		moduleQueue: make(map[string]bool),
-		backends:    make(map[string]backendRef),
-		stop:        make(chan struct{}),
+		store:        store,
+		clients:      clients,
+		proxy:        proxy,
+		bus:          bus,
+		logMigrator:  logMigrator,
+		log:          log,
+		cfg:          cfg,
+		deb:          newDebouncer(cfg.DebounceWindow),
+		admission:    serverruntime.NewAdmissionCoordinator(),
+		work:         make(chan string, workQueueDepth),
+		queued:       make(map[string]bool),
+		moduleWork:   make(chan string, workQueueDepth),
+		moduleQueue:  make(map[string]bool),
+		backends:     make(map[string]backendRef),
+		loops:        newRestartTracker(),
+		pendingStops: make(map[string]pendingStop),
+		retries:      make(map[string]bool),
+		stop:         make(chan struct{}),
 	}
 }
 
@@ -254,6 +316,10 @@ func (r *Reconciler) SetModuleReconciler(modules ModuleReconciler) {
 // Start launches the worker pool, consumes the supervisor's merged event stream
 // (which may be nil), and begins the periodic sweep. It returns immediately;
 // cancel ctx or call Stop to shut everything down.
+//
+// Start also registers this instance as the target of the package-level
+// NotifyTransitionEnded hook, which lifecycle code uses to request an
+// immediate convergence pass when a server's transition ends.
 func (r *Reconciler) Start(ctx context.Context, eventStream <-chan ContainerEvent) {
 	r.mu.Lock()
 	if r.started {
@@ -262,6 +328,7 @@ func (r *Reconciler) Start(ctx context.Context, eventStream <-chan ContainerEven
 	}
 	r.started = true
 	r.ctx = ctx
+	activeReconciler.Store(r)
 	r.mu.Unlock()
 
 	for i := 0; i < r.cfg.Workers; i++ {
@@ -290,9 +357,30 @@ func (r *Reconciler) Start(ctx context.Context, eventStream <-chan ContainerEven
 // Stop halts the reconciler. It is safe to call more than once.
 func (r *Reconciler) Stop() {
 	r.stopOnce.Do(func() {
+		activeReconciler.CompareAndSwap(r, nil)
 		r.deb.stop()
 		close(r.stop)
 	})
+}
+
+// NotifyTransitionEnded is the hook lifecycle code calls when a server's
+// lifecycle transition (start, stop, freeze, deep sleep, recreate) is
+// released. It schedules an immediate convergence pass for the server so the
+// transition's outcome is reconciled right away instead of at the next
+// Docker event or the 30s sweep.
+//
+// internal/docker cannot import this package (import cycle), so the
+// composition root bridges the two sides: hand this function to the docker
+// package's transition-end notifier. A convergence pass that hits a held
+// transition also arms its own bounded waiter
+// (convergeWhenTransitionEnds), which converges without any wiring.
+func NotifyTransitionEnded(serverID string) {
+	if serverID == "" {
+		return
+	}
+	if r := activeReconciler.Load(); r != nil {
+		r.Nudge(serverID)
+	}
 }
 
 // Wait blocks until every reconciler goroutine has exited.
@@ -502,6 +590,20 @@ func (r *Reconciler) consume(eventStream <-chan ContainerEvent) {
 				continue
 			}
 			if ev.ServerID != "" {
+				// Die events carry the exit evidence the restart-loop detector
+				// needs: a nonzero exit or an OOM is one abnormal termination,
+				// a clean exit forgives the tally, and an oom event without a
+				// die is itself the evidence.
+				at := ev.Timestamp
+				if at.IsZero() {
+					at = time.Now()
+				}
+				switch ev.Action {
+				case "die":
+					r.loops.recordDie(ev.ServerID, ev.ExitCode, false, at)
+				case "oom":
+					r.loops.recordDie(ev.ServerID, nil, true, at)
+				}
 				r.request(ev.ServerID)
 			}
 		}
@@ -624,6 +726,10 @@ type observedState struct {
 	// StartedAt is when the container process last (re)started. Log evidence
 	// older than it belongs to a previous boot, not this one.
 	StartedAt time.Time
+	// AbnormalExits is the number of consecutive abnormal container
+	// terminations currently on record for this server (restart-loop
+	// detection). Zero when the server is not crash-looping.
+	AbnormalExits int
 }
 
 // observe resolves the server's container and inspects its runtime state. A
@@ -691,17 +797,49 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	// mutate the same server/container relationship. A pass that overlaps one
 	// of those transitions can observe a half-created or half-stopped container
 	// and persist a false state. Leave the current pass to the next Docker event
-	// or periodic sweep when another operation owns the server.
+	// or periodic sweep when another operation owns the server — but watch for
+	// the transition to end so the server converges immediately afterwards
+	// instead of waiting out the sweep.
 	transition, err := docker.TryBeginServerTransition(serverID)
 	if err != nil {
+		r.convergeWhenTransitionEnds(serverID)
 		return nil
 	}
-	defer transition.Release()
+	// A pass that converged, or deliberately did nothing, is itself the
+	// convergence the transition-end hook would request: release it quietly so
+	// it cannot queue the next one. A transient failure is different - the hook
+	// is the prompt retry - so the first failure of an episode releases
+	// normally. Later failures release quietly and fall back to the periodic
+	// sweep, keeping a persistent fault from becoming an unbounded self-nudge
+	// loop.
+	retry := false
+	defer func() {
+		if retry && r.beginRetry(serverID) {
+			transition.Release()
+			return
+		}
+		if !retry {
+			r.clearRetry(serverID)
+		}
+		transition.ReleaseQuiet()
+	}()
 
 	server, err := r.store.GetServer(ctx, serverID)
-	if err != nil || server == nil {
-		// Deleted, or a transient DB read failure; either way there is nothing
-		// safe to converge.
+	if err != nil {
+		// A deleted server is a deliberate no-op; a read failure is transient
+		// and must retry promptly instead of waiting for the sweep.
+		r.loops.reset(serverID)
+		r.clearPendingStop(serverID)
+		if errors.Is(err, db.ErrServerNotFound) {
+			return nil
+		}
+		retry = true
+		return fmt.Errorf("get server: %w", err)
+	}
+	if server == nil {
+		// Deleted between listing and this pass; nothing safe to converge.
+		r.loops.reset(serverID)
+		r.clearPendingStop(serverID)
 		return nil
 	}
 
@@ -710,15 +848,35 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		if r.log != nil {
 			r.log.Warn("reconciler: node %q unavailable for server %s: %v", server.NodeID, server.Name, err)
 		}
+		retry = true
 		return nil
 	}
 
 	obs, err := r.observe(ctx, cli, server.ID)
 	if err != nil {
+		retry = true
 		return err
 	}
 
+	// Restart-loop detection: merge this observation into the per-server
+	// abnormal-termination tally. A threshold-exceeding tally is consumed
+	// (returned once, then reset) so the loop report below is raised once per
+	// loop episode instead of on every pass.
+	obs.AbnormalExits = r.loops.observe(server.ID, obs, time.Now())
+
 	dec := decide(server.Status, obs, server.Detached, !r.cfg.DisableSelfHeal)
+
+	// Crash-loop reporting: a container that keeps dying abnormally is an
+	// error with a loop-specific reason, not a flapping start/stop cycle.
+	// Skipped while an operator is stopping the server or while it is owned
+	// by deep sleep, and skipped while the container is up (a boot in
+	// progress after past crashes is not itself an error).
+	if obs.AbnormalExits >= restartLoopThreshold && dec.action == actNone && !obsAlive(obs) &&
+		server.Status != db.StatusStopping && server.Status != db.StatusDeepSleep {
+		dec.status = db.StatusError
+		dec.reason = restartLoopReason(obs.AbnormalExits)
+		dec.replaceReason = true
+	}
 
 	// Game-process failure detection. The container can outlive a crashed JVM
 	// (the image retries inside a live entrypoint), so Docker-level status
@@ -743,6 +901,7 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	adopted := false
 	if obs.Exists && obs.ContainerID != "" && obs.ContainerID != server.ContainerID {
 		if err := r.store.UpdateServerContainerID(ctx, server.ID, obs.ContainerID); err != nil {
+			retry = true
 			return fmt.Errorf("adopt container id: %w", err)
 		}
 		if r.log != nil {
@@ -795,6 +954,7 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	statusChanged := dec.status != "" && dec.status != prev
 	if statusChanged {
 		if err := r.store.UpdateServerStatus(ctx, server.ID, dec.status); err != nil {
+			retry = true
 			return fmt.Errorf("update status: %w", err)
 		}
 		server.Status = dec.status
@@ -811,6 +971,10 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		if dec.status == db.StatusError {
 			wantReason = dec.reason
 		}
+	} else if dec.status == db.StatusError && dec.reason != "" && dec.replaceReason {
+		// The decision carries a reason that must stay visible even on a
+		// sticky error status (the restart-loop report).
+		wantReason = dec.reason
 	} else if dec.status == db.StatusError && dec.reason != "" && wantReason == "" {
 		wantReason = dec.reason
 	}
@@ -846,7 +1010,34 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 
 	r.scheduleServerChildModules(server.ID, adopted, selfHealed, statusChanged, server.Status)
 
+	// A stop whose RPC never finalized must still be announced: check the
+	// deferred-announcement backlog on every pass.
+	r.flushPendingStops(ctx, server, obs)
+
 	return nil
+}
+
+// beginRetry records that serverID still needs a retry and reports whether this
+// is the first failure of the episode. Only that first failure releases the
+// transition loudly; a repeated failure stays quiet and leaves the next attempt
+// to the periodic sweep.
+func (r *Reconciler) beginRetry(serverID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.retries[serverID] {
+		return false
+	}
+	r.retries[serverID] = true
+	return true
+}
+
+// clearRetry forgets a server's failure episode after a pass that needed no
+// retry, whether it converged or deliberately did nothing (for example a
+// deleted server).
+func (r *Reconciler) clearRetry(serverID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.retries, serverID)
 }
 
 // scheduleServerChildModules queues a module pass for every sidecar on serverID
@@ -999,8 +1190,11 @@ func (r *Reconciler) emitTransition(ctx context.Context, server *db.Server, from
 			eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START
 		}
 	case db.StatusStopped, db.StatusError:
-		if from == db.StatusStopping {
-			// Already announced by the initiating RPC call.
+		if from == db.StatusStopping && r.suppressStopAnnouncement(ctx, server.ID, to, reason) {
+			// The initiating RPC (or the lifecycle journal that owns the
+			// stop) announces it. See suppressStopAnnouncement: when
+			// ownership cannot be checked, the announcement is deferred and
+			// re-emitted if the stop evidence persists past one sweep.
 			return
 		}
 		eventType = v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP
@@ -1017,6 +1211,150 @@ func (r *Reconciler) emitTransition(ctx context.Context, server *db.Server, from
 	}
 
 	r.bus.Emit(ctx, events.Event{Type: eventType, ServerID: server.ID, Data: data})
+}
+
+// suppressStopAnnouncement decides whether the SERVER_STOP announcement for
+// a stopping→stopped/error transition belongs to the RPC that requested the
+// stop. When the lifecycle journal is part of the store, an active operation
+// row means the stop is still owned (its RPC or recovery announces it), and
+// no active row means that RPC finalized without announcing — the reconciler
+// announces instead of swallowing the transition. When the journal is not
+// part of the store, ownership cannot be checked: the announcement is
+// deferred here and re-emitted by flushPendingStops once the stop evidence
+// has persisted past one sweep, so a stop whose RPC crashed mid-way is
+// never silently swallowed.
+func (r *Reconciler) suppressStopAnnouncement(ctx context.Context, serverID string, to db.ServerStatus, reason string) bool {
+	if journal, ok := r.store.(OperationJournal); ok {
+		err := journal.AssertNoServerOperation(ctx, serverID)
+		if err == nil {
+			return false
+		}
+		if errors.Is(err, db.ErrServerOperationActive) {
+			return true
+		}
+		// A journal read failure means ownership is unknown. Defer the
+		// announcement through the pending-stop path instead of suppressing it
+		// as if an active operation owned the server.
+		r.rememberPendingStop(serverID, to, reason)
+		return true
+	}
+	r.rememberPendingStop(serverID, to, reason)
+	return true
+}
+
+// pendingStop remembers a suppressed stopping→stopped transition so the
+// SERVER_STOP announcement can still be made if the initiating RPC died
+// before announcing it.
+type pendingStop struct {
+	at     time.Time
+	to     db.ServerStatus
+	reason string
+}
+
+func (r *Reconciler) rememberPendingStop(serverID string, to db.ServerStatus, reason string) {
+	if serverID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pendingStops == nil {
+		r.pendingStops = make(map[string]pendingStop)
+	}
+	r.pendingStops[serverID] = pendingStop{at: time.Now(), to: to, reason: reason}
+}
+
+func (r *Reconciler) clearPendingStop(serverID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.pendingStops, serverID)
+}
+
+// flushPendingStops re-announces suppressed stop transitions whose evidence
+// has persisted past one sweep. The RPC that requested the stop is given one
+// sweep to announce it; if the server is still stopped (or errored) with the
+// container still down after that, the RPC is presumed dead and the
+// reconciler announces the stop so subscribers are not left blind.
+func (r *Reconciler) flushPendingStops(ctx context.Context, server *db.Server, obs observedState) {
+	if server == nil {
+		return
+	}
+	r.mu.Lock()
+	pending, ok := r.pendingStops[server.ID]
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	if server.Status != db.StatusStopped && server.Status != db.StatusError {
+		// The server left the stopped state; the stop announcement is moot.
+		r.clearPendingStop(server.ID)
+		return
+	}
+	if obs.Exists && obsAlive(obs) {
+		// The container is up again; a start announcement covers the story.
+		r.clearPendingStop(server.ID)
+		return
+	}
+	if time.Since(pending.at) < r.cfg.SweepInterval {
+		return // still inside the RPC's one-sweep grace window
+	}
+	r.clearPendingStop(server.ID)
+
+	if r.log != nil {
+		r.log.Info("reconciler: announcing stop for server %s whose stop RPC never finalized (%s -> %s%s)",
+			server.Name, db.StatusStopping, pending.to, reasonSuffix(pending.reason))
+	}
+	if r.bus == nil {
+		return
+	}
+	data := map[string]any{
+		"previous_status": string(db.StatusStopping),
+		"status":          string(pending.to),
+	}
+	if pending.reason != "" {
+		data["reason"] = pending.reason
+	}
+	r.bus.Emit(ctx, events.Event{
+		Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP,
+		ServerID: server.ID,
+		Data:     data,
+	})
+}
+
+// convergeWhenTransitionEnds schedules one convergence pass for serverID to
+// run as soon as its current lifecycle transition ends, closing the blind
+// window between "a transition holds the lock" and "the next Docker event or
+// the 30s sweep". Waiters are de-duplicated per server and bounded, so a
+// burst of events during a long transition cannot pile up goroutines.
+func (r *Reconciler) convergeWhenTransitionEnds(serverID string) {
+	if r.ctx == nil {
+		// Not started (direct ReconcileServer calls, e.g. tests): there is no
+		// event loop or sweep to serve a follow-up pass, so do not wait.
+		return
+	}
+	if _, loaded := r.transitionWaits.LoadOrStore(serverID, struct{}{}); loaded {
+		return // a waiter is already watching this server
+	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		defer r.transitionWaits.Delete(serverID)
+
+		waitCtx, cancel := context.WithTimeout(r.ctx, transitionWaitTimeout)
+		defer cancel()
+		transitionDone := make(chan struct{})
+		go func() {
+			_ = docker.WaitForServerTransition(waitCtx, serverID)
+			close(transitionDone)
+		}()
+		select {
+		case <-transitionDone:
+			r.request(serverID)
+		case <-r.stop:
+			// Shutting down: the bounded watcher goroutine exits on its own
+			// when waitCtx is done.
+		}
+	}()
 }
 
 // reconcileAction is the self-heal action a decision calls for.
@@ -1039,6 +1377,10 @@ type decision struct {
 	action reconcileAction
 	// reason explains a non-obvious status (e.g. an OOM kill) for logs/events.
 	reason string
+	// replaceReason forces the persisted reason to this decision's reason
+	// even when the status itself did not change. Used by the restart-loop
+	// report, which must stay visible on a sticky error status.
+	replaceReason bool
 	// reconcileRoute requests a proxy-route refresh even without a status
 	// change (used when reality has converged but the backend may have moved).
 	reconcileRoute bool
@@ -1121,7 +1463,20 @@ func decide(desired db.ServerStatus, obs observedState, detached, selfHeal bool)
 		return decision{status: db.StatusPaused}
 
 	case db.StatusStarting:
-		// Docker is still restarting the container; let it settle.
+		// Docker is still restarting the container; let a single restart
+		// settle. But a container that keeps dying is a crash loop: Docker's
+		// restart policy would leave the row "starting" forever, so report
+		// the loop once the abnormal-exit tally crosses the threshold. The
+		// tally also covers a boot whose healthcheck is still starting, but
+		// that path self-corrects the moment the boot completes.
+		if obs.AbnormalExits >= restartLoopThreshold {
+			return decision{
+				status:         db.StatusError,
+				reason:         restartLoopReason(obs.AbnormalExits),
+				replaceReason:  true,
+				reconcileRoute: true,
+			}
+		}
 		return decision{}
 
 	case db.StatusStopped, db.StatusError:
@@ -1213,4 +1568,206 @@ func (d *debouncer) stop() {
 		t.Stop()
 		delete(d.timers, key)
 	}
+}
+
+// obsAlive reports whether the observed container is up (booting, serving,
+// or frozen while up).
+func obsAlive(obs observedState) bool {
+	return obs.Status == db.StatusRunning || obs.Status == db.StatusUnhealthy || obs.Status == db.StatusPaused
+}
+
+// isAbnormalExit reports whether a stopped container's exit was a crash
+// rather than a clean stop or a graceful `docker stop` (SIGTERM).
+func isAbnormalExit(obs observedState) bool {
+	if obs.OOMKilled {
+		return true
+	}
+	return obs.ExitCode != 0 && obs.ExitCode != exitCodeSIGTERM
+}
+
+// restartLoopReason renders the persisted failure reason for a detected
+// restart loop, e.g. "restarting repeatedly (3 times in 10m)".
+func restartLoopReason(count int) string {
+	return fmt.Sprintf("restarting repeatedly (%d times in %s)", count, restartLoopWindowLabel)
+}
+
+// obsExitKey identifies one container process lifetime, so repeated
+// observations of the same exit count the death only once.
+func obsExitKey(obs observedState) string {
+	return obs.ContainerID + "|" + obs.StartedAt.UTC().Format(time.RFC3339Nano)
+}
+
+// observedExitDedupWindow suppresses counting one death twice when both a
+// die event and the observed exited state describe it: they arrive within
+// moments of each other, while genuinely distinct deaths in a restart loop
+// are separated by the daemon's restart backoff or the sweep interval.
+const observedExitDedupWindow = 10 * time.Second
+
+// restartTracker counts consecutive abnormal container terminations per
+// server. Deaths are recorded from Docker die events (consume) and from
+// observed container state (ReconcileServer, deduplicated by container
+// identity so one exit observed by many passes counts once). A tally is
+// forgiven by a clean exit or by a container boot that stays up, expires
+// outside the window, and is consumed — returned once, then reset — by the
+// reconciliation pass that reports it.
+type restartTracker struct {
+	mu    sync.Mutex
+	loops map[string]*restartLoop
+}
+
+// restartLoop is one server's abnormal-termination tally inside the window.
+type restartLoop struct {
+	// deaths are the abnormal terminations inside the window, oldest first.
+	deaths []time.Time
+	// lastKey is the identity of the last observed exit counted, so the same
+	// death seen again on a later pass does not count twice.
+	lastKey string
+	// lastDieAt is when a die event last counted a death; the observed-exit
+	// path defers to it, because a die event and the exited state it
+	// produced arrive within moments of each other and describe one death.
+	lastDieAt time.Time
+}
+
+func newRestartTracker() *restartTracker {
+	return &restartTracker{loops: make(map[string]*restartLoop)}
+}
+
+// recordDie accounts one Docker die event. An oom flag counts regardless of
+// the exit code; a clean 0/143 exit forgives the tally; a missing exit code
+// is no evidence either way.
+func (t *restartTracker) recordDie(serverID string, exitCode *int, oom bool, now time.Time) {
+	if serverID == "" {
+		return
+	}
+	switch {
+	case oom:
+		t.recordAbnormalExit(serverID, now)
+	case exitCode != nil && *exitCode != 0 && *exitCode != exitCodeSIGTERM:
+		t.recordAbnormalExit(serverID, now)
+	case exitCode != nil:
+		// A clean stop forgives the loop.
+		t.reset(serverID)
+	}
+}
+
+// observe merges one reconciliation pass's observation into the tally and
+// returns the count the pass should act on.
+func (t *restartTracker) observe(serverID string, obs observedState, now time.Time) int {
+	if serverID == "" || !obs.Exists {
+		return t.tally(serverID, now, false)
+	}
+	switch obs.Status {
+	case db.StatusRunning, db.StatusUnhealthy, db.StatusPaused:
+		// A container that stays up is no longer crash-looping.
+		if !obs.StartedAt.IsZero() && now.Sub(obs.StartedAt) >= restartLoopStableRuntime {
+			t.reset(serverID)
+		}
+		// Not consumed: the tally should still be available to the next
+		// pass that observes a restarting or exited container.
+		return t.tally(serverID, now, false)
+	case db.StatusStopped:
+		if isAbnormalExit(obs) {
+			t.recordObservedExit(serverID, obsExitKey(obs), now)
+		} else {
+			// A clean stop forgives the loop.
+			t.reset(serverID)
+		}
+		return t.tally(serverID, now, true)
+	default:
+		// Starting (including Docker's "restarting") and unknown states do
+		// not change the tally, but a threshold-exceeding tally is consumed
+		// so the deciding pass reports the loop exactly once.
+		return t.tally(serverID, now, true)
+	}
+}
+
+// recordAbnormalExit counts one abnormal termination reported by a die event.
+func (t *restartTracker) recordAbnormalExit(serverID string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	loop := t.loops[serverID]
+	if loop == nil {
+		loop = &restartLoop{}
+		t.loops[serverID] = loop
+	}
+	loop.deaths = pruneExpiredDeaths(loop.deaths, now)
+	loop.deaths = append(loop.deaths, now)
+	loop.lastDieAt = now
+}
+
+// recordObservedExit counts one abnormal exit observed from container state,
+// deduplicating repeats of the same death and deaths a recent die event
+// already counted.
+func (t *restartTracker) recordObservedExit(serverID, key string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	loop := t.loops[serverID]
+	if loop != nil && loop.lastKey == key {
+		return // the same death, already counted
+	}
+	if loop != nil && !loop.lastDieAt.IsZero() && now.Sub(loop.lastDieAt) < observedExitDedupWindow {
+		// A die event counted a death moments ago; treat this observation as
+		// the exited state of that death rather than a second one.
+		loop.lastKey = key
+		return
+	}
+	if loop == nil {
+		loop = &restartLoop{}
+		t.loops[serverID] = loop
+	}
+	loop.deaths = pruneExpiredDeaths(loop.deaths, now)
+	loop.deaths = append(loop.deaths, now)
+	loop.lastKey = key
+}
+
+// reset forgives a server's tally entirely (clean exit, stable runtime).
+func (t *restartTracker) reset(serverID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.loops, serverID)
+}
+
+// tally reports the abnormal-termination count inside the window. With
+// consume set, a threshold-exceeding tally is returned once and reset, so
+// the loop report is not re-raised on every pass.
+func (t *restartTracker) tally(serverID string, now time.Time, consume bool) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	loop, ok := t.loops[serverID]
+	if !ok {
+		return 0
+	}
+	loop.deaths = pruneExpiredDeaths(loop.deaths, now)
+	count := len(loop.deaths)
+	if consume && count >= restartLoopThreshold {
+		// Keep the entry (its lastKey still deduplicates the death the
+		// passes continue to observe) but drop the deaths.
+		loop.deaths = nil
+		return count
+	}
+	return count
+}
+
+// count reports the current tally without consuming it. Test observability
+// and diagnostics use this.
+func (t *restartTracker) count(serverID string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	loop, ok := t.loops[serverID]
+	if !ok {
+		return 0
+	}
+	return len(pruneExpiredDeaths(loop.deaths, time.Now()))
+}
+
+// pruneExpiredDeaths drops abnormal terminations older than the window.
+func pruneExpiredDeaths(deaths []time.Time, now time.Time) []time.Time {
+	cutoff := now.Add(-restartLoopWindow)
+	keep := deaths[:0]
+	for _, at := range deaths {
+		if at.After(cutoff) {
+			keep = append(keep, at)
+		}
+	}
+	return keep
 }

@@ -40,8 +40,8 @@ After the upload/download byte-transport lanes were mounted in production, the
 same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
-gate reports `205/205 supported operations verified`. Live counts are
-`supported=205 listed=205 reachable=205 verified=205 excluded=76`.
+gate reports `207/207 supported operations verified`. Live counts are
+`supported=207 listed=207 reachable=207 verified=207 excluded=76`.
 Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
 `PackwizService=2/2` and `surface=2/2`. The Packwiz fixture drives real Packwiz
 storage through both typed tools and the production auth interceptor.
@@ -85,6 +85,6 @@ branch.
 ## Development server portability coverage
 
 The expected hosted contract after OSS-422 adds export and preview is
-`supported=205 listed=205 reachable=205 verified=205 excluded=76`. This
+`supported=207 listed=207 reachable=207 verified=207 excluded=76`. This
 count describes the development branch coverage fixture. The earlier run above
 records the exact checks and counts from the pinned publication candidate.

@@ -20,6 +20,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import DatapackSearch from '$lib/components/datapack-search.svelte';
 	import ModBrowserDialog from '$lib/components/mod-browser-dialog.svelte';
+	import ModsCatalogResultCard from '$lib/mods/ModsCatalogResultCard.svelte';
 	import {
 		mergeWizardModFiles,
 		supportsWizardMods,
@@ -3010,7 +3011,7 @@ one at https://mozilla.org/MPL/2.0/.
 										release.
 									</p>
 									<CarbonButton kind="secondary" onclick={() => (showModBrowser = true)}
-										>Browse mods</CarbonButton
+										>Browse & install</CarbonButton
 									>
 								{:else if selectedModpack}
 									<p class="text-sm text-muted-foreground">
@@ -3035,29 +3036,46 @@ one at https://mozilla.org/MPL/2.0/.
 									>
 								{/if}
 								{#if selectedMods.length > 0}
-									<ul class="divide-y divide-border border-t border-border">
+									<!-- Same result-row idiom as the browser dialog and the studio:
+										queued mods are cards with the Selected state tag. -->
+									<div class="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4">
 										{#each selectedMods as mod (mod.project)}
-											<li class="flex items-center justify-between gap-4 py-2">
-												<span class="text-sm"
-													>{mod.name}
-													<span class="text-xs text-muted-foreground"
-														>{mod.versionLabel}{mod.files.length > 1
-															? ` · ${mod.files.length - 1} required dependencies`
-															: ''}</span
-													></span
-												>
-												<CarbonButton
-													kind="tertiary"
-													size="sm"
-													aria-label={`Remove ${mod.name}`}
-													onclick={() =>
-														(selectedMods = selectedMods.filter(
-															(item) => item.project !== mod.project
-														))}>Remove</CarbonButton
-												>
-											</li>
+											<ModsCatalogResultCard
+												result={{
+													title: mod.name,
+													description: '',
+													iconUrl: '',
+													author: '',
+													downloads: 0,
+													categories: [],
+													platform: mod.selection.platform
+												}}
+												state="queued"
+											>
+												{#snippet badges()}
+													<CarbonTag type="gray" size="sm" class="normal-case"
+														>v{mod.versionLabel}</CarbonTag
+													>
+													{#if mod.files.length > 1}
+														<CarbonTag type="gray" size="sm" class="normal-case"
+															>{mod.files.length - 1} required dependencies</CarbonTag
+														>
+													{/if}
+												{/snippet}
+												{#snippet actions()}
+													<CarbonButton
+														kind="tertiary"
+														size="sm"
+														aria-label={`Remove ${mod.name}`}
+														onclick={() =>
+															(selectedMods = selectedMods.filter(
+																(item) => item.project !== mod.project
+															))}>Remove</CarbonButton
+													>
+												{/snippet}
+											</ModsCatalogResultCard>
 										{/each}
-									</ul>
+									</div>
 								{/if}
 							</div>
 						{:else}
