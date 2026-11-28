@@ -28,6 +28,49 @@ export function snapshotServerForm(source: UpdateServerRequest): UpdateServerReq
 }
 
 /**
+ * Field-by-field comparison of the settings form against its captured
+ * baseline. Every editable field participates, including `loaderVersion`: a
+ * loader build pin is a real saved change, so changing only it must gate Save.
+ */
+export function serverFormDiffersFromBaseline(
+	form: UpdateServerRequest,
+	baseline: UpdateServerRequest
+): boolean {
+	return (
+		form.name !== baseline.name ||
+		form.description !== baseline.description ||
+		form.port !== baseline.port ||
+		form.maxPlayers !== baseline.maxPlayers ||
+		form.memory !== baseline.memory ||
+		form.modLoader !== baseline.modLoader ||
+		form.mcVersion !== baseline.mcVersion ||
+		form.loaderVersion !== baseline.loaderVersion ||
+		form.dockerImage !== baseline.dockerImage ||
+		form.detached !== baseline.detached ||
+		form.autoStart !== baseline.autoStart ||
+		form.tpsCommand !== baseline.tpsCommand ||
+		form.autoHibernate !== baseline.autoHibernate ||
+		form.idleTimeoutMinutes !== baseline.idleTimeoutMinutes ||
+		form.autoDeepSleep !== baseline.autoDeepSleep ||
+		form.deepSleepTimeoutMinutes !== baseline.deepSleepTimeoutMinutes ||
+		safeString(form.additionalPorts) !== safeString(baseline.additionalPorts) ||
+		dockerOverridesFingerprint(form.dockerOverrides) !==
+			dockerOverridesFingerprint(baseline.dockerOverrides)
+	);
+}
+
+function safeString(data: unknown): string | undefined {
+	if (!data) return undefined;
+	try {
+		return JSON.stringify(data, (_, value) =>
+			typeof value === 'bigint' ? value.toString() : value
+		);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Shape-agnostic fingerprint of Docker overrides for the dirty comparison.
  *
  * The Docker Overrides JSON editor assigns a plain `JSON.parse` object, while

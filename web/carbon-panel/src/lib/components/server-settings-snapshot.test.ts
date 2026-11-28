@@ -16,7 +16,7 @@ import type { DockerOverrides } from '$lib/proto/carbonpanel/v1/common_pb';
 import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-import { dockerOverridesFingerprint, snapshotServerForm } from './server-settings-snapshot';
+import { dockerOverridesFingerprint, serverFormDiffersFromBaseline, snapshotServerForm } from './server-settings-snapshot';
 
 test('snapshotServerForm clones a form whose Docker overrides contain int64 bigints', () => {
 	const memoryLimit = 9_007_199_254_740_993n;
@@ -264,6 +264,39 @@ test('dockerOverridesFingerprint treats missing overrides as absent', () => {
 	assert.equal(dockerOverridesFingerprint(null), undefined);
 });
 
+test('changing only Loader Version is dirty and reverting it is clean', () => {
+	// Loader Version pins a real loader build, so it gates Save like every
+	// other editable field. It was missing from the comparison once, leaving
+	// Save disabled for a pin-only edit.
+	const baseline = create(UpdateServerRequestSchema, {
+		id: 'server-1',
+		modLoader: 'fabric',
+		mcVersion: '1.21.1',
+		loaderVersion: ''
+	});
+	const form = snapshotServerForm(baseline);
+
+	assert.equal(
+		serverFormDiffersFromBaseline(form, baseline),
+		false,
+		'the pristine copy must be clean'
+	);
+
+	form.loaderVersion = '0.16.5';
+	assert.equal(
+		serverFormDiffersFromBaseline(form, baseline),
+		true,
+		'a Loader Version-only edit must be dirty'
+	);
+
+	form.loaderVersion = '';
+	assert.equal(
+		serverFormDiffersFromBaseline(form, baseline),
+		false,
+		'reverting the Loader Version must be clean again'
+	);
+});
+
 test('a snapshot failure cannot wedge Save because saving is cleared in finally', () => {
 	const component = readFileSync(new URL('./server-settings.svelte', import.meta.url), 'utf8');
 	const start = component.indexOf('async function saveSettings');
@@ -314,8 +347,11 @@ test('the settings form hands the reactive source straight to the snapshot helpe
 	assert.match(component, /return snapshotServerForm\(source\);/);
 
 	// The dirty comparison must fingerprint the Docker overrides directly too,
-	// or the same key-loss class hides an edit from Save.
+	// or the same key-loss class hides an edit from Save. The comparison lives
+	// in the shared helper the component delegates to.
 	assert.doesNotMatch(component, /\$state\.snapshot\([^)]*dockerOverrides/);
-	assert.match(component, /dockerOverridesFingerprint\(form\.dockerOverrides\)/);
-	assert.match(component, /dockerOverridesFingerprint\(baseline\.dockerOverrides\)/);
+	assert.match(component, /serverFormDiffersFromBaseline\(form, baseline\)/);
+	const helper = readFileSync(new URL('./server-settings-snapshot.ts', import.meta.url), 'utf8');
+	assert.match(helper, /dockerOverridesFingerprint\(form\.dockerOverrides\)/);
+	assert.match(helper, /dockerOverridesFingerprint\(baseline\.dockerOverrides\)/);
 });
