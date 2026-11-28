@@ -73,15 +73,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		// ancestor. Measuring only on window resize left the indicator parked
 		// under the previously selected tab after any of those. The observer
 		// coalesces to one measurement per frame so the animation stays smooth.
+		//
+		// Tab widths also change without the container resizing: a late webfont
+		// swap widens every label after the first measure. Observe the tabs too,
+		// and re-measure once fonts finish loading, so a deep-linked tab does not
+		// stay clipped until the operator clicks or resizes something.
 		if (!container) return;
+		const tabCount = tabs.length;
 		let frame = 0;
+		let cancelled = false;
 		const schedule = () => {
+			if (cancelled) return;
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(measure);
 		};
 		const observer = new ResizeObserver(schedule);
 		observer.observe(container);
+		const buttons = container.querySelectorAll<HTMLElement>('[data-tab]');
+		for (let i = 0; i < tabCount && i < buttons.length; i++) observer.observe(buttons[i]);
+		const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+		fonts?.ready.then(schedule).catch(() => {});
 		return () => {
+			cancelled = true;
 			cancelAnimationFrame(frame);
 			observer.disconnect();
 		};

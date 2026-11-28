@@ -1,11 +1,12 @@
-// SPDX-License-Identifier: MPL-2.0
+﻿// SPDX-License-Identifier: MPL-2.0
 // Real-DOM coverage for keeping a selected tab inside a narrow scroll strip.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../../../../test/dom-setup.mjs';
 
-const TAB_WIDTH = 100;
+// Mutable so a test can model a late webfont swap widening every label.
+let tabWidth = 100;
 const VIEWPORT_WIDTH = 300;
 const tabs = Array.from({ length: 12 }, (_, i) => ({ id: `tab-${i}`, label: `Section ${i}` }));
 
@@ -37,7 +38,7 @@ function installLayoutShim() {
 			const container = this.closest<HTMLElement>('[data-carbon-tabs]');
 			if (container) {
 				const buttons = Array.from(container.querySelectorAll<HTMLElement>('[data-tab]'));
-				return rect(buttons.indexOf(this) * TAB_WIDTH - container.scrollLeft, TAB_WIDTH);
+				return rect(buttons.indexOf(this) * tabWidth - container.scrollLeft, tabWidth);
 			}
 		}
 		return originalRect.call(this);
@@ -68,6 +69,7 @@ const flush = async (ms = 150) => {
 };
 
 async function mountTabs(selectedTab: string) {
+	tabWidth = 100;
 	const target = document.createElement('div');
 	document.body.appendChild(target);
 	const instance = mount(CarbonTabs as never, { target, props: { tabs, selectedTab } });
@@ -120,5 +122,50 @@ test('selecting a late tab scrolls its whole width into the client area', async 
 	} finally {
 		ui.unmount();
 		restoreLayoutShim();
+	}
+});
+
+test('a late font swap re-measures and keeps the selected tab visible', async () => {
+	installLayoutShim();
+	const previousResizeObserver = globalThis.ResizeObserver;
+	const observers: FakeResizeObserver[] = [];
+	class FakeResizeObserver {
+		private targets: Element[] = [];
+		constructor(private callback: ResizeObserverCallback) {
+			observers.push(this);
+		}
+		observe(target: Element) {
+			this.targets.push(target);
+		}
+		unobserve() {}
+		disconnect() {}
+		notifyTabs() {
+			if (this.targets.some((target) => target.matches?.('[data-tab]'))) {
+				this.callback([], this as unknown as ResizeObserver);
+			}
+		}
+	}
+	globalThis.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+	let ui: Awaited<ReturnType<typeof mountTabs>> | undefined;
+	try {
+		ui = await mountTabs('tab-0');
+		ui.container.querySelector<HTMLButtonElement>('[data-testid="tab-tab-11"]')!.click();
+		await flush();
+		const before = ui.container.scrollLeft;
+		// A self-hosted webfont swaps in after the first measure: every label
+		// widens even though the strip's own box is unchanged. Only an observer
+		// that actually watches the tabs will notify here.
+		tabWidth = 140;
+		for (const observer of observers) observer.notifyTabs();
+		await flush();
+		assert.ok(
+			ui.container.scrollLeft > before,
+			'the widened selected tab must trigger a new scroll measurement'
+		);
+		assertVisible(ui.container, 'tab-11');
+	} finally {
+		ui?.unmount();
+		restoreLayoutShim();
+		globalThis.ResizeObserver = previousResizeObserver;
 	}
 });
