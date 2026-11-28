@@ -115,9 +115,17 @@ one at https://mozilla.org/MPL/2.0/.
 	 */
 	let baseline = $state<UpdateServerRequest>(serverFormValues(server));
 
-	/** Capture an independent plain snapshot of the reactive form state. */
+	/**
+	 * Capture an independent snapshot of the reactive form state.
+	 *
+	 * Do not wrap `source` in `$state.snapshot` first: it deep-clones plain
+	 * objects with `copy[key] = ...`, which silently drops an own `__proto__`
+	 * map key (a legal Docker environment/label name) into the prototype
+	 * setter. protobuf-es's clone reads the reactive proxy directly and keeps
+	 * those keys.
+	 */
 	function snapshotForm(source: UpdateServerRequest): UpdateServerRequest {
-		return snapshotServerForm($state.snapshot(source));
+		return snapshotServerForm(source);
 	}
 
 	/** Field-by-field comparison of the form against its captured baseline. */

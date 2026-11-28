@@ -5,6 +5,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+// Svelte's runtime proxy is the seam a `$state` component value exposes, but
+// its types are not part of the package's public type surface.
+// @ts-expect-error -- no declaration file for svelte/internal/client
+import { proxy } from 'svelte/internal/client';
 import { create } from '@bufbuild/protobuf';
 import { DockerOverridesSchema } from '$lib/proto/carbonpanel/v1/common_pb';
 import { UpdateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -85,4 +90,70 @@ test('snapshotServerForm keeps user map keys that collide with message internals
 		Object.getOwnPropertyDescriptor(source.dockerOverrides!.environment, '__proto__')?.value,
 		'literal-proto'
 	);
+});
+
+test('snapshotServerForm keeps production-shaped map keys through the reactive proxy', () => {
+	// Production maps are plain `{}` objects, not null-prototype ones, and the
+	// component snapshot is taken from `$state`-proxied form data. Svelte's
+	// `$state.snapshot` would clone these with `copy[key] = ...` and lose the
+	// own `__proto__` entry before protobuf-es's clone could copy it.
+	const environment: { [key: string]: string } = { MODE: 'source' };
+	const labels: { [key: string]: string } = { 'com.example.role': 'server' };
+	for (const map of [environment, labels]) {
+		Object.defineProperty(map, '$typeName', {
+			value: 'literal-type-name',
+			enumerable: true,
+			configurable: true,
+			writable: true
+		});
+		Object.defineProperty(map, '__proto__', {
+			value: 'literal-proto',
+			enumerable: true,
+			configurable: true,
+			writable: true
+		});
+	}
+	const source = create(UpdateServerRequestSchema, {
+		id: 'server-1',
+		dockerOverrides: create(DockerOverridesSchema, { environment, labels })
+	});
+	const proxySource = proxy(source);
+	assert.notEqual(proxySource, source, 'expected the reactive proxy wrapper');
+
+	const snapshot = snapshotServerForm(proxySource);
+
+	assert.notEqual(snapshot, proxySource);
+	assert.notEqual(snapshot.dockerOverrides, proxySource.dockerOverrides);
+
+	for (const [name, map] of [
+		['environment', snapshot.dockerOverrides!.environment],
+		['labels', snapshot.dockerOverrides!.labels]
+	] as const) {
+		assert.equal(
+			Object.getOwnPropertyDescriptor(map, '$typeName')?.value,
+			'literal-type-name',
+			`${name} must keep its own $typeName entry`
+		);
+		assert.equal(
+			Object.getOwnPropertyDescriptor(map, '__proto__')?.value,
+			'literal-proto',
+			`${name} must keep its own __proto__ entry`
+		);
+	}
+
+	// The snapshot must not write through to the reactive form.
+	snapshot.dockerOverrides!.environment.MODE = 'snapshot';
+	Object.defineProperty(snapshot.dockerOverrides!.environment, '__proto__', { value: 'changed' });
+	assert.equal(environment.MODE, 'source');
+	assert.equal(Object.getOwnPropertyDescriptor(environment, '__proto__')?.value, 'literal-proto');
+});
+
+test('the settings form hands the reactive source straight to the snapshot helper', () => {
+	const component = readFileSync(new URL('./server-settings.svelte', import.meta.url), 'utf8');
+
+	// `$state.snapshot(source)` drops an own `__proto__` map key before the
+	// helper's protobuf-es clone runs, which loses a legal Docker
+	// environment/label entry from the dirty baseline and from Undo.
+	assert.doesNotMatch(component, /snapshotServerForm\(\$state\.snapshot\(/);
+	assert.match(component, /return snapshotServerForm\(source\);/);
 });
