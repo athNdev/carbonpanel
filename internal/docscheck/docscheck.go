@@ -19,6 +19,9 @@ package docscheck
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -275,4 +278,337 @@ func resolveAlias(path string) string {
 		}
 	}
 	return path
+}
+
+var (
+	auditRowID = regexp.MustCompile(`^\|\s*(A\d{2,3})\s*\|`)
+	auditSpan  = regexp.MustCompile("`([^`]+)`")
+	// eventConstant matches a declared activity constant and its literal value.
+	eventConstant = regexp.MustCompile(`(?m)^\s*(Event[A-Za-z0-9_]+)\s*=\s*"([^"]+)"`)
+)
+
+var auditDispositions = []string{"Added", "Covered", "Deferred", "Internal"}
+
+// auditAssertionMarkers are call shapes that read stored activity rows. A
+// covering test must contain at least one of them; merely naming an entry point
+// or exercising an operation is not audit coverage.
+var auditAssertionMarkers = []string{
+	"adminAuditRows(",
+	"requireOneAdminAuditRow(",
+	"requireAuditRowForActor(",
+	"commandAuditRows(",
+	"activity.List(",
+	"ListActivityLogs(",
+	"countAudit(",
+	"countWorldEvents(",
+	"auditor.all()",
+	".Where(",
+	"ActivityLog",
+}
+
+// CheckAuditInventory verifies the OSS-358 admin-action inventory. The
+// inventory is required: a missing file is a failure, not a skipped check.
+// Every entry-point and audit-write citation must resolve to an existing file
+// and symbol, every event literal in the event cell must be declared, and
+// every named covering test must exist and assert a stored activity row. An
+// Added row additionally requires a declared event, a write site whose function
+// contains that event, and a covering test that asserts the row.
+func CheckAuditInventory(root, inventoryPath string) ([]Problem, error) {
+	body, err := os.ReadFile(filepath.Join(root, inventoryPath))
+	if err != nil {
+		return nil, err
+	}
+	return CheckAuditInventoryText(root, string(body))
+}
+
+// CheckAuditInventoryText is CheckAuditInventory for an in-memory document.
+func CheckAuditInventoryText(root, text string) ([]Problem, error) {
+	var problems []Problem
+	seen := map[string]bool{}
+	rows := 0
+
+	for i, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, "\r")
+		match := auditRowID.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		rows++
+		id := match[1]
+		where := fmt.Sprintf("line %d (%s)", i+1, id)
+		if seen[id] {
+			problems = append(problems, Problem{Row: where, Detail: "duplicate admin-audit id"})
+		}
+		seen[id] = true
+
+		cells := strings.Split(line, "|")
+		if len(cells) < 10 {
+			problems = append(problems, Problem{Row: where, Detail: fmt.Sprintf("row has %d cells, want 10", len(cells))})
+			continue
+		}
+
+		disposition := strings.Trim(strings.TrimSpace(cells[8]), "*")
+		recognised := false
+		for _, want := range auditDispositions {
+			if disposition == want {
+				recognised = true
+				break
+			}
+		}
+		if !recognised {
+			problems = append(problems, Problem{Row: where, Detail: fmt.Sprintf("unknown disposition %q", disposition)})
+		}
+		added := disposition == "Added"
+
+		entries := auditSpans(cells[3])
+		if len(entries) == 0 {
+			problems = append(problems, Problem{Row: where, Detail: "entry point has no code span"})
+		}
+		for _, entry := range entries {
+			if detail := checkAuditPathSymbol(root, entry); detail != "" {
+				problems = append(problems, Problem{Row: where, Detail: "entry point: " + detail})
+			}
+		}
+
+		eventCell := strings.TrimSpace(cells[5])
+		eventNone := eventCell == "`none`" || eventCell == "none"
+		events := auditSpans(cells[5])
+		if eventNone {
+			events = nil
+		} else if len(events) == 0 {
+			problems = append(problems, Problem{Row: where, Detail: "activity event has no code span"})
+		}
+		for _, literal := range events {
+			if detail := checkAuditEvent(root, literal); detail != "" {
+				problems = append(problems, Problem{Row: where, Detail: detail})
+			}
+		}
+
+		writeCell := strings.TrimSpace(cells[6])
+		writeNone := writeCell == "" || writeCell == "`none`" || writeCell == "none"
+		writes := auditSpans(cells[6])
+		if !writeNone {
+			if len(writes) == 0 {
+				problems = append(problems, Problem{Row: where, Detail: "audit write has no code span"})
+			}
+			for _, write := range writes {
+				if detail := checkAuditPathSymbol(root, write); detail != "" {
+					problems = append(problems, Problem{Row: where, Detail: "audit write: " + detail})
+				}
+			}
+		}
+
+		testCell := strings.TrimSpace(cells[7])
+		testNone := testCell == "" || testCell == "-" || testCell == "—" || testCell == "`-`" || testCell == "`—`"
+		tests := auditSpans(cells[7])
+		if !testNone {
+			if len(tests) == 0 {
+				problems = append(problems, Problem{Row: where, Detail: "covering test has no code span"})
+			}
+			for _, ref := range tests {
+				if detail := checkAuditTest(root, ref); detail != "" {
+					problems = append(problems, Problem{Row: where, Detail: "covering test: " + detail})
+				} else if detail := checkAuditTestAsserts(root, ref, events, added); detail != "" {
+					problems = append(problems, Problem{Row: where, Detail: "covering test: " + detail})
+				}
+			}
+		}
+
+		if added {
+			if len(events) == 0 {
+				problems = append(problems, Problem{Row: where, Detail: "Added requires a declared activity event literal"})
+			}
+			if writeNone || len(writes) == 0 {
+				problems = append(problems, Problem{Row: where, Detail: "Added requires an audit write location"})
+			} else {
+				for _, write := range writes {
+					if detail := checkAuditWriteContainsEvents(root, write, events); detail != "" {
+						problems = append(problems, Problem{Row: where, Detail: "audit write: " + detail})
+					}
+				}
+			}
+			if testNone || len(tests) == 0 {
+				problems = append(problems, Problem{Row: where, Detail: "Added requires a covering test that asserts the audit row"})
+			}
+		}
+	}
+
+	if rows == 0 {
+		return nil, fmt.Errorf("the admin audit inventory contains no rows")
+	}
+	sort.SliceStable(problems, func(a, b int) bool { return problems[a].Row < problems[b].Row })
+	return problems, nil
+}
+
+// auditSpans returns every code span in a cell. Some cells name two event
+// literals (for example player.op / player.deop); all of them are checked.
+func auditSpans(cell string) []string {
+	matches := auditSpan.FindAllStringSubmatch(cell, -1)
+	spans := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if span := strings.TrimSpace(match[1]); span != "" {
+			spans = append(spans, span)
+		}
+	}
+	return spans
+}
+
+func splitAuditReference(ref string) (string, string) {
+	ref = strings.TrimSpace(ref)
+	if idx := strings.LastIndexByte(ref, ':'); idx >= 0 {
+		return ref[:idx], ref[idx+1:]
+	}
+	return ref, ""
+}
+
+func checkAuditPathSymbol(root, ref string) string {
+	path, symbol := splitAuditReference(ref)
+	if path == "" {
+		return fmt.Sprintf("reference %q has no path", ref)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("path %q does not exist", path)
+	}
+	if symbol == "" {
+		return ""
+	}
+	if !strings.Contains(string(body), symbol+"(") {
+		return fmt.Sprintf("symbol %q not found in %s", symbol, path)
+	}
+	return ""
+}
+
+func checkAuditEvent(root, literal string) string {
+	path := "internal/activity/activity.go"
+	if strings.HasPrefix(literal, "world_view.") {
+		path = "internal/worldview/service.go"
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("event source %q does not exist", path)
+	}
+	if !strings.Contains(string(body), `"`+literal+`"`) {
+		return fmt.Sprintf("event %q not declared in %s", literal, path)
+	}
+	return ""
+}
+
+func checkAuditTest(root, ref string) string {
+	path, testName := splitAuditReference(ref)
+	if path == "" || testName == "" {
+		return fmt.Sprintf("reference %q must be a _test.go path plus test name", ref)
+	}
+	if !strings.HasSuffix(path, "_test.go") {
+		return fmt.Sprintf("covering test path %q is not a _test.go file", path)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return fmt.Sprintf("test file %q does not exist", path)
+	}
+	if !strings.Contains(string(body), "func "+testName+"(") {
+		return fmt.Sprintf("test %q not found in %s", testName, path)
+	}
+	return ""
+}
+
+// checkAuditTestAsserts requires the cited test function to read an activity
+// row. Added rows must also name the row's event, so a test that only checks
+// request/response behavior cannot pass as audit coverage.
+func checkAuditTestAsserts(root, ref string, events []string, requireEvent bool) string {
+	path, testName := splitAuditReference(ref)
+	body, ok := goFunctionBody(root, path, testName)
+	if !ok {
+		return fmt.Sprintf("test %q not found in %s", testName, path)
+	}
+	if requireEvent {
+		for _, literal := range events {
+			if !containsAny(body, eventTokens(root, literal)) {
+				return fmt.Sprintf("test %q does not assert event %q", testName, literal)
+			}
+		}
+	}
+	if !containsAny(body, auditAssertionMarkers) {
+		return fmt.Sprintf("test %q does not assert an activity row", testName)
+	}
+	return ""
+}
+
+// checkAuditWriteContainsEvents requires the cited write function to reference
+// every event it claims to record. A symbol that exists but records a
+// different event is not a valid audit location for this row.
+func checkAuditWriteContainsEvents(root, ref string, events []string) string {
+	path, symbol := splitAuditReference(ref)
+	if path == "" || symbol == "" {
+		return fmt.Sprintf("reference %q must be a path plus write symbol", ref)
+	}
+	body, ok := goFunctionBody(root, path, symbol)
+	if !ok {
+		return fmt.Sprintf("symbol %q not found in %s", symbol, path)
+	}
+	for _, literal := range events {
+		if !containsAny(body, eventTokens(root, literal)) {
+			return fmt.Sprintf("write site %s does not reference event %q", ref, literal)
+		}
+	}
+	return ""
+}
+
+// goFunctionBody returns the exact source of the named function or method. It
+// uses the Go parser so braces in strings and comments cannot confuse the
+// boundary.
+func goFunctionBody(root, path, name string) (string, bool) {
+	filename := filepath.Join(root, filepath.FromSlash(path))
+	src, err := os.ReadFile(filename)
+	if err != nil {
+		return "", false
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filename, src, 0)
+	if err != nil {
+		return "", false
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil || fn.Name.Name != name {
+			continue
+		}
+		start := fset.Position(fn.Pos()).Offset
+		end := fset.Position(fn.End()).Offset
+		if start < 0 || end > len(src) || start >= end {
+			return "", false
+		}
+		return string(src[start:end]), true
+	}
+	return "", false
+}
+
+// eventTokens returns the quoted literal plus any declared constant name for an
+// event. Source normally uses the constant (activity.EventNodeCreate), while
+// fixture tests may use the literal string.
+func eventTokens(root, literal string) []string {
+	tokens := []string{`"` + literal + `"`}
+	path := "internal/activity/activity.go"
+	if strings.HasPrefix(literal, "world_view.") {
+		path = "internal/worldview/service.go"
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return tokens
+	}
+	for _, match := range eventConstant.FindAllStringSubmatch(string(body), -1) {
+		if match[2] == literal {
+			tokens = append(tokens, match[1])
+		}
+	}
+	return tokens
+}
+
+func containsAny(body string, tokens []string) bool {
+	for _, token := range tokens {
+		if token != "" && strings.Contains(body, token) {
+			return true
+		}
+	}
+	return false
 }

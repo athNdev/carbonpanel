@@ -63,6 +63,28 @@ const (
 	// event per operation.
 	EventWorldBind   = "world.bind"
 	EventWorldUnbind = "world.unbind"
+
+	// Administrative identity and node mutations (OSS-358). Each row records
+	// only stable identity and change-shape properties; passwords, API-token
+	// plaintext, invite codes/PINs, TLS material and endpoint credentials are
+	// never copied into properties.
+	EventNodeCreate            = "node.create"
+	EventNodeUpdate            = "node.update"
+	EventNodeDelete            = "node.delete"
+	EventNodeTLSClear          = "node.tls_credentials_clear"
+	EventUserCreate            = "user.create"
+	EventUserUpdate            = "user.update"
+	EventUserDelete            = "user.delete"
+	EventRoleCreate            = "role.create"
+	EventRoleUpdate            = "role.update"
+	EventRoleDelete            = "role.delete"
+	EventRolePermissionsUpdate = "role.permissions_update"
+	EventRoleAssign            = "role.assign"
+	EventRoleUnassign          = "role.unassign"
+	EventAuthSettingsUpdate    = "auth.settings_update"
+	EventInviteCreate          = "auth.invite.create"
+	EventInviteDelete          = "auth.invite.delete"
+	EventAPITokenCreate        = "auth.api_token.create"
 )
 
 // Entry is a single audit record.

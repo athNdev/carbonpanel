@@ -50,6 +50,208 @@ func TestFeatureMatrixCitesExistingSource(t *testing.T) {
 	}
 }
 
+func TestAdminAuditInventoryIsSourceBacked(t *testing.T) {
+	root := repoRoot(t)
+	const inventory = "docs/plans/oss358-admin-action-audit-inventory.md"
+	if _, err := os.Stat(filepath.Join(root, inventory)); err != nil {
+		t.Fatalf("%s is not present in this checkout: %v", inventory, err)
+	}
+
+	problems, err := CheckAuditInventory(root, inventory)
+	if err != nil {
+		t.Fatalf("CheckAuditInventory: %v", err)
+	}
+	for _, problem := range problems {
+		t.Errorf("%s", problem)
+	}
+}
+
+func TestAdminAuditInventoryMissingFileFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	if _, err := CheckAuditInventory(root, "docs/plans/missing-inventory.md"); err == nil {
+		t.Fatal("CheckAuditInventory accepted a missing inventory file")
+	}
+}
+
+func TestAdminAuditInventoryReportsMissingCoveringTest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "x.go"), []byte("func Foo() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "x_test.go"), []byte("func Present(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text := "| A01 | Test | `internal/x.go:Foo` | `x:y` | `none` | `none` | `internal/x_test.go:Missing` | **Covered** |\n"
+	problems, err := CheckAuditInventoryText(root, text)
+	if err != nil {
+		t.Fatalf("CheckAuditInventoryText: %v", err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Detail, `test "Missing" not found`) {
+		t.Fatalf("problems = %v, want the missing covering-test defect", problems)
+	}
+}
+
+// newAuditInventoryFixture builds the smallest repository docscheck can walk:
+// an event source, an entry/write source and a test that reads activity rows.
+func newAuditInventoryFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"internal/activity/activity.go": `package activity
+
+const (
+	EventAlpha = "alpha.one"
+	EventBeta  = "beta.two"
+)
+`,
+		"internal/rpc/services/admin.go": `package services
+
+func DoBoth() {
+	_ = "alpha.one"
+	_ = "beta.two"
+}
+
+func DoOther() {
+	_ = "unrelated.event"
+}
+`,
+		"internal/rpc/services/admin_test.go": `package services
+
+func TestAdminAudit(t *testing.T) {
+	rows := adminAuditRows(t)
+	_ = rows
+	_ = "alpha.one"
+	_ = "beta.two"
+}
+
+func TestNotAnAudit(t *testing.T) {
+	_ = "alpha.one"
+}
+`,
+	}
+	for rel, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func auditInventoryRow(event, write, testRef, disposition string) string {
+	return "| A01 | Test | `internal/rpc/services/admin.go:DoBoth` | `x:y` | " +
+		event + " | " + write + " | " + testRef + " | **" + disposition + "** |\n"
+}
+
+func auditProblems(t *testing.T, root, text string) []Problem {
+	t.Helper()
+	problems, err := CheckAuditInventoryText(root, text)
+	if err != nil {
+		t.Fatalf("CheckAuditInventoryText: %v", err)
+	}
+	return problems
+}
+
+func requireAuditProblem(t *testing.T, problems []Problem, want string) {
+	t.Helper()
+	for _, problem := range problems {
+		if strings.Contains(problem.Detail, want) {
+			return
+		}
+	}
+	t.Fatalf("problems = %v, want detail containing %q", problems, want)
+}
+
+func TestAdminAuditInventoryAcceptsCompleteAddedRow(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"`alpha.one` / `beta.two`",
+		"`internal/rpc/services/admin.go:DoBoth`",
+		"`internal/rpc/services/admin_test.go:TestAdminAudit`",
+		"Added",
+	)
+	if problems := auditProblems(t, root, row); len(problems) != 0 {
+		t.Fatalf("complete Added row problems = %v, want none", problems)
+	}
+}
+
+func TestAdminAuditInventoryAddedRequiresEvent(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"none",
+		"`internal/rpc/services/admin.go:DoBoth`",
+		"`internal/rpc/services/admin_test.go:TestAdminAudit`",
+		"Added",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), "requires a declared activity event literal")
+}
+
+func TestAdminAuditInventoryAddedRequiresWrite(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"`alpha.one`",
+		"none",
+		"`internal/rpc/services/admin_test.go:TestAdminAudit`",
+		"Added",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), "requires an audit write location")
+}
+
+func TestAdminAuditInventoryAddedRequiresAuditTest(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"`alpha.one`",
+		"`internal/rpc/services/admin.go:DoBoth`",
+		"-",
+		"Added",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), "requires a covering test that asserts the audit row")
+}
+
+func TestAdminAuditInventoryChecksEveryEventLiteral(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	// Remove the second declaration; the row still names both events.
+	path := filepath.Join(root, "internal", "activity", "activity.go")
+	if err := os.WriteFile(path, []byte("package activity\n\nconst EventAlpha = \"alpha.one\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	row := auditInventoryRow(
+		"`alpha.one` / `beta.two`",
+		"`internal/rpc/services/admin.go:DoBoth`",
+		"`internal/rpc/services/admin_test.go:TestAdminAudit`",
+		"Added",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), `event "beta.two" not declared`)
+}
+
+func TestAdminAuditInventoryWriteMustContainEvent(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"`alpha.one`",
+		"`internal/rpc/services/admin.go:DoOther`",
+		"`internal/rpc/services/admin_test.go:TestAdminAudit`",
+		"Added",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), `does not reference event "alpha.one"`)
+}
+
+func TestAdminAuditInventoryRejectsNonAuditCoveringTest(t *testing.T) {
+	root := newAuditInventoryFixture(t)
+	row := auditInventoryRow(
+		"`alpha.one`",
+		"`internal/rpc/services/admin.go:DoBoth`",
+		"`internal/rpc/services/admin_test.go:TestNotAnAudit`",
+		"Covered",
+	)
+	requireAuditProblem(t, auditProblems(t, root, row), "does not assert an activity row")
+}
+
 func TestArchitectureSeamsAreCitedAndExist(t *testing.T) {
 	root := repoRoot(t)
 	const design = "DESIGN.md"

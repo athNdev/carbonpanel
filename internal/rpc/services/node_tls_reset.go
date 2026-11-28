@@ -9,6 +9,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/athNdev/carbon-panel/internal/activity"
+	"github.com/athNdev/carbon-panel/internal/auth"
 )
 
 // NodeTLSClearConfirmationPhrase is the exact confirmation required by the
@@ -77,6 +80,19 @@ func (s *NodeService) ClearNodeTLSCredentials(ctx context.Context, nodeID string
 		_ = s.pool.RemoveNode(node.ID)
 	}
 	// Audit records identity and endpoint change only, never credential values.
+	auditCtx := ctx
+	if auth.GetUserFromContext(auditCtx) == nil {
+		auditCtx = auth.WithUser(ctx, &auth.AuthenticatedUser{ID: action.OperatorID})
+	}
+	writeAudit(auditCtx, s.store, s.log, auditFields{
+		Event:      activity.EventNodeTLSClear,
+		SubjectTyp: "node",
+		SubjectID:  node.ID,
+	}, map[string]any{
+		"generation_before":         before,
+		"generation_after":          node.EndpointGeneration,
+		"credential_fields_cleared": "tls_ca_cert,tls_cert,tls_key",
+	})
 	s.log.Info("node.tls_credentials_cleared action=clear_tls_credentials operator=%s node=%s generation=%d->%d",
 		action.OperatorID, node.ID, before, node.EndpointGeneration)
 	return nil
