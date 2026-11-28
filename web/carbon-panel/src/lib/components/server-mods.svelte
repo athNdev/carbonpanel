@@ -105,6 +105,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let applyAtLocal = $state('');
 	let idleMinutes = $state(15);
 	let stagingUpdates = $state(false);
+	let stagingGeneration = 0;
 
 	// OSS-425 per-server opt-in policy. The policy is a typed mod_update task;
 	// TaskService owns schedule, timezone, next/last run and bounded retries.
@@ -304,6 +305,7 @@ one at https://mozilla.org/MPL/2.0/.
 			previewsSupplied = false;
 			loading = true;
 			uploading = false;
+			stagingGeneration++;
 			stagingUpdates = false;
 			hasLoaded = false;
 			// Invalidate outstanding policy work even if navigation returns to
@@ -466,7 +468,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 		const serverId = server.id;
 		const request = ++requestNumber;
+		const generation = ++stagingGeneration;
 		const isCurrent = () => request === requestNumber && server.id === serverId;
+		const ownsStaging = () => generation === stagingGeneration && server.id === serverId;
 
 		try {
 			stagingUpdates = true;
@@ -498,7 +502,7 @@ one at https://mozilla.org/MPL/2.0/.
 			if (isCurrent() && !wasRpcErrorToasted(error))
 				toastStageOutcome('Failed to stage mod updates');
 		} finally {
-			if (isCurrent()) stagingUpdates = false;
+			if (ownsStaging()) stagingUpdates = false;
 		}
 	}
 
