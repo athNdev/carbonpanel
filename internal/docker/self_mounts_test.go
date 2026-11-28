@@ -125,3 +125,23 @@ func TestResolveFromSelfMountsUsesTheClient(t *testing.T) {
 		t.Fatalf("ToHost = %q, want %q", got, want)
 	}
 }
+
+func TestResolveFromSelfMountsPreservesAParentBindSuffix(t *testing.T) {
+	body := `{"Id":"abc123","Mounts":[
+		{"Type":"bind","Source":"/srv/outer","Destination":"/app","RW":true},
+		{"Type":"bind","Source":"/srv/carbon-panel/data","Destination":"/app/data","RW":true}
+	]}`
+	cli := selfInspectServer(t, body, http.StatusOK)
+
+	mapping, err := hostmount.Resolve(context.Background(), cli, hostmount.Dirs{
+		DataDir:   "/app/data/servers",
+		BackupDir: "/app/backups",
+		TempDir:   "/app/tmp",
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got, want := mapping.ToHost("/app/data/servers/s1/world"), "/srv/carbon-panel/data/servers/s1/world"; got != want {
+		t.Fatalf("ToHost = %q, want %q", got, want)
+	}
+}

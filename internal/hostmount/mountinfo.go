@@ -217,7 +217,8 @@ func persistentHostPath(dirs Dirs) (string, bool) {
 	if root == "" || root == "." || root == "/" {
 		return "", false
 	}
-	return root, true
+	suffix, _ := relativeUnder(best.point, cleaned)
+	return appendMountSuffix(root, suffix), true
 }
 
 // containerMountCoverage reports whether the kernel's mount table covers dir,

@@ -242,6 +242,9 @@ func mappingFromMount(dataDir string, mount Mount) (Mapping, error) {
 	}
 
 	hostDir := filepath.ToSlash(strings.TrimSpace(mount.Source))
+	if suffix, ok := relativeUnder(mount.Destination, dataDir); ok {
+		hostDir = appendMountSuffix(hostDir, suffix)
+	}
 	origin := "container mount"
 	if mount.Kind == KindVolume {
 		// A named volume is reported with its host path under the daemon's
@@ -262,6 +265,35 @@ func mappingFromMount(dataDir string, mount Mount) (Mapping, error) {
 		mapping.OverrideDir = filepath.ToSlash(override)
 	}
 	return mapping, nil
+}
+
+// relativeUnder returns the slash-separated path of dir below base, and
+// whether dir is base or lies inside it. It compares whole path components, so
+// a mount at /app covers /app/data but not /application.
+func relativeUnder(base, dir string) (string, bool) {
+	base = path.Clean(strings.TrimSpace(base))
+	cleaned := path.Clean(strings.TrimSpace(dir))
+	if base == "" || base == "." {
+		return "", false
+	}
+	if cleaned == base {
+		return "", true
+	}
+	prefix := strings.TrimSuffix(base, "/") + "/"
+	if !strings.HasPrefix(cleaned, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(cleaned, prefix), true
+}
+
+// appendMountSuffix joins the part of the data directory that lies below a
+// mount's destination onto the mount's source. An exact mount returns the
+// source unchanged, so its reported spelling is preserved.
+func appendMountSuffix(source, suffix string) string {
+	if suffix == "" {
+		return source
+	}
+	return strings.TrimRight(source, "/") + "/" + suffix
 }
 
 // coveringMount picks the mount whose destination is the longest prefix of

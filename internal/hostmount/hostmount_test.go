@@ -102,6 +102,38 @@ func TestResolveUsesTheContainerMount(t *testing.T) {
 	}
 }
 
+func TestResolveParentMountPreservesTheDataDirSuffix(t *testing.T) {
+	insp := fakeInspector{mounts: []Mount{
+		{Kind: KindBind, Source: "/srv/carbon-panel", Destination: "/app", RW: true},
+	}}
+	mapping, err := Resolve(context.Background(), insp, dirsFor("/app/data"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mapping.HostDir != "/srv/carbon-panel/data" {
+		t.Fatalf("host dir = %q, want the parent source plus the data suffix", mapping.HostDir)
+	}
+	if !mapping.Translated {
+		t.Fatalf("mapping = %+v, want a translated mapping", mapping)
+	}
+	if got, want := mapping.ToHost("/app/data/servers/abc/world"), "/srv/carbon-panel/data/servers/abc/world"; got != want {
+		t.Errorf("ToHost = %q, want %q", got, want)
+	}
+}
+
+func TestResolveParentMountToleratesTrailingSlashes(t *testing.T) {
+	insp := fakeInspector{mounts: []Mount{
+		{Kind: KindBind, Source: "/srv/carbon-panel/", Destination: "/app/", RW: true},
+	}}
+	mapping, err := Resolve(context.Background(), insp, dirsFor("/app/data"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mapping.HostDir != "/srv/carbon-panel/data" {
+		t.Fatalf("host dir = %q, want a single separator between source and suffix", mapping.HostDir)
+	}
+}
+
 func TestResolvePicksTheDeepestCoveringMount(t *testing.T) {
 	insp := fakeInspector{mounts: []Mount{
 		{Kind: KindBind, Source: "/srv/outer", Destination: "/app", RW: true},
@@ -113,6 +145,54 @@ func TestResolvePicksTheDeepestCoveringMount(t *testing.T) {
 	}
 	if mapping.HostDir != "/srv/data" {
 		t.Fatalf("host dir = %q, want the deepest mount /srv/data", mapping.HostDir)
+	}
+}
+
+func TestResolveDeepestMountSuppliesTheSuffix(t *testing.T) {
+	insp := fakeInspector{mounts: []Mount{
+		{Kind: KindBind, Source: "/srv/outer", Destination: "/app", RW: true},
+		{Kind: KindBind, Source: "/srv/data", Destination: "/app/data", RW: true},
+		{Kind: KindBind, Source: "/srv/servers", Destination: "/app/data/servers", RW: true},
+	}}
+	mapping, err := Resolve(context.Background(), insp, dirsFor("/app/data/servers/abc"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mapping.HostDir != "/srv/servers/abc" {
+		t.Fatalf("host dir = %q, want the deepest mount plus its suffix", mapping.HostDir)
+	}
+}
+
+func TestResolveRequiresAWholeComponentPrefix(t *testing.T) {
+	t.Setenv("CARBONPANEL_HOST_DATA_PATH", "")
+	cases := []struct {
+		destination string
+		dataDir     string
+	}{
+		{"/app", "/application"},
+		{"/app/data", "/app/database"},
+	}
+	for _, tc := range cases {
+		insp := fakeInspector{mounts: []Mount{
+			{Kind: KindBind, Source: "/srv/app", Destination: tc.destination, RW: true},
+		}}
+		_, err := Resolve(context.Background(), insp, dirsFor(tc.dataDir))
+		if !errors.Is(err, ErrNotMounted) {
+			t.Errorf("Resolve(%q) with a mount at %q error = %v, want ErrNotMounted for a sibling path", tc.dataDir, tc.destination, err)
+		}
+	}
+}
+
+func TestResolveExactMountToleratesATrailingSlashDestination(t *testing.T) {
+	insp := fakeInspector{mounts: []Mount{
+		{Kind: KindBind, Source: "/srv/carbon-panel/data", Destination: "/app/data/", RW: true},
+	}}
+	mapping, err := Resolve(context.Background(), insp, dirsFor("/app/data"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mapping.HostDir != "/srv/carbon-panel/data" {
+		t.Fatalf("host dir = %q, want the exact mount source", mapping.HostDir)
 	}
 }
 
@@ -165,6 +245,29 @@ func TestResolveRejectsARelativeHostSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mount path should be absolute") {
 		t.Fatalf("error = %q, want the absolute-path reason", err)
+	}
+}
+
+func TestResolveRejectsAParentMountThatCannotHoldAWorld(t *testing.T) {
+	cases := []struct {
+		name  string
+		mount Mount
+		want  string
+	}{
+		{"read-only", Mount{Kind: KindBind, Source: "/srv/panel", Destination: "/app", RW: false}, "no write permission"},
+		{"tmpfs", Mount{Kind: KindTmpfs, Destination: "/app", RW: true}, "tmpfs"},
+		{"relative source", Mount{Kind: KindBind, Source: "srv/panel", Destination: "/app", RW: true}, "mount path should be absolute"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Resolve(context.Background(), fakeInspector{mounts: []Mount{tc.mount}}, dirsFor("/app/data"))
+			if err == nil {
+				t.Fatal("error = nil for a parent mount that cannot hold a world")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
