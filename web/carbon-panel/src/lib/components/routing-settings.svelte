@@ -189,28 +189,35 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function updateListener(listener: ProxyListener) {
-		const name = listener.name.trim();
-		if (!name) {
-			editListenerNameError = 'Listener name is required';
-			return;
-		}
-		editListenerNameError = '';
-
 		try {
 			await rpcClient.proxy.updateProxyListener({
 				id: listener.id,
-				name,
+				name: listener.name,
 				description: listener.description,
 				enabled: listener.enabled,
 				isDefault: listener.isDefault
 			});
 
-			toast.success(`Listener "${name}" updated`);
+			toast.success(`Listener "${listener.name}" updated`);
 			editingListener = null;
 			await loadListeners();
 		} catch (_e) {
 			toast.error('Failed to update listener');
 		}
+	}
+
+	function saveEditedListener() {
+		if (!editingListener) return;
+		// Validate only the edit form. Row actions such as "Set as default" use
+		// updateListener directly and must keep persisting the stored name.
+		const name = editingListener.name.trim();
+		if (!name) {
+			editListenerNameError = 'Listener name is required';
+			return;
+		}
+		editListenerNameError = '';
+		editingListener.name = name;
+		void updateListener(editingListener);
 	}
 
 	let pendingDelete = $state<ProxyListenerWithCount | null>(null);
@@ -445,13 +452,7 @@ one at https://mozilla.org/MPL/2.0/.
 													>
 														Cancel
 													</CarbonButton>
-													<CarbonButton
-														kind="primary"
-														size="sm"
-														onclick={() => {
-															if (editingListener) updateListener(editingListener);
-														}}
-													>
+													<CarbonButton kind="primary" size="sm" onclick={saveEditedListener}>
 														Save
 													</CarbonButton>
 												</div>
